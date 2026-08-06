@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import API from "../api";
+import MeetingRoom from "../components/MeetingRoom"; // Import updated Jitsi MeetingRoom component
 
 const FresherDashboard = () => {
   const companiesList = [
@@ -49,13 +50,21 @@ const FresherDashboard = () => {
   const [timeWindow, setTimeWindow] = useState("6:00 PM - 9:00 PM");
   const [paymentDetails, setPaymentDetails] = useState(null);
 
-  // Active Sessions & Rating States
+  // Active Sessions, Meeting Room & Rating States
   const [myBookings, setMyBookings] = useState([]);
+  const [activeCallSession, setActiveCallSession] = useState(null);
+  const [currentTime, setCurrentTime] = useState(new Date());
   const [ratingModalBooking, setRatingModalBooking] = useState(null);
   const [ratingScore, setRatingScore] = useState(5);
   const [reviewComment, setReviewComment] = useState("");
 
   const amountToPay = duration === "30 mins" ? 299 : 499;
+
+  // Real-time Clock Tick for exact slot unlock checking
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Fetch Existing Bookings Once
   const fetchMyBookings = async () => {
@@ -68,7 +77,6 @@ const FresherDashboard = () => {
   };
 
   useEffect(() => {
-    // ⚡ ONLY initial load fetch (No repetitive polling timer)
     fetchMyBookings();
   }, []);
 
@@ -91,11 +99,11 @@ const FresherDashboard = () => {
           try {
             const verifyRes = await API.post(
               "/payments/verify-payment",
-              response,
+              response
             );
             if (verifyRes.data.success) {
               setPaymentDetails(
-                verifyRes.data.paymentId || response.razorpay_payment_id,
+                verifyRes.data.paymentId || response.razorpay_payment_id
               );
               alert("🎉 Payment Verified Successfully!");
             }
@@ -138,17 +146,18 @@ const FresherDashboard = () => {
       });
 
       alert(
-        "🚀 Request Broadcasted to active employees of " + selectedCompany.name,
+        "🚀 Request Broadcasted to active employees of " + selectedCompany.name
       );
       setSelectedCompany(null);
       setPaymentDetails(null);
       setRequirement("");
 
-      // Submit explicit-a aana piragu mattum single refresh
       fetchMyBookings();
     } catch (err) {
       alert(
-        `Booking request failed: ${err.response?.data?.message || err.message}`,
+        `Booking request failed: ${
+          err.response?.data?.message || err.message
+        }`
       );
     }
   };
@@ -183,6 +192,25 @@ const FresherDashboard = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-4 sm:p-8 font-sans">
+      {/* 📹 IN-APP LIVE MEETING ROOM OVERLAY */}
+      {activeCallSession && (
+        <MeetingRoom
+          roomName={
+            activeCallSession.meetingLink?.includes("http")
+              ? activeCallSession.meetingLink.split("/").pop()
+              : activeCallSession.meetingLink ||
+                `MNCConnect-${activeCallSession._id}`
+          }
+          userName={
+            JSON.parse(localStorage.getItem("user") || "{}").name || "Fresher"
+          }
+          durationInMinutes={
+            parseInt(activeCallSession.requestedDuration) || 30
+          }
+          onLeave={() => setActiveCallSession(null)}
+        />
+      )}
+
       <div className="max-w-7xl mx-auto space-y-10">
         {/* --- HEADER --- */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-900/60 p-6 rounded-3xl border border-slate-800 backdrop-blur-xl shadow-2xl">
@@ -210,7 +238,6 @@ const FresherDashboard = () => {
         </div>
 
         {/* --- 1. ACTIVE BOOKINGS & LIVE ROOM STATUS SECTION --- */}
-        {/* --- 1. ACTIVE BOOKINGS & LIVE ROOM STATUS SECTION --- */}
         {myBookings.length > 0 && (
           <div className="space-y-4">
             <h2 className="text-xl font-bold text-white flex items-center gap-2">
@@ -221,23 +248,23 @@ const FresherDashboard = () => {
                 const meetingTime = booking.confirmedMeetingTime
                   ? new Date(booking.confirmedMeetingTime)
                   : null;
-                const now = new Date();
+                const durationMins =
+                  parseInt(booking.requestedDuration) || 30;
+                const slotEnd = meetingTime
+                  ? new Date(meetingTime.getTime() + durationMins * 60 * 1000)
+                  : null;
 
-                // 🟢 FIX 1: Flexible Time Window (Slot Time-ku 15 mins munnadiyey join enable aagidum)
-                const isReadyToJoin = meetingTime
-                  ? meetingTime.getTime() - now.getTime() <= 15 * 60 * 1000
-                  : true;
-
-                // 🟢 FIX 2: Valid Link Fallback
-                const roomUrl = booking.meetingLink
-                  ? booking.meetingLink.startsWith("http")
-                    ? booking.meetingLink
-                    : `https://meet.jit.si/${booking.meetingLink}`
-                  : `https://meet.jit.si/MNCConnect-${booking._id}`;
+                // 🟢 Exact Scheduled Time Match Check (IST)
+                const isReadyToJoin =
+                  meetingTime &&
+                  slotEnd &&
+                  currentTime >= meetingTime &&
+                  currentTime <= slotEnd;
 
                 const isOverdue =
                   meetingTime &&
-                  now.getTime() - meetingTime.getTime() > 30 * 60 * 1000;
+                  currentTime.getTime() - meetingTime.getTime() >
+                    30 * 60 * 1000;
 
                 return (
                   <div
@@ -258,8 +285,8 @@ const FresherDashboard = () => {
                           booking.status === "accepted"
                             ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
                             : booking.status === "requested"
-                              ? "bg-amber-500/20 text-amber-400 border border-amber-500/40"
-                              : "bg-slate-800 text-slate-400"
+                            ? "bg-amber-500/20 text-amber-400 border border-amber-500/40"
+                            : "bg-slate-800 text-slate-400"
                         }`}
                       >
                         {booking.status === "requested"
@@ -270,8 +297,8 @@ const FresherDashboard = () => {
 
                     <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 text-xs space-y-1">
                       <p className="text-slate-300">
-                        <strong>Duration:</strong> {booking.requestedDuration} (
-                        {booking.languageChosen})
+                        <strong>Duration:</strong> {booking.requestedDuration}{" "}
+                        ({booking.languageChosen})
                       </p>
                       <p className="text-slate-300">
                         <strong>Preferred Window:</strong>{" "}
@@ -288,37 +315,28 @@ const FresherDashboard = () => {
 
                     {booking.status === "accepted" && (
                       <div className="space-y-2 pt-1">
-                        {/* 🟢 FIX 3: Dynamic Direct Click Handled Room Button */}
+                        {/* 📹 Direct In-App Meeting Modal Launcher */}
                         <button
-                          onClick={() => {
-                            if (isReadyToJoin) {
-                              window.open(
-                                roomUrl,
-                                "_blank",
-                                "noopener,noreferrer",
-                              );
-                            } else {
-                              alert(
-                                "Meeting room will unlock 15 minutes before scheduled slot!",
-                              );
-                            }
-                          }}
+                          disabled={!isReadyToJoin}
+                          onClick={() =>
+                            isReadyToJoin && setActiveCallSession(booking)
+                          }
                           className={`w-full py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
                             isReadyToJoin
                               ? "bg-emerald-500 hover:bg-emerald-600 text-slate-950 shadow-lg shadow-emerald-500/25 animate-pulse"
-                              : "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed"
+                              : "bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed opacity-60"
                           }`}
                         >
                           <span>📹</span>{" "}
                           {isReadyToJoin
                             ? "Join Live Meeting Room Now"
-                            : "Join Button Locks Until 15 Mins Before Slot"}
+                            : "Join Button Locked Until Scheduled Slot Time"}
                         </button>
 
                         {isOverdue && (
                           <button
                             onClick={() => handleAutoRefund(booking._id)}
-                            className="w-full py-2 bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 text-xs font-bold rounded-xl transition-all"
+                            className="w-full py-2 bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 text-xs font-bold rounded-xl transition-all cursor-pointer"
                           >
                             ⚠️ Mentor No-Show? Claim Instant 100% Refund
                           </button>
@@ -326,7 +344,7 @@ const FresherDashboard = () => {
 
                         <button
                           onClick={() => setRatingModalBooking(booking)}
-                          className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition-all"
+                          className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition-all cursor-pointer"
                         >
                           ⭐ Complete & Rate Mentor
                         </button>
@@ -391,7 +409,7 @@ const FresherDashboard = () => {
 
         {/* --- 3. ADVANCED BOOKING MODAL --- */}
         {selectedCompany && (
-          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50">
             <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl relative space-y-6">
               <div className="flex justify-between items-center border-b border-slate-800 pb-4">
                 <div className="flex items-center gap-3">
@@ -407,7 +425,7 @@ const FresherDashboard = () => {
                 </div>
                 <button
                   onClick={() => setSelectedCompany(null)}
-                  className="text-slate-400 hover:text-white font-bold text-xl"
+                  className="text-slate-400 hover:text-white font-bold text-xl cursor-pointer"
                 >
                   ✕
                 </button>
@@ -425,7 +443,7 @@ const FresherDashboard = () => {
                         key={dur}
                         type="button"
                         onClick={() => setDuration(dur)}
-                        className={`py-2.5 rounded-xl text-xs font-bold border transition-all ${
+                        className={`py-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                           duration === dur
                             ? "bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/30"
                             : "bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700"
@@ -494,14 +512,17 @@ const FresherDashboard = () => {
                   <button
                     type="button"
                     onClick={handleRazorpayPayment}
-                    className={`w-full py-3.5 rounded-xl font-bold text-xs transition-all shadow-xl ${
+                    className={`w-full py-3.5 rounded-xl font-bold text-xs transition-all shadow-xl cursor-pointer ${
                       paymentDetails
                         ? "bg-emerald-500 text-slate-950 shadow-emerald-500/20"
                         : "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-blue-500/20 hover:opacity-95"
                     }`}
                   >
                     {paymentDetails
-                      ? `✓ Payment Verified (ID: ${paymentDetails.slice(0, 10)}...)`
+                      ? `✓ Payment Verified (ID: ${paymentDetails.slice(
+                          0,
+                          10
+                        )}...)`
                       : `Pay ₹${amountToPay} & Lock Slot Request`}
                   </button>
                 </div>
@@ -547,7 +568,7 @@ const FresherDashboard = () => {
                         key={star}
                         type="button"
                         onClick={() => setRatingScore(star)}
-                        className={`flex-1 py-2 rounded-xl text-lg font-bold ${
+                        className={`flex-1 py-2 rounded-xl text-lg font-bold cursor-pointer ${
                           ratingScore >= star
                             ? "bg-amber-500 text-slate-950"
                             : "bg-slate-800 text-slate-500"
@@ -567,7 +588,7 @@ const FresherDashboard = () => {
                     value={reviewComment}
                     onChange={(e) => setReviewComment(e.target.value)}
                     rows="3"
-                    className="w-full p-3 bg-slate-950 border border-slate-800 text-white text-xs rounded-xl"
+                    className="w-full p-3 bg-slate-950 border border-slate-800 text-white text-xs rounded-xl outline-none focus:border-blue-500"
                     placeholder="How was the mock interview guidance?"
                   />
                 </div>
@@ -575,14 +596,14 @@ const FresherDashboard = () => {
                 <div className="flex gap-2">
                   <button
                     type="submit"
-                    className="flex-1 py-2.5 bg-emerald-500 text-slate-950 font-bold text-xs rounded-xl"
+                    className="flex-1 py-2.5 bg-emerald-500 text-slate-950 font-bold text-xs rounded-xl cursor-pointer"
                   >
                     Submit Review
                   </button>
                   <button
                     type="button"
                     onClick={() => setRatingModalBooking(null)}
-                    className="py-2.5 px-4 bg-slate-800 text-slate-300 font-bold text-xs rounded-xl"
+                    className="py-2.5 px-4 bg-slate-800 text-slate-300 font-bold text-xs rounded-xl cursor-pointer"
                   >
                     Close
                   </button>

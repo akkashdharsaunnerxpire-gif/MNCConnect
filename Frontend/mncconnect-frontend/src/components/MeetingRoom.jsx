@@ -9,10 +9,10 @@ const MeetingRoom = ({ roomName, userName, onLeave, durationInMinutes = 30 }) =>
 
   // 1. Live Countdown Engine (Runs ONLY when 2 or more participants are present)
   useEffect(() => {
-    if (!isMeetingStarted) return; // 🛑 2 perum varalana timer pause-la irukum!
+    if (!isMeetingStarted) return; 
 
     if (timeLeft <= 0) {
-      alert('⏰ 30 Minutes Session Completed! Meeting is closing automatically.');
+      alert('⏰ Session Duration Ended! Meeting closing automatically.');
       if (jitsiApi) {
         jitsiApi.executeCommand('hangup');
       }
@@ -27,7 +27,6 @@ const MeetingRoom = ({ roomName, userName, onLeave, durationInMinutes = 30 }) =>
     return () => clearInterval(timer);
   }, [timeLeft, isMeetingStarted, jitsiApi, onLeave]);
 
-  // Format seconds -> MM:SS
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -36,55 +35,55 @@ const MeetingRoom = ({ roomName, userName, onLeave, durationInMinutes = 30 }) =>
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col font-sans">
-      {/* --- TOP HEADER BAR WITH SCREEN TIMER --- */}
+      {/* HEADER */}
       <div className="bg-slate-900 border-b border-slate-800 px-6 py-3 flex justify-between items-center shadow-2xl z-10">
-        
-        {/* Left Side Info */}
         <div className="flex items-center gap-3">
           <span className="flex h-3 w-3 relative">
             <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isMeetingStarted ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
             <span className={`relative inline-flex rounded-full h-3 w-3 ${isMeetingStarted ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
           </span>
           <div>
-            <h3 className="text-white font-bold text-sm tracking-wide">MNC Connect Live Mentorship</h3>
-            <p className="text-xs text-slate-400 font-medium">
-              {isMeetingStarted ? `🟢 Active Call (${participantCount} Joined)` : '⏳ Waiting for 2nd participant to join...'}
+            <h3 className="text-white font-bold text-sm">MNC Connect Live Mentorship</h3>
+            {/* 🔴 STATUS TEXT REQUIREMENT */}
+            <p className="text-xs text-amber-400 font-semibold">
+              {isMeetingStarted 
+                ? `🟢 Both Connected (${participantCount} In Call)` 
+                : "Time starts if another user is coming"}
             </p>
           </div>
         </div>
 
-        {/* 🟢 CENTER SCREEN TIMER (BIG & CLEAR DISPLAY) */}
-        <div className={`px-6 py-2 rounded-xl border flex items-center gap-3 shadow-lg transition-all ${
+        {/* TIMER DISPLAY */}
+        <div className={`px-6 py-2 rounded-xl border flex items-center gap-3 ${
           !isMeetingStarted 
-            ? 'bg-slate-800/80 border-slate-700 text-slate-400' 
+            ? 'bg-slate-800 border-slate-700 text-slate-400' 
             : timeLeft <= 300 
             ? 'bg-rose-500/20 border-rose-500/50 text-rose-400 animate-pulse' 
             : 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
         }`}>
           <span className="text-lg">⏱️</span>
           <div className="flex flex-col items-center">
-            <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400">
-              {isMeetingStarted ? 'Session Time Left' : 'Timer Status'}
+            <span className="text-[10px] uppercase font-bold text-slate-400">
+              {isMeetingStarted ? 'Time Left' : 'Timer Status'}
             </span>
-            <span className="text-xl font-mono font-black tracking-wider">
-              {isMeetingStarted ? formatTime(timeLeft) : 'PAUSED (Waiting)'}
+            <span className="text-xl font-mono font-black">
+              {isMeetingStarted ? formatTime(timeLeft) : 'PAUSED (Waiting for 2nd person)'}
             </span>
           </div>
         </div>
 
-        {/* Right Side Action */}
         <button 
           onClick={() => {
             if (jitsiApi) jitsiApi.executeCommand('hangup');
             onLeave();
           }}
-          className="bg-rose-600 hover:bg-rose-700 active:scale-95 text-white px-5 py-2 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
+          className="bg-rose-600 hover:bg-rose-700 text-white px-5 py-2 rounded-xl text-xs font-bold transition-all"
         >
-          End Call / Leave
+          End Call
         </button>
       </div>
 
-      {/* --- JITSI EMBEDDED IFRAME --- */}
+      {/* JITSI FRAME */}
       <div className="flex-1 w-full bg-slate-900 relative">
         <JitsiMeeting
           domain="meet.jit.si"
@@ -106,21 +105,18 @@ const MeetingRoom = ({ roomName, userName, onLeave, durationInMinutes = 30 }) =>
           onApiReady={(externalApi) => {
             setJitsiApi(externalApi);
 
-            // 🟢 Participant Check Engine
             const updateParticipantStatus = () => {
-              // getParticipantsInfo array + 1 (Current User)
               const otherParticipants = externalApi.getParticipantsInfo() || [];
               const totalCount = otherParticipants.length + 1; 
 
               setParticipantCount(totalCount);
 
-              // 2 or more participants connected -> START TIMER
+              // 🔴 2 Persons Join Aana udane Timer Run aaganum
               if (totalCount >= 2) {
                 setIsMeetingStarted(true);
               }
             };
 
-            // Event Handlers for Join/Leave
             externalApi.addEventListener('participantJoined', updateParticipantStatus);
             externalApi.addEventListener('videoConferenceJoined', updateParticipantStatus);
             externalApi.addEventListener('participantLeft', updateParticipantStatus);
