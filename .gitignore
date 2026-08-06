@@ -1,0 +1,34 @@
+# Dependencies (Heavy Node Modules)
+node_modules/
+Backend/node_modules/
+Frontend/mncconnect-frontend/node_modules/
+
+# Environment Variables & Secrets (VERY IMPORTANT)
+.env
+.env.local
+.env.production
+Backend/.env
+Frontend/mncconnect-frontend/.env
+
+# Build outputs (Production Builds)
+dist/
+build/
+Frontend/mncconnect-frontend/dist/
+Frontend/mncconnect-frontend/build/
+
+# Logs & Debugging
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+logs/
+*.log
+
+# IDE / Editor Files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS System Files
+.DS_Store
+Thumbs.db
