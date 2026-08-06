@@ -5,6 +5,26 @@ import MeetingRoom from '../components/MeetingRoom';
 
 const socket = io('http://localhost:5000');
 
+// Date-ah DD-MM-YYYY format-uku maatha siriya helper function
+const formatDate = (dateString) => {
+  if (!dateString) return '';
+  const d = new Date(dateString);
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}-${month}-${year}`;
+};
+
+// Date & Time sentha format (e.g. 06-08-2026, 02:30 PM)
+const formatDateTime = (dateObj) => {
+  if (!dateObj) return '';
+  const day = String(dateObj.getDate()).padStart(2, '0');
+  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const year = dateObj.getFullYear();
+  const time = dateObj.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+  return `${day}-${month}-${year}, ${time}`;
+};
+
 const MentorDashboard = () => {
   const [requests, setRequests] = useState([]);
   const [acceptedSessions, setAcceptedSessions] = useState([]);
@@ -25,8 +45,8 @@ const MentorDashboard = () => {
   const fetchMentorRequests = async () => {
     try {
       const res = await API.get('/bookings/my-bookings');
-      setRequests(res.data.filter(b => b.status === 'requested'));
-      setAcceptedSessions(res.data.filter(b => b.status === 'accepted'));
+      setRequests((res.data || []).filter((b) => b.status === 'requested'));
+      setAcceptedSessions((res.data || []).filter((b) => b.status === 'accepted'));
     } catch (err) {
       console.error('Error loading requests:', err);
     }
@@ -42,15 +62,19 @@ const MentorDashboard = () => {
         fetchMentorRequests();
       });
     }
-    return () => socket.off('new_fresher_request');
+    return () => {
+      socket.off('new_fresher_request');
+    };
   }, [mentorCompany]);
 
   const handleScheduleSubmit = async (e) => {
     e.preventDefault();
     try {
+      const isoDate = new Date(scheduledDate).toISOString();
+
       await API.post('/bookings/accept-slot', {
         bookingId: selectedReq._id,
-        confirmedMeetingTime: scheduledDate,
+        confirmedMeetingTime: isoDate,
         meetingLink: `MNCConnect-${selectedReq._id}`
       });
       alert('🎉 Session confirmed!');
@@ -68,8 +92,8 @@ const MentorDashboard = () => {
       {activeCallSession && (
         <MeetingRoom
           roomName={
-            activeCallSession.meetingLink?.includes("http")
-              ? activeCallSession.meetingLink.split("/").pop()
+            activeCallSession.meetingLink?.includes('http')
+              ? activeCallSession.meetingLink.split('/').pop()
               : activeCallSession.meetingLink || `MNCConnect-${activeCallSession._id}`
           }
           userName={user.name || 'Mentor'}
@@ -88,7 +112,7 @@ const MentorDashboard = () => {
           <div>
             <h4 className="text-sm font-bold text-white">Live Request Scanner Active</h4>
             <p className="text-xs text-slate-400">
-              Scanning incoming fresher requests for {mentorCompany || "your company"}...
+              Scanning incoming fresher requests for {mentorCompany || 'your company'}...
             </p>
           </div>
         </div>
@@ -112,8 +136,8 @@ const MentorDashboard = () => {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {requests.map((req) => (
-              <div 
-                key={req._id} 
+              <div
+                key={req._id}
                 className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
               >
                 <div className="space-y-2">
@@ -133,9 +157,9 @@ const MentorDashboard = () => {
 
                 <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between">
                   <span className="text-[11px] text-slate-400">
-                    Requested: {new Date(req.createdAt).toLocaleDateString()}
+                    Requested: {formatDate(req.createdAt)}
                   </span>
-                  
+
                   <button
                     onClick={() => setSelectedReq(req)}
                     className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow-sm shadow-blue-200"
@@ -152,7 +176,7 @@ const MentorDashboard = () => {
       {/* 📅 CONFIRMED SESSIONS */}
       <div className="mb-10">
         <h3 className="text-lg font-bold text-slate-800 mb-3">📅 Confirmed Sessions</h3>
-        
+
         {acceptedSessions.length === 0 ? (
           <div className="bg-slate-50 border border-dashed border-slate-200 rounded-2xl p-6 text-center text-slate-400 text-xs">
             No confirmed scheduled meetings yet.
@@ -169,18 +193,20 @@ const MentorDashboard = () => {
               return (
                 <div key={session._id} className="bg-emerald-50/50 border border-emerald-200 p-5 rounded-2xl">
                   <h4 className="font-bold text-slate-900 text-sm">Fresher: {session.fresherId?.name || 'Fresher'}</h4>
-                  <p className="text-xs text-slate-600 mt-1">🕒 Scheduled: <strong>{slotStart?.toLocaleString()}</strong></p>
+                  <p className="text-xs text-slate-600 mt-1">
+                    🕒 Scheduled: <strong>{formatDateTime(slotStart)}</strong>
+                  </p>
 
-                  <button 
+                  <button
                     disabled={!isMeetingTimeNow}
                     onClick={() => isMeetingTimeNow && setActiveCallSession(session)}
                     className={`mt-4 w-full py-2.5 rounded-xl font-bold text-xs transition-all ${
                       isMeetingTimeNow
-                        ? "bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer shadow-sm animate-pulse"
-                        : "bg-slate-200 text-slate-400 cursor-not-allowed"
+                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer shadow-sm animate-pulse'
+                        : 'bg-slate-200 text-slate-400 cursor-not-allowed'
                     }`}
                   >
-                    📹 {isMeetingTimeNow ? "Start / Join Live Meeting" : "Join Button Locked Until Scheduled Time"}
+                    📹 {isMeetingTimeNow ? 'Start / Join Live Meeting' : 'Join Button Locked Until Scheduled Time'}
                   </button>
                 </div>
               );
@@ -195,20 +221,20 @@ const MentorDashboard = () => {
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
             <h3 className="text-lg font-bold mb-4">Schedule Slot (Time format IST)</h3>
             <form onSubmit={handleScheduleSubmit} className="space-y-4">
-              <input 
-                type="datetime-local" 
-                value={scheduledDate} 
-                onChange={(e) => setScheduledDate(e.target.value)} 
-                required 
+              <input
+                type="datetime-local"
+                value={scheduledDate}
+                onChange={(e) => setScheduledDate(e.target.value)}
+                required
                 className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
               />
               <div className="flex gap-3">
                 <button type="submit" className="flex-1 py-2.5 bg-blue-600 text-white font-bold text-xs rounded-xl">
                   Confirm
                 </button>
-                <button 
-                  type="button" 
-                  onClick={() => setSelectedReq(null)} 
+                <button
+                  type="button"
+                  onClick={() => setSelectedReq(null)}
                   className="flex-1 py-2.5 bg-slate-100 text-xs font-bold rounded-xl text-slate-600"
                 >
                   Cancel

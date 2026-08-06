@@ -6,15 +6,15 @@ exports.getMyBookings = async (req, res) => {
     let query = {};
     
     if (req.user.role === 'fresher') {
-      // Fresher: Avaru create panna requests
+      // Fresher: Filter bookings created by user
       query = { fresherId: req.user._id };
     } else if (req.user.role === 'mentor') {
-      // Safely fetch company name from top level OR mentorProfile
+      // Fetch company name safely
       const mentorCompany = (req.user.companyName || req.user.mentorProfile?.companyName || '').trim();
 
       query = {
         $or: [
-          // Case-insensitive regex match for TCS, tcs, Tcs
+          // Case-insensitive regex match for target MNC
           { 
             status: 'requested', 
             companyName: { $regex: new RegExp(`^${mentorCompany}$`, 'i') } 
@@ -26,6 +26,7 @@ exports.getMyBookings = async (req, res) => {
 
     const bookings = await Booking.find(query)
       .populate('fresherId', 'name email')
+      .populate('mentorId', 'name email mentorProfile')
       .sort({ createdAt: -1 });
 
     res.json(bookings);
@@ -38,6 +39,10 @@ exports.getMyBookings = async (req, res) => {
 exports.createBooking = async (req, res) => {
   try {
     const { companyName, requirements, languageChosen, requestedDuration, preferredTimeWindow, paymentId, amountPaid } = req.body;
+
+    if (!companyName) {
+      return res.status(400).json({ message: 'Company name is required' });
+    }
 
     const booking = await Booking.create({
       fresherId: req.user._id,
@@ -54,7 +59,7 @@ exports.createBooking = async (req, res) => {
 
     const io = req.app.get('io');
     if (io) {
-      // Emit to room in lowercase format
+      // Socket event to room in lowercase format
       const companyRoom = `company_${companyName.toLowerCase().trim()}`;
       io.to(companyRoom).emit('new_fresher_request', {
         message: `🔔 New ${companyName} Session Request! Claim now.`,
@@ -69,14 +74,16 @@ exports.createBooking = async (req, res) => {
 };
 
 // Mentor Accepts Slot
-// Mentor Accepts Slot
-// Mentor Accepts Slot
 exports.acceptBookingSlot = async (req, res) => {
   try {
     const { bookingId, confirmedMeetingTime, meetingLink } = req.body;
 
     if (!bookingId) {
       return res.status(400).json({ message: 'Booking ID is required' });
+    }
+
+    if (!confirmedMeetingTime) {
+      return res.status(400).json({ message: 'Confirmed meeting time is required' });
     }
 
     const booking = await Booking.findById(bookingId);
@@ -88,21 +95,24 @@ exports.acceptBookingSlot = async (req, res) => {
       return res.status(400).json({ message: 'Booking already claimed or processed!' });
     }
 
-    // 🟢 Solution: Direct Atomic Update (Bypasses full model schema re-validation errors)
+    // Convert incoming date string safely to proper Date Object
+    const parsedDate = new Date(confirmedMeetingTime);
+
+    // Direct Atomic Update (Bypasses full model schema re-validation issues)
     const updatedBooking = await Booking.findByIdAndUpdate(
       bookingId,
       {
         $set: {
           status: 'accepted',
           mentorId: req.user._id,
-          confirmedMeetingTime: confirmedMeetingTime,
+          confirmedMeetingTime: parsedDate,
           meetingLink: meetingLink || `MNCConnect-${bookingId}`
         }
       },
-      { new: true, runValidators: false } // skips re-checking amountPaid & preferredTimeWindow
+      { new: true, runValidators: false }
     );
 
-    // Socket Notification
+    // Socket Notification for Fresher
     const io = req.app.get('io');
     if (io) {
       io.emit(`fresher_notification_${updatedBooking.fresherId}`, {
@@ -144,7 +154,6 @@ exports.cancelAndRefundBooking = async (req, res) => {
   }
 };
 
-// Submit Star Rating
 // Submit Star Rating & Feedback
 exports.submitFeedback = async (req, res) => {
   try {

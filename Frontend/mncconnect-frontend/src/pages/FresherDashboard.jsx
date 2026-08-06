@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import API from "../api";
-import MeetingRoom from "../components/MeetingRoom"; // Import updated Jitsi MeetingRoom component
+import MeetingRoom from "../components/MeetingRoom";
 
 const FresherDashboard = () => {
   const companiesList = [
@@ -60,7 +60,7 @@ const FresherDashboard = () => {
 
   const amountToPay = duration === "30 mins" ? 299 : 499;
 
-  // Real-time Clock Tick for exact slot unlock checking
+  // Real-time Clock Tick
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
@@ -222,8 +222,7 @@ const FresherDashboard = () => {
               1-on-1 MNC Mock Interviews
             </h1>
             <p className="text-slate-400 text-xs sm:text-sm mt-1">
-              Select target company → Instant Request Broadcast to active
-              verified employees
+              Select target company → Instant Request Broadcast to active verified employees
             </p>
           </div>
           <div className="flex items-center gap-3 bg-slate-800/80 p-3 rounded-2xl border border-slate-700">
@@ -254,7 +253,6 @@ const FresherDashboard = () => {
                   ? new Date(meetingTime.getTime() + durationMins * 60 * 1000)
                   : null;
 
-                // 🟢 Exact Scheduled Time Match Check (IST)
                 const isReadyToJoin =
                   meetingTime &&
                   slotEnd &&
@@ -315,7 +313,6 @@ const FresherDashboard = () => {
 
                     {booking.status === "accepted" && (
                       <div className="space-y-2 pt-1">
-                        {/* 📹 Direct In-App Meeting Modal Launcher */}
                         <button
                           disabled={!isReadyToJoin}
                           onClick={() =>
@@ -455,10 +452,10 @@ const FresherDashboard = () => {
                   </div>
                 </div>
 
-                {/* Preferred Flexible Time Window */}
+                {/* Flexible Time Window */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Your Flexible Time Window (When are you free?)
+                    Your Flexible Time Window
                   </label>
                   <select
                     value={timeWindow}
@@ -503,7 +500,7 @@ const FresherDashboard = () => {
                     required
                     rows="3"
                     className="w-full p-3 bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl focus:border-blue-500 outline-none"
-                    placeholder="E.g., Mock React/Node interview, Resume structural feedback, Salary Negotiation advice..."
+                    placeholder="E.g., Mock React/Node interview, Resume feedback..."
                   />
                 </div>
 
@@ -519,15 +516,12 @@ const FresherDashboard = () => {
                     }`}
                   >
                     {paymentDetails
-                      ? `✓ Payment Verified (ID: ${paymentDetails.slice(
-                          0,
-                          10
-                        )}...)`
+                      ? `✓ Payment Verified (ID: ${paymentDetails.slice(0, 10)}...)`
                       : `Pay ₹${amountToPay} & Lock Slot Request`}
                   </button>
                 </div>
 
-                {/* Submit Action */}
+                {/* Action Buttons */}
                 <div className="flex gap-3 pt-2">
                   <button
                     type="submit"
@@ -539,7 +533,7 @@ const FresherDashboard = () => {
                   <button
                     type="button"
                     onClick={() => setSelectedCompany(null)}
-                    className="py-3 px-5 bg-slate-800 text-slate-400 font-bold text-xs rounded-xl hover:bg-slate-700 transition-all cursor-pointer"
+                    className="flex-1 py-3 bg-slate-800 text-slate-300 font-bold text-xs rounded-xl hover:bg-slate-700 transition-all cursor-pointer"
                   >
                     Cancel
                   </button>
@@ -549,63 +543,46 @@ const FresherDashboard = () => {
           </div>
         )}
 
-        {/* --- 4. POST-SESSION RATING MODAL --- */}
+        {/* --- 4. RATING & REVIEW MODAL --- */}
         {ratingModalBooking && (
           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50">
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5">
-              <h3 className="text-lg font-bold text-white">
-                Rate Mentor Session ({ratingModalBooking.companyName})
-              </h3>
-
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4">
+              <h3 className="text-lg font-bold text-white">Rate Session Experience</h3>
               <form onSubmit={handleRatingSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-2">
-                    Select Rating
-                  </label>
-                  <div className="flex gap-2">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <button
-                        key={star}
-                        type="button"
-                        onClick={() => setRatingScore(star)}
-                        className={`flex-1 py-2 rounded-xl text-lg font-bold cursor-pointer ${
-                          ratingScore >= star
-                            ? "bg-amber-500 text-slate-950"
-                            : "bg-slate-800 text-slate-500"
-                        }`}
-                      >
-                        ★ {star}
-                      </button>
-                    ))}
-                  </div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Rating (1 to 5 Stars)</label>
+                  <select
+                    value={ratingScore}
+                    onChange={(e) => setRatingScore(Number(e.target.value))}
+                    className="w-full p-2.5 bg-slate-950 border border-slate-800 text-white text-xs rounded-xl"
+                  >
+                    <option value={5}>⭐⭐⭐⭐⭐ (5/5) Excellent</option>
+                    <option value={4}>⭐⭐⭐⭐ (4/5) Good</option>
+                    <option value={3}>⭐⭐⭐ (3/5) Average</option>
+                    <option value={2}>⭐⭐ (2/5) Poor</option>
+                    <option value={1}>⭐ (1/5) Bad</option>
+                  </select>
                 </div>
-
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">
-                    Feedback / Review
-                  </label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Review Comment</label>
                   <textarea
                     value={reviewComment}
                     onChange={(e) => setReviewComment(e.target.value)}
                     rows="3"
-                    className="w-full p-3 bg-slate-950 border border-slate-800 text-white text-xs rounded-xl outline-none focus:border-blue-500"
-                    placeholder="How was the mock interview guidance?"
+                    className="w-full p-2.5 bg-slate-950 border border-slate-800 text-white text-xs rounded-xl"
+                    placeholder="Share feedback on how the session helped you..."
                   />
                 </div>
-
-                <div className="flex gap-2">
-                  <button
-                    type="submit"
-                    className="flex-1 py-2.5 bg-emerald-500 text-slate-950 font-bold text-xs rounded-xl cursor-pointer"
-                  >
-                    Submit Review
+                <div className="flex gap-3">
+                  <button type="submit" className="flex-1 py-2.5 bg-blue-600 text-white font-bold text-xs rounded-xl">
+                    Submit Feedback
                   </button>
                   <button
                     type="button"
                     onClick={() => setRatingModalBooking(null)}
-                    className="py-2.5 px-4 bg-slate-800 text-slate-300 font-bold text-xs rounded-xl cursor-pointer"
+                    className="flex-1 py-2.5 bg-slate-800 text-slate-300 font-bold text-xs rounded-xl"
                   >
-                    Close
+                    Cancel
                   </button>
                 </div>
               </form>
