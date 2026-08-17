@@ -52,20 +52,42 @@ exports.registerUser = async (req, res) => {
 // @route   POST /api/auth/login
 exports.loginUser = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, role } = req.body;
+
+    // Validate role
+    if (!role) {
+      return res.status(400).json({
+        message: 'Please select a login role'
+      });
+    }
 
     // Check user email
     const user = await User.findOne({ email });
+
     if (!user) {
-      return res.status(401).json({ message: 'Invalid email or password' });
+      return res.status(401).json({
+        message: 'Invalid email or password'
+      });
+    }
+
+    // IMPORTANT:
+    // Selected login role must match the role stored in MongoDB
+    if (user.role !== role) {
+      return res.status(403).json({
+        message: `This account is registered as ${user.role}. Please login as ${user.role}.`
+      });
     }
 
     // Compare Password
     const isMatch = await bcrypt.compare(password, user.password);
+
     if (!isMatch) {
-      return res.status(401).json({ message: 'Invalid email or password' });
+      return res.status(401).json({
+        message: 'Invalid email or password'
+      });
     }
 
+    // Successful login
     res.json({
       _id: user._id,
       name: user.name,
@@ -73,7 +95,10 @@ exports.loginUser = async (req, res) => {
       role: user.role,
       token: generateToken(user._id)
     });
+
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({
+      message: error.message
+    });
   }
 };
