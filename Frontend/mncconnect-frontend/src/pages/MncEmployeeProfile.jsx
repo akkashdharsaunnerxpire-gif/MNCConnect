@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+const API_URL = import.meta.env.VITE_API_URL; // Change this to your backend URL
 
 const initialProfile = {
   name: "",
@@ -54,6 +55,7 @@ export default function MncEmployeeProfile() {
   const [profile, setProfile] = useState(initialProfile);
   const [files, setFiles] = useState(emptyFiles);
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [preview, setPreview] = useState(null);
   const [validationAttempted, setValidationAttempted] = useState(false);
   const [errors, setErrors] = useState({});
@@ -136,7 +138,6 @@ export default function MncEmployeeProfile() {
     update(field, file.name);
   };
 
-
   const openPreview = (field) => {
     const file = files[field];
 
@@ -184,7 +185,6 @@ export default function MncEmployeeProfile() {
         image.onerror = reject;
       });
 
-      // Use the same normalized crop coordinates as the responsive editor.
       const stageWidth = 1200;
       const stageHeight = 750;
 
@@ -282,7 +282,6 @@ export default function MncEmployeeProfile() {
     }
   };
 
-
   const validateStep = (currentStep) => {
     const nextErrors = {};
 
@@ -361,36 +360,89 @@ export default function MncEmployeeProfile() {
     window.scrollTo({ top: 0, behavior: "auto" });
   };
 
-  const submitForVerification = (event) => {
-    event.preventDefault();
-    if (!validateStep(3)) return;
+  const submitForVerification = async (event) => {
+  event.preventDefault();
+  
+  if (!validateStep(3)) return;
+  
+  if (isSubmitting) return;
+  
+  setIsSubmitting(true);
+  
+  try {
+    const formData = new FormData();
+    
+    Object.entries(profile).forEach(([key, value]) => {
+      if (key === 'confirmationAccepted') {
+        formData.append(key, value ? 'true' : 'false');
+      } else if (value !== undefined && value !== null && value !== '') {
+        formData.append(key, value);
+      }
+    });
+    
+    if (files.offerLetter) {
+      formData.append('offerLetter', files.offerLetter);
+    }
+    
+    if (files.employeeIdProof) {
+      formData.append('employeeIdProof', files.employeeIdProof);
+    }
+    
+    if (files.additionalProof) {
+      formData.append('additionalProof', files.additionalProof);
+    }
+    
+    console.log('Submitting mentor registration:');
+    for (let pair of formData.entries()) {
+      if (pair[1] instanceof File) {
+        console.log(`${pair[0]}: File(${pair[1].name}, ${pair[1].size} bytes)`);
+      } else {
+        console.log(`${pair[0]}: ${pair[1]}`);
+      }
+    }
+    
+    // FIX: Use hardcoded URL or import.meta.env
+    
+    const response = await fetch(`${API_URL}/auth/mentor/register`, {
+      method: 'POST',
+      body: formData,
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      let errorMessage = data.message || 'Registration failed. Please try again.';
+      
+      if (response.status === 409) {
+        errorMessage = data.message || 'An account already exists with this email, mobile, or employee ID.';
+      } else if (response.status === 400) {
+        errorMessage = data.message || 'Please check all fields and try again.';
+      } else if (response.status === 500) {
+        errorMessage = 'Server error. Please try again later.';
+      }
+      
+      alert(errorMessage);
+      setIsSubmitting(false);
+      return;
+    }
+    
     setSubmitted(true);
     window.scrollTo({ top: 0, behavior: "auto" });
-
-    /*
-      BACKEND INTEGRATION POINT
-
-      Send profile + files to your backend here.
-
-      Example:
-      const formData = new FormData();
-      Object.entries(profile).forEach(([key, value]) => formData.append(key, value));
-      formData.append("offerLetter", files.offerLetter);
-      formData.append("employeeIdProof", files.employeeIdProof);
-      if (files.additionalProof) {
-        formData.append("additionalProof", files.additionalProof);
-      }
-
-      await api.post("/employee-verification", formData);
-
-      Admin page is intentionally NOT included.
-      After admin approval:
-        1. Mark the employee account approved.
-        2. Send an SMS to the employee mobile number.
-        3. Allow login.
-    */
-  };
-
+    
+    console.log('Registration successful:', data);
+    
+  } catch (error) {
+    console.error('Submission error:', error);
+    
+    if (error.message === 'Failed to fetch') {
+      alert('Cannot connect to server. Please check if the backend is running on http://localhost:5000');
+    } else {
+      alert(error.message || 'Unable to submit registration. Please try again.');
+    }
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
   useEffect(() => {
     if (!preview) return;
@@ -587,6 +639,7 @@ export default function MncEmployeeProfile() {
                 goBack={goBack}
                 goNext={goNext}
                 validateStep={validateStep}
+                isSubmitting={isSubmitting}
               />
             </div>
           </section>
@@ -613,7 +666,6 @@ function McLoader() {
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#f7f9fc]">
-      {/* Real page preview under the animation */}
       <div className="pointer-events-none min-h-screen select-none">
         <Header navigate={() => {}} />
 
@@ -646,7 +698,6 @@ function McLoader() {
         </main>
       </div>
 
-      {/* Cinematic MNC zoom overlay */}
       <div className="fixed inset-0 z-[99999] overflow-hidden">
         <div
           className="absolute inset-0 bg-white"
@@ -947,119 +998,135 @@ function StepOne({ profile, update, inputClass, errors = {}, validationAttempted
       <div className="grid gap-5 sm:grid-cols-2">
         <Field label="Legal / Full Name" showRequired={validationAttempted}>
           <input
-value={profile.name}
+            value={profile.name}
             onChange={(e) => update("name", e.target.value)}
             placeholder="Arun Kumar"
             className={inputClass}
           />
           <Hint>Your name used for professional verification.</Hint>
-        {validationAttempted && errors.name && (
-          <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
-            {errors.name}
-          </p>
-        )}
+          {validationAttempted && errors.name && (
+            <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
+              {errors.name}
+            </p>
+          )}
         </Field>
 
         <Field label="Professional Email" showRequired={validationAttempted}>
           <input
-type="email"
+            type="email"
             value={profile.email}
             onChange={(e) => update("email", e.target.value)}
             placeholder="arun@company.com"
             className={inputClass}
           />
-        {validationAttempted && errors.email && (
-          <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
-            {errors.email}
-          </p>
-        )}
+          {validationAttempted && errors.email && (
+            <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
+              {errors.email}
+            </p>
+          )}
         </Field>
 
         <Field label="Mobile Number" showRequired={validationAttempted}>
           <input
-value={profile.mobile}
+            value={profile.mobile}
             onChange={(e) => update("mobile", e.target.value)}
             placeholder="+91 98765 43210"
             className={inputClass}
           />
           <Hint>Approval notification will be sent here.</Hint>
-        {validationAttempted && errors.mobile && (
-          <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
-            {errors.mobile}
-          </p>
-        )}
+          {validationAttempted && errors.mobile && (
+            <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
+              {errors.mobile}
+            </p>
+          )}
+        </Field>
+
+        <Field label="Password" showRequired={validationAttempted}>
+          <input
+            type="password"
+            value={profile.password}
+            onChange={(e) => update("password", e.target.value)}
+            placeholder="Min 8 characters"
+            className={inputClass}
+          />
+          <Hint>Must be at least 8 characters long.</Hint>
+          {validationAttempted && errors.password && (
+            <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
+              {errors.password}
+            </p>
+          )}
         </Field>
 
         <Field label="Current MNC / Company" showRequired={validationAttempted}>
           <input
-value={profile.company}
+            value={profile.company}
             onChange={(e) => update("company", e.target.value)}
             placeholder="Google / Amazon / TCS"
             className={inputClass}
           />
-        {validationAttempted && errors.company && (
-          <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
-            {errors.company}
-          </p>
-        )}
+          {validationAttempted && errors.company && (
+            <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
+              {errors.company}
+            </p>
+          )}
         </Field>
 
         <Field label="Designation" showRequired={validationAttempted}>
           <input
-value={profile.designation}
+            value={profile.designation}
             onChange={(e) => update("designation", e.target.value)}
             placeholder="Senior Software Engineer"
             className={inputClass}
           />
-        {validationAttempted && errors.designation && (
-          <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
-            {errors.designation}
-          </p>
-        )}
+          {validationAttempted && errors.designation && (
+            <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
+              {errors.designation}
+            </p>
+          )}
         </Field>
 
         <Field label="Department / Team" showRequired={validationAttempted}>
           <input
-value={profile.department}
+            value={profile.department}
             onChange={(e) => update("department", e.target.value)}
             placeholder="Engineering / Product / HR"
             className={inputClass}
           />
-        {validationAttempted && errors.department && (
-          <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
-            {errors.department}
-          </p>
-        )}
+          {validationAttempted && errors.department && (
+            <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
+              {errors.department}
+            </p>
+          )}
         </Field>
 
         <Field label="Years of Experience" showRequired={validationAttempted}>
           <input
-type="number"
+            type="number"
             min="0"
             value={profile.experience}
             onChange={(e) => update("experience", e.target.value)}
             placeholder="5"
             className={inputClass}
           />
-        {validationAttempted && errors.experience && (
-          <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
-            {errors.experience}
-          </p>
-        )}
+          {validationAttempted && errors.experience && (
+            <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
+              {errors.experience}
+            </p>
+          )}
         </Field>
 
         <Field label="Current Location" icon={MapPin} required>
           <input
-value={profile.location}
+            value={profile.location}
             onChange={(e) => update("location", e.target.value)}
             placeholder="Bengaluru, India"
             className={inputClass}
           />
-        {validationAttempted && errors.location && (
-          <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
-            {errors.location}
-          </p>
-        )}
+          {validationAttempted && errors.location && (
+            <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
+              {errors.location}
+            </p>
+          )}
         </Field>
 
         <Field label="LinkedIn Profile">
@@ -1074,32 +1141,32 @@ value={profile.location}
 
         <Field label="Skills / Expertise" showRequired={validationAttempted}>
           <input
-value={profile.skills}
+            value={profile.skills}
             onChange={(e) => update("skills", e.target.value)}
             placeholder="React, Java, DSA, Cloud..."
             className={inputClass}
           />
-        {validationAttempted && errors.skills && (
-          <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
-            {errors.skills}
-          </p>
-        )}
+          {validationAttempted && errors.skills && (
+            <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
+              {errors.skills}
+            </p>
+          )}
         </Field>
       </div>
 
       <div className="mt-5">
         <Field label="Professional Bio" showRequired={validationAttempted}>
           <textarea
-value={profile.bio}
+            value={profile.bio}
             onChange={(e) => update("bio", e.target.value)}
             placeholder="Tell freshers about your career, expertise and what you can help them with..."
             className={`${inputClass} min-h-32 resize-y ${errors?.bio && validationAttempted ? "border-red-300" : ""}`}
           />
-        {validationAttempted && errors?.bio && (
-          <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
-            {errors?.bio}
-          </p>
-        )}
+          {validationAttempted && errors?.bio && (
+            <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
+              {errors?.bio}
+            </p>
+          )}
         </Field>
       </div>
     </div>
@@ -1173,11 +1240,11 @@ function StepTwo({
               placeholder="EMP-10293"
               className={inputClass}
             />
-          {validationAttempted && errors.companyId && (
-            <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
-              {errors.companyId}
-            </p>
-          )}
+            {validationAttempted && errors.companyId && (
+              <p data-validation-error className="mt-1.5 text-xs font-medium text-red-600">
+                {errors.companyId}
+              </p>
+            )}
           </Field>
 
           <DocumentUpload
@@ -1602,7 +1669,6 @@ function DocumentPreview({
         className="mx-auto flex h-[100dvh] w-full max-w-6xl flex-col overflow-hidden bg-[#171717] text-white sm:h-[94vh] sm:max-w-5xl sm:rounded-2xl sm:shadow-[0_35px_120px_rgba(0,0,0,.42)]"
         onClick={(event) => event.stopPropagation()}
       >
-        {/* Top bar */}
         <div className="flex min-h-14 shrink-0 items-center justify-between border-b border-white/10 bg-[#222] px-4 sm:px-6">
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-white">
@@ -1636,7 +1702,6 @@ function DocumentPreview({
                   onPointerCancel={endDrag}
                   onPointerLeave={endDrag}
                 >
-                  {/* Fixed full-image canvas */}
                   <img
                     src={preview.url}
                     alt={previewName}
@@ -1644,10 +1709,8 @@ function DocumentPreview({
                     className="pointer-events-none absolute inset-0 h-full w-full select-none object-contain"
                   />
 
-                  {/* Outside area */}
                   <div className="pointer-events-none absolute inset-0 bg-black/42" />
 
-                  {/* Responsive selection */}
                   <div
                     className={`absolute border ${
                       cropDragging ? "border-white" : "border-white/95"
@@ -1662,18 +1725,15 @@ function DocumentPreview({
                     }}
                     onPointerDown={(event) => beginDrag(event, "move")}
                   >
-                    {/* 3x3 guides */}
                     <span className="pointer-events-none absolute left-1/3 top-0 h-full w-px bg-white/25" />
                     <span className="pointer-events-none absolute left-2/3 top-0 h-full w-px bg-white/25" />
                     <span className="pointer-events-none absolute left-0 top-1/3 h-px w-full bg-white/25" />
                     <span className="pointer-events-none absolute left-0 top-2/3 h-px w-full bg-white/25" />
-                    {/* Corner brackets */}
                     <span className="pointer-events-none absolute left-[-2px] top-[-2px] h-5 w-5 border-l-2 border-t-2 border-white" />
                     <span className="pointer-events-none absolute right-[-2px] top-[-2px] h-5 w-5 border-r-2 border-t-2 border-white" />
                     <span className="pointer-events-none absolute bottom-[-2px] left-[-2px] h-5 w-5 border-b-2 border-l-2 border-white" />
                     <span className="pointer-events-none absolute bottom-[-2px] right-[-2px] h-5 w-5 border-b-2 border-r-2 border-white" />
 
-                    {/* Edge handles */}
                     <span
                       onPointerDown={(event) => beginDrag(event, "n")}
                       className="absolute left-1/2 top-[-5px] h-3 w-16 -translate-x-1/2 cursor-ns-resize"
@@ -1691,7 +1751,6 @@ function DocumentPreview({
                       className="absolute right-[-5px] top-1/2 h-16 w-3 -translate-y-1/2 cursor-ew-resize"
                     />
 
-                    {/* Corner resize handles */}
                     <span
                       onPointerDown={(event) => beginDrag(event, "nw")}
                       className="absolute left-[-8px] top-[-8px] h-5 w-5 cursor-nwse-resize"
@@ -1709,7 +1768,6 @@ function DocumentPreview({
                       className="absolute bottom-[-8px] right-[-8px] h-5 w-5 cursor-nwse-resize"
                     />
 
-                    {/* Live size */}
                     <span className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded bg-black/70 px-2.5 py-1 text-[9px] font-mono text-white sm:text-[10px]">
                       {sizeLabel()}
                     </span>
@@ -1721,7 +1779,6 @@ function DocumentPreview({
                 </div>
               </div>
 
-              {/* Responsive bottom controls */}
               <div className="shrink-0 border-t border-white/10 bg-[#222] px-3 py-3 sm:px-5">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="text-[10px] text-white/35">
@@ -1782,8 +1839,7 @@ function DocumentPreview({
   );
 }
 
-
-function ActionBar({ step, goBack, goNext, validateStep }) {
+function ActionBar({ step, goBack, goNext, validateStep, isSubmitting = false }) {
   const isLast = step === 3;
 
   const handlePrimary = () => {
@@ -1803,7 +1859,8 @@ function ActionBar({ step, goBack, goNext, validateStep }) {
             <button
               type="button"
               onClick={goBack}
-              className="flex-1 rounded-xl border border-slate-200 bg-white px-5 py-3.5 text-sm font-bold text-slate-700"
+              disabled={isSubmitting}
+              className="flex-1 rounded-xl border border-slate-200 bg-white px-5 py-3.5 text-sm font-bold text-slate-700 disabled:opacity-50"
             >
               <ArrowLeft className="mr-2 inline h-4 w-4" />
               Back
@@ -1813,13 +1870,23 @@ function ActionBar({ step, goBack, goNext, validateStep }) {
           <button
             type={isLast ? "submit" : "button"}
             onClick={handlePrimary}
-            className={`flex flex-1 items-center justify-center gap-2 rounded-xl border px-5 py-3.5 text-sm font-bold ${PRIMARY_ACTION}`}
+            disabled={isSubmitting}
+            className={`flex flex-1 items-center justify-center gap-2 rounded-xl border px-5 py-3.5 text-sm font-bold disabled:opacity-70 ${PRIMARY_ACTION}`}
           >
-            {isLast ? "Submit for Verification" : "Continue"}
-            {isLast ? (
-              <ShieldCheck className="h-4 w-4" />
+            {isSubmitting ? (
+              <>
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
+                Submitting...
+              </>
             ) : (
-              <ArrowRight className="h-4 w-4" />
+              <>
+                {isLast ? "Submit for Verification" : "Continue"}
+                {isLast ? (
+                  <ShieldCheck className="h-4 w-4" />
+                ) : (
+                  <ArrowRight className="h-4 w-4" />
+                )}
+              </>
             )}
           </button>
         </div>
@@ -1833,7 +1900,6 @@ function ActionBar({ step, goBack, goNext, validateStep }) {
     </div>
   );
 }
-
 
 function Field({
   label,

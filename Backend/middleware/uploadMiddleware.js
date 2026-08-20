@@ -1,38 +1,73 @@
-const multer = require('multer');
-const path = require('path');
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+const crypto = require("crypto");
 
-// Storage configuration
+const uploadDir = path.resolve(
+  process.env.UPLOAD_DIR || path.join(process.cwd(), "uploads")
+);
+
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, {
+    recursive: true,
+  });
+}
+
+const allowedMimeTypes = new Set([
+  "image/jpeg",
+  "image/png",
+  "application/pdf",
+]);
+
+const allowedExtensions = new Set([
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".pdf",
+]);
+
 const storage = multer.diskStorage({
-  destination(req, file, cb) {
-    cb(null, 'uploads/');
+  destination: (req, file, cb) => {
+    cb(null, uploadDir);
   },
-  filename(req, file, cb) {
-    cb(
-      null,
-      `${file.fieldname}-${Date.now()}${path.extname(file.originalname)}`
-    );
-  }
+
+  filename: (req, file, cb) => {
+    const extension = path.extname(file.originalname).toLowerCase();
+
+    const uniqueName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
+
+    cb(null, uniqueName);
+  },
 });
 
-// File type validation
-const checkFileTypes = (file, cb) => {
-  const filetypes = /jpg|jpeg|png|pdf/;
-  const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = filetypes.test(file.mimetype);
+const fileFilter = (req, file, cb) => {
+  const extension = path.extname(file.originalname).toLowerCase();
 
-  if (extname && mimetype) {
+  if (
+    allowedExtensions.has(extension) &&
+    allowedMimeTypes.has(file.mimetype)
+  ) {
     return cb(null, true);
-  } else {
-    cb(new Error('Images (JPG/PNG) and PDFs only!'));
   }
+
+  return cb(
+    new multer.MulterError(
+      "LIMIT_UNEXPECTED_FILE",
+      "Only JPG, JPEG, PNG and PDF files are allowed."
+    )
+  );
 };
 
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB Limit
-  fileFilter: (req, file, cb) => {
-    checkFileTypes(file, cb);
-  }
+  fileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024,
+    files: 3,
+  },
 });
 
-module.exports = upload;
+module.exports = {
+  upload,
+  uploadDir,
+};

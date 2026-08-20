@@ -1,45 +1,113 @@
-const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const jwt = require("jsonwebtoken");
 
-// Verify Bearer Token in Headers
+const Fresher = require("../models/Fresher");
+const Mentor = require("../models/Mentor");
+
 const protect = async (req, res, next) => {
-  let token;
+  try {
+    const authHeader =
+      req.headers.authorization;
 
-  if (
-    req.headers.authorization &&
-    req.headers.authorization.startsWith('Bearer')
-  ) {
-    try {
-      // Get token from header (Format: "Bearer <token>")
-      token = req.headers.authorization.split(' ')[1];
-
-      // Verify token
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-      // Get user from the token (exclude password field)
-      req.user = await User.findById(decoded.id).select('-password');
-
-      next();
-    } catch (error) {
-      return res.status(401).json({ message: 'Not authorized, token failed' });
+    if (
+      !authHeader ||
+      !authHeader.startsWith("Bearer ")
+    ) {
+      return res.status(401).json({
+        success: false,
+        message:
+          "Authentication required.",
+      });
     }
-  }
 
-  if (!token) {
-    return res.status(401).json({ message: 'Not authorized, no token provided' });
+    const token =
+      authHeader.split(" ")[1];
+
+    const decoded =
+      jwt.verify(
+        token,
+        process.env.JWT_SECRET
+      );
+
+    if (
+      !decoded.id ||
+      !decoded.role
+    ) {
+      return res.status(401).json({
+        success: false,
+        message:
+          "Invalid authentication token.",
+      });
+    }
+
+    let user = null;
+
+    // Fresher
+    if (decoded.role === "fresher") {
+      user =
+        await Fresher.findById(
+          decoded.id
+        );
+    }
+
+    // Mentor
+    if (decoded.role === "mentor") {
+      user =
+        await Mentor.findById(
+          decoded.id
+        );
+    }
+
+    // Admin
+    // Keep your existing admin logic here
+    if (decoded.role === "admin") {
+      // Your existing admin lookup
+    }
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message:
+          "User account not found.",
+      });
+    }
+
+    req.user = user;
+    req.user.role = decoded.role;
+    req.user.id = decoded.id;
+
+    next();
+  } catch (error) {
+    console.error(
+      "Auth middleware error:",
+      error
+    );
+
+    return res.status(401).json({
+      success: false,
+      message:
+        "Invalid or expired token.",
+    });
   }
 };
 
-// Middleware to restrict routes by Role (e.g., mentor or admin only)
 const authorize = (...roles) => {
   return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ 
-        message: `User role '${req.user.role}' is not authorized to access this route` 
+    if (
+      !req.user ||
+      !roles.includes(req.user.role)
+    ) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "You are not authorized to access this resource.",
       });
     }
+
     next();
   };
 };
 
-module.exports = { protect, authorize };
+module.exports = {
+  protect,
+  authorize,
+};
