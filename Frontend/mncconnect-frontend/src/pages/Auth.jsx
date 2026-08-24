@@ -125,8 +125,8 @@ export default function Auth({ closeModal = () => {}, isModal = false }) {
   
     const endpoint =
       userMode === "register"
-        ? `${API_URL}/api/auth/fresher/register`
-        : `${API_URL}/api/auth/fresher/login`;
+        ? `${API_URL}/auth/fresher/register`
+        : `${API_URL}/auth/fresher/login`;
 
     // FIX: Send only the 10-digit mobile number, not with country code
     const body =

@@ -2,6 +2,7 @@ require("dotenv").config();
 
 const app = require("./app");
 const connectDB = require("./config/db");
+const { seedAdminFromEnv } = require("./controllers/adminController");
 
 const PORT = Number(process.env.PORT) || 5000;
 
@@ -20,11 +21,15 @@ const startServer = async () => {
     }
 
     await connectDB();
+    
+    // Seed admin from .env on startup (optional)
+    await seedAdminFromEnv();
 
     app.listen(PORT, () => {
       console.log(
         `MNCConnect server running on port ${PORT}`
       );
+      console.log(`🔗 Admin Login: http://localhost:${PORT}/admin/login`);
     });
   } catch (error) {
     console.error(

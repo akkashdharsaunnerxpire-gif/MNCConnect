@@ -4,6 +4,10 @@ const fs = require("fs/promises");
 
 const Fresher = require("../models/Fresher");
 const Mentor = require("../models/Mentor");
+const {
+  uploadFromBuffer,
+  deleteFromCloudinary,
+} = require("../config/cloudinary");
 
 // =====================================================
 // JWT
@@ -22,7 +26,7 @@ const generateToken = (id, role) => {
     process.env.JWT_SECRET,
     {
       expiresIn: "7d",
-    }
+    },
   );
 };
 
@@ -100,13 +104,7 @@ const sanitizeMentor = (mentor) => {
 
 exports.registerFresher = async (req, res) => {
   try {
-    const {
-      name,
-      email,
-      mobile,
-      countryCode,
-      password,
-    } = req.body;
+    const { name, email, mobile, countryCode, password } = req.body;
 
     console.log("FRESHER REGISTER BODY:", req.body);
 
@@ -123,7 +121,11 @@ exports.registerFresher = async (req, res) => {
     }
 
     // 2. Validate name
-    if (typeof name !== "string" || name.trim().length < 2 || name.trim().length > 50) {
+    if (
+      typeof name !== "string" ||
+      name.trim().length < 2 ||
+      name.trim().length > 50
+    ) {
       return res.status(400).json({
         success: false,
         message: "Name must be between 2 and 50 characters.",
@@ -149,21 +151,24 @@ exports.registerFresher = async (req, res) => {
 
     // 5. Validate mobile number - FIXED
     const mobileRegex = /^[0-9]{10}$/;
-    let cleanMobileForValidation = String(mobile).replace(/[\s\-\(\)]/g, '');
-    
+    let cleanMobileForValidation = String(mobile).replace(/[\s\-\(\)]/g, "");
+
     // Remove country code if present in the mobile string
-    if (cleanMobileForValidation.startsWith('+')) {
-      const digitsOnly = cleanMobileForValidation.replace(/[^0-9]/g, '');
+    if (cleanMobileForValidation.startsWith("+")) {
+      const digitsOnly = cleanMobileForValidation.replace(/[^0-9]/g, "");
       if (digitsOnly.length >= 10) {
         cleanMobileForValidation = digitsOnly.slice(-10);
       }
     }
-    
+
     // If it has country code without + (e.g., "918015874936")
-    if (cleanMobileForValidation.length > 10 && /^\d{11,13}$/.test(cleanMobileForValidation)) {
+    if (
+      cleanMobileForValidation.length > 10 &&
+      /^\d{11,13}$/.test(cleanMobileForValidation)
+    ) {
       cleanMobileForValidation = cleanMobileForValidation.slice(-10);
     }
-    
+
     if (!mobileRegex.test(cleanMobileForValidation)) {
       return res.status(400).json({
         success: false,
@@ -174,8 +179,8 @@ exports.registerFresher = async (req, res) => {
     // 6. Validate country code
     const countryCodeRegex = /^\+\d{1,4}$/;
     let cleanCountryCode = String(countryCode || "+91").trim();
-    if (!cleanCountryCode.startsWith('+')) {
-      cleanCountryCode = '+' + cleanCountryCode;
+    if (!cleanCountryCode.startsWith("+")) {
+      cleanCountryCode = "+" + cleanCountryCode;
     }
     if (!countryCodeRegex.test(cleanCountryCode)) {
       return res.status(400).json({
@@ -227,7 +232,8 @@ exports.registerFresher = async (req, res) => {
     if (existingFresherByMobile) {
       return res.status(409).json({
         success: false,
-        message: "This mobile number is already registered with a fresher account.",
+        message:
+          "This mobile number is already registered with a fresher account.",
       });
     }
 
@@ -239,7 +245,8 @@ exports.registerFresher = async (req, res) => {
     if (existingMentorByMobile) {
       return res.status(409).json({
         success: false,
-        message: "This mobile number is already registered with a mentor account.",
+        message:
+          "This mobile number is already registered with a mentor account.",
       });
     }
 
@@ -267,7 +274,6 @@ exports.registerFresher = async (req, res) => {
       user: sanitizeFresher(fresher),
       token,
     });
-
   } catch (error) {
     console.error("Fresher registration error:", error);
 
@@ -346,7 +352,6 @@ exports.loginFresher = async (req, res) => {
       user: sanitizeFresher(fresher),
       token,
     });
-
   } catch (error) {
     console.error("Fresher login error:", error);
     return res.status(500).json({
@@ -366,8 +371,15 @@ exports.loginFresher = async (req, res) => {
 // POST /api/auth/mentor/register
 // =====================================================
 
+// ... (keep all your existing code until registerMentor)
+
+// =====================================================
+// 3. MENTOR REGISTER WITH CLOUDINARY
+// POST /api/auth/mentor/register
+// =====================================================
+
 exports.registerMentor = async (req, res) => {
-  const uploadedFiles = [];
+  let uploadedFiles = [];
 
   try {
     const {
@@ -389,12 +401,11 @@ exports.registerMentor = async (req, res) => {
     } = req.body;
 
     console.log("MENTOR REGISTER BODY:", req.body);
+    console.log("FILES RECEIVED:", req.files);
 
     // =====================================================
     // STRICT VALIDATIONS - MENTOR
     // =====================================================
-
-    // ... [Keep all your existing validations exactly as they are]
 
     // 1. Check required fields
     if (!name || !email || !mobile || !password) {
@@ -405,7 +416,11 @@ exports.registerMentor = async (req, res) => {
     }
 
     // 2. Validate name
-    if (typeof name !== "string" || name.trim().length < 2 || name.trim().length > 50) {
+    if (
+      typeof name !== "string" ||
+      name.trim().length < 2 ||
+      name.trim().length > 50
+    ) {
       return res.status(400).json({
         success: false,
         message: "Name must be between 2 and 50 characters.",
@@ -429,21 +444,24 @@ exports.registerMentor = async (req, res) => {
       });
     }
 
-    // 5. Validate mobile number - FIXED with country code support
+    // 5. Validate mobile number
     const mobileRegex = /^[0-9]{10}$/;
-    let cleanMobileForValidation = String(mobile).replace(/[\s\-\(\)]/g, '');
-    
-    if (cleanMobileForValidation.startsWith('+')) {
-      const digitsOnly = cleanMobileForValidation.replace(/[^0-9]/g, '');
+    let cleanMobileForValidation = String(mobile).replace(/[\s\-\(\)]/g, "");
+
+    if (cleanMobileForValidation.startsWith("+")) {
+      const digitsOnly = cleanMobileForValidation.replace(/[^0-9]/g, "");
       if (digitsOnly.length >= 10) {
         cleanMobileForValidation = digitsOnly.slice(-10);
       }
     }
-    
-    if (cleanMobileForValidation.length > 10 && /^\d{11,13}$/.test(cleanMobileForValidation)) {
+
+    if (
+      cleanMobileForValidation.length > 10 &&
+      /^\d{11,13}$/.test(cleanMobileForValidation)
+    ) {
       cleanMobileForValidation = cleanMobileForValidation.slice(-10);
     }
-    
+
     if (!mobileRegex.test(cleanMobileForValidation)) {
       return res.status(400).json({
         success: false,
@@ -454,8 +472,8 @@ exports.registerMentor = async (req, res) => {
     // 6. Validate country code
     const countryCodeRegex = /^\+\d{1,4}$/;
     let cleanCountryCode = String(countryCode || "+91").trim();
-    if (!cleanCountryCode.startsWith('+')) {
-      cleanCountryCode = '+' + cleanCountryCode;
+    if (!cleanCountryCode.startsWith("+")) {
+      cleanCountryCode = "+" + cleanCountryCode;
     }
     if (!countryCodeRegex.test(cleanCountryCode)) {
       return res.status(400).json({
@@ -473,7 +491,11 @@ exports.registerMentor = async (req, res) => {
     }
 
     // 8. Validate designation
-    if (!designation || typeof designation !== "string" || designation.trim().length < 2) {
+    if (
+      !designation ||
+      typeof designation !== "string" ||
+      designation.trim().length < 2
+    ) {
       return res.status(400).json({
         success: false,
         message: "Designation is required and must be at least 2 characters.",
@@ -481,7 +503,11 @@ exports.registerMentor = async (req, res) => {
     }
 
     // 9. Validate department
-    if (!department || typeof department !== "string" || department.trim().length < 2) {
+    if (
+      !department ||
+      typeof department !== "string" ||
+      department.trim().length < 2
+    ) {
       return res.status(400).json({
         success: false,
         message: "Department is required and must be at least 2 characters.",
@@ -489,7 +515,11 @@ exports.registerMentor = async (req, res) => {
     }
 
     // 10. Validate companyId (Employee ID)
-    if (!companyId || typeof companyId !== "string" || companyId.trim().length < 2) {
+    if (
+      !companyId ||
+      typeof companyId !== "string" ||
+      companyId.trim().length < 2
+    ) {
       return res.status(400).json({
         success: false,
         message: "Employee ID is required and must be at least 2 characters.",
@@ -506,24 +536,36 @@ exports.registerMentor = async (req, res) => {
 
     // 12. Validate experience
     const parsedExperience = Number(experience);
-    if (Number.isNaN(parsedExperience) || parsedExperience < 0 || parsedExperience > 60) {
+    if (
+      Number.isNaN(parsedExperience) ||
+      parsedExperience < 0 ||
+      parsedExperience > 60
+    ) {
       return res.status(400).json({
         success: false,
         message: "Please provide valid years of experience (0-60 years).",
       });
     }
 
-    // 13. Validate location (optional but if provided, must be valid)
-    if (location && (typeof location !== "string" || location.trim().length < 2)) {
+    // 13. Validate location (optional)
+    if (
+      location &&
+      (typeof location !== "string" || location.trim().length < 2)
+    ) {
       return res.status(400).json({
         success: false,
         message: "Location must be at least 2 characters if provided.",
       });
     }
 
-    // 14. Validate LinkedIn (optional but if provided, must be valid URL)
-    if (linkedin && typeof linkedin === "string" && linkedin.trim().length > 0) {
-      const linkedinRegex = /^(https?:\/\/)?(www\.)?linkedin\.com\/in\/[a-zA-Z0-9\-_]+\/?$/;
+    // 14. Validate LinkedIn (optional)
+    if (
+      linkedin &&
+      typeof linkedin === "string" &&
+      linkedin.trim().length > 0
+    ) {
+      const linkedinRegex =
+        /^(https?:\/\/)?(www\.)?linkedin\.com\/in\/[a-zA-Z0-9\-_]+\/?$/;
       if (!linkedinRegex.test(linkedin.trim())) {
         return res.status(400).json({
           success: false,
@@ -553,7 +595,7 @@ exports.registerMentor = async (req, res) => {
       });
     }
 
-    // 17. Validate files
+    // 17. Validate files - Check if files exist
     const offerLetter = req.files?.offerLetter?.[0];
     const employeeIdProof = req.files?.employeeIdProof?.[0];
     const additionalProof = req.files?.additionalProof?.[0];
@@ -572,56 +614,44 @@ exports.registerMentor = async (req, res) => {
       });
     }
 
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf'];
-    const maxSize = 10 * 1024 * 1024;
+    // =====================================================
+    // UPLOAD FILES TO CLOUDINARY
+    // =====================================================
 
-    if (!allowedTypes.includes(offerLetter.mimetype)) {
-      return res.status(400).json({
-        success: false,
-        message: "Offer letter must be a PDF, PNG, or JPG file.",
-      });
-    }
+    const timestamp = Date.now();
+    const userEmail = normalizeEmail(email);
+    const folderName = `mentors/${userEmail}`;
 
-    if (offerLetter.size > maxSize) {
-      return res.status(400).json({
-        success: false,
-        message: "Offer letter must be less than 10MB.",
-      });
-    }
+    console.log("Uploading files to Cloudinary...");
 
-    if (!allowedTypes.includes(employeeIdProof.mimetype)) {
-      return res.status(400).json({
-        success: false,
-        message: "Employee ID proof must be a PDF, PNG, or JPG file.",
-      });
-    }
+    // Upload offer letter
+    const offerLetterUpload = await uploadFromBuffer(
+      offerLetter.buffer,
+      `${folderName}/documents`,
+      `offer_letter_${timestamp}`,
+    );
+    uploadedFiles.push(offerLetterUpload.public_id);
 
-    if (employeeIdProof.size > maxSize) {
-      return res.status(400).json({
-        success: false,
-        message: "Employee ID proof must be less than 10MB.",
-      });
-    }
+    // Upload employee ID proof
+    const employeeIdProofUpload = await uploadFromBuffer(
+      employeeIdProof.buffer,
+      `${folderName}/documents`,
+      `employee_id_${timestamp}`,
+    );
+    uploadedFiles.push(employeeIdProofUpload.public_id);
 
+    // Upload additional proof if provided
+    let additionalProofUpload = null;
     if (additionalProof) {
-      if (!allowedTypes.includes(additionalProof.mimetype)) {
-        return res.status(400).json({
-          success: false,
-          message: "Additional proof must be a PDF, PNG, or JPG file.",
-        });
-      }
-      if (additionalProof.size > maxSize) {
-        return res.status(400).json({
-          success: false,
-          message: "Additional proof must be less than 10MB.",
-        });
-      }
+      additionalProofUpload = await uploadFromBuffer(
+        additionalProof.buffer,
+        `${folderName}/documents`,
+        `additional_proof_${timestamp}`,
+      );
+      uploadedFiles.push(additionalProofUpload.public_id);
     }
 
-    uploadedFiles.push(offerLetter, employeeIdProof);
-    if (additionalProof) {
-      uploadedFiles.push(additionalProof);
-    }
+    console.log("All files uploaded to Cloudinary successfully!");
 
     // =====================================================
     // CLEAN AND PREPARE DATA
@@ -638,19 +668,6 @@ exports.registerMentor = async (req, res) => {
     const cleanLinkedin = linkedin ? String(linkedin).trim() : "";
     const cleanBio = bio ? String(bio).trim() : "";
 
-    console.log("Cleaned mentor data:", {
-      name: cleanName,
-      email: normalizedEmail,
-      mobile: cleanMobile,
-      countryCode: cleanCountryCode,
-      company: cleanCompany,
-      designation: cleanDesignation,
-      department: cleanDepartment,
-      employeeId: cleanEmployeeId,
-      experience: parsedExperience,
-      languages: languages.length,
-    });
-
     // =====================================================
     // UNIQUENESS CHECKS - MENTOR
     // =====================================================
@@ -660,6 +677,10 @@ exports.registerMentor = async (req, res) => {
     });
 
     if (existingMentorByEmail) {
+      // Delete uploaded files from Cloudinary
+      for (const publicId of uploadedFiles) {
+        await deleteFromCloudinary(publicId).catch(console.error);
+      }
       return res.status(409).json({
         success: false,
         message: "A mentor account already exists with this email.",
@@ -671,6 +692,9 @@ exports.registerMentor = async (req, res) => {
     });
 
     if (existingFresherByEmail) {
+      for (const publicId of uploadedFiles) {
+        await deleteFromCloudinary(publicId).catch(console.error);
+      }
       return res.status(409).json({
         success: false,
         message: "This email is already registered as a fresher.",
@@ -682,9 +706,13 @@ exports.registerMentor = async (req, res) => {
     });
 
     if (existingMentorByMobile) {
+      for (const publicId of uploadedFiles) {
+        await deleteFromCloudinary(publicId).catch(console.error);
+      }
       return res.status(409).json({
         success: false,
-        message: "This mobile number is already registered with a mentor account.",
+        message:
+          "This mobile number is already registered with a mentor account.",
       });
     }
 
@@ -693,9 +721,13 @@ exports.registerMentor = async (req, res) => {
     });
 
     if (existingFresherByMobile) {
+      for (const publicId of uploadedFiles) {
+        await deleteFromCloudinary(publicId).catch(console.error);
+      }
       return res.status(409).json({
         success: false,
-        message: "This mobile number is already registered with a fresher account.",
+        message:
+          "This mobile number is already registered with a fresher account.",
       });
     }
 
@@ -704,14 +736,18 @@ exports.registerMentor = async (req, res) => {
     });
 
     if (existingMentorByEmployeeId) {
+      for (const publicId of uploadedFiles) {
+        await deleteFromCloudinary(publicId).catch(console.error);
+      }
       return res.status(409).json({
         success: false,
-        message: "This Employee ID is already registered with another mentor account.",
+        message:
+          "This Employee ID is already registered with another mentor account.",
       });
     }
 
     // =====================================================
-    // CREATE MENTOR - FIXED VERSION
+    // CREATE MENTOR WITH CLOUDINARY URLs
     // =====================================================
 
     const hashedPassword = await bcrypt.hash(password, 12);
@@ -720,7 +756,6 @@ exports.registerMentor = async (req, res) => {
       name: cleanName,
       email: normalizedEmail,
       mobile: cleanMobile,
-      countryCode: cleanCountryCode, // This won't be stored if not in schema
       password: hashedPassword,
       employeeId: cleanEmployeeId,
       workEmail: normalizedEmail,
@@ -733,57 +768,80 @@ exports.registerMentor = async (req, res) => {
       languages: languages,
       hourlyRate: 0,
       bio: cleanBio,
-      offerLetter: offerLetter.filename,
-      employeeIdProof: employeeIdProof.filename,
-      additionalProof: additionalProof ? additionalProof.filename : "",
+      // Cloudinary URLs
+      offerLetter: offerLetterUpload.secure_url,
+      offerLetterPublicId: offerLetterUpload.public_id,
+      employeeIdProof: employeeIdProofUpload.secure_url,
+      employeeIdProofPublicId: employeeIdProofUpload.public_id,
+      additionalProof: additionalProofUpload
+        ? additionalProofUpload.secure_url
+        : "",
+      additionalProofPublicId: additionalProofUpload
+        ? additionalProofUpload.public_id
+        : "",
       isVerified: false,
       verificationStatus: "pending",
       verificationMethod: "document",
       rejectionReason: "",
       accountStatus: "pending",
-      // FIX: Use null instead of undefined for Date fields
       lastLoginAt: null,
       profilePic: "",
     };
 
-    // Remove countryCode if it's not in the schema
-    // If your schema doesn't have countryCode, remove it from mentorData
-    // delete mentorData.countryCode; // Uncomment if countryCode is not in schema
-
     const mentor = await Mentor.create(mentorData);
 
-    console.log("Mentor created successfully:", mentor._id);
+    console.log(
+      "Mentor created successfully with Cloudinary files:",
+      mentor._id,
+    );
 
     return res.status(201).json({
       success: true,
-      message: "MNC employee profile submitted successfully. Your account is pending admin verification.",
+      message:
+        "MNC employee profile submitted successfully. Your account is pending admin verification.",
       user: sanitizeMentor(mentor),
     });
-
   } catch (error) {
     console.error("Mentor registration error:", error);
 
-    // Delete uploaded files if DB save failed
-    for (const file of uploadedFiles) {
+    // Delete uploaded files from Cloudinary if DB save failed
+    for (const publicId of uploadedFiles) {
       try {
-        await fs.unlink(file.path);
-      } catch (unlinkError) {
-        console.error("Unable to delete uploaded file:", unlinkError.message);
+        await deleteFromCloudinary(publicId);
+        console.log(`Deleted file from Cloudinary: ${publicId}`);
+      } catch (deleteError) {
+        console.error(
+          "Unable to delete file from Cloudinary:",
+          deleteError.message,
+        );
       }
     }
 
     // Handle specific MongoDB errors
-    if (error.name === 'ValidationError') {
+    if (error.name === "ValidationError") {
       return res.status(400).json({
         success: false,
-        message: "Validation error: " + Object.values(error.errors).map(e => e.message).join(', '),
+        message:
+          "Validation error: " +
+          Object.values(error.errors)
+            .map((e) => e.message)
+            .join(", "),
       });
     }
 
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
-        message: "An account already exists with this email, mobile number, or employee ID.",
+        message:
+          "An account already exists with this email, mobile number, or employee ID.",
+      });
+    }
+
+    // Handle Cloudinary errors
+    if (error.message && error.message.includes("Cloudinary")) {
+      return res.status(500).json({
+        success: false,
+        message: "File upload failed. Please try again.",
       });
     }
 
@@ -860,12 +918,15 @@ exports.loginMentor = async (req, res) => {
       });
     }
 
-    if (mentor.accountStatus !== "active" || 
-        mentor.verificationStatus !== "approved" || 
-        !mentor.isVerified) {
+    if (
+      mentor.accountStatus !== "active" ||
+      mentor.verificationStatus !== "approved" ||
+      !mentor.isVerified
+    ) {
       return res.status(403).json({
         success: false,
-        message: "Your MNC employee profile is still pending admin verification.",
+        message:
+          "Your MNC employee profile is still pending admin verification.",
         verificationStatus: mentor.verificationStatus || "pending",
         accountStatus: mentor.accountStatus,
       });
@@ -878,11 +939,20 @@ exports.loginMentor = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Mentor login successful.",
-      user: sanitizeMentor(mentor),
+      message: "Mentor login successful",
       token,
+      verificationStatus: mentor.verificationStatus,
+      accountStatus: mentor.accountStatus,
+      mentor: {
+        id: mentor._id,
+        name: mentor.name,
+        email: mentor.email,
+        company: mentor.currentCompany,
+        designation: mentor.designation,
+        verificationStatus: mentor.verificationStatus,
+        accountStatus: mentor.accountStatus,
+      },
     });
-
   } catch (error) {
     console.error("Mentor login error:", error);
     return res.status(500).json({
@@ -899,24 +969,17 @@ exports.loginMentor = async (req, res) => {
 
 exports.getMe = async (req, res) => {
   try {
-    if (req.user.role === "fresher") {
-      const fresher = await Fresher.findById(req.user.id);
-
-      if (!fresher) {
-        return res.status(404).json({
-          success: false,
-          message: "Fresher account not found.",
-        });
-      }
-
-      return res.status(200).json({
-        success: true,
-        user: sanitizeFresher(fresher),
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
       });
     }
 
     if (req.user.role === "mentor") {
-      const mentor = await Mentor.findById(req.user.id);
+      const mentor = await Mentor.findById(
+        req.user.id
+      ).select("-password");
 
       if (!mentor) {
         return res.status(404).json({
@@ -927,7 +990,27 @@ exports.getMe = async (req, res) => {
 
       return res.status(200).json({
         success: true,
+        message: "Mentor data fetched successfully.",
         user: sanitizeMentor(mentor),
+      });
+    }
+
+    if (req.user.role === "fresher") {
+      const fresher = await Fresher.findById(
+        req.user.id
+      ).select("-password");
+
+      if (!fresher) {
+        return res.status(404).json({
+          success: false,
+          message: "Fresher account not found.",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Fresher data fetched successfully.",
+        user: sanitizeFresher(fresher),
       });
     }
 
@@ -937,10 +1020,14 @@ exports.getMe = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Get me error:", error);
+    console.error(
+      "Get current user error:",
+      error
+    );
+
     return res.status(500).json({
       success: false,
-      message: "Unable to get user information.",
+      message: "Unable to fetch user information.",
     });
   }
 };
@@ -973,10 +1060,15 @@ exports.updateMentorVerification = async (req, res) => {
     }
 
     if (status === "rejected") {
-      if (!rejectionReason || typeof rejectionReason !== "string" || rejectionReason.trim().length < 5) {
+      if (
+        !rejectionReason ||
+        typeof rejectionReason !== "string" ||
+        rejectionReason.trim().length < 5
+      ) {
         return res.status(400).json({
           success: false,
-          message: "Rejection reason is required and must be at least 5 characters.",
+          message:
+            "Rejection reason is required and must be at least 5 characters.",
         });
       }
     }
@@ -1016,12 +1108,12 @@ exports.updateMentorVerification = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: status === "approved" 
-        ? "Mentor approved successfully." 
-        : "Mentor verification rejected.",
+      message:
+        status === "approved"
+          ? "Mentor approved successfully."
+          : "Mentor verification rejected.",
       user: sanitizeMentor(mentor),
     });
-
   } catch (error) {
     console.error("Mentor verification error:", error);
     return res.status(500).json({

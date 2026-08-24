@@ -1,0 +1,887 @@
+<% 
+    pageTitle = 'Mentor Details';
+    pageSubtitle = 'View and manage mentor profile';
+    currentPage = 'mentors';
+%>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>MNCConnect Admin - Mentor Details</title>
+
+    <link rel="stylesheet" href="/admin/css/output.css">
+    <link
+        rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+    >
+</head>
+
+<body class="bg-slate-950 text-white min-h-screen">
+
+<div class="flex min-h-screen">
+
+    <!-- =========================================================
+         SIDEBAR
+    ========================================================== -->
+
+    <aside class="w-64 bg-slate-900 border-r border-slate-800 fixed h-screen overflow-y-auto">
+
+        <div class="p-6 border-b border-slate-800">
+            <h1 class="text-2xl font-bold text-indigo-500">
+                MNCConnect
+            </h1>
+
+            <p class="text-sm text-slate-400 mt-1">
+                Admin Panel
+            </p>
+        </div>
+
+        <nav class="p-4 space-y-2">
+
+            <a href="/admin"
+               class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
+                <i class="fas fa-chart-pie w-5"></i>
+                <span>Dashboard</span>
+            </a>
+
+            <a href="/admin/mentors"
+               class="flex items-center gap-3 px-4 py-3 rounded-lg bg-indigo-600">
+                <i class="fas fa-users w-5"></i>
+                <span>Mentors</span>
+            </a>
+
+            <a href="/admin/freshers"
+               class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
+                <i class="fas fa-graduation-cap w-5"></i>
+                <span>Freshers</span>
+            </a>
+
+            <a href="/admin/payments"
+               class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
+                <i class="fas fa-credit-card w-5"></i>
+                <span>Payments</span>
+            </a>
+
+            <a href="/admin/users"
+               class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
+                <i class="fas fa-user-cog w-5"></i>
+                <span>Users</span>
+            </a>
+
+            <a href="/admin/logout"
+               class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-red-600/20 text-red-400 transition mt-8">
+                <i class="fas fa-sign-out-alt w-5"></i>
+                <span>Logout</span>
+            </a>
+
+        </nav>
+    </aside>
+
+
+    <!-- =========================================================
+         MAIN CONTENT
+    ========================================================== -->
+
+    <main class="ml-64 flex-1 p-8">
+
+        <!-- Header -->
+
+        <div class="flex justify-between items-center mb-8">
+
+            <div>
+                <h2 class="text-3xl font-bold">
+                    Mentor Details
+                </h2>
+
+                <p class="text-slate-400 mt-1">
+                    Complete mentor profile and verification documents
+                </p>
+            </div>
+
+            <div class="text-slate-400">
+                <i class="fas fa-user-circle text-2xl"></i>
+
+                <%= admin ? admin.name : 'Admin' %>
+            </div>
+
+        </div>
+
+
+        <% if (mentor) { %>
+
+        <!-- =====================================================
+             PROFILE HEADER
+        ====================================================== -->
+
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-6">
+
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-6">
+
+                <div class="flex items-center gap-5">
+
+                    <!-- Profile -->
+
+                    <% if (mentor.profilePic) { %>
+
+                        <img
+                            src="<%= mentor.profilePic %>"
+                            alt="<%= mentor.name %>"
+                            class="w-24 h-24 rounded-2xl object-cover border border-slate-700"
+                        >
+
+                    <% } else { %>
+
+                        <div class="w-24 h-24 rounded-2xl bg-indigo-600/20
+                                    flex items-center justify-center
+                                    border border-indigo-500/20">
+
+                            <span class="text-4xl font-bold text-indigo-400">
+                                <%= mentor.name ? mentor.name.charAt(0).toUpperCase() : '?' %>
+                            </span>
+
+                        </div>
+
+                    <% } %>
+
+
+                    <div>
+
+                        <h3 class="text-2xl font-bold">
+                            <%= mentor.name || 'N/A' %>
+                        </h3>
+
+                        <p class="text-slate-400 mt-1">
+                            <%= mentor.email || 'N/A' %>
+                        </p>
+
+                        <p class="text-slate-500 text-sm mt-1">
+                            Employee ID:
+                            <span class="text-slate-300">
+                                <%= mentor.employeeId || 'N/A' %>
+                            </span>
+                        </p>
+
+                    </div>
+
+                </div>
+
+
+                <!-- Verification Status -->
+
+                <div class="flex flex-col items-start md:items-end gap-2">
+
+                    <span class="text-xs text-slate-500 uppercase tracking-wider">
+                        Verification
+                    </span>
+
+                    <span class="px-4 py-2 rounded-full text-sm font-semibold
+                        <%= mentor.verificationStatus === 'approved'
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                            : mentor.verificationStatus === 'rejected'
+                            ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                            : 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'
+                        %>">
+
+                        <i class="fas
+                            <%= mentor.verificationStatus === 'approved'
+                                ? 'fa-check-circle'
+                                : mentor.verificationStatus === 'rejected'
+                                ? 'fa-times-circle'
+                                : 'fa-clock'
+                            %> mr-1">
+                        </i>
+
+                        <%= mentor.verificationStatus
+                            ? mentor.verificationStatus.toUpperCase()
+                            : 'PENDING'
+                        %>
+
+                    </span>
+
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <!-- =====================================================
+             PERSONAL INFORMATION
+        ====================================================== -->
+
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-6">
+
+            <div class="flex items-center gap-3 mb-6">
+
+                <div class="w-10 h-10 rounded-lg bg-indigo-500/10
+                            flex items-center justify-center">
+
+                    <i class="fas fa-user text-indigo-400"></i>
+
+                </div>
+
+                <div>
+                    <h3 class="text-lg font-semibold">
+                        Personal Information
+                    </h3>
+
+                    <p class="text-sm text-slate-500">
+                        Basic mentor details
+                    </p>
+                </div>
+
+            </div>
+
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+
+                <!-- Full Name -->
+
+                <div class="info-card">
+                    <p class="label">Full Name</p>
+                    <p class="value">
+                        <%= mentor.name || 'Not provided' %>
+                    </p>
+                </div>
+
+                <!-- Email -->
+
+                <div class="info-card">
+                    <p class="label">Email</p>
+                    <p class="value break-all">
+                        <%= mentor.email || 'Not provided' %>
+                    </p>
+                </div>
+
+                <!-- Mobile -->
+
+                <div class="info-card">
+                    <p class="label">Mobile</p>
+                    <p class="value">
+                        <%= mentor.mobile
+                            ? `${mentor.countryCode || '+91'} ${mentor.mobile}`
+                            : 'Not provided'
+                        %>
+                    </p>
+                </div>
+
+                <!-- Work Email -->
+
+                <div class="info-card">
+                    <p class="label">Work Email</p>
+                    <p class="value break-all">
+                        <%= mentor.workEmail || 'Not provided' %>
+                    </p>
+                </div>
+
+                <!-- Employee ID -->
+
+                <div class="info-card">
+                    <p class="label">Employee ID</p>
+                    <p class="value">
+                        <%= mentor.employeeId || 'Not provided' %>
+                    </p>
+                </div>
+
+                <!-- LinkedIn -->
+
+                <div class="info-card">
+
+                    <p class="label">LinkedIn</p>
+
+                    <% if (mentor.linkedinProfile) { %>
+
+                        <a
+                            href="<%= mentor.linkedinProfile %>"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="text-indigo-400 hover:text-indigo-300 break-all"
+                        >
+                            <i class="fab fa-linkedin mr-1"></i>
+                            View Profile
+                        </a>
+
+                    <% } else { %>
+
+                        <p class="value">
+                            Not provided
+                        </p>
+
+                    <% } %>
+
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <!-- =====================================================
+             PROFESSIONAL INFORMATION
+        ====================================================== -->
+
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-6">
+
+            <div class="flex items-center gap-3 mb-6">
+
+                <div class="w-10 h-10 rounded-lg bg-blue-500/10
+                            flex items-center justify-center">
+
+                    <i class="fas fa-briefcase text-blue-400"></i>
+
+                </div>
+
+                <div>
+                    <h3 class="text-lg font-semibold">
+                        Professional Information
+                    </h3>
+
+                    <p class="text-sm text-slate-500">
+                        Current employment details
+                    </p>
+                </div>
+
+            </div>
+
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+
+                <div class="info-card">
+                    <p class="label">Company</p>
+                    <p class="value">
+                        <%= mentor.currentCompany || 'Not provided' %>
+                    </p>
+                </div>
+
+                <div class="info-card">
+                    <p class="label">Designation</p>
+                    <p class="value">
+                        <%= mentor.designation || 'Not provided' %>
+                    </p>
+                </div>
+
+                <div class="info-card">
+                    <p class="label">Department</p>
+                    <p class="value">
+                        <%= mentor.department || 'Not provided' %>
+                    </p>
+                </div>
+
+                <div class="info-card">
+                    <p class="label">Experience</p>
+                    <p class="value">
+                        <%= mentor.yearsOfExperience ?? 0 %> years
+                    </p>
+                </div>
+
+                <div class="info-card">
+                    <p class="label">Office Location</p>
+                    <p class="value">
+                        <%= mentor.officeLocation || 'Not provided' %>
+                    </p>
+                </div>
+
+                <div class="info-card">
+                    <p class="label">Hourly Rate</p>
+                    <p class="value">
+                        <%= mentor.hourlyRate
+                            ? '₹' + mentor.hourlyRate
+                            : 'Not specified'
+                        %>
+                    </p>
+                </div>
+
+            </div>
+
+
+            <!-- Languages -->
+
+            <% if (mentor.languages && mentor.languages.length > 0) { %>
+
+                <div class="mt-5">
+
+                    <p class="label mb-2">
+                        Languages
+                    </p>
+
+                    <div class="flex flex-wrap gap-2">
+
+                        <% mentor.languages.forEach(function(language) { %>
+
+                            <span class="px-3 py-1.5 rounded-full
+                                         bg-indigo-500/10
+                                         border border-indigo-500/20
+                                         text-indigo-400 text-sm">
+
+                                <%= language %>
+
+                            </span>
+
+                        <% }) %>
+
+                    </div>
+
+                </div>
+
+            <% } %>
+
+        </div>
+
+
+        <!-- =====================================================
+             BIO
+        ====================================================== -->
+
+        <% if (mentor.bio) { %>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-6">
+
+            <div class="flex items-center gap-3 mb-4">
+
+                <i class="fas fa-align-left text-purple-400"></i>
+
+                <h3 class="text-lg font-semibold">
+                    About Mentor
+                </h3>
+
+            </div>
+
+            <p class="text-slate-300 leading-7 whitespace-pre-line">
+                <%= mentor.bio %>
+            </p>
+
+        </div>
+
+        <% } %>
+
+
+        <!-- =====================================================
+             VERIFICATION DOCUMENTS
+        ====================================================== -->
+
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-6">
+
+            <div class="flex items-center justify-between mb-6">
+
+                <div class="flex items-center gap-3">
+
+                    <div class="w-10 h-10 rounded-lg bg-orange-500/10
+                                flex items-center justify-center">
+
+                        <i class="fas fa-file-shield text-orange-400"></i>
+
+                    </div>
+
+                    <div>
+
+                        <h3 class="text-lg font-semibold">
+                            Verification Documents
+                        </h3>
+
+                        <p class="text-sm text-slate-500">
+                            Documents submitted by the mentor
+                        </p>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+                <!-- Offer Letter -->
+
+                <div class="document-card">
+
+                    <div class="flex items-center gap-3">
+
+                        <div class="document-icon bg-blue-500/10 text-blue-400">
+                            <i class="fas fa-file-contract"></i>
+                        </div>
+
+                        <div class="min-w-0">
+
+                            <h4 class="font-semibold">
+                                Offer Letter
+                            </h4>
+
+                            <p class="text-xs text-slate-500">
+                                Employment document
+                            </p>
+
+                        </div>
+
+                    </div>
+
+                    <% if (mentor.offerLetter) { %>
+
+                        <a
+                            href="<%= mentor.offerLetter %>"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="document-button bg-blue-600 hover:bg-blue-500"
+                        >
+                            <i class="fas fa-eye"></i>
+                            View Document
+                        </a>
+
+                    <% } else { %>
+
+                        <span class="text-sm text-slate-500">
+                            Not uploaded
+                        </span>
+
+                    <% } %>
+
+                </div>
+
+
+                <!-- Employee ID -->
+
+                <div class="document-card">
+
+                    <div class="flex items-center gap-3">
+
+                        <div class="document-icon bg-emerald-500/10 text-emerald-400">
+                            <i class="fas fa-id-card"></i>
+                        </div>
+
+                        <div>
+
+                            <h4 class="font-semibold">
+                                Employee ID Proof
+                            </h4>
+
+                            <p class="text-xs text-slate-500">
+                                Employee identification
+                            </p>
+
+                        </div>
+
+                    </div>
+
+                    <% if (mentor.employeeIdProof) { %>
+
+                        <a
+                            href="<%= mentor.employeeIdProof %>"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="document-button bg-emerald-600 hover:bg-emerald-500"
+                        >
+                            <i class="fas fa-eye"></i>
+                            View Document
+                        </a>
+
+                    <% } else { %>
+
+                        <span class="text-sm text-slate-500">
+                            Not uploaded
+                        </span>
+
+                    <% } %>
+
+                </div>
+
+
+                <!-- Additional Proof -->
+
+                <div class="document-card">
+
+                    <div class="flex items-center gap-3">
+
+                        <div class="document-icon bg-purple-500/10 text-purple-400">
+                            <i class="fas fa-file-circle-check"></i>
+                        </div>
+
+                        <div>
+
+                            <h4 class="font-semibold">
+                                Additional Proof
+                            </h4>
+
+                            <p class="text-xs text-slate-500">
+                                Supporting document
+                            </p>
+
+                        </div>
+
+                    </div>
+
+                    <% if (mentor.additionalProof) { %>
+
+                        <a
+                            href="<%= mentor.additionalProof %>"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="document-button bg-purple-600 hover:bg-purple-500"
+                        >
+                            <i class="fas fa-eye"></i>
+                            View Document
+                        </a>
+
+                    <% } else { %>
+
+                        <span class="text-sm text-slate-500">
+                            Not uploaded
+                        </span>
+
+                    <% } %>
+
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <!-- =====================================================
+             VERIFICATION / ACCOUNT STATUS
+        ====================================================== -->
+
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-6">
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+
+                <div class="info-card">
+                    <p class="label">Verification Status</p>
+                    <p class="value capitalize">
+                        <%= mentor.verificationStatus || 'pending' %>
+                    </p>
+                </div>
+
+                <div class="info-card">
+                    <p class="label">Verification Method</p>
+                    <p class="value capitalize">
+                        <%= mentor.verificationMethod || 'pending' %>
+                    </p>
+                </div>
+
+                <div class="info-card">
+                    <p class="label">Account Status</p>
+                    <p class="value capitalize">
+                        <%= mentor.accountStatus || 'pending' %>
+                    </p>
+                </div>
+
+                <div class="info-card">
+                    <p class="label">Last Login</p>
+                    <p class="value">
+                        <%= mentor.lastLoginAt
+                            ? new Date(mentor.lastLoginAt).toLocaleString()
+                            : 'Never'
+                        %>
+                    </p>
+                </div>
+
+            </div>
+
+
+            <% if (mentor.rejectionReason) { %>
+
+                <div class="mt-5 p-4 rounded-lg bg-red-500/10
+                            border border-red-500/20">
+
+                    <p class="text-sm text-red-400 font-medium">
+                        Rejection Reason
+                    </p>
+
+                    <p class="text-slate-300 mt-1">
+                        <%= mentor.rejectionReason %>
+                    </p>
+
+                </div>
+
+            <% } %>
+
+        </div>
+
+
+        <!-- =====================================================
+             CREATED / UPDATED
+        ====================================================== -->
+
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-6">
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                <div class="info-card">
+                    <p class="label">Registered On</p>
+                    <p class="value">
+                        <%= mentor.createdAt
+                            ? new Date(mentor.createdAt).toLocaleString()
+                            : 'N/A'
+                        %>
+                    </p>
+                </div>
+
+                <div class="info-card">
+                    <p class="label">Last Updated</p>
+                    <p class="value">
+                        <%= mentor.updatedAt
+                            ? new Date(mentor.updatedAt).toLocaleString()
+                            : 'N/A'
+                        %>
+                    </p>
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <!-- =====================================================
+             ACTIONS
+        ====================================================== -->
+
+        <div class="flex flex-wrap gap-3">
+
+            <a
+                href="/admin/mentors"
+                class="bg-slate-700 hover:bg-slate-600 px-6 py-3 rounded-lg
+                       transition flex items-center gap-2"
+            >
+                <i class="fas fa-arrow-left"></i>
+                Back to Mentors
+            </a>
+
+
+            <% if (mentor.verificationStatus === 'pending') { %>
+
+                <button
+                    type="button"
+                    id="approveMentorBtn"
+                    data-mentor-id="<%= mentor._id %>"
+                    class="bg-emerald-600 hover:bg-emerald-500 px-6 py-3 rounded-lg transition flex items-center gap-2"
+                >
+                    <i class="fas fa-check"></i>
+                    Approve Mentor
+                </button>
+
+                <button
+                    type="button"
+                    id="rejectMentorBtn"
+                    data-mentor-id="<%= mentor._id %>"
+                    class="bg-red-600 hover:bg-red-500 px-6 py-3 rounded-lg transition flex items-center gap-2"
+                >
+                    <i class="fas fa-times"></i>
+                    Reject Mentor
+                </button>
+
+            <% } %>
+
+        </div>
+
+
+        <% } else { %>
+
+            <!-- Mentor Not Found -->
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-16 text-center">
+
+                <i class="fas fa-user-slash text-6xl text-slate-600 mb-5"></i>
+
+                <h3 class="text-2xl font-bold">
+                    Mentor Not Found
+                </h3>
+
+                <p class="text-slate-400 mt-2">
+                    The mentor you're looking for doesn't exist or has been removed.
+                </p>
+
+                <a
+                    href="/admin/mentors"
+                    class="inline-flex items-center gap-2 mt-6
+                           bg-indigo-600 hover:bg-indigo-500
+                           px-6 py-3 rounded-lg transition"
+                >
+                    <i class="fas fa-arrow-left"></i>
+                    Back to Mentors
+                </a>
+
+            </div>
+
+        <% } %>
+
+    </main>
+
+</div>
+
+
+<!-- =========================================================
+     STYLES
+========================================================== -->
+
+<style>
+
+    .info-card {
+        background: rgba(30, 41, 59, 0.5);
+        border: 1px solid rgb(51, 65, 85);
+        border-radius: 0.75rem;
+        padding: 1rem;
+    }
+
+    .label {
+        color: rgb(148, 163, 184);
+        font-size: 0.75rem;
+        margin-bottom: 0.35rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+
+    .value {
+        color: white;
+        font-weight: 500;
+        line-height: 1.5;
+    }
+
+    .document-card {
+        background: rgba(30, 41, 59, 0.5);
+        border: 1px solid rgb(51, 65, 85);
+        border-radius: 0.75rem;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 1rem;
+        min-height: 145px;
+    }
+
+    .document-icon {
+        width: 42px;
+        height: 42px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+
+    .document-button {
+        color: white;
+        padding: 0.65rem 1rem;
+        border-radius: 0.5rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        font-size: 0.875rem;
+        font-weight: 500;
+        transition: 0.2s;
+    }
+
+    /* Button disabled state */
+    button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+</style>
+<script src="/admin/js/admin.js"></script>
+
+</body>
+</html>

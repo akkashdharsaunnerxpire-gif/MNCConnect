@@ -1,0 +1,194 @@
+<% 
+  pageTitle = 'Mentors';
+  pageSubtitle = 'Manage all mentor profiles';
+  currentPage = 'mentors';
+%>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MNCConnect Admin - Mentors</title>
+    <link rel="stylesheet" href="/admin/css/output.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body class="bg-slate-950 text-white min-h-screen">
+    
+    <!-- Sidebar -->
+    <div class="flex h-screen">
+        <aside class="w-64 bg-slate-900 border-r border-slate-800 fixed h-full overflow-y-auto">
+            <div class="p-6 border-b border-slate-800">
+                <h1 class="text-2xl font-bold text-indigo-500">MNCConnect</h1>
+                <p class="text-sm text-slate-400">Admin Panel</p>
+            </div>
+            
+            <nav class="p-4 space-y-2">
+                <a href="/admin" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
+                    <i class="fas fa-chart-pie w-5"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="/admin/mentors" class="flex items-center gap-3 px-4 py-3 rounded-lg bg-indigo-600 transition">
+                    <i class="fas fa-users w-5"></i>
+                    <span>Mentors</span>
+                </a>
+                <a href="/admin/freshers" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
+                    <i class="fas fa-graduation-cap w-5"></i>
+                    <span>Freshers</span>
+                </a>
+                <a href="/admin/payments" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
+                    <i class="fas fa-credit-card w-5"></i>
+                    <span>Payments</span>
+                </a>
+                <a href="/admin/users" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
+                    <i class="fas fa-user-cog w-5"></i>
+                    <span>Users</span>
+                </a>
+                <a href="/admin/logout" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-red-600/20 text-red-400 transition mt-8">
+                    <i class="fas fa-sign-out-alt w-5"></i>
+                    <span>Logout</span>
+                </a>
+            </nav>
+        </aside>
+        
+        <!-- Main Content -->
+        <main class="ml-64 flex-1 p-8 overflow-y-auto">
+            <div class="flex justify-between items-center mb-8">
+                <div>
+                    <h2 class="text-3xl font-bold text-white">Mentors</h2>
+                    <p class="text-slate-400">Manage all mentor profiles</p>
+                </div>
+                <div class="flex items-center gap-4">
+                    <span class="text-slate-400"><i class="fas fa-user-circle text-2xl"></i> <%= admin ? admin.name : 'Admin' %></span>
+                </div>
+            </div>
+            
+            <!-- Search and Filter -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-6">
+                <form method="GET" action="/admin/mentors" class="flex flex-wrap gap-4">
+                    <div class="flex-1 min-w-[200px]">
+                        <input type="text" name="search" value="<%= search || '' %>" 
+                               placeholder="Search by name, email, or phone..."
+                               class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none">
+                    </div>
+                    <div class="min-w-[150px]">
+                        <select name="status" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none">
+                            <option value="all" <%= status === 'all' ? 'selected' : '' %>>All Status</option>
+                            <option value="pending" <%= status === 'pending' ? 'selected' : '' %>>Pending</option>
+                            <option value="approved" <%= status === 'approved' ? 'selected' : '' %>>Approved</option>
+                            <option value="rejected" <%= status === 'rejected' ? 'selected' : '' %>>Rejected</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2.5 rounded-lg transition flex items-center gap-2">
+                        <i class="fas fa-search"></i> Search
+                    </button>
+                    <a href="/admin/mentors" class="bg-slate-700 hover:bg-slate-600 text-white px-6 py-2.5 rounded-lg transition flex items-center gap-2">
+                        <i class="fas fa-undo"></i> Reset
+                    </a>
+                </form>
+            </div>
+            
+            <!-- Mentors Table -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full">
+                        <thead>
+                            <tr class="border-b border-slate-800 bg-slate-950">
+                                <th class="text-left px-6 py-4 text-sm font-medium text-slate-400">Name</th>
+                                <th class="text-left px-6 py-4 text-sm font-medium text-slate-400">Email</th>
+                                <th class="text-left px-6 py-4 text-sm font-medium text-slate-400">Phone</th>
+                                <th class="text-left px-6 py-4 text-sm font-medium text-slate-400">Status</th>
+                                <th class="text-left px-6 py-4 text-sm font-medium text-slate-400">Joined</th>
+                                <th class="text-right px-6 py-4 text-sm font-medium text-slate-400">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% if (mentors && mentors.length > 0) { %>
+                                <% mentors.forEach(function(mentor) { %>
+                                    <tr class="border-b border-slate-800 hover:bg-slate-800/50 transition">
+                                        <td class="px-6 py-4">
+                                            <div class="flex items-center gap-3">
+                                                <div class="w-10 h-10 bg-indigo-600/20 rounded-full flex items-center justify-center">
+                                                    <span class="text-indigo-400 font-semibold"><%= mentor.name.charAt(0).toUpperCase() %></span>
+                                                </div>
+                                                <span class="text-white font-medium"><%= mentor.name %></span>
+                                            </div>
+                                        </td>
+                                        <td class="px-6 py-4 text-slate-300"><%= mentor.email %></td>
+                                        <td class="px-6 py-4 text-slate-300"><%= mentor.phone || 'N/A' %></td>
+                                        <td class="px-6 py-4">
+                                            <span class="px-3 py-1 rounded-full text-xs font-medium 
+                                                <%= mentor.approvalStatus === 'approved' ? 'bg-emerald-600/20 text-emerald-400' : 
+                                                   mentor.approvalStatus === 'pending' ? 'bg-yellow-600/20 text-yellow-400' : 
+                                                   'bg-red-600/20 text-red-400' %>">
+                                                <%= mentor.approvalStatus %>
+                                            </span>
+                                        </td>
+                                        <td class="px-6 py-4 text-slate-400 text-sm">
+                                            <%= new Date(mentor.createdAt).toLocaleDateString() %>
+                                        </td>
+                                        <td class="px-6 py-4 text-right">
+                                            <div class="flex items-center justify-end gap-2">
+                                                <a href="/admin/mentors/<%= mentor._id %>" 
+                                                   class="text-indigo-400 hover:text-indigo-300 transition px-3 py-1 rounded-lg hover:bg-indigo-600/20">
+                                                    <i class="fas fa-eye"></i> View
+                                                </a>
+                                                <% if (mentor.approvalStatus === 'pending') { %>
+                                                    <button onclick="updateMentorStatus('<%= mentor._id %>', 'approve')" 
+                                                            class="text-emerald-400 hover:text-emerald-300 transition px-3 py-1 rounded-lg hover:bg-emerald-600/20">
+                                                        <i class="fas fa-check"></i>
+                                                    </button>
+                                                    <button onclick="updateMentorStatus('<%= mentor._id %>', 'reject')" 
+                                                            class="text-red-400 hover:text-red-300 transition px-3 py-1 rounded-lg hover:bg-red-600/20">
+                                                        <i class="fas fa-times"></i>
+                                                    </button>
+                                                <% } %>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                <% }) %>
+                            <% } else { %>
+                                <tr>
+                                    <td colspan="6" class="px-6 py-12 text-center text-slate-400">
+                                        <i class="fas fa-users text-4xl block mb-3 text-slate-600"></i>
+                                        <p>No mentors found</p>
+                                        <p class="text-sm">Try adjusting your search or filter</p>
+                                    </td>
+                                </tr>
+                            <% } %>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <script>
+    function updateMentorStatus(id, action) {
+        if (!confirm('Are you sure you want to ' + action + ' this mentor?')) return;
+        
+        fetch('/admin/mentors/' + id + '/' + action, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (data.success) {
+                alert(data.message);
+                window.location.reload();
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+        .catch(function(error) {
+            alert('Error updating mentor status');
+            console.error(error);
+        });
+    }
+    </script>
+    
+    <script src="/admin/js/admin.js"></script>
+</body>
+</html>

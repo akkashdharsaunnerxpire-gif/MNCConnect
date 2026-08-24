@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>MNCConnect | Admin Login</title>
+
+    <link
+        rel="stylesheet"
+        href="/admin/css/output.css"
+    >
+</head>
+
+
+<body class="min-h-screen bg-slate-950">
+
+    <main class="min-h-screen flex items-center justify-center px-4 py-10">
+
+        <div class="w-full max-w-md">
+
+            <!-- Brand -->
+            <div class="text-center mb-8">
+
+                <div
+                    class="inline-flex items-center justify-center
+                           w-14 h-14 rounded-2xl
+                           bg-indigo-600 shadow-lg shadow-indigo-600/20
+                           mb-5"
+                >
+
+                    <svg
+                        class="w-7 h-7 text-white"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                    >
+                        <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="1.8"
+                            d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v2h8z"
+                        />
+                    </svg>
+
+                </div>
+
+
+                <h1
+                    class="text-3xl font-bold tracking-tight text-white"
+                >
+                    MNCConnect
+                </h1>
+
+
+                <p class="mt-2 text-sm text-slate-400">
+                    Administration Portal
+                </p>
+
+            </div>
+
+
+            <!-- Login Card -->
+            <section
+                class="rounded-3xl border border-slate-800
+                       bg-slate-900/90
+                       shadow-2xl shadow-black/20
+                       p-7 sm:p-8"
+            >
+
+                <!-- Header -->
+                <div class="mb-7">
+
+                    <h2
+                        class="text-xl font-semibold text-white"
+                    >
+                        Welcome back
+                    </h2>
+
+                    <p class="mt-1 text-sm text-slate-400">
+                        Sign in to manage MNCConnect.
+                    </p>
+
+                </div>
+
+
+                <!-- Error Message -->
+                <% if (typeof error !== "undefined" && error) { %>
+
+                    <div
+                        class="mb-6 flex items-start gap-3
+                               rounded-xl border border-red-500/20
+                               bg-red-500/10
+                               px-4 py-3"
+                    >
+
+                        <svg
+                            class="mt-0.5 h-5 w-5 shrink-0 text-red-400"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M12 8v4m0 4h.01M10.29 3.86l-8.82 15a2 2 0 001.73 3h17.6a2 2 0 001.73-3l-8.82-15a2 2 0 00-3.42 0z"
+                            />
+                        </svg>
+
+                        <p class="text-sm text-red-300">
+                            <%= error %>
+                        </p>
+
+                    </div>
+
+                <% } %>
+
+
+                <!-- Login Form -->
+                <form
+                    action="/admin/login"
+                    method="POST"
+                    id="adminLoginForm"
+                    class="space-y-5"
+                >
+
+                    <!-- Email -->
+                    <div>
+
+                        <label
+                            for="email"
+                            class="mb-2 block text-sm font-medium text-slate-200"
+                        >
+                            Email address
+                        </label>
+
+
+                        <div class="relative">
+
+                            <div
+                                class="pointer-events-none
+                                       absolute inset-y-0 left-0
+                                       flex items-center pl-3.5"
+                            >
+
+                                <svg
+                                    class="h-5 w-5 text-slate-500"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="1.8"
+                                        d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                                    />
+                                </svg>
+
+                            </div>
+
+
+                            <input
+                                type="email"
+                                id="email"
+                                name="email"
+                                autocomplete="email"
+                                placeholder="admin@example.com"
+                                required
+                                class="w-full rounded-xl border
+                                       border-slate-700
+                                       bg-slate-950
+                                       py-3.5 pl-11 pr-4
+                                       text-sm text-white
+                                       placeholder:text-slate-600
+                                       outline-none
+                                       transition
+                                       focus:border-indigo-500
+                                       focus:ring-4
+                                       focus:ring-indigo-500/10"
+                            >
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- Password -->
+                    <div>
+
+                        <div class="mb-2 flex items-center justify-between">
+
+                            <label
+                                for="password"
+                                class="block text-sm font-medium text-slate-200"
+                            >
+                                Password
+                            </label>
+
+                        </div>
+
+
+                        <div class="relative">
+
+                            <div
+                                class="pointer-events-none
+                                       absolute inset-y-0 left-0
+                                       flex items-center pl-3.5"
+                            >
+
+                                <svg
+                                    class="h-5 w-5 text-slate-500"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="1.8"
+                                        d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v2h8z"
+                                    />
+                                </svg>
+
+                            </div>
+
+
+                            <input
+                                type="password"
+                                id="password"
+                                name="password"
+                                autocomplete="current-password"
+                                placeholder="Enter your password"
+                                required
+                                class="w-full rounded-xl border
+                                       border-slate-700
+                                       bg-slate-950
+                                       py-3.5 pl-11 pr-12
+                                       text-sm text-white
+                                       placeholder:text-slate-600
+                                       outline-none
+                                       transition
+                                       focus:border-indigo-500
+                                       focus:ring-4
+                                       focus:ring-indigo-500/10"
+                            >
+
+
+                            <button
+                                type="button"
+                                id="togglePassword"
+                                aria-label="Show password"
+                                class="absolute inset-y-0 right-0
+                                       flex items-center pr-3.5
+                                       text-slate-500
+                                       transition
+                                       hover:text-slate-300"
+                            >
+
+                                <svg
+                                    id="eyeIcon"
+                                    class="h-5 w-5"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="1.8"
+                                        d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"
+                                    />
+
+                                    <circle
+                                        cx="12"
+                                        cy="12"
+                                        r="2.5"
+                                        stroke-width="1.8"
+                                    />
+                                </svg>
+
+                            </button>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- Remember -->
+                    <div class="flex items-center">
+
+                        <label
+                            class="flex cursor-pointer items-center gap-2"
+                        >
+
+                            <input
+                                type="checkbox"
+                                name="remember"
+                                class="h-4 w-4 rounded
+                                       border-slate-600
+                                       bg-slate-950
+                                       text-indigo-600
+                                       focus:ring-indigo-500
+                                       focus:ring-offset-slate-900"
+                            >
+
+                            <span
+                                class="text-sm text-slate-400"
+                            >
+                                Remember me
+                            </span>
+
+                        </label>
+
+                    </div>
+
+
+                    <!-- Submit -->
+                    <button
+                        type="submit"
+                        id="loginButton"
+                        class="group flex w-full
+                               items-center justify-center
+                               gap-2 rounded-xl
+                               bg-indigo-600
+                               px-4 py-3.5
+                               text-sm font-semibold text-white
+                               shadow-lg shadow-indigo-600/20
+                               transition
+                               hover:bg-indigo-500
+                               hover:shadow-indigo-600/30
+                               focus:outline-none
+                               focus:ring-4
+                               focus:ring-indigo-500/20
+                               disabled:cursor-not-allowed
+                               disabled:opacity-70"
+                    >
+
+                        <span id="loginButtonText">
+                            Sign in to Admin
+                        </span>
+
+
+                        <svg
+                            id="loginArrow"
+                            class="h-4 w-4 transition-transform
+                                   group-hover:translate-x-1"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M5 12h14m-6-6l6 6-6 6"
+                            />
+                        </svg>
+
+                    </button>
+
+                </form>
+
+
+                <!-- Security Notice -->
+                <div
+                    class="mt-7 flex items-start gap-3
+                           rounded-xl
+                           border border-slate-800
+                           bg-slate-950/70
+                           px-4 py-3"
+                >
+
+                    <svg
+                        class="mt-0.5 h-4 w-4 shrink-0 text-emerald-400"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                    >
+                        <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v2h8z"
+                        />
+                    </svg>
+
+                    <p class="text-xs leading-5 text-slate-500">
+                        Secure administrator access. Your session
+                        is protected by server-side authentication.
+                    </p>
+
+                </div>
+
+            </section>
+
+
+            <!-- Footer -->
+            <p class="mt-6 text-center text-xs text-slate-600">
+                © <%= new Date().getFullYear() %> MNCConnect.
+                All rights reserved.
+            </p>
+
+        </div>
+
+    </main>
+
+
+    <!-- Page Logic -->
+    <script>
+
+        const passwordInput =
+            document.getElementById("password");
+
+        const togglePassword =
+            document.getElementById("togglePassword");
+
+        const eyeIcon =
+            document.getElementById("eyeIcon");
+
+
+        togglePassword.addEventListener(
+            "click",
+            () => {
+
+                const isPassword =
+                    passwordInput.type === "password";
+
+
+                passwordInput.type =
+                    isPassword
+                        ? "text"
+                        : "password";
+
+
+                togglePassword.setAttribute(
+                    "aria-label",
+                    isPassword
+                        ? "Hide password"
+                        : "Show password"
+                );
+
+
+                if (isPassword) {
+
+                    eyeIcon.innerHTML = `
+                        <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="1.8"
+                            d="M3 3l18 18M10.58 10.58a2 2 0 002.83 2.83M9.88 5.09A10.94 10.94 0 0112 5c6 0 9.5 7 9.5 7a17.16 17.16 0 01-3.12 3.97M6.61 6.61C4.1 8.2 2.5 12 2.5 12s3.5 6 9.5 6a9.94 9.94 0 004.39-1"
+                        />
+                    `;
+
+                } else {
+
+                    eyeIcon.innerHTML = `
+                        <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="1.8"
+                            d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"
+                        />
+                        <circle
+                            cx="12"
+                            cy="12"
+                            r="2.5"
+                            stroke-width="1.8"
+                        />
+                    `;
+
+                }
+
+            }
+        );
+
+
+        // Prevent accidental double submission
+        const loginForm =
+            document.getElementById("adminLoginForm");
+
+        const loginButton =
+            document.getElementById("loginButton");
+
+        const loginButtonText =
+            document.getElementById("loginButtonText");
+
+        const loginArrow =
+            document.getElementById("loginArrow");
+
+
+        loginForm.addEventListener(
+            "submit",
+            () => {
+
+                loginButton.disabled = true;
+
+                loginButtonText.textContent =
+                    "Signing in...";
+
+                loginArrow.classList.add(
+                    "animate-pulse"
+                );
+
+            }
+        );
+
+    </script>
+
+</body>
+
+</html>
