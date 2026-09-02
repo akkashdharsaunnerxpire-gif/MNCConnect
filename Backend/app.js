@@ -4,10 +4,10 @@ const helmet = require("helmet");
 const session = require("express-session");
 const cookieParser = require("cookie-parser");
 const path = require("path");
-const mentorRoutes = require("./routes/mentorRoutes");
 const authRoutes = require("./routes/authRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
+const mentorRoutes = require("./routes/mentorRoutes"); // ✅ ADD THIS
 
 const app = express();
 
@@ -20,13 +20,13 @@ app.disable("x-powered-by");
 app.use(
   helmet({
     crossOriginResourcePolicy: {
-      policy: "same-site",
+      policy: "cross-origin", // ✅ CHANGE THIS from "same-site" to "cross-origin"
     },
   })
 );
 
 // ============================================================
-// SESSION CONFIGURATION (For Admin)
+// SESSION CONFIGURATION
 // ============================================================
 
 app.use(
@@ -38,7 +38,7 @@ app.use(
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      maxAge: 1000 * 60 * 60 * 8, // 8 hours
+      maxAge: 1000 * 60 * 60 * 8,
     },
   })
 );
@@ -50,16 +50,18 @@ app.use(
 app.use(cookieParser());
 
 // ============================================================
-// CORS CONFIGURATION - Applied ONLY to /api routes
+// CORS CONFIGURATION - MUST BE BEFORE ROUTES
 // ============================================================
 
 const allowedOrigins = (
   process.env.CLIENT_URLS ||
-  "http://localhost:5173"
+  "http://localhost:5173,http://localhost:3000"
 )
 .split(",")
 .map((origin) => origin.trim())
-  .filter(Boolean);
+.filter(Boolean);
+
+console.log("✅ Allowed origins:", allowedOrigins);
 
 const corsOptions = {
   origin: (origin, callback) => {
@@ -72,6 +74,7 @@ const corsOptions = {
       return callback(null, true);
     }
     
+    console.log("❌ Blocked origin:", origin);
     return callback(
       new Error("CORS: Origin not allowed")
     );
@@ -88,16 +91,12 @@ const corsOptions = {
   allowedHeaders: [
     "Content-Type",
     "Authorization",
+    "X-Requested-With",
   ],
 };
 
-// ============================================================
-// CORS - Apply ONLY to /api routes
-// ============================================================
-
-// Apply CORS middleware ONLY to API routes
-app.use("/api", cors(corsOptions));
-app.use("/api/mentors", mentorRoutes);
+// ✅ APPLY CORS TO ALL ROUTES (not just /api)
+app.use(cors(corsOptions));
 
 // ============================================================
 // BODY PARSERS - Global
@@ -117,7 +116,7 @@ app.use(
 );
 
 // ============================================================
-// STATIC FILES - For Admin panel (CSS, JS, etc.)
+// STATIC FILES
 // ============================================================
 
 app.use(express.static("public"));
@@ -130,7 +129,7 @@ app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
 
 // ============================================================
-// HEALTH CHECK - Public route (no CORS needed)
+// HEALTH CHECK
 // ============================================================
 
 app.get("/api/health", (req, res) => {
@@ -142,24 +141,24 @@ app.get("/api/health", (req, res) => {
 });
 
 // ============================================================
-// API ROUTES - With CORS applied
+// API ROUTES
 // ============================================================
 
 app.use("/api/auth", authRoutes);
 app.use("/api/payments", paymentRoutes);
+app.use("/api/mentor", mentorRoutes); // ✅ ADD THIS
 
 // ============================================================
-// ADMIN ROUTES - NO CORS (uses EJS + sessions)
+// ADMIN ROUTES
 // ============================================================
 
 app.use("/admin", adminRoutes);
 
 // ============================================================
-// 404 HANDLER - Detect if it's an API or Admin route
+// 404 HANDLER
 // ============================================================
 
 app.use((req, res) => {
-  // If it's an API route, return JSON error
   if (req.path.startsWith("/api/")) {
     return res.status(404).json({
       success: false,
@@ -167,7 +166,6 @@ app.use((req, res) => {
     });
   }
 
-  // For Admin routes, return simple HTML error
   if (req.path.startsWith("/admin/")) {
     return res.status(404).send(`
       <!DOCTYPE html>
@@ -175,20 +173,8 @@ app.use((req, res) => {
         <head>
           <title>404 - Page Not Found</title>
           <style>
-            body { 
-              font-family: Arial, sans-serif; 
-              background: #0f172a; 
-              color: #e2e8f0; 
-              display: flex; 
-              justify-content: center; 
-              align-items: center; 
-              height: 100vh; 
-              margin: 0;
-            }
-            .container { 
-              text-align: center; 
-              padding: 2rem;
-            }
+            body { font-family: Arial, sans-serif; background: #0f172a; color: #e2e8f0; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+            .container { text-align: center; padding: 2rem; }
             h1 { font-size: 4rem; color: #818cf8; margin-bottom: 0; }
             p { font-size: 1.2rem; color: #94a3b8; }
             a { color: #818cf8; text-decoration: none; }
@@ -206,7 +192,6 @@ app.use((req, res) => {
     `);
   }
 
-  // Default fallback
   res.status(404).send(`
     <!DOCTYPE html>
     <html>
@@ -226,17 +211,13 @@ app.use((req, res) => {
 app.use((error, req, res, next) => {
   console.error("Global error:", error);
 
-  // CORS errors - Return JSON for API, HTML for Admin
   if (error.message?.startsWith("CORS:")) {
-    // If it's an API route, return JSON
     if (req.path.startsWith("/api/")) {
       return res.status(403).json({
         success: false,
         message: "Request origin is not allowed.",
       });
     }
-
-    // For Admin routes, return HTML
     return res.status(403).send(`
       <!DOCTYPE html>
       <html>
@@ -250,7 +231,6 @@ app.use((error, req, res, next) => {
     `);
   }
 
-  // File size limit errors
   if (error.code === "LIMIT_FILE_SIZE") {
     if (req.path.startsWith("/api/")) {
       return res.status(400).json({
@@ -261,7 +241,6 @@ app.use((error, req, res, next) => {
     return res.status(400).send("File size cannot exceed 5MB.");
   }
 
-  // Multer errors
   if (error instanceof require("multer").MulterError) {
     if (req.path.startsWith("/api/")) {
       return res.status(400).json({
@@ -272,15 +251,14 @@ app.use((error, req, res, next) => {
     return res.status(400).send(error.message || "File upload failed.");
   }
 
-  // API route errors - Return JSON
   if (req.path.startsWith("/api/")) {
     return res.status(500).json({
       success: false,
       message: "Internal server error.",
+      error: error.message
     });
   }
 
-  // Admin route errors - Return HTML
   return res.status(500).send(`
     <!DOCTYPE html>
     <html>

@@ -1,5 +1,5 @@
-import React, { useState, createContext, useContext } from "react";
 
+import React, { useState, createContext, useContext } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -7,76 +7,82 @@ import {
   Navigate,
 } from "react-router-dom";
 
-import Landing from "./pages/Landing";
-import EmployeeProfile from "./pages/MncEmployeeProfile";
-import Login from "./components/Login";
-import ForgotPassword from "./components/ForgotPassword";
+import Landing from "./Landingpages/Landing";
 import LinearProgress from "./components/LinearProgress";
 
-import MentorDashboard from "./pages/MncEmployee/MentorDashboard";
-import MentorNotifications from "./pages/MncEmployee/notifications";
-import MentorProfile from "./pages/MncEmployee/profile";
-import MentorSettings from "./pages/MncEmployee/settings";
-import BrowseMentors from "./pages/FresherDashboard/BrowseMentors";
+import MentorRoutes from "./Routes/MentorRoutes";
+import FresherRoutes from "./Routes/FresherRoutes";
+
+/* =========================================
+   LOADING CONTEXT
+========================================= */
+
 export const LoadingContext = createContext();
 
 export const useLoading = () => {
   const context = useContext(LoadingContext);
 
   if (!context) {
-    throw new Error("useLoading must be used within LoadingProvider");
+    throw new Error(
+      "useLoading must be used within LoadingProvider"
+    );
   }
 
   return context;
 };
 
-const isMentorLoggedIn = () => {
-  const token = localStorage.getItem("mnc_mentor_token");
+/* =========================================
+   LOGIN CHECK
+========================================= */
 
-  return Boolean(token);
+const isMentorLoggedIn = () => {
+  return Boolean(
+    localStorage.getItem("mnc_mentor_token")
+  );
 };
 
+const isFresherLoggedIn = () => {
+  return Boolean(
+    localStorage.getItem("fresher_token")
+  );
+};
+
+/* =========================================
+   ROOT
+========================================= */
+
 const HomeRoute = () => {
+
+  // Mentor already logged in
   if (isMentorLoggedIn()) {
-    return <Navigate to="/mentordashboard" replace />;
+    return (
+      <Navigate
+        to="/mentor/dashboard"
+        replace
+      />
+    );
   }
 
+  // Fresher already logged in
+  if (isFresherLoggedIn()) {
+    return (
+      <Navigate
+        to="/Home"
+        replace
+      />
+    );
+  }
+
+  // Nobody logged in
   return <Landing />;
 };
 
-const MentorDashboardRoute = () => {
-  if (!isMentorLoggedIn()) {
-    return <Navigate to="/mentor/login" replace />;
-  }
-
-  return <MentorDashboard />;
-};
-
-const MentorLoginRoute = () => {
-  if (isMentorLoggedIn()) {
-    return <Navigate to="/mentordashboard" replace />;
-  }
-
-  return <Login />;
-};
-
-const MentorRegisterRoute = () => {
-  if (isMentorLoggedIn()) {
-    return <Navigate to="/mentordashboard" replace />;
-  }
-
-  return null;
-};
-
-const ProtectedMentorPage = ({ children }) => {
-  if (!isMentorLoggedIn()) {
-    return <Navigate to="/mentor/login" replace />;
-  }
-
-  return children;
-};
+/* =========================================
+   APP
+========================================= */
 
 function App() {
+
   const [isLoading, setIsLoading] = useState(false);
 
   return (
@@ -86,82 +92,121 @@ function App() {
         setIsLoading,
       }}
     >
+
       <Router>
-        <div className="bg-white text-gray-900 font-sans">
-          <LinearProgress isLoading={isLoading} />
 
-          <main>
-            <Routes>
-              <Route path="/" element={<HomeRoute />} />
+        <div className="min-h-screen font-sans text-gray-900 bg-white">
 
-              <Route path="/mentor" element={<EmployeeProfile />}>
-                <Route index element={<Navigate to="register" replace />} />
+          {/* Global Loading */}
+          <LinearProgress
+            isLoading={isLoading}
+          />
 
-                <Route path="register" element={<MentorRegisterRoute />} />
+          <Routes>
 
-                <Route path="login" element={<MentorLoginRoute />} />
+            {/* ==============================
+                LANDING
+                /
+            ============================== */}
 
-                <Route path="forgot-password" element={<ForgotPassword />} />
-              </Route>
+            <Route
+              path="/"
+              element={<HomeRoute />}
+            />
 
-              {/* MENTOR */}
 
-              <Route
-                path="/mentordashboard"
-                element={<MentorDashboardRoute />}
-              />
+            {/* ==============================
+                ALL MENTOR ROUTES
+                /mentor/*
+            ============================== */}
 
-              <Route
-                path="/mentor/profile"
-                element={
-                  <ProtectedMentorPage>
-                    <MentorProfile />
-                  </ProtectedMentorPage>
-                }
-              />
+            <Route
+              path="/mentor/*"
+              element={<MentorRoutes />}
+            />
 
-              <Route
-                path="/mentor/notifications"
-                element={
-                  <ProtectedMentorPage>
-                    <MentorNotifications />
-                  </ProtectedMentorPage>
-                }
-              />
 
-              <Route
-                path="/mentor/settings"
-                element={
-                  <ProtectedMentorPage>
-                    <MentorSettings />
-                  </ProtectedMentorPage>
-                }
-              />
+            {/* ==============================
+                ALL FRESHER ROUTES
+                /Home/*
+            ============================== */}
 
-              {/* FRESHER */}
+            <Route
+              path="/Home/*"
+              element={<FresherRoutes />}
+            />
 
-              <Route path="/browse-mentors" element={<BrowseMentors />} />
 
-              <Route
-                path="/employee-profile"
-                element={<Navigate to="/mentor/register" replace />}
-              />
+            {/* ==============================
+                OLD PROFILE URL
+                /profile
+            ============================== */}
 
-              <Route
-                path="*"
-                element={
-                  <Navigate
-                    to={isMentorLoggedIn() ? "/mentordashboard" : "/"}
-                    replace
-                  />
-                }
-              />
-            </Routes>
-          </main>
+            <Route
+              path="/profile"
+              element={
+                <Navigate
+                  to="/Home/profile"
+                  replace
+                />
+              }
+            />
+
+
+            {/* ==============================
+                OLD MNC LOGOS URL
+                /Mnclogos
+            ============================== */}
+
+            <Route
+              path="/Mnclogos"
+              element={
+                <Navigate
+                  to="/Home/mnc-logos"
+                  replace
+                />
+              }
+            />
+
+
+            {/* ==============================
+                OLD EMPLOYEE PROFILE
+            ============================== */}
+
+            <Route
+              path="/employee-profile"
+              element={
+                <Navigate
+                  to="/mentor/register"
+                  replace
+                />
+              }
+            />
+
+
+            {/* ==============================
+                INVALID URL
+            ============================== */}
+
+            <Route
+              path="*"
+              element={
+                <Navigate
+                  to="/"
+                  replace
+                />
+              }
+            />
+
+          </Routes>
+
         </div>
+
       </Router>
+
     </LoadingContext.Provider>
   );
 }
 
 export default App;
+
