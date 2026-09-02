@@ -81,6 +81,8 @@ const sanitizeMentor = (mentor) => {
     fullMobile: (mentor.countryCode || "+91") + (mentor.mobile || ""),
     role: "mentor",
     profilePic: mentor.profilePic || "",
+    employeeId: mentor.employeeId || "",
+    workEmail: mentor.workEmail || "",
     lastLoginAt: mentor.lastLoginAt,
     createdAt: mentor.createdAt,
     company: mentor.currentCompany,

@@ -4,14 +4,14 @@ const fs = require("fs");
 const crypto = require("crypto");
 
 // ============================================================
-// UPLOAD DIRECTORY CONFIGURATION
+// UPLOAD DIRECTORY
 // ============================================================
 
 const uploadDir = path.resolve(
-  process.env.UPLOAD_DIR || path.join(process.cwd(), "uploads")
+  process.env.UPLOAD_DIR ||
+    path.join(process.cwd(), "uploads")
 );
 
-// Create upload directory if it doesn't exist
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, {
     recursive: true,
@@ -26,6 +26,7 @@ const allowedMimeTypes = new Set([
   "image/jpeg",
   "image/jpg",
   "image/png",
+  "image/webp",
   "application/pdf",
 ]);
 
@@ -33,11 +34,12 @@ const allowedExtensions = new Set([
   ".jpg",
   ".jpeg",
   ".png",
+  ".webp",
   ".pdf",
 ]);
 
 // ============================================================
-// STORAGE CONFIGURATION - For Local Storage (Optional)
+// DISK STORAGE
 // ============================================================
 
 const diskStorage = multer.diskStorage({
@@ -46,26 +48,37 @@ const diskStorage = multer.diskStorage({
   },
 
   filename: (req, file, cb) => {
-    const extension = path.extname(file.originalname).toLowerCase();
-    const uniqueName = `${Date.now()}-${crypto.randomUUID()}${extension}`;
+    const extension = path
+      .extname(file.originalname)
+      .toLowerCase();
+
+    const uniqueName =
+      `${Date.now()}-${crypto.randomUUID()}${extension}`;
+
     cb(null, uniqueName);
   },
 });
 
 // ============================================================
-// MEMORY STORAGE - For Cloudinary Upload
+// MEMORY STORAGE - CLOUDINARY
 // ============================================================
 
-const memoryStorage = multer.memoryStorage();
+const memoryStorage =
+  multer.memoryStorage();
 
 // ============================================================
 // FILE FILTER
 // ============================================================
 
-const fileFilter = (req, file, cb) => {
-  const extension = path.extname(file.originalname).toLowerCase();
-  
-  // Check if file type is allowed
+const fileFilter = (
+  req,
+  file,
+  cb
+) => {
+  const extension = path
+    .extname(file.originalname)
+    .toLowerCase();
+
   if (
     allowedExtensions.has(extension) &&
     allowedMimeTypes.has(file.mimetype)
@@ -73,109 +86,171 @@ const fileFilter = (req, file, cb) => {
     return cb(null, true);
   }
 
-  // Reject file with proper error
   return cb(
     new multer.MulterError(
-      "LIMIT_UNEXPECTED_FILE",
-      "Only JPG, JPEG, PNG and PDF files are allowed."
+      "LIMIT_UNEXPECTED_FILE"
     ),
     false
   );
 };
 
 // ============================================================
-// MULTER INSTANCES
+// CLOUDINARY UPLOAD
 // ============================================================
 
-// For Cloudinary - Memory Storage
-const uploadToCloudinary = multer({
-  storage: memoryStorage,
-  fileFilter: fileFilter,
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB
-    files: 3,
+const uploadToCloudinary =
+  multer({
+    storage: memoryStorage,
+    fileFilter,
+    limits: {
+      fileSize: 10 * 1024 * 1024,
+      files: 4,
+    },
+  });
+
+// ============================================================
+// LOCAL UPLOAD
+// ============================================================
+
+const uploadToLocal =
+  multer({
+    storage: diskStorage,
+    fileFilter,
+    limits: {
+      fileSize: 10 * 1024 * 1024,
+      files: 4,
+    },
+  });
+
+// ============================================================
+// MENTOR FILES
+// ============================================================
+
+const mentorUploadFields = [
+  {
+    name: "employee_profileimage",
+    maxCount: 1,
   },
-});
-
-// For Local Storage - Disk Storage (Backup/Alternative)
-const uploadToLocal = multer({
-  storage: diskStorage,
-  fileFilter: fileFilter,
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB
-    files: 3,
+  {
+    name: "offerLetter",
+    maxCount: 1,
   },
-});
+  {
+    name: "employeeIdProof",
+    maxCount: 1,
+  },
+  {
+    name: "additionalProof",
+    maxCount: 1,
+  },
+];
+
+// Cloudinary
+const uploadMentorFiles =
+  uploadToCloudinary.fields(
+    mentorUploadFields
+  );
+
+// Local backup
+const uploadMentorFilesLocal =
+  uploadToLocal.fields(
+    mentorUploadFields
+  );
 
 // ============================================================
-// UPLOAD MIDDLEWARES
+// SINGLE FILE
 // ============================================================
 
-// For mentor registration - multiple files (Cloudinary)
-const uploadMentorFiles = uploadToCloudinary.fields([
-  { name: 'offerLetter', maxCount: 1 },
-  { name: 'employeeIdProof', maxCount: 1 },
-  { name: 'additionalProof', maxCount: 1 }
-]);
+const uploadSingleFile =
+  uploadToCloudinary.single("file");
 
-// For mentor registration - multiple files (Local - Backup)
-const uploadMentorFilesLocal = uploadToLocal.fields([
-  { name: 'offerLetter', maxCount: 1 },
-  { name: 'employeeIdProof', maxCount: 1 },
-  { name: 'additionalProof', maxCount: 1 }
-]);
-
-// For single file uploads
-const uploadSingleFile = uploadToCloudinary.single('file');
-const uploadSingleFileLocal = uploadToLocal.single('file');
-
-// For profile pictures
-const uploadProfilePic = uploadToCloudinary.single('profilePic');
-const uploadProfilePicLocal = uploadToLocal.single('profilePic');
+const uploadSingleFileLocal =
+  uploadToLocal.single("file");
 
 // ============================================================
-// ERROR HANDLING MIDDLEWARE FOR MULTER
+// PROFILE PICTURE
 // ============================================================
 
-const handleMulterError = (err, req, res, next) => {
-  if (err instanceof multer.MulterError) {
-    // Multer-specific errors
-    if (err.code === 'LIMIT_FILE_SIZE') {
+const uploadProfilePic =
+  uploadToCloudinary.single(
+    "employee_profileimage"
+  );
+
+const uploadProfilePicLocal =
+  uploadToLocal.single(
+    "employee_profileimage"
+  );
+
+// ============================================================
+// MULTER ERROR HANDLER
+// ============================================================
+
+const handleMulterError = (
+  err,
+  req,
+  res,
+  next
+) => {
+  if (!err) {
+    return next();
+  }
+
+  if (
+    err instanceof multer.MulterError
+  ) {
+    if (
+      err.code ===
+      "LIMIT_FILE_SIZE"
+    ) {
       return res.status(400).json({
         success: false,
-        message: 'File size too large. Maximum size is 10MB.'
+        message:
+          "File size too large. Maximum size is 10MB.",
       });
     }
-    
-    if (err.code === 'LIMIT_FILE_COUNT') {
+
+    if (
+      err.code ===
+      "LIMIT_FILE_COUNT"
+    ) {
       return res.status(400).json({
         success: false,
-        message: 'Too many files uploaded. Maximum 3 files allowed.'
+        message:
+          "Too many files uploaded. Maximum 4 files allowed.",
       });
     }
-    
-    if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+
+    if (
+      err.code ===
+      "LIMIT_UNEXPECTED_FILE"
+    ) {
       return res.status(400).json({
         success: false,
-        message: err.message || 'Unexpected file upload.'
+        message:
+          "Invalid file type or unexpected upload field. Allowed: JPG, JPEG, PNG, WEBP and PDF.",
       });
     }
-    
-    if (err.code === 'LIMIT_FIELD_KEY') {
+
+    if (
+      err.code ===
+      "LIMIT_FIELD_KEY"
+    ) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid field name in upload.'
+        message:
+          "Invalid field name in upload.",
       });
     }
-    
+
     return res.status(400).json({
       success: false,
-      message: err.message || 'File upload error.'
+      message:
+        err.message ||
+        "File upload error.",
     });
   }
-  
-  // Pass other errors to next middleware
-  next(err);
+
+  return next(err);
 };
 
 // ============================================================
@@ -183,22 +258,22 @@ const handleMulterError = (err, req, res, next) => {
 // ============================================================
 
 module.exports = {
-  // Upload instances
   upload: uploadToCloudinary,
   uploadToCloudinary,
   uploadToLocal,
-  
-  // Specific middlewares
+
   uploadMentorFiles,
   uploadMentorFilesLocal,
+
   uploadSingleFile,
   uploadSingleFileLocal,
+
   uploadProfilePic,
   uploadProfilePicLocal,
-  
-  // Utility
+
   uploadDir,
   allowedMimeTypes,
   allowedExtensions,
+
   handleMulterError,
 };
