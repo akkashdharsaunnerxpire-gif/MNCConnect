@@ -13,15 +13,15 @@ import {
 import Home from "../FresherDashboard/pages/Home";
 import FresherProfile from "../FresherDashboard/pages/FresherProfile";
 import Mnclogos from "../FresherDashboard/mncLogos/Companylogos";
-import MyBookings from "../FresherDashboard/pages/MyBookings";
-import SessionBoard from "../FresherDashboard/pages/SessionsBoard";
+import MyBookings from "../FresherDashboard/pages/FresherBookings";
+import SessionBoard from "../FresherDashboard/pages/Fresher_SessionsBoard";
 
 /* =========================================
    COMMON HEADER
 ========================================= */
-
+import Notifications from "../FresherDashboard/pages/FresherNotifications"
 import Header from "../FresherDashboard/Component/Header";
-
+import BonusWallet from "../FresherDashboard/pages/FresherWallet"
 /* =========================================
    FRESHER LOGIN CHECK
 ========================================= */
@@ -76,7 +76,7 @@ const FresherRoutes = () => {
         ============================== */}
 
         <Route
-          index
+          path="/"
           element={
             <FresherProtectedRoute>
               <Home />
@@ -99,6 +99,15 @@ const FresherRoutes = () => {
           }
         />
 
+        <Route
+          path="bonus-wallet"
+          element={
+            <FresherProtectedRoute>
+              <BonusWallet />
+            </FresherProtectedRoute>
+          }
+        />
+
 
         {/* ==============================
             MY BOOKINGS
@@ -110,6 +119,14 @@ const FresherRoutes = () => {
           element={
             <FresherProtectedRoute>
               <MyBookings />
+            </FresherProtectedRoute>
+          }
+        />
+        <Route
+          path="notifications"
+          element={
+            <FresherProtectedRoute>
+              <Notifications/>
             </FresherProtectedRoute>
           }
         />

@@ -1139,64 +1139,78 @@ const FresherProfile = () => {
      AVATAR UPLOAD
   ======================================================================= */
 
-  const handleAvatarUpload = async (file) => {
-    if (!file) return;
+ const handleAvatarUpload = async (file) => {
+  if (!file) return;
 
-    setUploading(true);
+  setUploading(true);
 
-    try {
-      const reader = new FileReader();
+  try {
+    // Instant preview
+    const reader = new FileReader();
 
-      reader.onloadend = () => {
-        setPreviewImage(reader.result);
+    reader.onloadend = () => {
+      const imageUrl = reader.result;
 
+      setPreviewImage(imageUrl);
+
+      setUser((prev) => {
         const updatedUser = {
-          ...user,
-          avatar: reader.result,
+          ...prev,
+          avatar: imageUrl,
         };
 
-        setUser(updatedUser);
         saveToLocalStorage(updatedUser);
-      };
+        return updatedUser;
+      });
+    };
 
-      reader.readAsDataURL(file);
+    reader.readAsDataURL(file);
 
-      const updated = await apiUploadAvatar(file);
+    // Upload to backend
+    const updated = await apiUploadAvatar(file);
 
-      if (updated) {
+    if (updated) {
+      setUser((prev) => {
         const mergedUser = {
-          ...user,
+          ...prev,
           ...updated,
+          avatar:
+            updated.avatar ||
+            updated.profilePic ||
+            updated.profileImage ||
+            updated.photo ||
+            updated.photoUrl ||
+            prev.avatar,
         };
 
-        setUser(mergedUser);
         saveToLocalStorage(mergedUser);
-
-        showToast(
-          "success",
-          "Profile photo updated successfully!"
-        );
-      }
-    } catch (err) {
-      console.error("Upload failed:", err);
+        return mergedUser;
+      });
 
       showToast(
-        "error",
-        err.message ||
-          "Could not upload photo. Please try again."
+        "success",
+        "Profile photo updated successfully!"
       );
-
-      setPreviewImage(null);
-
-      const localData = getFromLocalStorage();
-
-      if (localData) {
-        setUser(localData);
-      }
-    } finally {
-      setUploading(false);
     }
-  };
+  } catch (err) {
+    console.error("Upload failed:", err);
+
+    showToast(
+      "error",
+      err.message || "Could not upload photo. Please try again."
+    );
+
+    setPreviewImage(null);
+
+    const localData = getFromLocalStorage();
+
+    if (localData) {
+      setUser(localData);
+    }
+  } finally {
+    setUploading(false);
+  }
+};
 
   const handleAvatarRemove = async () => {
     try {
@@ -1515,9 +1529,9 @@ const FresherProfile = () => {
   const displayName =
     (user?.name || "").trim() || "Fresher";
 
-  const avatarUrl =
-    previewImage ||
-    (user ? resolveAvatar(user) : null);
+ const avatarUrl =
+  previewImage ||
+  (user ? resolveAvatar(user) : null);
 
   /* =======================================================================
      STATES

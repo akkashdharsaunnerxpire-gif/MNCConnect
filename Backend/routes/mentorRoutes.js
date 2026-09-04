@@ -1,18 +1,35 @@
 const express = require("express");
-const router = express.Router();
-const Mentor = require("../models/Mentor");
 
-// Import controller functions
+const router = express.Router();
+
 const {
   getMentorProfile,
   getMentorsByCompany,
   UpdateMentorProfile,
+  createSessionRequest,
+  getSessionRequestStatus,
 } = require("../controllers/mentorController");
 
-
-// ✅ These routes should work if the controller functions exist
 router.get("/companies", getMentorsByCompany);
-router.get("/:mentoremail", getMentorProfile);
-router.put("/:mentoremail", UpdateMentorProfile);
+
+router.post(
+  "/session-requests",
+  createSessionRequest
+);
+
+router.get(
+  "/session-requests/:requestGroupId",
+  getSessionRequestStatus
+);
+
+router.get(
+  "/:mentoremail",
+  getMentorProfile
+);
+
+router.put(
+  "/:mentoremail",
+  UpdateMentorProfile
+);
 
 module.exports = router;

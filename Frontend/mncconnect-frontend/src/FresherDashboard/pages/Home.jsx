@@ -197,7 +197,7 @@ const BrowseMentors = () => {
       setLoading(true);
       setError("");
 
-      const response = await fetch(`${API_URL}/Mentors/companies`);
+      const response = await fetch(`${API_URL}/mentor/companies`);
 
       const data = await response.json();
 

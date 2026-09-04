@@ -1,654 +1,513 @@
 import React, { useEffect, useState } from "react";
-import { Link, useNavigate, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { AnimatePresence, motion } from "framer-motion";
 import {
-  Users,
   Bell,
-  Home,
   CalendarDays,
-  MessageSquare,
-  LayoutDashboard,
-  Sparkles,
-  Menu,
-  X,
-  WalletCards,
   ChevronRight,
-  Banknote,
+  Home,
+  Menu,
+  MessageSquare,
+  User,
+  Wallet,
+  X,
+  ArrowLeft,
+  GraduationCap,
 } from "lucide-react";
 
-const Header = () => {
-  const [mobileMenu, setMobileMenu] = useState(false);
-  const [balance, setBalance] = useState(25);
-  const [balancePulse, setBalancePulse] = useState(false);
+const notifications = [
+  {
+    id: 1,
+    type: "session",
+    title: "Mentoring Session Confirmed",
+    message: "Your mentoring session has been confirmed successfully.",
+    time: "5 min ago",
+    unread: true,
+  },
+  {
+    id: 2,
+    type: "bonus",
+    title: "₹25 Bonus Added",
+    message: "You received ₹25 for completing a mentoring session.",
+    time: "30 min ago",
+    unread: true,
+  },
+  {
+    id: 3,
+    type: "mentor",
+    title: "New Mentor Available",
+    message: "A new mentor from a top company is now available.",
+    time: "1 hour ago",
+    unread: true,
+  },
+  {
+    id: 4,
+    type: "booking",
+    title: "Upcoming Session",
+    message: "Your mentoring session is scheduled for today.",
+    time: "2 hours ago",
+    unread: true,
+  },
+  {
+    id: 5,
+    type: "referral",
+    title: "Referral Bonus",
+    message: "Your referral was successful. ₹25 has been added.",
+    time: "3 hours ago",
+    unread: true,
+  },
+  {
+    id: 6,
+    type: "welcome",
+    title: "Welcome to MNCConnect",
+    message: "Your ₹25 welcome bonus has been added to your wallet.",
+    time: "Yesterday",
+    unread: true,
+  },
+  {
+    id: 7,
+    type: "session",
+    title: "Session Reminder",
+    message: "Don't forget your upcoming mentoring session.",
+    time: "Yesterday",
+    unread: false,
+  },
+  {
+    id: 8,
+    type: "system",
+    title: "Profile Update",
+    message: "Complete your profile to improve your mentor experience.",
+    time: "2 days ago",
+    unread: false,
+  },
+];
 
+const getNotificationIcon = (type) => {
+  switch (type) {
+    case "session":
+      return <GraduationCap size={17} />;
+    case "bonus":
+      return <Wallet size={17} />;
+    case "mentor":
+      return <User size={17} />;
+    case "booking":
+      return <CalendarDays size={17} />;
+    case "referral":
+      return <User size={17} />;
+    default:
+      return <Bell size={17} />;
+  }
+};
+
+const Header = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  /* =====================================================
-     LOAD WALLET BALANCE
-  ===================================================== */
+  const [mobileMenu, setMobileMenu] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [balance, setBalance] = useState(0);
+
+  const unreadCount = notifications.filter(
+    (notification) => notification.unread
+  ).length;
+
+  const loadBalance = () => {
+    const savedBalance = localStorage.getItem("fresherCoins");
+
+    setBalance(savedBalance ? Number(savedBalance) : 0);
+  };
 
   useEffect(() => {
-    const loadBalance = () => {
-      const storedCoins = localStorage.getItem("fresherCoins");
-
-      if (storedCoins !== null) {
-        const parsedBalance = Number(storedCoins);
-
-        if (Number.isFinite(parsedBalance)) {
-          setBalance(parsedBalance);
-        }
-      } else {
-        localStorage.setItem("fresherCoins", "25");
-        setBalance(25);
-      }
-    };
-
     loadBalance();
 
-    const handleWalletUpdate = () => {
-      loadBalance();
-
-      setBalancePulse(true);
-
-      setTimeout(() => {
-        setBalancePulse(false);
-      }, 900);
-    };
-
-    window.addEventListener("fresherCoinsUpdated", handleWalletUpdate);
-
-    window.addEventListener("storage", handleWalletUpdate);
+    window.addEventListener("fresherCoinsUpdated", loadBalance);
+    window.addEventListener("storage", loadBalance);
 
     return () => {
-      window.removeEventListener("fresherCoinsUpdated", handleWalletUpdate);
-
-      window.removeEventListener("storage", handleWalletUpdate);
+      window.removeEventListener("fresherCoinsUpdated", loadBalance);
+      window.removeEventListener("storage", loadBalance);
     };
   }, []);
 
-  /* =====================================================
-     ACTIVE ROUTE
-  ===================================================== */
+  useEffect(() => {
+    setShowNotifications(false);
+    setMobileMenu(false);
+  }, [location.pathname]);
 
-  const isActive = (path) => location.pathname === path;
+  const openNotifications = () => {
+    setMobileMenu(false);
+    setShowNotifications(true);
+  };
 
-  /* =====================================================
-     FORMAT BALANCE
-  ===================================================== */
+  const closeNotifications = () => {
+    setShowNotifications(false);
+  };
 
-  const formattedBalance = Number(balance || 0).toLocaleString("en-IN");
+  const goToWallet = () => {
+    setMobileMenu(false);
+    setShowNotifications(false);
+    navigate("/Home/bonus-wallet");
+  };
+
+  const goToProfile = () => {
+    setMobileMenu(false);
+    setShowNotifications(false);
+    navigate("/Home/profile");
+  };
+
+  const goToBookings = () => {
+    setMobileMenu(false);
+    setShowNotifications(false);
+    navigate("/Home/my-bookings");
+  };
+
+  const goToNotificationsPage = () => {
+    setMobileMenu(false);
+    setShowNotifications(false);
+    navigate("/Home/notifications");
+  };
+
+  const isActive = (path) => {
+    return location.pathname === path;
+  };
 
   return (
-    <div className="sticky top-0 z-[9999]">
-      {/* ===================================================
-          HEADER
-      =================================================== */}
-
-      <header className="relative overflow-visible border-b border-white/[0.08] bg-black/70 backdrop-blur-2xl">
-        <div className="mx-auto flex w-full max-w-[1540px] items-center justify-between px-5 py-4 sm:px-7 lg:px-10">
-          {/* =================================================
-              LOGO
-          ================================================= */}
-
+    <>
+      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <Link
-            to="/browse-mentors"
-            className="flex items-center gap-3 group shrink-0"
+            to="/Home"
+            className="flex items-center gap-2"
+            onClick={() => {
+              setMobileMenu(false);
+              setShowNotifications(false);
+            }}
           >
-            <div className="relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-violet-500 via-purple-500 to-indigo-600 shadow-[0_0_25px_rgba(139,92,246,0.35)] transition-all duration-300 group-hover:scale-105 group-hover:shadow-[0_0_38px_rgba(139,92,246,0.6)]">
-              <Sparkles size={22} className="relative z-10 text-white" />
-
-              <div className="absolute inset-0 transition-opacity duration-300 opacity-0 bg-white/10 group-hover:opacity-100" />
-
-              <div className="absolute top-0 w-8 h-full transition-transform duration-700 -left-10 rotate-12 bg-white/20 blur-md group-hover:translate-x-20" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-600 to-purple-600 shadow-lg shadow-indigo-200">
+              <GraduationCap size={22} className="text-white" />
             </div>
 
-            <span className="text-xl font-bold tracking-tight text-transparent bg-gradient-to-r from-violet-400 via-purple-400 to-indigo-400 bg-clip-text sm:text-2xl">
-              MNCConnect
-            </span>
+            <div className="hidden sm:block">
+              <h1 className="text-lg font-extrabold tracking-tight text-slate-900">
+                MNC<span className="text-indigo-600">Connect</span>
+              </h1>
+
+              <p className="text-[10px] font-medium text-slate-500">
+                Fresher Community
+              </p>
+            </div>
           </Link>
 
-          {/* =================================================
-              DESKTOP NAVIGATION
-          ================================================= */}
-
-          <nav className="items-center hidden gap-7 lg:flex xl:gap-10">
-            <NavItem
-              icon={<Home size={18} />}
-              label="Home"
+          <nav className="hidden items-center gap-1 lg:flex">
+            <Link
               to="/Home"
-              active={isActive("/Home")}
-            />
+              className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                isActive("/Home")
+                  ? "bg-indigo-50 text-indigo-700"
+                  : "text-slate-600 hover:bg-slate-50 hover:text-indigo-600"
+              }`}
+            >
+              <Home size={17} />
+              Home
+            </Link>
 
-            <NavItem
-              icon={<CalendarDays size={18} />}
-              label="My Bookings"
-              to="/my-bookings"
-              active={isActive("/my-bookings")}
-            />
+            <Link
+              to="/Home/my-bookings"
+              className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                isActive("/Home/my-bookings")
+                  ? "bg-indigo-50 text-indigo-700"
+                  : "text-slate-600 hover:bg-slate-50 hover:text-indigo-600"
+              }`}
+            >
+              <CalendarDays size={17} />
+              My Bookings
+            </Link>
 
-            <NavItem
-              icon={<MessageSquare size={18} />}
-              label="Messages"
-              to="/messages"
-              active={isActive("/Home/notifications")}
-            />
+            <Link
+              to="/Home/messages"
+              className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                isActive("/Home/messages")
+                  ? "bg-indigo-50 text-indigo-700"
+                  : "text-slate-600 hover:bg-slate-50 hover:text-indigo-600"
+              }`}
+            >
+              <MessageSquare size={17} />
+              Messages
+            </Link>
 
-            <NavItem
-              icon={<LayoutDashboard size={18} />}
-              label="Dashboard"
+            <Link
               to="/dashboard"
-              active={isActive("/dashboard")}
-            />
+              className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-indigo-600"
+            >
+              Dashboard
+            </Link>
           </nav>
 
-          {/* =================================================
-              RIGHT SIDE
-          ================================================= */}
+          <div className="hidden items-center gap-2 lg:flex">
+            <button
+              type="button"
+              onClick={openNotifications}
+              className="relative flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 hover:text-indigo-600"
+            >
+              <Bell size={20} />
 
-          <div className="flex items-center gap-3 sm:gap-4">
-            {/* =================================================
-                PREMIUM WALLET
-            ================================================= */}
+              {unreadCount > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 px-0.5 text-[7px] font-bold leading-none text-white shadow-md ring-1 ring-white">
+                  {unreadCount}
+                </span>
+              )}
+            </button>
 
             <button
               type="button"
-              onClick={() => navigate("/fresher-profile")}
-              className={`
-                wallet-shell
-                group
-                relative
-                flex
-                items-center
-                overflow-hidden
-                rounded-2xl
-                p-[1px]
-                transition-all
-                duration-500
-                hover:-translate-y-1
-                hover:scale-[1.02]
-                ${balancePulse ? "scale-105" : ""}
-              `}
+              onClick={goToWallet}
+              className="flex items-center gap-2 rounded-xl bg-indigo-50 px-3 py-2 transition hover:bg-indigo-100"
             >
-              {/* =============================================
-                  ANIMATED SILVER BORDER
-              ============================================= */}
+              <Wallet size={18} className="text-indigo-600" />
 
-              <span className="absolute inset-0 wallet-border rounded-2xl" />
-
-              {/* =============================================
-                  INNER GOLDEN WALLET
-              ============================================= */}
-
-              <span className="relative flex items-center overflow-hidden rounded-[15px] border border-amber-300/20 bg-gradient-to-br from-[#3b2705] via-[#76520d] to-[#2a1b03] px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_25px_rgba(245,158,11,0.18)] sm:px-3 sm:py-2">
-                {/* GOLD GLOW */}
-
-                <span className="absolute w-24 h-24 transition-all duration-500 rounded-full pointer-events-none -left-10 -top-10 bg-yellow-400/20 blur-2xl group-hover:bg-yellow-300/30" />
-
-                <span className="absolute w-24 h-24 rounded-full pointer-events-none -bottom-10 -right-10 bg-orange-500/20 blur-2xl" />
-
-                {/* =========================================
-                    MOVING GOLD SHINE
-                ========================================= */}
-
-                <span className="absolute inset-0 pointer-events-none wallet-shine" />
-
-                {/* =========================================
-                    WALLET ICON
-                ========================================= */}
-
-                <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-yellow-200/30 bg-gradient-to-br from-yellow-300 via-amber-500 to-orange-600 shadow-[inset_0_1px_2px_rgba(255,255,255,0.6),0_0_15px_rgba(245,158,11,0.4)] sm:h-9 sm:w-9">
-                  <WalletCards
-                    size={17}
-                    className="text-white drop-shadow-[0_2px_3px_rgba(0,0,0,0.5)]"
-                  />
-
-                  {/* SMALL CASH LINE */}
-
-                  <span className="absolute bottom-1 left-1/2 h-[1px] w-3 -translate-x-1/2 rounded-full bg-white/60" />
-                </span>
-
-                {/* =========================================
-                    BALANCE
-                ========================================= */}
-
-                <span className="relative hidden ml-2 text-left sm:block">
-                  <span className="block text-[8px] font-black uppercase tracking-[0.24em] text-yellow-200/60">
-                    Available Wallet
-                  </span>
-
-                  <span className="flex items-center gap-1.5">
-                    <span
-                      className={`
-                        text-sm
-                        font-black
-                        tracking-tight
-                        text-white
-                        transition-all
-                        duration-500
-                        ${balancePulse ? "scale-125 text-yellow-200" : ""}
-                      `}
-                    >
-                      ₹{formattedBalance}
-                    </span>
-
-                    <span className="text-[9px] font-bold uppercase tracking-wider text-yellow-300/80">
-                      Balance
-                    </span>
-                  </span>
-                </span>
-
-                {/* MOBILE BALANCE */}
-
-                <span
-                  className={`
-                    relative ml-2 text-xs font-black text-white sm:hidden
-                    ${balancePulse ? "scale-125 text-yellow-200" : ""}
-                  `}
-                >
-                  ₹{formattedBalance}
-                </span>
-
-                {/* ARROW */}
-
-                <ChevronRight
-                  size={14}
-                  className="relative hidden ml-1 transition-transform duration-300 text-yellow-200/50 group-hover:translate-x-1 sm:block"
-                />
-
-                {/* LIVE STATUS */}
-
-                <span className="absolute flex w-3 h-3 -right-1 -top-1">
-                  <span className="absolute inline-flex w-full h-full bg-yellow-400 rounded-full animate-ping opacity-60" />
-
-                  <span className="relative inline-flex h-3 w-3 rounded-full border-2 border-[#171005] bg-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.8)]" />
-                </span>
+              <span className="font-bold text-indigo-700">
+                ₹{balance}
               </span>
             </button>
 
-            {/* =================================================
-                NOTIFICATION
-            ================================================= */}
-
             <button
               type="button"
-              className="relative flex items-center justify-center w-10 h-10 transition-all duration-300 group rounded-xl hover:bg-white/5"
-            onClick={() => navigate("/Home/notifications")}>
-              <Bell
-                size={21}
-                className="text-gray-300 transition-colors group-hover:text-white"
-              />
-
-              <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 text-[10px] font-bold text-white shadow-lg shadow-purple-600/30 ring-2 ring-black">
-                3
-              </span>
-            </button>
-
-            {/* =================================================
-                PROFILE
-            ================================================= */}
-
-            <button
-              type="button"
-              onClick={() => navigate("/Home/profile")}
-              className="relative h-[3.5rem] w-[3.5rem] overflow-hidden rounded-full border-2 border-purple-500/70 shadow-[0_0_18px_rgba(139,92,246,0.2)] transition-all duration-300 hover:scale-105 hover:border-purple-400 hover:shadow-[0_0_25px_rgba(139,92,246,0.45)]"
+              onClick={goToProfile}
+              className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2 border-indigo-100 bg-slate-100 transition hover:border-indigo-300"
             >
-              <img
-                src={(() => {
-                  try {
-                    const storedUser = localStorage.getItem("user");
+              <User size={19} className="text-slate-600" />
+            </button>
+          </div>
 
-                    if (storedUser) {
-                      const user = JSON.parse(storedUser);
+          <div className="flex items-center gap-2 lg:hidden">
+            <button
+              type="button"
+              onClick={openNotifications}
+              className="relative flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100"
+            >
+              <Bell size={20} />
 
-                      if (user?.profilePic) {
-                        return user.profilePic;
-                      }
-
-                      const seed = encodeURIComponent(user?.name || "Fresher");
-
-                      return `https://api.dicebear.com/7.x/bottts-neutral/svg?seed=${seed}&backgroundColor=4f46e5`;
-                    }
-                  } catch (error) {
-                    console.error(error);
-                  }
-
-                  return "https://api.dicebear.com/7.x/bottts-neutral/svg?seed=Fresher&backgroundColor=4f46e5";
-                })()}
-                alt="Profile"
-                className="object-cover w-full h-full"
-              />
-
-              <span className="absolute bottom-0 right-0 w-3 h-3 border-2 border-black rounded-full bg-emerald-400" />
+              {unreadCount > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 px-0.5 text-[7px] font-bold leading-none text-white ring-1 ring-white">
+                  {unreadCount}
+                </span>
+              )}
             </button>
 
-            {/* =================================================
-                MOBILE MENU
-            ================================================= */}
-
             <button
+              type="button"
               onClick={() => setMobileMenu((prev) => !prev)}
-              className="flex items-center justify-center w-10 h-10 transition border rounded-xl border-white/5 bg-white/5 hover:bg-white/10 lg:hidden"
-              aria-label="Toggle menu"
+              className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-700 transition hover:bg-slate-100"
             >
-              {mobileMenu ? <X size={21} /> : <Menu size={21} />}
+              {mobileMenu ? <X size={22} /> : <Menu size={22} />}
             </button>
           </div>
         </div>
 
-        {/* ===================================================
-            MOBILE NAVIGATION
-        =================================================== */}
+        <AnimatePresence>
+          {mobileMenu && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden border-t border-slate-100 bg-white lg:hidden"
+            >
+              <div className="space-y-1 px-4 py-4">
+                <Link
+                  to="/Home"
+                  onClick={() => setMobileMenu(false)}
+                  className="flex items-center gap-3 rounded-xl px-4 py-3 font-semibold text-slate-700 transition hover:bg-indigo-50 hover:text-indigo-700"
+                >
+                  <Home size={19} />
+                  Home
+                </Link>
 
-        {mobileMenu && (
-          <div className="border-t border-white/10 bg-black/95 backdrop-blur-2xl lg:hidden">
-            {/* =================================================
-                MOBILE WALLET
-            ================================================= */}
+                <Link
+                  to="/browse-mentors"
+                  onClick={() => setMobileMenu(false)}
+                  className="flex items-center gap-3 rounded-xl px-4 py-3 font-semibold text-slate-700 transition hover:bg-indigo-50 hover:text-indigo-700"
+                >
+                  <User size={19} />
+                  Browse Mentors
+                </Link>
 
-            <div className="mx-5 mt-4">
-              <button
-                onClick={() => {
-                  setMobileMenu(false);
-                  navigate("/fresher-profile");
-                }}
-                className="wallet-shell group relative w-full overflow-hidden rounded-2xl p-[1px] text-left"
-              >
-                <span className="absolute inset-0 wallet-border rounded-2xl" />
+                <button
+                  type="button"
+                  onClick={goToBookings}
+                  className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-semibold text-slate-700 transition hover:bg-indigo-50 hover:text-indigo-700"
+                >
+                  <CalendarDays size={19} />
+                  My Bookings
+                </button>
 
-                <span className="relative block overflow-hidden rounded-[15px] border border-amber-300/20 bg-gradient-to-br from-[#3b2705] via-[#76520d] to-[#2a1b03] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_30px_rgba(245,158,11,0.15)]">
-                  <span className="absolute rounded-full pointer-events-none -right-8 -top-8 h-28 w-28 bg-yellow-400/20 blur-2xl" />
+                <Link
+                  to="/Home/messages"
+                  onClick={() => setMobileMenu(false)}
+                  className="flex items-center gap-3 rounded-xl px-4 py-3 font-semibold text-slate-700 transition hover:bg-indigo-50 hover:text-indigo-700"
+                >
+                  <MessageSquare size={19} />
+                  Messages
+                </Link>
 
-                  <span className="absolute inset-0 pointer-events-none wallet-shine" />
+                <Link
+                  to="/dashboard"
+                  onClick={() => setMobileMenu(false)}
+                  className="flex items-center gap-3 rounded-xl px-4 py-3 font-semibold text-slate-700 transition hover:bg-indigo-50 hover:text-indigo-700"
+                >
+                  Dashboard
+                </Link>
 
-                  <div className="relative flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      {/* WALLET */}
+                <button
+                  type="button"
+                  onClick={goToWallet}
+                  className="flex w-full items-center justify-between rounded-xl bg-indigo-50 px-4 py-3 text-left"
+                >
+                  <span className="flex items-center gap-3 font-semibold text-indigo-700">
+                    <Wallet size={19} />
+                    Bonus Wallet
+                  </span>
 
-                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-yellow-200/30 bg-gradient-to-br from-yellow-300 via-amber-500 to-orange-600 shadow-[0_0_22px_rgba(245,158,11,0.4)]">
-                        <Banknote size={22} className="text-white" />
-                      </div>
+                  <span className="font-bold text-indigo-700">
+                    ₹{balance}
+                  </span>
+                </button>
 
-                      {/* BALANCE */}
+                <button
+                  type="button"
+                  onClick={openNotifications}
+                  className="flex w-full items-center justify-between rounded-xl px-4 py-3 text-left font-semibold text-slate-700 transition hover:bg-indigo-50 hover:text-indigo-700"
+                >
+                  <span className="flex items-center gap-3">
+                    <Bell size={19} />
+                    Notifications
+                  </span>
 
-                      <div>
-                        <p className="text-[9px] font-black uppercase tracking-[0.24em] text-yellow-200/60">
-                          Available Wallet
-                        </p>
+                  {unreadCount > 0 && (
+                    <span className="rounded-full bg-indigo-600 px-2 py-0.5 text-xs font-bold text-white">
+                      {unreadCount}
+                    </span>
+                  )}
+                </button>
 
-                        <div className="mt-0.5 flex items-end gap-2">
-                          <span
-                            className={`
-                              text-2xl
-                              font-black
-                              tracking-tight
-                              text-white
-                              transition-all
-                              duration-500
-                              ${balancePulse ? "scale-110 text-yellow-200" : ""}
-                            `}
-                          >
-                            ₹{formattedBalance}
-                          </span>
-
-                          <span className="mb-1 text-xs font-bold text-yellow-300/80">
-                            Balance
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <ChevronRight
-                      size={19}
-                      className="transition-transform duration-300 text-yellow-200/60 group-hover:translate-x-1"
-                    />
-                  </div>
-                </span>
-              </button>
-            </div>
-
-            {/* =================================================
-                MOBILE NAV
-            ================================================= */}
-
-            <nav className="flex flex-col gap-2 p-5">
-              <MobileNavItem
-                icon={<Home size={18} />}
-                label="Home"
-                to="/"
-                active={isActive("/browse-mentors")}
-                onClick={() => setMobileMenu(false)}
-              />
-
-              <MobileNavItem
-                icon={<Users size={18} />}
-                label="Browse Mentors"
-                to="/browse-mentors"
-                active={isActive("/browse-mentors")}
-                onClick={() => setMobileMenu(false)}
-              />
-
-              <MobileNavItem
-                icon={<CalendarDays size={18} />}
-                label="My Bookings"
-                to="/my-bookings"
-                active={isActive("/my-bookings")}
-                onClick={() => setMobileMenu(false)}
-              />
-
-              <MobileNavItem
-                icon={<MessageSquare size={18} />}
-                label="Messages"
-                to="/messages"
-                active={isActive("/messages")}
-                onClick={() => setMobileMenu(false)}
-              />
-
-              <MobileNavItem
-                icon={<LayoutDashboard size={18} />}
-                label="Dashboard"
-                to="/dashboard"
-                active={isActive("/dashboard")}
-                onClick={() => setMobileMenu(false)}
-              />
-            </nav>
-          </div>
-        )}
+                <button
+                  type="button"
+                  onClick={goToProfile}
+                  className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-semibold text-slate-700 transition hover:bg-indigo-50 hover:text-indigo-700"
+                >
+                  <User size={19} />
+                  Profile
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </header>
 
-      {/* =====================================================
-          ANIMATIONS
-      ===================================================== */}
+      <AnimatePresence>
+        {showNotifications && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-start justify-center bg-slate-900/30 px-4 pt-20 backdrop-blur-[2px]"
+            onClick={closeNotifications}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: -20, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -20, scale: 0.96 }}
+              transition={{ duration: 0.2 }}
+              className="w-full max-w-[480px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={closeNotifications}
+                    className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100"
+                  >
+                    <ArrowLeft size={19} />
+                  </button>
 
-      <style>{`
+                  <div>
+                    <h2 className="text-base font-bold text-slate-900">
+                      Notifications
+                    </h2>
 
-        /* ===============================================
-           SILVER BORDER TRAVELING EFFECT
-        =============================================== */
+                    <p className="text-xs text-slate-500">
+                      {unreadCount} unread notifications
+                    </p>
+                  </div>
+                </div>
 
-        @keyframes walletBorderMove {
+                <button
+                  type="button"
+                  onClick={closeNotifications}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                >
+                  <X size={18} />
+                </button>
+              </div>
 
-          0% {
-            transform: rotate(0deg);
-          }
+              <div className="max-h-[430px] overflow-y-auto">
+                {notifications.slice(0, 6).map((notification) => (
+                  <div
+                    key={notification.id}
+                    className={`flex gap-3 border-b border-slate-100 px-4 py-3 transition hover:bg-slate-50 ${
+                      notification.unread
+                        ? "bg-indigo-50/30"
+                        : "bg-white"
+                    }`}
+                  >
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+                      {getNotificationIcon(notification.type)}
+                    </div>
 
-          100% {
-            transform: rotate(360deg);
-          }
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="text-sm font-bold text-slate-800">
+                          {notification.title}
+                        </h3>
 
-        }
+                        {notification.unread && (
+                          <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-indigo-600" />
+                        )}
+                      </div>
 
-        .wallet-shell {
-          isolation: isolate;
-        }
+                      <p className="mt-1 text-xs leading-5 text-slate-500">
+                        {notification.message}
+                      </p>
 
-        .wallet-border {
-          background:
-            conic-gradient(
-              from 0deg,
-              rgba(255,255,255,0.08),
-              rgba(203,213,225,0.25),
-              rgba(255,255,255,0.95),
-              rgba(148,163,184,0.25),
-              rgba(255,255,255,0.08),
-              rgba(203,213,225,0.8),
-              rgba(255,255,255,0.08)
-            );
+                      <p className="mt-1 text-[10px] font-medium text-slate-400">
+                        {notification.time}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
 
-          animation:
-            walletBorderMove
-            3.8s
-            linear
-            infinite;
+              {notifications.length > 6 && (
+                <div className="flex items-center justify-between bg-slate-50 px-4 py-3">
+                  <span className="text-xs font-medium text-slate-500">
+                    {notifications.length - 6} more notifications
+                  </span>
 
-          filter:
-            drop-shadow(
-              0 0 5px
-              rgba(226,232,240,0.35)
-            );
-
-          z-index: -1;
-        }
-
-        /* ===============================================
-           GOLD SHINE
-        =============================================== */
-
-        @keyframes walletShineMove {
-
-          0% {
-            transform:
-              translateX(-120%)
-              skewX(-20deg);
-
-            opacity: 0;
-          }
-
-          15% {
-            opacity: 0.4;
-          }
-
-          45% {
-            opacity: 0.8;
-          }
-
-          65% {
-            opacity: 0;
-          }
-
-          100% {
-            transform:
-              translateX(180%)
-              skewX(-20deg);
-
-            opacity: 0;
-          }
-
-        }
-
-        .wallet-shine {
-          width: 35%;
-          background:
-            linear-gradient(
-              90deg,
-              transparent,
-              rgba(255,255,255,0.28),
-              transparent
-            );
-
-          transform:
-            translateX(-120%)
-            skewX(-20deg);
-
-          animation:
-            walletShineMove
-            4s
-            ease-in-out
-            infinite;
-
-        }
-
-        /* ===============================================
-           HOVER BORDER BOOST
-        =============================================== */
-
-        .wallet-shell:hover .wallet-border {
-          animation-duration: 1.8s;
-
-          filter:
-            drop-shadow(
-              0 0 8px
-              rgba(226,232,240,0.65)
-            );
-        }
-
-      `}</style>
-    </div>
-  );
-};
-
-/* =========================================================
-   DESKTOP NAV ITEM
-========================================================= */
-
-const NavItem = ({ icon, label, to, active = false }) => {
-  return (
-    <Link
-      to={to}
-      className={`
-        group
-        relative
-        flex
-        items-center
-        gap-2
-        transition-all
-        duration-200
-        ${active ? "text-purple-400" : "text-gray-300 hover:text-white"}
-      `}
-    >
-      {icon}
-
-      <span className="text-sm font-medium">{label}</span>
-
-      {active && (
-        <span className="absolute -bottom-[22px] left-0 right-0 h-[2px] rounded-full bg-gradient-to-r from-violet-500 to-indigo-500 shadow-[0_0_10px_rgba(139,92,246,0.7)]" />
-      )}
-    </Link>
-  );
-};
-
-/* =========================================================
-   MOBILE NAV ITEM
-========================================================= */
-
-const MobileNavItem = ({ icon, label, to, active = false, onClick }) => {
-  return (
-    <Link
-      to={to}
-      onClick={onClick}
-      className={`
-        flex
-        items-center
-        gap-3
-        rounded-xl
-        px-4
-        py-3
-        transition-all
-        duration-200
-        ${
-          active
-            ? "border border-purple-500/10 bg-purple-500/10 text-purple-400"
-            : "text-gray-300 hover:bg-white/5 hover:text-white"
-        }
-      `}
-    >
-      {icon}
-
-      <span className="font-medium">{label}</span>
-
-      {active && (
-        <span className="ml-auto h-1.5 w-1.5 rounded-full bg-purple-400 shadow-[0_0_8px_rgba(168,85,247,0.8)]" />
-      )}
-    </Link>
+                  <button
+                    type="button"
+                    onClick={goToNotificationsPage}
+                    className="flex items-center gap-1 text-xs font-bold text-indigo-600 transition hover:text-indigo-800"
+                  >
+                    Read all
+                    <ChevronRight size={15} />
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   );
 };
 
