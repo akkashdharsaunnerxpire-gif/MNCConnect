@@ -12,7 +12,17 @@ const mentorRoutes = require("./routes/mentorRoutes");
 
 const app = express();
 
+
+// ========================================
+// BASIC CONFIG
+// ========================================
+
 app.disable("x-powered-by");
+
+
+// ========================================
+// HELMET
+// ========================================
 
 app.use(
   helmet({
@@ -22,36 +32,64 @@ app.use(
   })
 );
 
+
+// ========================================
+// SESSION
+// ========================================
+
 app.use(
   session({
     secret:
       process.env.SESSION_SECRET ||
       "mncconnect-session-secret-dev",
+
     resave: false,
+
     saveUninitialized: false,
+
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+
+      secure:
+        process.env.NODE_ENV === "production",
+
       sameSite: "lax",
+
       maxAge: 1000 * 60 * 60 * 8,
     },
   })
 );
 
+
+// ========================================
+// COOKIE PARSER
+// ========================================
+
 app.use(cookieParser());
 
+
+// ========================================
+// CORS
+// ========================================
+
 const allowedOrigins = (
-  process.env.CLIENT_URLS ||
-  "http://localhost:5173,http://localhost:3000"
+  process.env.CLIENT_URL ||
+  "http://localhost:5173"
 )
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
 
-console.log("✅ Allowed origins:", allowedOrigins);
+console.log(
+  "✅ Allowed CORS origins:",
+  allowedOrigins
+);
+
 
 const corsOptions = {
   origin: (origin, callback) => {
+
+    // Allow requests like Postman / server-to-server
     if (!origin) {
       return callback(null, true);
     }
@@ -60,7 +98,10 @@ const corsOptions = {
       return callback(null, true);
     }
 
-    console.log("❌ Blocked origin:", origin);
+    console.log(
+      "❌ Blocked CORS origin:",
+      origin
+    );
 
     return callback(
       new Error("CORS: Origin not allowed")
@@ -85,7 +126,14 @@ const corsOptions = {
   ],
 };
 
+
+// Apply CORS to API routes
 app.use("/api", cors(corsOptions));
+
+
+// ========================================
+// BODY PARSER
+// ========================================
 
 app.use(
   express.json({
@@ -100,41 +148,97 @@ app.use(
   })
 );
 
+
+// ========================================
+// STATIC FILES
+// ========================================
+
 app.use(express.static("public"));
 
+
+// ========================================
+// EJS
+// ========================================
+
 app.set("view engine", "ejs");
-app.set("views", path.join(__dirname, "views"));
+
+app.set(
+  "views",
+  path.join(__dirname, "views")
+);
+
+
+// ========================================
+// HEALTH CHECK
+// ========================================
 
 app.get("/api/health", (req, res) => {
+
   res.status(200).json({
     success: true,
     message: "MNCConnect API is running",
     timestamp: new Date().toISOString(),
   });
+
 });
 
-app.use("/api/auth", authRoutes);
 
-app.use("/api/payments", paymentRoutes);
+// ========================================
+// API ROUTES
+// ========================================
 
-app.use("/api/mentor", mentorRoutes);
+app.use(
+  "/api/auth",
+  authRoutes
+);
 
-app.use("/admin", adminRoutes);
+app.use(
+  "/api/payments",
+  paymentRoutes
+);
+
+app.use(
+  "/api/mentor",
+  mentorRoutes
+);
+
+
+// ========================================
+// ADMIN ROUTES
+// ========================================
+
+app.use(
+  "/admin",
+  adminRoutes
+);
+
+
+// ========================================
+// 404 HANDLER
+// ========================================
 
 app.use((req, res) => {
+
   if (req.path.startsWith("/api/")) {
+
     return res.status(404).json({
       success: false,
-      message: `Route not found: ${req.method} ${req.originalUrl}`,
+      message:
+        `Route not found: ${req.method} ${req.originalUrl}`,
     });
   }
 
+
   if (req.path.startsWith("/admin/")) {
+
     return res.status(404).send(`
       <!DOCTYPE html>
+
       <html>
+
         <head>
           <title>404 - Page Not Found</title>
+
           <style>
             body {
               font-family: Arial, sans-serif;
@@ -175,8 +279,11 @@ app.use((req, res) => {
         </head>
 
         <body>
+
           <div class="container">
+
             <h1>404</h1>
+
             <p>
               Page not found:
               ${req.method} ${req.originalUrl}
@@ -187,49 +294,82 @@ app.use((req, res) => {
                 ← Back to Admin Dashboard
               </a>
             </p>
+
           </div>
+
         </body>
+
       </html>
     `);
   }
 
+
   return res.status(404).send(`
     <!DOCTYPE html>
+
     <html>
+
       <head>
         <title>404 - Not Found</title>
       </head>
 
       <body>
+
         <h1>404 - Not Found</h1>
 
         <p>
           The requested resource was not found.
         </p>
+
       </body>
+
     </html>
   `);
 });
 
-app.use((error, req, res, next) => {
-  console.error("Global error:", error);
 
-  if (error.message?.startsWith("CORS:")) {
-    if (req.path.startsWith("/api/")) {
+// ========================================
+// GLOBAL ERROR HANDLER
+// ========================================
+
+app.use((error, req, res, next) => {
+
+  console.error(
+    "Global error:",
+    error
+  );
+
+
+  // ========================================
+  // CORS ERROR
+  // ========================================
+
+  if (
+    error.message?.startsWith("CORS:")
+  ) {
+
+    if (
+      req.path.startsWith("/api/")
+    ) {
+
       return res.status(403).json({
         success: false,
-        message: "Request origin is not allowed.",
+        message:
+          "Request origin is not allowed.",
       });
     }
 
     return res.status(403).send(`
       <!DOCTYPE html>
+
       <html>
+
         <head>
           <title>403 - Forbidden</title>
         </head>
 
         <body>
+
           <h1>403 - Forbidden</h1>
 
           <p>
@@ -241,16 +381,30 @@ app.use((error, req, res, next) => {
               ← Back to Admin
             </a>
           </p>
+
         </body>
+
       </html>
     `);
   }
 
-  if (error.code === "LIMIT_FILE_SIZE") {
-    if (req.path.startsWith("/api/")) {
+
+  // ========================================
+  // FILE SIZE ERROR
+  // ========================================
+
+  if (
+    error.code === "LIMIT_FILE_SIZE"
+  ) {
+
+    if (
+      req.path.startsWith("/api/")
+    ) {
+
       return res.status(400).json({
         success: false,
-        message: "File size cannot exceed 5MB.",
+        message:
+          "File size cannot exceed 5MB.",
       });
     }
 
@@ -259,8 +413,20 @@ app.use((error, req, res, next) => {
     );
   }
 
-  if (error instanceof require("multer").MulterError) {
-    if (req.path.startsWith("/api/")) {
+
+  // ========================================
+  // MULTER ERROR
+  // ========================================
+
+  if (
+    error instanceof
+    require("multer").MulterError
+  ) {
+
+    if (
+      req.path.startsWith("/api/")
+    ) {
+
       return res.status(400).json({
         success: false,
         message:
@@ -275,21 +441,42 @@ app.use((error, req, res, next) => {
     );
   }
 
-  if (req.path.startsWith("/api/")) {
+
+  // ========================================
+  // GENERAL API ERROR
+  // ========================================
+
+  if (
+    req.path.startsWith("/api/")
+  ) {
+
     return res.status(500).json({
       success: false,
-      message: "Internal server error.",
-      error: error.message,
+      message:
+        "Internal server error.",
+      error:
+        error.message,
     });
   }
 
+
+  // ========================================
+  // GENERAL HTML ERROR
+  // ========================================
+
   return res.status(500).send(`
     <!DOCTYPE html>
+
     <html>
+
       <head>
-        <title>500 - Server Error</title>
+
+        <title>
+          500 - Server Error
+        </title>
 
         <style>
+
           body {
             font-family: Arial, sans-serif;
             background: #0f172a;
@@ -319,12 +506,18 @@ app.use((error, req, res, next) => {
             color: #818cf8;
             text-decoration: none;
           }
+
         </style>
+
       </head>
 
       <body>
+
         <div class="container">
-          <h1>500 - Server Error</h1>
+
+          <h1>
+            500 - Server Error
+          </h1>
 
           <p>
             Something went wrong.
@@ -336,10 +529,15 @@ app.use((error, req, res, next) => {
               ← Back to Admin
             </a>
           </p>
+
         </div>
+
       </body>
+
     </html>
   `);
+
 });
+
 
 module.exports = app;

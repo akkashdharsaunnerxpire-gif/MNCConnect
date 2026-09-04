@@ -4,339 +4,312 @@ const http = require("http");
 const { Server } = require("socket.io");
 
 const app = require("./app");
+
 const connectDB = require("./config/db");
-const { seedAdminFromEnv } = require("./controllers/adminController");
 
-const authRoutes = require("./routes/authRoutes");
-const mentorRoutes = require("./routes/mentorRoutes");
+const {
+  seedAdminFromEnv,
+} = require("./controllers/adminController");
 
-const PORT = Number(process.env.PORT) || 5000;
 
-app.use("/api/auth", authRoutes);
-app.use("/api/mentor", mentorRoutes);
+// ========================================
+// ENV
+// ========================================
+
+const PORT =
+  Number(process.env.PORT) || 5000;
+
+const CLIENT_URL =
+  process.env.CLIENT_URL ||
+  "http://localhost:5173";
+
+
+// ========================================
+// START SERVER
+// ========================================
 
 const startServer = async () => {
+
   try {
+
+    // ========================================
+    // ENV VALIDATION
+    // ========================================
+
     if (!process.env.JWT_SECRET) {
+
       throw new Error(
         "JWT_SECRET is missing in environment variables."
       );
     }
 
+
     if (!process.env.MONGO_URI) {
+
       throw new Error(
         "MONGO_URI is missing in environment variables."
       );
     }
 
+
+    if (!process.env.CLIENT_URL) {
+
+      throw new Error(
+        "CLIENT_URL is missing in environment variables."
+      );
+    }
+
+
+    // ========================================
+    // DATABASE
+    // ========================================
+
     await connectDB();
+
     await seedAdminFromEnv();
 
-    const server = http.createServer(app);
+
+    // ========================================
+    // HTTP SERVER
+    // ========================================
+
+    const server =
+      http.createServer(app);
+
+
+    // ========================================
+    // SOCKET.IO
+    // ========================================
 
     const io = new Server(server, {
+
       cors: {
-        origin: [
-          "http://localhost:5173",
-          "http://localhost:3000",
+
+        origin: CLIENT_URL,
+
+        methods: [
+          "GET",
+          "POST",
         ],
-        methods: ["GET", "POST"],
+
         credentials: true,
       },
+
     });
+
+
+    // ========================================
+    // ONLINE EMPLOYEES
+    // ========================================
 
     /*
       employeeId -> Set of socket IDs
 
       Example:
 
-      {
-        "EMP001": Set {
-          "socket123",
-          "socket456"
-        }
+      EMP001 -> {
+        socket123,
+        socket456
       }
 
-      Same employee multiple tabs/devices open
-      pannalum online-ah maintain pannalam.
+      Multiple tabs/devices
+      open pannalum online maintain pannalam.
     */
-    const onlineEmployees = new Map();
+
+    const onlineEmployees =
+      new Map();
+
+
+    // ========================================
+    // ONLINE MENTORS
+    // ========================================
 
     /*
       mentorId -> Set of socket IDs
     */
-    const onlineMentors = new Map();
 
-    /*
-      Make these available to controllers.
+    const onlineMentors =
+      new Map();
 
-      Controller-la:
 
-      const io = req.app.get("io");
-      const onlineEmployees =
-        req.app.get("onlineEmployees");
-    */
-    app.set("io", io);
+    // ========================================
+    // MAKE AVAILABLE TO CONTROLLERS
+    // ========================================
+
+    app.set(
+      "io",
+      io
+    );
+
     app.set(
       "onlineEmployees",
       onlineEmployees
     );
+
     app.set(
       "onlineMentors",
       onlineMentors
     );
+
+
+    // ========================================
+    // ADD ONLINE USER
+    // ========================================
 
     const addOnlineUser = (
       map,
       userId,
       socketId
     ) => {
-      const id = String(userId);
+
+      const id =
+        String(userId);
+
 
       if (!map.has(id)) {
-        map.set(id, new Set());
+
+        map.set(
+          id,
+          new Set()
+        );
       }
 
-      map.get(id).add(socketId);
+
+      map
+        .get(id)
+        .add(socketId);
     };
+
+
+    // ========================================
+    // REMOVE ONLINE USER
+    // ========================================
 
     const removeOnlineUser = (
       map,
       userId,
       socketId
     ) => {
+
       if (!userId) {
         return false;
       }
 
-      const id = String(userId);
 
-      const sockets = map.get(id);
+      const id =
+        String(userId);
+
+
+      const sockets =
+        map.get(id);
+
 
       if (!sockets) {
         return false;
       }
 
-      sockets.delete(socketId);
 
-      if (sockets.size === 0) {
+      sockets.delete(
+        socketId
+      );
+
+
+      if (
+        sockets.size === 0
+      ) {
+
         map.delete(id);
 
         return true;
       }
 
+
       return false;
     };
 
-    io.on("connection", (socket) => {
-      console.log(
-        "Socket connected:",
-        socket.id
-      );
 
-      /*
-        ========================================
-        EMPLOYEE ONLINE
-        ========================================
-      */
+    // ========================================
+    // SOCKET CONNECTION
+    // ========================================
 
-      socket.on(
-        "employee-online",
-        (payload = {}) => {
-          const employeeId =
-            payload.employeeId;
+    io.on(
+      "connection",
+      (socket) => {
 
-          if (!employeeId) {
-            console.log(
-              "Employee ID missing"
-            );
+        console.log(
+          "Socket connected:",
+          socket.id
+        );
 
-            return;
-          }
 
-          socket.employeeId =
-            String(employeeId);
+        // ========================================
+        // EMPLOYEE ONLINE
+        // ========================================
 
-          addOnlineUser(
-            onlineEmployees,
-            employeeId,
-            socket.id
-          );
+        socket.on(
+          "employee-online",
+          (payload = {}) => {
 
-          console.log(
-            `Employee ${employeeId} is ONLINE`
-          );
+            const employeeId =
+              payload.employeeId;
 
-          console.log(
-            "Online employees:",
-            Array.from(
-              onlineEmployees.keys()
-            )
-          );
 
-          io.emit(
-            "employee-status",
-            {
-              employeeId:
-                String(employeeId),
+            if (!employeeId) {
 
-              isOnline: true,
+              console.log(
+                "Employee ID missing"
+              );
+
+              return;
             }
-          );
-        }
-      );
 
-      /*
-        ========================================
-        EMPLOYEE OFFLINE
-        ========================================
-      */
 
-      socket.on(
-        "employee-offline",
-        (payload = {}) => {
-          const employeeId =
-            payload.employeeId ||
-            socket.employeeId;
+            socket.employeeId =
+              String(employeeId);
 
-          if (!employeeId) {
-            return;
-          }
 
-          const becameOffline =
-            removeOnlineUser(
+            addOnlineUser(
               onlineEmployees,
               employeeId,
               socket.id
             );
 
-          console.log(
-            `Employee ${employeeId} socket disconnected manually`
-          );
 
-          if (becameOffline) {
+            console.log(
+              `Employee ${employeeId} is ONLINE`
+            );
+
+
             io.emit(
               "employee-status",
               {
                 employeeId:
                   String(employeeId),
 
-                isOnline: false,
+                isOnline: true,
               }
             );
           }
-        }
-      );
+        );
 
-      /*
-        ========================================
-        MENTOR ONLINE
-        ========================================
-      */
 
-      socket.on(
-        "mentor-online",
-        (payload = {}) => {
-          const mentorId =
-            payload.mentorId;
+        // ========================================
+        // EMPLOYEE OFFLINE
+        // ========================================
 
-          if (!mentorId) {
-            console.log(
-              "Mentor ID missing"
-            );
+        socket.on(
+          "employee-offline",
+          (payload = {}) => {
 
-            return;
-          }
-
-          socket.mentorId =
-            String(mentorId);
-
-          addOnlineUser(
-            onlineMentors,
-            mentorId,
-            socket.id
-          );
-
-          console.log(
-            `Mentor ${mentorId} is ONLINE`
-          );
-
-          io.emit(
-            "mentor-status",
-            {
-              mentorId:
-                String(mentorId),
-
-              isOnline: true,
-            }
-          );
-        }
-      );
-
-      /*
-        ========================================
-        MENTOR OFFLINE
-        ========================================
-      */
-
-      socket.on(
-        "mentor-offline",
-        (payload = {}) => {
-          const mentorId =
-            payload.mentorId ||
-            socket.mentorId;
-
-          if (!mentorId) {
-            return;
-          }
-
-          const becameOffline =
-            removeOnlineUser(
-              onlineMentors,
-              mentorId,
-              socket.id
-            );
-
-          console.log(
-            `Mentor ${mentorId} went OFFLINE`
-          );
-
-          if (becameOffline) {
-            io.emit(
-              "mentor-status",
-              {
-                mentorId:
-                  String(mentorId),
-
-                isOnline: false,
-              }
-            );
-          }
-        }
-      );
-
-      /*
-        ========================================
-        SOCKET DISCONNECT
-        ========================================
-      */
-
-      socket.on(
-        "disconnect",
-        (reason) => {
-          console.log(
-            "Socket disconnected:",
-            socket.id,
-            reason
-          );
-
-          /*
-            Remove employee
-          */
-
-          if (socket.employeeId) {
             const employeeId =
+              payload.employeeId ||
               socket.employeeId;
+
+
+            if (!employeeId) {
+              return;
+            }
+
 
             const becameOffline =
               removeOnlineUser(
@@ -345,10 +318,13 @@ const startServer = async () => {
                 socket.id
               );
 
+
+            console.log(
+              `Employee ${employeeId} socket disconnected manually`
+            );
+
+
             if (becameOffline) {
-              console.log(
-                `Employee ${employeeId} is OFFLINE`
-              );
 
               io.emit(
                 "employee-status",
@@ -361,14 +337,77 @@ const startServer = async () => {
               );
             }
           }
+        );
 
-          /*
-            Remove mentor
-          */
 
-          if (socket.mentorId) {
+        // ========================================
+        // MENTOR ONLINE
+        // ========================================
+
+        socket.on(
+          "mentor-online",
+          (payload = {}) => {
+
             const mentorId =
+              payload.mentorId;
+
+
+            if (!mentorId) {
+
+              console.log(
+                "Mentor ID missing"
+              );
+
+              return;
+            }
+
+
+            socket.mentorId =
+              String(mentorId);
+
+
+            addOnlineUser(
+              onlineMentors,
+              mentorId,
+              socket.id
+            );
+
+
+            console.log(
+              `Mentor ${mentorId} is ONLINE`
+            );
+
+
+            io.emit(
+              "mentor-status",
+              {
+                mentorId:
+                  String(mentorId),
+
+                isOnline: true,
+              }
+            );
+          }
+        );
+
+
+        // ========================================
+        // MENTOR OFFLINE
+        // ========================================
+
+        socket.on(
+          "mentor-offline",
+          (payload = {}) => {
+
+            const mentorId =
+              payload.mentorId ||
               socket.mentorId;
+
+
+            if (!mentorId) {
+              return;
+            }
+
 
             const becameOffline =
               removeOnlineUser(
@@ -377,10 +416,13 @@ const startServer = async () => {
                 socket.id
               );
 
+
+            console.log(
+              `Mentor ${mentorId} went OFFLINE`
+            );
+
+
             if (becameOffline) {
-              console.log(
-                `Mentor ${mentorId} is OFFLINE`
-              );
 
               io.emit(
                 "mentor-status",
@@ -393,34 +435,155 @@ const startServer = async () => {
               );
             }
           }
-        }
-      );
-    });
+        );
+
+
+        // ========================================
+        // SOCKET DISCONNECT
+        // ========================================
+
+        socket.on(
+          "disconnect",
+          (reason) => {
+
+            console.log(
+              "Socket disconnected:",
+              socket.id,
+              reason
+            );
+
+
+            // ========================================
+            // REMOVE EMPLOYEE
+            // ========================================
+
+            if (
+              socket.employeeId
+            ) {
+
+              const employeeId =
+                socket.employeeId;
+
+
+              const becameOffline =
+                removeOnlineUser(
+                  onlineEmployees,
+                  employeeId,
+                  socket.id
+                );
+
+
+              if (becameOffline) {
+
+                console.log(
+                  `Employee ${employeeId} is OFFLINE`
+                );
+
+
+                io.emit(
+                  "employee-status",
+                  {
+                    employeeId:
+                      String(employeeId),
+
+                    isOnline: false,
+                  }
+                );
+              }
+            }
+
+
+            // ========================================
+            // REMOVE MENTOR
+            // ========================================
+
+            if (
+              socket.mentorId
+            ) {
+
+              const mentorId =
+                socket.mentorId;
+
+
+              const becameOffline =
+                removeOnlineUser(
+                  onlineMentors,
+                  mentorId,
+                  socket.id
+                );
+
+
+              if (becameOffline) {
+
+                console.log(
+                  `Mentor ${mentorId} is OFFLINE`
+                );
+
+
+                io.emit(
+                  "mentor-status",
+                  {
+                    mentorId:
+                      String(mentorId),
+
+                    isOnline: false,
+                  }
+                );
+              }
+            }
+
+          }
+        );
+
+      }
+    );
+
+
+    // ========================================
+    // START SERVER
+    // ========================================
 
     server.listen(
       PORT,
       () => {
+
         console.log(
-          `Server running on port ${PORT}`
+          "========================================"
         );
 
         console.log(
-          `API: http://localhost:${PORT}`
+          `✅ Server running on port ${PORT}`
         );
 
         console.log(
-          `Socket.IO: http://localhost:${PORT}`
+          `✅ API: http://localhost:${PORT}`
         );
+
+        console.log(
+          `✅ Socket.IO: http://localhost:${PORT}`
+        );
+
+        console.log(
+          `✅ Client URL: ${CLIENT_URL}`
+        );
+
+        console.log(
+          "========================================"
+        );
+
       }
     );
+
   } catch (error) {
+
     console.error(
-      "Server startup failed:",
+      "❌ Server startup failed:",
       error.message
     );
 
     process.exit(1);
   }
 };
+
 
 startServer();
