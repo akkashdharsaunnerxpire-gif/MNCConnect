@@ -55,10 +55,7 @@ const login = async (req, res) => {
         // VALIDATE INPUT
         // ========================================================
 
-        if (
-            !email ||
-            !password
-        ) {
+        if (!email || !password) {
 
             return res.status(400).render(
                 "admin/login",
@@ -76,12 +73,12 @@ const login = async (req, res) => {
 
         const normalizedEmail =
             String(email)
-                .toLowerCase()
-                .trim();
+                .trim()
+                .toLowerCase();
 
 
         // ========================================================
-        // GET ENV ADMIN DETAILS
+        // ENV ADMIN CREDENTIALS
         // ========================================================
 
         const envAdminEmail =
@@ -89,8 +86,8 @@ const login = async (req, res) => {
                 process.env.ADMIN_EMAIL ||
                 "admin@mncconnect.com"
             )
-                .toLowerCase()
-                .trim();
+                .trim()
+                .toLowerCase();
 
 
         const envAdminPassword =
@@ -106,17 +103,24 @@ const login = async (req, res) => {
 
 
         // ========================================================
-        // CHECK .ENV ADMIN FIRST
+        // FIRST CHECK .ENV ADMIN
         // ========================================================
 
+        /*
+          IMPORTANT:
+
+          .env credentials are checked FIRST.
+
+          So even if the same admin already exists
+          in MongoDB with an old password, the .env
+          credentials will still work.
+        */
+
         if (
-            normalizedEmail ===
-                envAdminEmail &&
-            String(password) ===
-                envAdminPassword
+            normalizedEmail === envAdminEmail &&
+            String(password) === envAdminPassword
         ) {
 
-            // Create admin session
             req.session.admin = {
 
                 id: "env-admin",
@@ -130,7 +134,7 @@ const login = async (req, res) => {
 
 
             console.log(
-                "================================="
+                "========================================"
             );
 
             console.log(
@@ -152,7 +156,7 @@ const login = async (req, res) => {
             );
 
             console.log(
-                "================================="
+                "========================================"
             );
 
 
@@ -235,7 +239,7 @@ const login = async (req, res) => {
         if (!admin.isActive) {
 
             console.log(
-                "❌ Admin account inactive:",
+                "❌ Admin account is inactive:",
                 normalizedEmail
             );
 
@@ -256,7 +260,13 @@ const login = async (req, res) => {
         let isPasswordValid = false;
 
 
-        // If model has comparePassword()
+        /*
+          If Admin model has comparePassword(),
+          use it.
+
+          Otherwise use bcrypt.compare().
+        */
+
         if (
             typeof admin.comparePassword ===
             "function"
@@ -269,7 +279,6 @@ const login = async (req, res) => {
 
         } else {
 
-            // Fallback bcrypt comparison
             isPasswordValid =
                 await bcrypt.compare(
                     password,
@@ -285,7 +294,7 @@ const login = async (req, res) => {
         if (!isPasswordValid) {
 
             console.log(
-                "❌ Invalid admin password:",
+                "❌ Invalid database admin password:",
                 normalizedEmail
             );
 
@@ -330,7 +339,7 @@ const login = async (req, res) => {
 
 
         console.log(
-            "================================="
+            "========================================"
         );
 
         console.log(
@@ -342,7 +351,7 @@ const login = async (req, res) => {
         );
 
         console.log(
-            "Admin:",
+            "Admin email:",
             admin.email
         );
 
@@ -352,7 +361,7 @@ const login = async (req, res) => {
         );
 
         console.log(
-            "================================="
+            "========================================"
         );
 
 
@@ -401,7 +410,6 @@ const login = async (req, res) => {
             error
         );
 
-
         return res.status(500).render(
             "admin/login",
             {
@@ -418,6 +426,10 @@ const login = async (req, res) => {
 // ============================================================
 
 const logout = (req, res) => {
+
+    if (!req.session) {
+        return res.redirect("/admin/login");
+    }
 
     req.session.destroy(
         (error) => {
@@ -480,6 +492,7 @@ const dashboard = async (req, res) => {
         return res.render(
             "admin/dashboard",
             {
+
                 admin:
                     req.session.admin,
 
@@ -523,6 +536,642 @@ const dashboard = async (req, res) => {
 
 
 // ============================================================
+// MENTOR LIST
+// ============================================================
+
+const listMentors = async (req, res) => {
+
+    try {
+
+        const {
+            search = "",
+            status = "all"
+        } = req.query;
+
+        const filter = {};
+
+
+        // ========================================================
+        // STATUS FILTER
+        // ========================================================
+
+        if (
+            [
+                "pending",
+                "approved",
+                "rejected"
+            ].includes(status)
+        ) {
+
+            filter.verificationStatus =
+                status;
+        }
+
+
+        // ========================================================
+        // SEARCH
+        // ========================================================
+
+        if (search.trim()) {
+
+            const searchRegex =
+                new RegExp(
+                    search.trim(),
+                    "i"
+                );
+
+
+            filter.$or = [
+
+                {
+                    name:
+                        searchRegex
+                },
+
+                {
+                    email:
+                        searchRegex
+                },
+
+                {
+                    mobile:
+                        searchRegex
+                },
+
+                {
+                    employeeId:
+                        searchRegex
+                },
+
+                {
+                    currentCompany:
+                        searchRegex
+                },
+
+                {
+                    designation:
+                        searchRegex
+                },
+
+                {
+                    department:
+                        searchRegex
+                }
+            ];
+        }
+
+
+        // ========================================================
+        // GET MENTORS
+        // ========================================================
+
+        const mentors =
+            await Mentor
+                .find(filter)
+                .select("-password")
+                .sort({
+                    createdAt: -1
+                })
+                .lean();
+
+
+        return res.render(
+            "admin/mentors",
+            {
+
+                admin:
+                    req.session.admin,
+
+                mentors,
+
+                search,
+
+                status,
+
+                currentPage:
+                    "mentors",
+
+                pageTitle:
+                    "Mentors",
+
+                pageSubtitle:
+                    "Manage all mentor profiles"
+            }
+        );
+
+
+    } catch (error) {
+
+        console.error(
+            "List mentors error:",
+            error
+        );
+
+        return res
+            .status(500)
+            .send(
+                "Unable to load mentors."
+            );
+    }
+};
+
+
+// ============================================================
+// MENTOR DETAILS
+// ============================================================
+
+const mentorDetails = async (req, res) => {
+
+    try {
+
+        const {
+            id
+        } = req.params;
+
+
+        // ========================================================
+        // VALIDATE OBJECT ID
+        // ========================================================
+
+        if (
+            !mongoose.Types.ObjectId.isValid(id)
+        ) {
+
+            return res
+                .status(400)
+                .send(
+                    "Invalid mentor ID format."
+                );
+        }
+
+
+        // ========================================================
+        // GET MENTOR
+        // ========================================================
+
+        const mentor =
+            await Mentor
+                .findById(id)
+                .select("-password")
+                .lean();
+
+
+        if (!mentor) {
+
+            return res
+                .status(404)
+                .send(
+                    "Mentor not found."
+                );
+        }
+
+
+        return res.render(
+            "admin/mentorDetails",
+            {
+
+                admin:
+                    req.session.admin,
+
+                mentor,
+
+                currentPage:
+                    "mentors",
+
+                pageTitle:
+                    "Mentor Details",
+
+                pageSubtitle:
+                    "View and manage mentor profile"
+            }
+        );
+
+
+    } catch (error) {
+
+        console.error(
+            "Mentor details error:",
+            error
+        );
+
+        return res
+            .status(500)
+            .send(
+                "Unable to load mentor details."
+            );
+    }
+};
+
+
+// ============================================================
+// APPROVE MENTOR
+// ============================================================
+
+const approveMentor = async (req, res) => {
+
+    try {
+
+        console.log(
+            "================================="
+        );
+
+        console.log(
+            "APPROVE MENTOR ROUTE HIT"
+        );
+
+        console.log(
+            "MENTOR ID:",
+            req.params.id
+        );
+
+        console.log(
+            "ADMIN SESSION:",
+            req.session.admin
+        );
+
+        console.log(
+            "================================="
+        );
+
+
+        const {
+            id
+        } = req.params;
+
+
+        // ========================================================
+        // VALIDATE OBJECT ID
+        // ========================================================
+
+        if (
+            !mongoose.Types.ObjectId.isValid(id)
+        ) {
+
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Invalid mentor ID format."
+            });
+        }
+
+
+        // ========================================================
+        // FIND MENTOR
+        // ========================================================
+
+        const mentor =
+            await Mentor.findById(id);
+
+
+        if (!mentor) {
+
+            return res.status(404).json({
+                success: false,
+                message:
+                    "Mentor not found."
+            });
+        }
+
+
+        // ========================================================
+        // CURRENT STATUS
+        // ========================================================
+
+        console.log(
+            "Current mentor status:",
+            {
+                verificationStatus:
+                    mentor.verificationStatus,
+
+                isVerified:
+                    mentor.isVerified,
+
+                accountStatus:
+                    mentor.accountStatus
+            }
+        );
+
+
+        // ========================================================
+        // ALREADY APPROVED
+        // ========================================================
+
+        if (
+            mentor.verificationStatus ===
+            "approved"
+        ) {
+
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Mentor is already approved."
+            });
+        }
+
+
+        // ========================================================
+        // UPDATE MENTOR
+        // ========================================================
+
+        mentor.verificationStatus =
+            "approved";
+
+        mentor.isVerified =
+            true;
+
+        mentor.accountStatus =
+            "active";
+
+
+        if (
+            !mentor.verificationMethod ||
+            mentor.verificationMethod ===
+            "pending"
+        ) {
+
+            mentor.verificationMethod =
+                "document";
+        }
+
+
+        // Remove rejection reason
+        mentor.rejectionReason =
+            undefined;
+
+
+        await mentor.save();
+
+
+        console.log(
+            "Mentor approved successfully:",
+            {
+                id:
+                    mentor._id,
+
+                email:
+                    mentor.email,
+
+                verificationStatus:
+                    mentor.verificationStatus,
+
+                isVerified:
+                    mentor.isVerified,
+
+                accountStatus:
+                    mentor.accountStatus
+            }
+        );
+
+
+        return res.json({
+
+            success: true,
+
+            message:
+                "Mentor approved successfully.",
+
+            mentor: {
+
+                id:
+                    mentor._id,
+
+                verificationStatus:
+                    mentor.verificationStatus,
+
+                isVerified:
+                    mentor.isVerified,
+
+                accountStatus:
+                    mentor.accountStatus
+            }
+        });
+
+
+    } catch (error) {
+
+        console.error(
+            "Approve mentor error:",
+            error
+        );
+
+        return res.status(500).json({
+
+            success: false,
+
+            message:
+                "Unable to approve mentor. Error: " +
+                error.message
+        });
+    }
+};
+
+
+// ============================================================
+// REJECT MENTOR
+// ============================================================
+
+const rejectMentor = async (req, res) => {
+
+    try {
+
+        console.log(
+            "================================="
+        );
+
+        console.log(
+            "REJECT MENTOR ROUTE HIT"
+        );
+
+        console.log(
+            "MENTOR ID:",
+            req.params.id
+        );
+
+        console.log(
+            "ADMIN SESSION:",
+            req.session.admin
+        );
+
+        console.log(
+            "================================="
+        );
+
+
+        const {
+            id
+        } = req.params;
+
+
+        // ========================================================
+        // VALIDATE OBJECT ID
+        // ========================================================
+
+        if (
+            !mongoose.Types.ObjectId.isValid(id)
+        ) {
+
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Invalid mentor ID format."
+            });
+        }
+
+
+        // ========================================================
+        // FIND MENTOR
+        // ========================================================
+
+        const mentor =
+            await Mentor.findById(id);
+
+
+        if (!mentor) {
+
+            return res.status(404).json({
+                success: false,
+                message:
+                    "Mentor not found."
+            });
+        }
+
+
+        // ========================================================
+        // CURRENT STATUS
+        // ========================================================
+
+        console.log(
+            "Current mentor status:",
+            {
+                verificationStatus:
+                    mentor.verificationStatus,
+
+                isVerified:
+                    mentor.isVerified,
+
+                accountStatus:
+                    mentor.accountStatus
+            }
+        );
+
+
+        // ========================================================
+        // ALREADY REJECTED
+        // ========================================================
+
+        if (
+            mentor.verificationStatus ===
+            "rejected"
+        ) {
+
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Mentor is already rejected."
+            });
+        }
+
+
+        // ========================================================
+        // REJECTION REASON
+        // ========================================================
+
+        const reason =
+            req.body?.reason ||
+            "Mentor verification rejected by admin.";
+
+
+        // ========================================================
+        // UPDATE MENTOR
+        // ========================================================
+
+        mentor.verificationStatus =
+            "rejected";
+
+        mentor.isVerified =
+            false;
+
+        mentor.accountStatus =
+            "rejected";
+
+        mentor.rejectionReason =
+            reason;
+
+
+        await mentor.save();
+
+
+        console.log(
+            "Mentor rejected successfully:",
+            {
+                id:
+                    mentor._id,
+
+                email:
+                    mentor.email,
+
+                verificationStatus:
+                    mentor.verificationStatus,
+
+                isVerified:
+                    mentor.isVerified,
+
+                accountStatus:
+                    mentor.accountStatus,
+
+                rejectionReason:
+                    mentor.rejectionReason
+            }
+        );
+
+
+        return res.json({
+
+            success: true,
+
+            message:
+                "Mentor rejected successfully.",
+
+            mentor: {
+
+                id:
+                    mentor._id,
+
+                verificationStatus:
+                    mentor.verificationStatus,
+
+                isVerified:
+                    mentor.isVerified,
+
+                accountStatus:
+                    mentor.accountStatus,
+
+                rejectionReason:
+                    mentor.rejectionReason
+            }
+        });
+
+
+    } catch (error) {
+
+        console.error(
+            "Reject mentor error:",
+            error
+        );
+
+        return res.status(500).json({
+
+            success: false,
+
+            message:
+                "Unable to reject mentor. Error: " +
+                error.message
+        });
+    }
+};
+
+
+// ============================================================
 // SEED ADMIN FROM .ENV
 // ============================================================
 
@@ -534,14 +1183,20 @@ const seedAdminFromEnv = async () => {
             process.env.ADMIN_EMAIL ||
             "admin@mncconnect.com";
 
+
         const envAdminPassword =
             process.env.ADMIN_PASSWORD ||
             "Admin@123";
+
 
         const envAdminName =
             process.env.ADMIN_NAME ||
             "Super Admin";
 
+
+        // ========================================================
+        // CHECK EXISTING ADMIN
+        // ========================================================
 
         const existingAdmin =
             await Admin.findOne({
@@ -559,6 +1214,10 @@ const seedAdminFromEnv = async () => {
             return;
         }
 
+
+        // ========================================================
+        // CREATE ADMIN
+        // ========================================================
 
         const admin =
             new Admin({
@@ -588,9 +1247,10 @@ const seedAdminFromEnv = async () => {
         );
 
         console.log(
-            "Admin email:",
+            "Email:",
             envAdminEmail
         );
+
 
     } catch (error) {
 
@@ -616,8 +1276,13 @@ module.exports = {
 
     dashboard,
 
-    // Keep your existing mentor functions
-    // below if they are already in this file.
+    listMentors,
+
+    mentorDetails,
+
+    approveMentor,
+
+    rejectMentor,
 
     seedAdminFromEnv
 };
