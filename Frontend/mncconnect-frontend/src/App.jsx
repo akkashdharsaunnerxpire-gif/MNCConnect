@@ -1,5 +1,9 @@
+import React, {
+  useState,
+  createContext,
+  useContext,
+} from "react";
 
-import React, { useState, createContext, useContext } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -13,9 +17,9 @@ import LinearProgress from "./components/LinearProgress";
 import MentorRoutes from "./Routes/MentorRoutes";
 import FresherRoutes from "./Routes/FresherRoutes";
 
-/* =========================================
+/* =========================================================
    LOADING CONTEXT
-========================================= */
+========================================================= */
 
 export const LoadingContext = createContext();
 
@@ -31,39 +35,44 @@ export const useLoading = () => {
   return context;
 };
 
-/* =========================================
-   LOGIN CHECK
-========================================= */
+/* =========================================================
+   AUTH CHECKS
+========================================================= */
 
 const isMentorLoggedIn = () => {
   return Boolean(
-    localStorage.getItem("mnc_mentor_token")
+    window.localStorage.getItem("mnc_mentor_token")
   );
 };
 
 const isFresherLoggedIn = () => {
   return Boolean(
-    localStorage.getItem("fresher_token")
+    window.localStorage.getItem("fresher_token")
   );
 };
 
-/* =========================================
-   ROOT
-========================================= */
+/* =========================================================
+   HOME ROUTE
+========================================================= */
 
 const HomeRoute = () => {
-
-  // Mentor already logged in
+  /*
+    If mentor is already logged in,
+    send them to the actual mentor dashboard.
+  */
   if (isMentorLoggedIn()) {
     return (
       <Navigate
-        to="/mentor/dashboard"
+        to="/mentor/home"
         replace
       />
     );
   }
 
-  // Fresher already logged in
+  /*
+    If fresher is already logged in,
+    send them to fresher home.
+  */
   if (isFresherLoggedIn()) {
     return (
       <Navigate
@@ -73,16 +82,17 @@ const HomeRoute = () => {
     );
   }
 
-  // Nobody logged in
+  /*
+    Otherwise show landing page.
+  */
   return <Landing />;
 };
 
-/* =========================================
+/* =========================================================
    APP
-========================================= */
+========================================================= */
 
 function App() {
-
   const [isLoading, setIsLoading] = useState(false);
 
   return (
@@ -92,55 +102,48 @@ function App() {
         setIsLoading,
       }}
     >
-
       <Router>
+        <div className="min-h-screen bg-white font-sans text-gray-900">
 
-        <div className="min-h-screen font-sans text-gray-900 bg-white">
-
-          {/* Global Loading */}
+          {/* Global loading progress */}
           <LinearProgress
             isLoading={isLoading}
           />
 
           <Routes>
 
-            {/* ==============================
-                LANDING
-                /
-            ============================== */}
+            {/* =================================================
+                ROOT
+            ================================================= */}
 
             <Route
               path="/"
               element={<HomeRoute />}
             />
 
-
-            {/* ==============================
-                ALL MENTOR ROUTES
+            {/* =================================================
+                MENTOR ROUTES
                 /mentor/*
-            ============================== */}
+            ================================================= */}
 
             <Route
               path="/mentor/*"
               element={<MentorRoutes />}
             />
 
-
-            {/* ==============================
-                ALL FRESHER ROUTES
+            {/* =================================================
+                FRESHER ROUTES
                 /Home/*
-            ============================== */}
+            ================================================= */}
 
             <Route
               path="/Home/*"
               element={<FresherRoutes />}
             />
 
-
-            {/* ==============================
-                OLD PROFILE URL
-                /profile
-            ============================== */}
+            {/* =================================================
+                LEGACY / SHORTCUT ROUTES
+            ================================================= */}
 
             <Route
               path="/profile"
@@ -152,12 +155,6 @@ function App() {
               }
             />
 
-
-            {/* ==============================
-                OLD MNC LOGOS URL
-                /Mnclogos
-            ============================== */}
-
             <Route
               path="/Mnclogos"
               element={
@@ -167,11 +164,6 @@ function App() {
                 />
               }
             />
-
-
-            {/* ==============================
-                OLD EMPLOYEE PROFILE
-            ============================== */}
 
             <Route
               path="/employee-profile"
@@ -183,10 +175,9 @@ function App() {
               }
             />
 
-
-            {/* ==============================
-                INVALID URL
-            ============================== */}
+            {/* =================================================
+                UNKNOWN ROUTES
+            ================================================= */}
 
             <Route
               path="*"
@@ -199,14 +190,10 @@ function App() {
             />
 
           </Routes>
-
         </div>
-
       </Router>
-
     </LoadingContext.Provider>
   );
 }
 
 export default App;
-

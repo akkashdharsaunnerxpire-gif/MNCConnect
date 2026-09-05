@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
+import socket from "../../socket";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -23,10 +24,8 @@ import {
   Video,
   Zap,
 } from "lucide-react";
-import { io } from "socket.io-client";
 
-const SOCKET_URL =
-  import.meta.env.VITE_SOCKET_URL || "http://localhost:5000";
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:5000";
 
 const mentor = {
   name: "Arun",
@@ -146,94 +145,80 @@ const impactSteps = [
     icon: BriefcaseBusiness,
   },
 ];
-
 function Home() {
-  const [isOnline, setIsOnline] = useState(true);
+  const [isOnline, setIsOnline] = useState(socket.connected);
 
   useEffect(() => {
-    const socket = io(SOCKET_URL, {
-      transports: ["websocket"],
-    });
-
-    socket.on("connect", () => {
-      setIsOnline(true);
-
-      const mentorId = localStorage.getItem("mentorId");
-
-      if (mentorId) {
-        socket.emit("mentor-online", {
-          mentorId,
-        });
-      }
-    });
-
-    socket.on("disconnect", () => {
-      setIsOnline(false);
-    });
-
-    socket.on("connect_error", () => {
-      setIsOnline(false);
-    });
-
-    return () => {
-      socket.disconnect();
-    };
-  }, []);
-
-  const toggleOnlineStatus = () => {
     const mentorId = localStorage.getItem("mentorId");
-    const nextStatus = !isOnline;
-
-    setIsOnline(nextStatus);
 
     if (!mentorId) {
+      console.warn("mentorId not found in localStorage");
+      setIsOnline(false);
       return;
     }
 
-    const socket = io(SOCKET_URL, {
-      transports: ["websocket"],
-    });
+    const handleConnect = () => {
+      console.log("Home socket connected:", socket.id);
 
-    socket.emit(nextStatus ? "mentor-online" : "mentor-offline", {
-      mentorId,
-    });
+      setIsOnline(true);
 
-    setTimeout(() => {
-      socket.disconnect();
-    }, 500);
-  };
+      socket.emit("mentor-online", {
+        mentorId,
+      });
+
+      console.log("mentor-online emitted:", mentorId);
+    };
+
+    const handleDisconnect = (reason) => {
+      console.log("Home socket disconnected:", reason);
+      setIsOnline(false);
+    };
+
+    const handleConnectError = (error) => {
+      console.error("Home socket connection error:", error.message);
+      setIsOnline(false);
+    };
+
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
+    socket.on("connect_error", handleConnectError);
+
+    if (socket.connected) {
+      handleConnect();
+    } else {
+      socket.connect();
+    }
+
+    return () => {
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("connect_error", handleConnectError);
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#f6f7f9] text-slate-950">
       <main className="mx-auto max-w-[1500px] px-4 py-5 sm:px-6 lg:px-8">
-
         <section className="relative overflow-hidden rounded-[32px] bg-slate-950 text-white shadow-2xl">
           <div className="absolute -right-32 -top-32 h-[420px] w-[420px] rounded-full bg-blue-500/10 blur-3xl" />
           <div className="absolute -bottom-40 left-1/3 h-[420px] w-[420px] rounded-full bg-indigo-500/10 blur-3xl" />
 
           <div className="relative grid gap-12 px-6 py-8 sm:px-9 sm:py-10 lg:grid-cols-[1.15fr_0.85fr] lg:px-12 lg:py-12">
-
             <div className="flex flex-col justify-center">
               <div className="mb-6 flex flex-wrap items-center gap-3">
                 <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-semibold tracking-wide text-white">
                   <Sparkles size={13} />
                   NEXT GENERATION
                 </div>
-
-                <button
-                  onClick={toggleOnlineStatus}
-                  className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:bg-white/10"
-                >
+                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-300">
                   <span
                     className={`h-2 w-2 rounded-full ${
                       isOnline ? "bg-emerald-400" : "bg-slate-500"
                     }`}
                   />
 
-                  {isOnline
-                    ? "Available for mentorship"
-                    : "Currently offline"}
-                </button>
+                  {isOnline ? "Available for mentorship" : "Currently offline"}
+                </div>
               </div>
 
               <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-500">
@@ -242,15 +227,13 @@ function Home() {
 
               <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-[1.04] tracking-[-0.045em] sm:text-5xl lg:text-[64px]">
                 Your session can become their{" "}
-                <span className="text-slate-500">
-                  first opportunity.
-                </span>
+                <span className="text-slate-500">first opportunity.</span>
               </h1>
 
               <p className="mt-6 max-w-2xl text-base leading-7 text-slate-300 sm:text-lg">
-                Share your experience, prepare the next generation and,
-                when a fresher is ready, open a door inside the company
-                you already know.
+                Share your experience, prepare the next generation and, when a
+                fresher is ready, open a door inside the company you already
+                know.
               </p>
 
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
@@ -297,7 +280,6 @@ function Home() {
               className="flex items-center"
             >
               <div className="w-full rounded-[28px] border border-white/10 bg-white/[0.06] p-5 backdrop-blur-xl sm:p-6">
-
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
@@ -399,19 +381,14 @@ function Home() {
                     <Icon size={19} />
                   </div>
 
-                  <ArrowUpRight
-                    size={17}
-                    className="text-slate-300"
-                  />
+                  <ArrowUpRight size={17} className="text-slate-300" />
                 </div>
 
                 <p className="mt-5 text-3xl font-semibold tracking-tight">
                   {item.value}
                 </p>
 
-                <p className="mt-1 text-sm text-slate-500">
-                  {item.label}
-                </p>
+                <p className="mt-1 text-sm text-slate-500">{item.label}</p>
               </motion.div>
             );
           })}
@@ -428,9 +405,9 @@ function Home() {
             </h2>
 
             <p className="mt-4 text-sm leading-7 text-slate-500 sm:text-base">
-              Your role doesn't stop when the video call ends. If the
-              fresher is ready, your professional experience and company
-              network can help them take the next step.
+              Your role doesn't stop when the video call ends. If the fresher is
+              ready, your professional experience and company network can help
+              them take the next step.
             </p>
           </div>
 
@@ -456,9 +433,7 @@ function Home() {
                     </div>
                   </div>
 
-                  <h3 className="mt-6 text-lg font-semibold">
-                    {step.title}
-                  </h3>
+                  <h3 className="mt-6 text-lg font-semibold">{step.title}</h3>
 
                   <p className="mt-2 text-sm leading-6 text-slate-500">
                     {step.text}
@@ -477,7 +452,6 @@ function Home() {
         </section>
 
         <section className="mt-10 grid gap-6 lg:grid-cols-[1.35fr_0.65fr]">
-
           <div className="rounded-[30px] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
             <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
               <div>
@@ -513,7 +487,6 @@ function Home() {
                   className="rounded-2xl border border-slate-200 p-4 transition hover:border-slate-300 hover:shadow-sm"
                 >
                   <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-
                     <div className="flex items-center gap-4">
                       <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-slate-950 text-sm font-semibold text-white">
                         {student.initials}
@@ -521,9 +494,7 @@ function Home() {
 
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="font-semibold">
-                            {student.name}
-                          </h3>
+                          <h3 className="font-semibold">{student.name}</h3>
 
                           <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-500">
                             {student.completed}
@@ -548,12 +519,9 @@ function Home() {
                     </div>
 
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-
                       <div className="min-w-[145px]">
                         <div className="flex items-center justify-between text-xs">
-                          <span className="text-slate-400">
-                            Readiness
-                          </span>
+                          <span className="text-slate-400">Readiness</span>
 
                           <span className="font-semibold">
                             {student.readiness}%
@@ -614,8 +582,8 @@ function Home() {
 
             <p className="mt-4 text-sm leading-7 text-slate-400">
               You know the interview process. You know the culture. You know
-              what your company looks for. Give the next generation access
-              to that knowledge.
+              what your company looks for. Give the next generation access to
+              that knowledge.
             </p>
 
             <div className="mt-8 border-t border-white/10 pt-6">
@@ -624,29 +592,19 @@ function Home() {
                   Students mentored
                 </span>
 
-                <span className="text-2xl font-semibold">
-                  48
-                </span>
+                <span className="text-2xl font-semibold">48</span>
               </div>
 
               <div className="mt-5 flex items-center justify-between">
-                <span className="text-sm text-slate-500">
-                  Goals completed
-                </span>
+                <span className="text-sm text-slate-500">Goals completed</span>
 
-                <span className="text-2xl font-semibold">
-                  37
-                </span>
+                <span className="text-2xl font-semibold">37</span>
               </div>
 
               <div className="mt-5 flex items-center justify-between">
-                <span className="text-sm text-slate-500">
-                  Success rate
-                </span>
+                <span className="text-sm text-slate-500">Success rate</span>
 
-                <span className="text-2xl font-semibold">
-                  86%
-                </span>
+                <span className="text-2xl font-semibold">86%</span>
               </div>
             </div>
           </div>
@@ -683,13 +641,9 @@ function Home() {
               >
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <h3 className="font-semibold">
-                      {area.title}
-                    </h3>
+                    <h3 className="font-semibold">{area.title}</h3>
 
-                    <p className="mt-2 text-sm text-slate-400">
-                      {area.skills}
-                    </p>
+                    <p className="mt-2 text-sm text-slate-400">{area.skills}</p>
                   </div>
 
                   <div className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600">
@@ -725,9 +679,9 @@ function Home() {
               </h2>
 
               <p className="mt-4 text-sm leading-7 text-slate-400 sm:text-base">
-                If a fresher has the skills, preparation and potential,
-                your referral can be the bridge between what they know
-                and where they want to go.
+                If a fresher has the skills, preparation and potential, your
+                referral can be the bridge between what they know and where they
+                want to go.
               </p>
             </div>
 

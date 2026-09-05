@@ -45,12 +45,10 @@ export default function Login() {
         } else if (response.status === 403) {
           setError(
             data.message ||
-            "Your account is pending approval. Please wait for admin verification."
+              "Your account is pending approval. Please wait for admin verification.",
           );
         } else if (response.status === 404) {
-          setError(
-            data.message || "Account not found. Please register first."
-          );
+          setError(data.message || "Account not found. Please register first.");
         } else if (response.status === 500) {
           setError("Server error. Please try again later.");
         } else {
@@ -62,45 +60,29 @@ export default function Login() {
 
       if (!data.token) {
         throw new Error(
-          "Login successful, but authentication token is missing."
+          "Login successful, but authentication token is missing.",
         );
       }
 
       if (!data.mentor) {
-        throw new Error(
-          "Mentor information is missing from server response."
-        );
+        throw new Error("Mentor information is missing from server response.");
       }
 
       const mentorId = data.mentor.id;
 
       if (!mentorId) {
-        throw new Error(
-          "Mentor ID is missing from server response."
-        );
+        throw new Error("Mentor ID is missing from server response.");
       }
 
       localStorage.setItem("mnc_mentor_token", data.token);
       localStorage.setItem("user", JSON.stringify(data.mentor));
       localStorage.setItem("mentor", JSON.stringify(data.mentor));
 
-      // IMPORTANT
-      localStorage.setItem("mentorId", mentorId);
+      console.log("🔥 SAVING MENTOR ID:", mentorId);
 
-      console.log("Mentor login successful");
-      console.log("Mentor ID:", mentorId);
+      localStorage.setItem("mentorId", String(mentorId));
 
-      const emitMentorOnline = () => {
-        console.log("Socket connected:", socket.id);
-
-        socket.emit("mentor-online", {
-          mentorId,
-        });
-
-        console.log("mentor-online emitted:", mentorId);
-
-        navigate("/mentor/home");
-      };
+      console.log("🔥 SAVED MENTOR ID:", localStorage.getItem("mentorId"));
 
       if (socket.connected) {
         socket.emit("mentor-online", {
@@ -115,13 +97,9 @@ export default function Login() {
       console.error("Login error:", error);
 
       if (error.message === "Failed to fetch") {
-        setError(
-          "Cannot connect to server. Please check your connection."
-        );
+        setError("Cannot connect to server. Please check your connection.");
       } else {
-        setError(
-          error.message || "An unexpected error occurred."
-        );
+        setError(error.message || "An unexpected error occurred.");
       }
     } finally {
       setIsLoading(false);
@@ -151,9 +129,7 @@ export default function Login() {
           <div className="flex items-start gap-3 p-4 border border-red-200 rounded-xl bg-red-50">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
 
-            <p className="text-sm font-medium text-red-700">
-              {error}
-            </p>
+            <p className="text-sm font-medium text-red-700">{error}</p>
           </div>
         )}
 

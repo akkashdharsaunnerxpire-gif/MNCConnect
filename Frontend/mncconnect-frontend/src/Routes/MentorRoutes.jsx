@@ -1,4 +1,5 @@
 import React from "react";
+
 import {
   Routes,
   Route,
@@ -6,49 +7,79 @@ import {
   Outlet,
 } from "react-router-dom";
 
-/* =========================================
-   AUTH PAGES
-========================================= */
+/* =========================================================
+   MENTOR AUTH
+========================================================= */
 
-import Login from "../Authpage/Login";
-import MncRegister from "../Authpage/MncRegister";
-import ForgotPassword from "../components/ForgotPassword";
+/*
+  IMPORTANT:
 
-/* =========================================
+  Do NOT import Login.jsx separately.
+
+  MncRegister.jsx already contains:
+
+  - Register UI
+  - Mentor Login UI
+  - Forgot Password UI
+  - AuthSidebar
+  - Header
+  - Mobile Auth Navigation
+
+  It decides what to show based on the current URL.
+*/
+
+import MncEmployeeProfile from "../Authpage/MncRegister";
+
+/* =========================================================
    MENTOR PAGES
-========================================= */
+========================================================= */
 
 import Home from "../MncEmployee/pages/Home";
-import MentorNotifications from "../MncEmployee/pages/notifications";
-import MentorProfile from "../MncEmployee/pages/MentorProfile";
 
-import MentorRequests from "../MncEmployee/pages/MentorRequests";
-import MentorSessions from "../MncEmployee/pages/MentorSessions";
-import MentorEarnings from "../MncEmployee/pages/MentorEarnings";
-import MentorReviews from "../MncEmployee/pages/MentorReviews";
-import MentorSettings from "../MncEmployee/pages/MentorSettings";
+import MentorNotifications
+  from "../MncEmployee/pages/notifications";
 
-/* =========================================
-   MENTOR HEADER
-========================================= */
+import MentorProfile
+  from "../MncEmployee/pages/MentorProfile";
 
-import MentorHeader from "../MncEmployee/Components/MentorHeader";
+import MentorRequests
+  from "../MncEmployee/pages/MentorRequests";
 
-/* =========================================
-   MENTOR LOGIN CHECK
-========================================= */
+import MentorSessions
+  from "../MncEmployee/pages/MentorSessions";
+
+import MentorEarnings
+  from "../MncEmployee/pages/MentorEarnings";
+
+import MentorReviews
+  from "../MncEmployee/pages/MentorReviews";
+
+import MentorSettings
+  from "../MncEmployee/pages/MentorSettings";
+
+import MentorHeader
+  from "../MncEmployee/Components/MentorHeader";
+
+/* =========================================================
+   MENTOR AUTH CHECK
+========================================================= */
 
 const isMentorLoggedIn = () => {
   return Boolean(
-    localStorage.getItem("mnc_mentor_token")
+    window.localStorage.getItem("mnc_mentor_token")
   );
 };
 
-/* =========================================
+/* =========================================================
    PROTECTED ROUTE
-========================================= */
+========================================================= */
 
 const MentorProtectedRoute = ({ children }) => {
+  /*
+    If mentor is NOT logged in,
+    send them to the SAME mentor login page.
+  */
+
   if (!isMentorLoggedIn()) {
     return (
       <Navigate
@@ -61,25 +92,18 @@ const MentorProtectedRoute = ({ children }) => {
   return children;
 };
 
-/* =========================================
-   MENTOR LAYOUT
-   HEADER + PAGE
-========================================= */
+/* =========================================================
+   PROTECTED MENTOR LAYOUT
+========================================================= */
 
 const MentorLayout = () => {
   return (
     <div className="min-h-screen bg-[#080612] text-white">
 
-      {/* =====================================
-          COMMON MENTOR HEADER
-      ===================================== */}
-
+      {/* Mentor dashboard header */}
       <MentorHeader />
 
-      {/* =====================================
-          PAGE CONTENT
-      ===================================== */}
-
+      {/* Mentor page content */}
       <main className="min-h-[calc(100vh-64px)]">
         <Outlet />
       </main>
@@ -88,53 +112,79 @@ const MentorLayout = () => {
   );
 };
 
-/* =========================================
+/* =========================================================
    MENTOR ROUTES
-========================================= */
+========================================================= */
 
 const MentorRoutes = () => {
   return (
     <Routes>
 
-      {/* =====================================
-          LOGIN
-          /mentor/login
-      ===================================== */}
+      {/* =====================================================
+          PUBLIC MENTOR AUTH ROUTES
+      ===================================================== */}
 
-      <Route
-        path="login"
-        element={<Login />}
-      />
+      {/*
+        REGISTER
 
+        /mentor/register
 
-      {/* =====================================
-          REGISTER
-          /mentor/register
-      ===================================== */}
+        MncEmployeeProfile checks the pathname and
+        renders the registration UI + AuthSidebar.
+      */}
 
       <Route
         path="register"
-        element={<MncRegister />}
+        element={
+          <MncEmployeeProfile />
+        }
       />
 
+      {/*
+        LOGIN
 
-      {/* =====================================
-          FORGOT PASSWORD
-          /mentor/forgot-password
-      ===================================== */}
+        /mentor/login
+
+        SAME MncEmployeeProfile component.
+
+        It detects /mentor/login and renders:
+
+        - Header
+        - Mentor Access sidebar
+        - Mentor Login form
+      */}
+
+      <Route
+        path="login"
+        element={
+          <MncEmployeeProfile />
+        }
+      />
+
+      {/*
+        FORGOT PASSWORD
+
+        /mentor/forgot-password
+
+        SAME MncEmployeeProfile component.
+
+        It renders:
+
+        - Header
+        - Mentor Access sidebar
+        - Forgot Password form
+      */}
 
       <Route
         path="forgot-password"
-        element={<ForgotPassword />}
+        element={
+          <MncEmployeeProfile />
+        }
       />
 
-
-      {/* =====================================
-          PROTECTED MENTOR AREA
-
-          HEADER WILL SHOW ON ALL
-          PROTECTED PAGES
-      ===================================== */}
+      {/* =====================================================
+          PROTECTED MENTOR ROUTES
+      ===================================================== */}
 
       <Route
         element={
@@ -144,87 +194,72 @@ const MentorRoutes = () => {
         }
       >
 
-        {/* ===================================
-            MENTOR HOME
-            /mentor/home
-        =================================== */}
+        {/* ===================================================
+            MENTOR HOME / DASHBOARD
+        =================================================== */}
 
         <Route
           path="home"
           element={<Home />}
         />
 
-
-        {/* ===================================
-            FRESHER REQUESTS
-            /mentor/requests
-        =================================== */}
+        {/* ===================================================
+            REQUESTS
+        =================================================== */}
 
         <Route
           path="requests"
           element={<MentorRequests />}
         />
 
-
-        {/* ===================================
+        {/* ===================================================
             SESSIONS
-            /mentor/sessions
-        =================================== */}
+        =================================================== */}
 
         <Route
           path="sessions"
           element={<MentorSessions />}
         />
 
-
-        {/* ===================================
+        {/* ===================================================
             EARNINGS
-            /mentor/earnings
-        =================================== */}
+        =================================================== */}
 
         <Route
           path="earnings"
           element={<MentorEarnings />}
         />
 
-
-        {/* ===================================
+        {/* ===================================================
             REVIEWS
-            /mentor/reviews
-        =================================== */}
+        =================================================== */}
 
         <Route
           path="reviews"
           element={<MentorReviews />}
         />
 
-
-        {/* ===================================
+        {/* ===================================================
             PROFILE
-            /mentor/profile
-        =================================== */}
+        =================================================== */}
 
         <Route
           path="profile"
           element={<MentorProfile />}
         />
 
-
-        {/* ===================================
+        {/* ===================================================
             NOTIFICATIONS
-            /mentor/notifications
-        =================================== */}
+        =================================================== */}
 
         <Route
           path="notifications"
           element={<MentorNotifications />}
         />
 
-
-        {/* ===================================
+        {/* ===================================================
             SETTINGS
-            /mentor/settings
-        =================================== */}
+        =================================================== */}
 
         <Route
           path="settings"
@@ -233,11 +268,15 @@ const MentorRoutes = () => {
 
       </Route>
 
-
-      {/* =====================================
+      {/* =====================================================
           /mentor
-          DEFAULT
-      ===================================== */}
+          
+          If logged in:
+            /mentor → /mentor/home
+
+          If not logged in:
+            /mentor → /mentor/login
+      ===================================================== */}
 
       <Route
         index
@@ -253,10 +292,9 @@ const MentorRoutes = () => {
         }
       />
 
-
-      {/* =====================================
-          INVALID MENTOR URL
-      ===================================== */}
+      {/* =====================================================
+          UNKNOWN MENTOR ROUTE
+      ===================================================== */}
 
       <Route
         path="*"

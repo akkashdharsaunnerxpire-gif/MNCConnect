@@ -24,7 +24,7 @@ const API_URL = import.meta.env.VITE_API_URL;
 // Auth endpoints / storage keys. Keep these in one place if your backend paths differ.
 const MENTOR_LOGIN_URL = `${API_URL}/auth/mentor/login`;
 const MENTOR_FORGOT_PASSWORD_URL = `${API_URL}/auth/mentor/forgot-password`;
-const MENTOR_DASHBOARD_PATH = "/mentordashboard";
+const MENTOR_DASHBOARD_PATH = "/mentor/home";
 const MENTOR_REGISTERED_KEY = "mnc_mentor_registration_complete";
 const MENTOR_VERIFICATION_KEY = "mnc_mentor_verification_status";
 const MENTOR_EMAIL_KEY = "mnc_mentor_registered_email";
@@ -164,10 +164,11 @@ function ToastContainer({ toasts, removeToast }) {
 export default function MncEmployeeProfile() {
   const navigate = useNavigate();
   const location = useLocation();
-  
+
   const [showLoader, setShowLoader] = useState(true);
   const [isRegistered, setIsRegistered] = useState(false);
   const [step, setStep] = useState(1);
+
   const [profile, setProfile] = useState(initialProfile);
   const [files, setFiles] = useState(emptyFiles);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1025,31 +1026,66 @@ function AuthSidebar({
           {/* BUTTON 2 — MENTOR LOGIN */}
           <button
             type="button"
-            onClick={() => navigate("/mentor/login")}
-            className={`${itemClass(isLoginRoute)} mt-4`}
+            disabled={!isRegistered}
+            onClick={() => {
+              if (isRegistered) {
+                navigate("/mentor/login");
+              }
+            }}
+            className={`${itemClass(isLoginRoute)} mt-4 ${
+              !isRegistered ? "cursor-not-allowed opacity-60" : ""
+            }`}
           >
             <span
-              className={`relative z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-xs font-bold ${isLoginRoute ? "border-amber-500 bg-amber-400 text-slate-950 shadow-[0_6px_18px_rgba(251,191,36,.22)]" : "border-slate-200 bg-white text-slate-400"}`}
+              className={`relative z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-xs font-bold ${
+                isLoginRoute
+                  ? "border-amber-500 bg-amber-400 text-slate-950 shadow-[0_6px_18px_rgba(251,191,36,.22)]"
+                  : isRegistered
+                    ? "border-slate-200 bg-white text-slate-400"
+                    : "border-slate-200 bg-slate-100 text-slate-300"
+              }`}
             >
               2
-              {isRegisterRoute && (
+              {!isRegistered && (
+                <span className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-slate-800 text-white">
+                  <LockKeyhole className="h-3 w-3" />
+                </span>
+              )}
+              {isRegisterRoute && isRegistered && (
                 <span className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-slate-800 text-white">
                   <LockKeyhole className="h-3 w-3" />
                 </span>
               )}
             </span>
+
             <span>
               <span
-                className={`block text-sm font-bold ${isLoginRoute ? "text-slate-950" : "text-slate-400"}`}
+                className={`block text-sm font-bold ${
+                  isLoginRoute
+                    ? "text-slate-950"
+                    : isRegistered
+                      ? "text-slate-700"
+                      : "text-slate-400"
+                }`}
               >
                 Mentor Login
               </span>
+
               <span
-                className={`mt-0.5 flex items-center gap-1 text-[10px] font-semibold ${isLoginRoute ? "text-amber-600" : "text-slate-300"}`}
+                className={`mt-0.5 flex items-center gap-1 text-[10px] font-semibold ${
+                  isLoginRoute
+                    ? "text-amber-600"
+                    : isRegistered
+                      ? "text-slate-400"
+                      : "text-slate-300"
+                }`}
               >
-                <LogIn className="h-3 w-3" /> Secure access
+                {!isRegistered && <LockKeyhole className="h-3 w-3" />}
+
+                {isRegistered ? "Secure access" : "Register first"}
               </span>
             </span>
+
             {isLoginRoute && (
               <span className="absolute -left-3 top-1/2 h-8 w-1 -translate-y-1/2 rounded-r-full bg-amber-400" />
             )}
@@ -1057,22 +1093,34 @@ function AuthSidebar({
         </div>
 
         <div
-          className={`mt-7 rounded-2xl border p-4 ${isVerified ? "border-blue-100 bg-blue-50/70" : "border-amber-100 bg-amber-50/70"}`}
+          className={`mt-7 rounded-2xl border p-4 ${
+            isVerified
+              ? "border-blue-100 bg-blue-50/70"
+              : isRegistered
+                ? "border-amber-100 bg-amber-50/70"
+                : "border-slate-200 bg-slate-50/70"
+          }`}
         >
           {isVerified ? (
             <CheckCircle2 className="h-4 w-4 text-blue-600" />
           ) : (
             <LockKeyhole className="h-4 w-4 text-amber-600" />
           )}
+
           <p className="mt-2 text-xs font-bold text-slate-900">
             {isVerified
               ? "Verification completed"
-              : "Profile details are locked"}
+              : isRegistered
+                ? "Registration submitted and locked"
+                : "Registration required"}
           </p>
+
           <p className="mt-1 text-[11px] leading-5 text-slate-600">
             {isVerified
-              ? "Your mentor account is ready for secure login."
-              : "Registration cannot be edited again until admin verification is finished."}
+              ? "Your mentor account is verified. You can now login securely."
+              : isRegistered
+                ? "Your registration details are locked. You cannot register again. Please wait for admin verification. Once your account is approved, you can login securely."
+                : "Please complete your mentor registration first. Once submitted, your registration details cannot be changed or submitted again."}
           </p>
         </div>
       </div>
@@ -1091,6 +1139,7 @@ function MentorLogin({ showToast }) {
       "",
   );
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState(() => {
@@ -1161,6 +1210,18 @@ function MentorLogin({ showToast }) {
 
       // Show login success toast
       showToast("✅ Login successful! Welcome back, Mentor.", "success", 4000);
+      window.localStorage.setItem(MENTOR_EMAIL_KEY, email.trim());
+
+      const mentorId =
+        data?.mentor?.id || data?.mentor?._id || data?.id || data?._id;
+
+      if (!mentorId) {
+        throw new Error("Mentor ID was not returned by the server.");
+      }
+
+      window.localStorage.setItem("mentorId", String(mentorId));
+
+      showToast("✅ Login successful! Welcome back, Mentor.", "success", 4000);
 
       navigate(MENTOR_DASHBOARD_PATH, { replace: true });
     } catch (loginError) {
@@ -1178,7 +1239,7 @@ function MentorLogin({ showToast }) {
       setIsSubmitting(false);
     }
   };
-  
+
   return (
     <section className="w-full overflow-hidden rounded-[30px] border border-slate-200/80 bg-white/95 shadow-[0_20px_60px_rgba(15,23,42,.07)]">
       <div className="border-b border-slate-100/80 bg-gradient-to-r from-white via-slate-50/50 to-white px-6 py-7 sm:px-8">
@@ -1559,9 +1620,8 @@ function StepOne({
   update,
   errors = {},
   validationAttempted = false,
-}) 
-{
-    const [showPassword, setShowPassword] = useState(false);
+}) {
+  const [showPassword, setShowPassword] = useState(false);
 
   return (
     <div className="animate-fadeIn">
