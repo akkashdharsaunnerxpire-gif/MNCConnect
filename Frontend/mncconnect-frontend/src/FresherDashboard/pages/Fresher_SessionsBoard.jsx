@@ -849,7 +849,7 @@ export default function SessionBoard() {
 
     try {
       const response = await fetch(
-        `${API_URL}/mentor/session-requests/${encodeURIComponent(
+        `${API_URL}/session/session-requests/${encodeURIComponent(
           requestGroupId,
         )}`,
       );
@@ -989,7 +989,7 @@ export default function SessionBoard() {
 
     console.log("Sending session request:", payload);
 
-    const response = await fetch(`${API_URL}/mentor/session-requests`, {
+    const response = await fetch(`${API_URL}/session/session-requests`, {
       method: "POST",
 
       headers: {
@@ -1103,7 +1103,7 @@ export default function SessionBoard() {
             // 3. Verify payment
             const verifyResponse = await fetch(
              `${API_URL}/payments/verify-payment`,
-              {
+              { 
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",

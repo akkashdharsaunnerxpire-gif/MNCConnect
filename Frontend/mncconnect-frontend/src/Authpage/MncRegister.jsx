@@ -42,6 +42,7 @@ const initialProfile = {
   designation: "",
   department: "",
   experience: "",
+  gender: "",
   location: "",
   linkedin: "",
   skills: "",
@@ -82,6 +83,7 @@ const REQUIRED_STEP_1_FIELDS = [
   ["company", "Current MNC / Company is required."],
   ["designation", "Designation is required."],
   ["department", "Department / Team is required."],
+  ["gender", "Gender is required."], // ADD
   ["experience", "Years of experience is required."],
   ["location", "Current location is required."],
   ["skills", "Skills / Expertise is required."],
@@ -1744,6 +1746,27 @@ function StepOne({
           />
           <ErrorText
             error={errors.department}
+            validationAttempted={validationAttempted}
+          />
+        </Field>
+        <Field label="Gender" required={validationAttempted}>
+          <select
+            value={profile.gender}
+            onChange={(e) => update("gender", e.target.value)}
+            className={`${INPUT_CLASS} ${
+              errors.gender && validationAttempted
+                ? "border-red-300 bg-red-50/50"
+                : ""
+            }`}
+          >
+            <option value="">Select Gender</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+            <option value="other">Other</option>
+          </select>
+
+          <ErrorText
+            error={errors.gender}
             validationAttempted={validationAttempted}
           />
         </Field>

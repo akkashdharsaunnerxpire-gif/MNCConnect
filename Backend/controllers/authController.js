@@ -393,6 +393,7 @@ exports.registerMentor = async (req, res) => {
       company,
       designation,
       department,
+      gender,
       experience,
       location,
       linkedin,
@@ -402,18 +403,21 @@ exports.registerMentor = async (req, res) => {
       confirmationAccepted,
     } = req.body;
 
+    console.log("========================================");
     console.log("MENTOR REGISTER BODY:", req.body);
     console.log("FILES RECEIVED:", req.files);
+    console.log("========================================");
 
     // =====================================================
     // STRICT VALIDATIONS - MENTOR
     // =====================================================
 
-    // 1. Check required fields
+    // 1. Required fields
     if (!name || !email || !mobile || !password) {
       return res.status(400).json({
         success: false,
-        message: "Name, email, mobile number and password are required.",
+        message:
+          "Name, email, mobile number and password are required.",
       });
     }
 
@@ -429,8 +433,9 @@ exports.registerMentor = async (req, res) => {
       });
     }
 
-    // 3. Validate email format
+    // 3. Validate email
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
     if (!emailRegex.test(email)) {
       return res.status(400).json({
         success: false,
@@ -446,22 +451,33 @@ exports.registerMentor = async (req, res) => {
       });
     }
 
+    // =====================================================
     // 5. Validate mobile number
-    const mobileRegex = /^[0-9]{10}$/;
-    let cleanMobileForValidation = String(mobile).replace(/[\s\-\(\)]/g, "");
+    // =====================================================
 
+    const mobileRegex = /^[0-9]{10}$/;
+
+    let cleanMobileForValidation = String(mobile).replace(
+      /[\s\-\(\)]/g,
+      "",
+    );
+
+    // If mobile starts with +
     if (cleanMobileForValidation.startsWith("+")) {
       const digitsOnly = cleanMobileForValidation.replace(/[^0-9]/g, "");
+
       if (digitsOnly.length >= 10) {
         cleanMobileForValidation = digitsOnly.slice(-10);
       }
     }
 
+    // If country code is included without +
     if (
       cleanMobileForValidation.length > 10 &&
       /^\d{11,13}$/.test(cleanMobileForValidation)
     ) {
-      cleanMobileForValidation = cleanMobileForValidation.slice(-10);
+      cleanMobileForValidation =
+        cleanMobileForValidation.slice(-10);
     }
 
     if (!mobileRegex.test(cleanMobileForValidation)) {
@@ -471,28 +487,46 @@ exports.registerMentor = async (req, res) => {
       });
     }
 
+    // =====================================================
     // 6. Validate country code
+    // =====================================================
+
     const countryCodeRegex = /^\+\d{1,4}$/;
+
     let cleanCountryCode = String(countryCode || "+91").trim();
+
     if (!cleanCountryCode.startsWith("+")) {
       cleanCountryCode = "+" + cleanCountryCode;
     }
+
     if (!countryCodeRegex.test(cleanCountryCode)) {
       return res.status(400).json({
         success: false,
-        message: "Please provide a valid country code (e.g., +91).",
+        message:
+          "Please provide a valid country code (e.g., +91).",
       });
     }
 
+    // =====================================================
     // 7. Validate company
-    if (!company || typeof company !== "string" || company.trim().length < 2) {
+    // =====================================================
+
+    if (
+      !company ||
+      typeof company !== "string" ||
+      company.trim().length < 2
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Company name is required and must be at least 2 characters.",
+        message:
+          "Company name is required and must be at least 2 characters.",
       });
     }
 
+    // =====================================================
     // 8. Validate designation
+    // =====================================================
+
     if (
       !designation ||
       typeof designation !== "string" ||
@@ -500,11 +534,15 @@ exports.registerMentor = async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-        message: "Designation is required and must be at least 2 characters.",
+        message:
+          "Designation is required and must be at least 2 characters.",
       });
     }
 
+    // =====================================================
     // 9. Validate department
+    // =====================================================
+
     if (
       !department ||
       typeof department !== "string" ||
@@ -512,11 +550,44 @@ exports.registerMentor = async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-        message: "Department is required and must be at least 2 characters.",
+        message:
+          "Department is required and must be at least 2 characters.",
       });
     }
 
-    // 10. Validate companyId (Employee ID)
+    // =====================================================
+    // 10. VALIDATE GENDER
+    // =====================================================
+
+    const allowedGenders = [
+      "male",
+      "female",
+      "other",
+    ];
+
+    const cleanGender = String(gender || "")
+      .trim()
+      .toLowerCase();
+
+    if (!cleanGender) {
+      return res.status(400).json({
+        success: false,
+        message: "Gender is required.",
+      });
+    }
+
+    if (!allowedGenders.includes(cleanGender)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid gender. Please select Male, Female or Other.",
+      });
+    }
+
+    // =====================================================
+    // 11. Validate Employee ID
+    // =====================================================
+
     if (
       !companyId ||
       typeof companyId !== "string" ||
@@ -524,20 +595,29 @@ exports.registerMentor = async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-        message: "Employee ID is required and must be at least 2 characters.",
+        message:
+          "Employee ID is required and must be at least 2 characters.",
       });
     }
 
-    // 11. Validate confirmation
+    // =====================================================
+    // 12. Validate confirmation
+    // =====================================================
+
     if (confirmationAccepted !== "true") {
       return res.status(400).json({
         success: false,
-        message: "Please confirm that the submitted information is correct.",
+        message:
+          "Please confirm that the submitted information is correct.",
       });
     }
 
-    // 12. Validate experience
+    // =====================================================
+    // 13. Validate experience
+    // =====================================================
+
     const parsedExperience = Number(experience);
+
     if (
       Number.isNaN(parsedExperience) ||
       parsedExperience < 0 ||
@@ -545,22 +625,31 @@ exports.registerMentor = async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-        message: "Please provide valid years of experience (0-60 years).",
+        message:
+          "Please provide valid years of experience (0-60 years).",
       });
     }
 
-    // 13. Validate location (optional)
+    // =====================================================
+    // 14. Validate location
+    // =====================================================
+
     if (
       location &&
-      (typeof location !== "string" || location.trim().length < 2)
+      (typeof location !== "string" ||
+        location.trim().length < 2)
     ) {
       return res.status(400).json({
         success: false,
-        message: "Location must be at least 2 characters if provided.",
+        message:
+          "Location must be at least 2 characters if provided.",
       });
     }
 
-    // 14. Validate LinkedIn (optional)
+    // =====================================================
+    // 15. Validate LinkedIn
+    // =====================================================
+
     if (
       linkedin &&
       typeof linkedin === "string" &&
@@ -568,23 +657,34 @@ exports.registerMentor = async (req, res) => {
     ) {
       const linkedinRegex =
         /^(https?:\/\/)?(www\.)?linkedin\.com\/in\/[a-zA-Z0-9\-_]+\/?$/;
+
       if (!linkedinRegex.test(linkedin.trim())) {
         return res.status(400).json({
           success: false,
-          message: "Please provide a valid LinkedIn profile URL.",
+          message:
+            "Please provide a valid LinkedIn profile URL.",
         });
       }
     }
 
-    // 15. Validate bio (optional)
-    if (bio && (typeof bio !== "string" || bio.trim().length > 500)) {
+    // =====================================================
+    // 16. Validate bio
+    // =====================================================
+
+    if (
+      bio &&
+      (typeof bio !== "string" || bio.trim().length > 500)
+    ) {
       return res.status(400).json({
         success: false,
         message: "Bio must be less than 500 characters.",
       });
     }
 
-    // 16. Validate skills
+    // =====================================================
+    // 17. Validate skills
+    // =====================================================
+
     const languages = String(skills || "")
       .split(",")
       .map((item) => item.trim())
@@ -593,14 +693,23 @@ exports.registerMentor = async (req, res) => {
     if (languages.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "At least one skill/language is required.",
+        message:
+          "At least one skill/language is required.",
       });
     }
 
-    // 17. Validate files - Check if files exist
-    const offerLetter = req.files?.offerLetter?.[0];
-    const employeeIdProof = req.files?.employeeIdProof?.[0];
-    const additionalProof = req.files?.additionalProof?.[0];
+    // =====================================================
+    // 18. Validate files
+    // =====================================================
+
+    const offerLetter =
+      req.files?.offerLetter?.[0];
+
+    const employeeIdProof =
+      req.files?.employeeIdProof?.[0];
+
+    const additionalProof =
+      req.files?.additionalProof?.[0];
 
     if (!offerLetter) {
       return res.status(400).json({
@@ -621,96 +730,152 @@ exports.registerMentor = async (req, res) => {
     // =====================================================
 
     const timestamp = Date.now();
+
     const userEmail = normalizeEmail(email);
+
     const folderName = `mentors/${userEmail}`;
 
     console.log("Uploading files to Cloudinary...");
 
-    // Upload offer letter
-    const offerLetterUpload = await uploadFromBuffer(
-      offerLetter.buffer,
-      `${folderName}/documents`,
-      `offer_letter_${timestamp}`,
-    );
-    uploadedFiles.push(offerLetterUpload.public_id);
-
-    // Upload employee ID proof
-    const employeeIdProofUpload = await uploadFromBuffer(
-      employeeIdProof.buffer,
-      `${folderName}/documents`,
-      `employee_id_${timestamp}`,
-    );
-    uploadedFiles.push(employeeIdProofUpload.public_id);
-
-    // Upload additional proof if provided
-    let additionalProofUpload = null;
-    if (additionalProof) {
-      additionalProofUpload = await uploadFromBuffer(
-        additionalProof.buffer,
+    // Offer Letter
+    const offerLetterUpload =
+      await uploadFromBuffer(
+        offerLetter.buffer,
         `${folderName}/documents`,
-        `additional_proof_${timestamp}`,
+        `offer_letter_${timestamp}`,
       );
-      uploadedFiles.push(additionalProofUpload.public_id);
+
+    uploadedFiles.push(
+      offerLetterUpload.public_id,
+    );
+
+    // Employee ID
+    const employeeIdProofUpload =
+      await uploadFromBuffer(
+        employeeIdProof.buffer,
+        `${folderName}/documents`,
+        `employee_id_${timestamp}`,
+      );
+
+    uploadedFiles.push(
+      employeeIdProofUpload.public_id,
+    );
+
+    // Additional Proof
+    let additionalProofUpload = null;
+
+    if (additionalProof) {
+      additionalProofUpload =
+        await uploadFromBuffer(
+          additionalProof.buffer,
+          `${folderName}/documents`,
+          `additional_proof_${timestamp}`,
+        );
+
+      uploadedFiles.push(
+        additionalProofUpload.public_id,
+      );
     }
 
-    console.log("All files uploaded to Cloudinary successfully!");
+    console.log(
+      "All files uploaded to Cloudinary successfully!",
+    );
 
     // =====================================================
-    // CLEAN AND PREPARE DATA
+    // CLEAN DATA
     // =====================================================
 
-    const cleanName = String(name).trim();
-    const normalizedEmail = normalizeEmail(email);
-    const cleanMobile = cleanCountryCode + cleanMobileForValidation;
-    const cleanCompany = String(company).trim();
-    const cleanDesignation = String(designation).trim();
-    const cleanDepartment = String(department).trim();
-    const cleanEmployeeId = String(companyId).trim();
-    const cleanLocation = location ? String(location).trim() : "";
-    const cleanLinkedin = linkedin ? String(linkedin).trim() : "";
-    const cleanBio = bio ? String(bio).trim() : "";
+    const cleanName =
+      String(name).trim();
+
+    const normalizedEmail =
+      normalizeEmail(email);
+
+    const cleanMobile =
+      cleanCountryCode +
+      cleanMobileForValidation;
+
+    const cleanCompany =
+      String(company).trim();
+
+    const cleanDesignation =
+      String(designation).trim();
+
+    const cleanDepartment =
+      String(department).trim();
+
+    const cleanEmployeeId =
+      String(companyId).trim();
+
+    const cleanLocation =
+      location
+        ? String(location).trim()
+        : "";
+
+    const cleanLinkedin =
+      linkedin
+        ? String(linkedin).trim()
+        : "";
+
+    const cleanBio =
+      bio
+        ? String(bio).trim()
+        : "";
 
     // =====================================================
-    // UNIQUENESS CHECKS - MENTOR
+    // UNIQUENESS CHECKS
     // =====================================================
 
-    const existingMentorByEmail = await Mentor.findOne({
-      email: normalizedEmail,
-    });
+    const existingMentorByEmail =
+      await Mentor.findOne({
+        email: normalizedEmail,
+      });
 
     if (existingMentorByEmail) {
-      // Delete uploaded files from Cloudinary
       for (const publicId of uploadedFiles) {
-        await deleteFromCloudinary(publicId).catch(console.error);
+        await deleteFromCloudinary(
+          publicId,
+        ).catch(console.error);
       }
+
       return res.status(409).json({
         success: false,
-        message: "A mentor account already exists with this email.",
+        message:
+          "A mentor account already exists with this email.",
       });
     }
 
-    const existingFresherByEmail = await Fresher.findOne({
-      email: normalizedEmail,
-    });
+    const existingFresherByEmail =
+      await Fresher.findOne({
+        email: normalizedEmail,
+      });
 
     if (existingFresherByEmail) {
       for (const publicId of uploadedFiles) {
-        await deleteFromCloudinary(publicId).catch(console.error);
+        await deleteFromCloudinary(
+          publicId,
+        ).catch(console.error);
       }
+
       return res.status(409).json({
         success: false,
-        message: "This email is already registered as a fresher.",
+        message:
+          "This email is already registered as a fresher.",
       });
     }
 
-    const existingMentorByMobile = await Mentor.findOne({
-      mobile: cleanMobile,
-    });
+    const existingMentorByMobile =
+      await Mentor.findOne({
+        mobile: cleanMobile,
+      });
 
     if (existingMentorByMobile) {
       for (const publicId of uploadedFiles) {
-        await deleteFromCloudinary(publicId).catch(console.error);
+        await deleteFromCloudinary(
+          publicId,
+        ).catch(console.error);
       }
+
       return res.status(409).json({
         success: false,
         message:
@@ -718,14 +883,18 @@ exports.registerMentor = async (req, res) => {
       });
     }
 
-    const existingFresherByMobile = await Fresher.findOne({
-      mobile: cleanMobile,
-    });
+    const existingFresherByMobile =
+      await Fresher.findOne({
+        mobile: cleanMobile,
+      });
 
     if (existingFresherByMobile) {
       for (const publicId of uploadedFiles) {
-        await deleteFromCloudinary(publicId).catch(console.error);
+        await deleteFromCloudinary(
+          publicId,
+        ).catch(console.error);
       }
+
       return res.status(409).json({
         success: false,
         message:
@@ -733,14 +902,18 @@ exports.registerMentor = async (req, res) => {
       });
     }
 
-    const existingMentorByEmployeeId = await Mentor.findOne({
-      employeeId: cleanEmployeeId,
-    });
+    const existingMentorByEmployeeId =
+      await Mentor.findOne({
+        employeeId: cleanEmployeeId,
+      });
 
     if (existingMentorByEmployeeId) {
       for (const publicId of uploadedFiles) {
-        await deleteFromCloudinary(publicId).catch(console.error);
+        await deleteFromCloudinary(
+          publicId,
+        ).catch(console.error);
       }
+
       return res.status(409).json({
         success: false,
         message:
@@ -749,69 +922,152 @@ exports.registerMentor = async (req, res) => {
     }
 
     // =====================================================
-    // CREATE MENTOR WITH CLOUDINARY URLs
+    // CREATE MENTOR
     // =====================================================
 
-    const hashedPassword = await bcrypt.hash(password, 12);
+    const hashedPassword =
+      await bcrypt.hash(password, 12);
 
     const mentorData = {
       name: cleanName,
       email: normalizedEmail,
       mobile: cleanMobile,
       password: hashedPassword,
+
       employeeId: cleanEmployeeId,
       workEmail: normalizedEmail,
+
       linkedinProfile: cleanLinkedin,
-      yearsOfExperience: parsedExperience,
+
+      yearsOfExperience:
+        parsedExperience,
+
       currentCompany: cleanCompany,
       designation: cleanDesignation,
       department: cleanDepartment,
+
+      // ⭐ IMPORTANT
+      gender: cleanGender,
+
       officeLocation: cleanLocation,
+
       languages: languages,
+
       hourlyRate: 0,
+
       bio: cleanBio,
-      // Cloudinary URLs
-      offerLetter: offerLetterUpload.secure_url,
-      offerLetterPublicId: offerLetterUpload.public_id,
-      employeeIdProof: employeeIdProofUpload.secure_url,
-      employeeIdProofPublicId: employeeIdProofUpload.public_id,
-      additionalProof: additionalProofUpload
-        ? additionalProofUpload.secure_url
-        : "",
-      additionalProofPublicId: additionalProofUpload
-        ? additionalProofUpload.public_id
-        : "",
+
+      // =====================================================
+      // CLOUDINARY
+      // =====================================================
+
+      offerLetter:
+        offerLetterUpload.secure_url,
+
+      offerLetterPublicId:
+        offerLetterUpload.public_id,
+
+      employeeIdProof:
+        employeeIdProofUpload.secure_url,
+
+      employeeIdProofPublicId:
+        employeeIdProofUpload.public_id,
+
+      additionalProof:
+        additionalProofUpload
+          ? additionalProofUpload.secure_url
+          : "",
+
+      additionalProofPublicId:
+        additionalProofUpload
+          ? additionalProofUpload.public_id
+          : "",
+
+      // =====================================================
+      // VERIFICATION
+      // =====================================================
+
       isVerified: false,
+
       verificationStatus: "pending",
+
       verificationMethod: "document",
+
       rejectionReason: "",
+
       accountStatus: "pending",
+
       lastLoginAt: null,
+
       profilePic: "",
     };
 
-    const mentor = await Mentor.create(mentorData);
+    console.log(
+      "FINAL MENTOR DATA:",
+      mentorData,
+    );
+
+    // =====================================================
+    // SAVE TO MONGODB
+    // =====================================================
+
+    const mentor =
+      await Mentor.create(mentorData);
 
     console.log(
-      "Mentor created successfully with Cloudinary files:",
+      "========================================",
+    );
+
+    console.log(
+      "Mentor created successfully:",
       mentor._id,
     );
 
+    console.log(
+      "Mentor gender saved:",
+      mentor.gender,
+    );
+
+    console.log(
+      "========================================",
+    );
+
+    // =====================================================
+    // RESPONSE
+    // =====================================================
+
     return res.status(201).json({
       success: true,
+
       message:
         "MNC employee profile submitted successfully. Your account is pending admin verification.",
+
       user: sanitizeMentor(mentor),
     });
-  } catch (error) {
-    console.error("Mentor registration error:", error);
 
-    // Delete uploaded files from Cloudinary if DB save failed
+  } catch (error) {
+
+    console.error(
+      "Mentor registration error:",
+      error,
+    );
+
+    // =====================================================
+    // DELETE CLOUDINARY FILES IF DB SAVE FAILS
+    // =====================================================
+
     for (const publicId of uploadedFiles) {
       try {
-        await deleteFromCloudinary(publicId);
-        console.log(`Deleted file from Cloudinary: ${publicId}`);
+        await deleteFromCloudinary(
+          publicId,
+        );
+
+        console.log(
+          `Deleted file from Cloudinary: ${publicId}`,
+        );
+
       } catch (deleteError) {
+
         console.error(
           "Unable to delete file from Cloudinary:",
           deleteError.message,
@@ -819,10 +1075,17 @@ exports.registerMentor = async (req, res) => {
       }
     }
 
-    // Handle specific MongoDB errors
-    if (error.name === "ValidationError") {
+    // =====================================================
+    // MONGOOSE VALIDATION ERROR
+    // =====================================================
+
+    if (
+      error.name ===
+      "ValidationError"
+    ) {
       return res.status(400).json({
         success: false,
+
         message:
           "Validation error: " +
           Object.values(error.errors)
@@ -831,25 +1094,46 @@ exports.registerMentor = async (req, res) => {
       });
     }
 
+    // =====================================================
+    // DUPLICATE KEY ERROR
+    // =====================================================
+
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
+
         message:
           "An account already exists with this email, mobile number, or employee ID.",
       });
     }
 
-    // Handle Cloudinary errors
-    if (error.message && error.message.includes("Cloudinary")) {
+    // =====================================================
+    // CLOUDINARY ERROR
+    // =====================================================
+
+    if (
+      error.message &&
+      error.message.includes(
+        "Cloudinary",
+      )
+    ) {
       return res.status(500).json({
         success: false,
-        message: "File upload failed. Please try again.",
+
+        message:
+          "File upload failed. Please try again.",
       });
     }
 
+    // =====================================================
+    // GENERIC ERROR
+    // =====================================================
+
     return res.status(500).json({
       success: false,
-      message: "Unable to submit MNC employee registration. Please try again.",
+
+      message:
+        "Unable to submit MNC employee registration. Please try again.",
     });
   }
 };

@@ -14,15 +14,11 @@ import {
 import { useNavigate } from "react-router-dom";
 import socket from "../../socket";
 
-const API_URL =
-  import.meta.env.VITE_API_URL ||
-  "http://localhost:5000/api";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
-const ACCEPTED_SESSIONS_KEY =
-  "mncconnect_accepted_sessions";
+const ACCEPTED_SESSIONS_KEY = "mncconnect_accepted_sessions";
 
-const ACCEPTED_SESSIONS_EVENT =
-  "mncconnect_session_accepted";
+const ACCEPTED_SESSIONS_EVENT = "mncconnect_session_accepted";
 
 const SESSION_GAP_MINUTES = 30;
 const INDIA_TIMEZONE = "Asia/Kolkata";
@@ -69,12 +65,7 @@ const getSessionDateTime = (date, time) => {
   minute = Number(minute);
   period = period.toUpperCase();
 
-  if (
-    hour < 1 ||
-    hour > 12 ||
-    minute < 0 ||
-    minute > 59
-  ) {
+  if (hour < 1 || hour > 12 || minute < 0 || minute > 59) {
     return null;
   }
 
@@ -94,9 +85,7 @@ const getSessionDateTime = (date, time) => {
 
   const result = new Date(iso);
 
-  return Number.isNaN(result.getTime())
-    ? null
-    : result;
+  return Number.isNaN(result.getTime()) ? null : result;
 };
 
 const getDurationMinutes = (duration) => {
@@ -106,13 +95,9 @@ const getDurationMinutes = (duration) => {
 
   const value = String(duration || "");
 
-  const hourMatch = value.match(
-    /(\d+(?:\.\d+)?)\s*(hr|hrs|hour|hours)/i
-  );
+  const hourMatch = value.match(/(\d+(?:\.\d+)?)\s*(hr|hrs|hour|hours)/i);
 
-  const minuteMatch = value.match(
-    /(\d+)\s*(min|mins|minute|minutes)/i
-  );
+  const minuteMatch = value.match(/(\d+)\s*(min|mins|minute|minutes)/i);
 
   let total = 0;
 
@@ -137,9 +122,7 @@ const getDurationMinutes = (duration) => {
 
 const getAcceptedSessions = () => {
   try {
-    const stored = localStorage.getItem(
-      ACCEPTED_SESSIONS_KEY
-    );
+    const stored = localStorage.getItem(ACCEPTED_SESSIONS_KEY);
 
     if (!stored) {
       return [];
@@ -154,23 +137,17 @@ const getAcceptedSessions = () => {
 };
 
 const getSessionInterval = (session) => {
-  const start = getSessionDateTime(
-    session.date,
-    session.time
-  );
+  const start = getSessionDateTime(session.date, session.time);
 
   if (!start) {
     return null;
   }
 
-  const duration = getDurationMinutes(
-    session.duration
-  );
+  const duration = getDurationMinutes(session.duration);
 
   const startMs = start.getTime();
 
-  const endMs =
-    startMs + duration * 60 * 1000;
+  const endMs = startMs + duration * 60 * 1000;
 
   return {
     startMs,
@@ -179,41 +156,30 @@ const getSessionInterval = (session) => {
 };
 
 const getSessionConflict = (request) => {
-  const requested =
-    getSessionInterval(request);
+  const requested = getSessionInterval(request);
 
   if (!requested) {
     return null;
   }
 
-  const acceptedSessions =
-    getAcceptedSessions();
+  const acceptedSessions = getAcceptedSessions();
 
-  const gapMs =
-    SESSION_GAP_MINUTES *
-    60 *
-    1000;
+  const gapMs = SESSION_GAP_MINUTES * 60 * 1000;
 
   for (const session of acceptedSessions) {
-    if (
-      String(session.id) ===
-      String(request.id)
-    ) {
+    if (String(session.id) === String(request.id)) {
       continue;
     }
 
-    const existing =
-      getSessionInterval(session);
+    const existing = getSessionInterval(session);
 
     if (!existing) {
       continue;
     }
 
     const conflict =
-      requested.startMs <
-        existing.endMs + gapMs &&
-      requested.endMs + gapMs >
-        existing.startMs;
+      requested.startMs < existing.endMs + gapMs &&
+      requested.endMs + gapMs > existing.startMs;
 
     if (conflict) {
       return {
@@ -229,145 +195,96 @@ const getSessionConflict = (request) => {
 
 const persistAcceptedSession = (session) => {
   try {
-    const existing =
-      getAcceptedSessions();
+    const existing = getAcceptedSessions();
 
-    const filtered =
-      existing.filter(
-        (item) =>
-          String(item.id) !==
-          String(session.id)
-      );
-
-    const updated = [
-      ...filtered,
-      session,
-    ];
-
-    localStorage.setItem(
-      ACCEPTED_SESSIONS_KEY,
-      JSON.stringify(updated)
+    const filtered = existing.filter(
+      (item) => String(item.id) !== String(session.id),
     );
 
-    window.dispatchEvent(
-      new Event(
-        ACCEPTED_SESSIONS_EVENT
-      )
-    );
+    const updated = [...filtered, session];
+
+    localStorage.setItem(ACCEPTED_SESSIONS_KEY, JSON.stringify(updated));
+
+    window.dispatchEvent(new Event(ACCEPTED_SESSIONS_EVENT));
   } catch (error) {
-    console.error(
-      "Failed to save accepted session:",
-      error
-    );
+    console.error("Failed to save accepted session:", error);
   }
 };
 
 const formatTime = (date) => {
-  return new Intl.DateTimeFormat(
-    "en-IN",
-    {
-      timeZone: INDIA_TIMEZONE,
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    }
-  ).format(date);
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: INDIA_TIMEZONE,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(date);
 };
 
 const MentorRequests = () => {
   const navigate = useNavigate();
 
-  const [activeTab, setActiveTab] =
-    useState("Pending");
+  const [activeTab, setActiveTab] = useState("Pending");
 
-  const [searchQuery, setSearchQuery] =
-    useState("");
+  const [searchQuery, setSearchQuery] = useState("");
 
-  const [showFilters, setShowFilters] =
-    useState(false);
+  const [showFilters, setShowFilters] = useState(false);
 
-  const [selectedRequest, setSelectedRequest] =
-    useState(null);
+  const [selectedRequest, setSelectedRequest] = useState(null);
 
-  const [actionType, setActionType] =
-    useState(null);
+  const [actionType, setActionType] = useState(null);
 
-  const [acceptError, setAcceptError] =
-    useState("");
+  const [acceptError, setAcceptError] = useState("");
 
-  const [actionLoading, setActionLoading] =
-    useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
 
-  const [socketConnected, setSocketConnected] =
-    useState(socket.connected);
+  const [socketConnected, setSocketConnected] = useState(socket.connected);
 
-  const [requests, setRequests] =
-    useState([]);
+  const [requests, setRequests] = useState([]);
 
-  const [filters, setFilters] =
-    useState({
-      timing: "All",
-      role: "All",
-      duration: "All",
-      amount: "All",
-    });
+  const [filters, setFilters] = useState({
+    timing: "All",
+    role: "All",
+    duration: "All",
+    amount: "All",
+  });
 
   useEffect(() => {
-    const mentorId =
-      localStorage.getItem("mentorId");
+    const mentorId = localStorage.getItem("mentorId");
 
     if (!mentorId) {
-      console.warn(
-        "mentorId not found in localStorage"
-      );
+      console.warn("mentorId not found in localStorage");
       return;
     }
 
     const handleConnect = () => {
-      console.log(
-        "MentorRequests socket connected:",
-        socket.id
-      );
+      console.log("MentorRequests socket connected:", socket.id);
 
       setSocketConnected(true);
 
-      socket.emit("mentor-online", {
-        mentorId,
-      });
+      socket.emit("mentor-online", mentorId);
+
+      console.log("Mentor online event sent:", mentorId);
     };
 
     const handleDisconnect = (reason) => {
-      console.log(
-        "MentorRequests socket disconnected:",
-        reason
-      );
+      console.log("MentorRequests socket disconnected:", reason);
 
       setSocketConnected(false);
     };
 
     const handleConnectError = (error) => {
-      console.error(
-        "MentorRequests socket error:",
-        error.message
-      );
+      console.error("MentorRequests socket error:", error.message);
 
       setSocketConnected(false);
     };
 
-    const handleSessionRequest = (
-      incomingRequest
-    ) => {
-      console.log(
-        "New session request received:",
-        incomingRequest
-      );
+    const handleSessionRequest = (incomingRequest) => {
+      console.log("New session request received:", incomingRequest);
 
       const normalizedRequest = {
         ...incomingRequest,
 
-        id:
-          incomingRequest.id ||
-          incomingRequest.requestGroupId,
+        id: incomingRequest.id || incomingRequest.requestGroupId,
 
         name:
           incomingRequest.name ||
@@ -379,41 +296,26 @@ const MentorRequests = () => {
           incomingRequest.requester?.image ||
           "https://i.pravatar.cc/150?img=12",
 
-        role:
-          incomingRequest.role ||
-          "Other",
+        role: incomingRequest.role || "Other",
 
-        company:
-          incomingRequest.company ||
-          incomingRequest.companyName ||
-          "",
+        company: incomingRequest.company || incomingRequest.companyName || "",
 
         date:
-          incomingRequest.date ||
-          incomingRequest.sessionDetails?.date ||
-          "",
+          incomingRequest.date || incomingRequest.sessionDetails?.date || "",
 
         time:
-          incomingRequest.time ||
-          incomingRequest.sessionDetails?.time ||
-          "",
+          incomingRequest.time || incomingRequest.sessionDetails?.time || "",
 
         duration:
           incomingRequest.duration ||
           incomingRequest.sessionDetails?.duration ||
           30,
 
-        amount:
-          Number(
-            incomingRequest.amount ||
-              incomingRequest.sessionDetails?.amount ||
-              0
-          ),
+        amount: Number(
+          incomingRequest.amount || incomingRequest.sessionDetails?.amount || 0,
+        ),
 
-        type:
-          incomingRequest.type ||
-          incomingRequest.sessionDetails?.sessionType ||
-          "Video Call",
+        type: "Video Call",
 
         message:
           incomingRequest.message ||
@@ -422,46 +324,26 @@ const MentorRequests = () => {
 
         status: "Pending",
       };
-
       setRequests((prev) => {
         const alreadyExists = prev.some(
-          (request) =>
-            String(request.id) ===
-            String(
-              normalizedRequest.id
-            )
+          (request) => String(request.id) === String(normalizedRequest.id),
         );
 
         if (alreadyExists) {
           return prev;
         }
 
-        return [
-          normalizedRequest,
-          ...prev,
-        ];
+        return [normalizedRequest, ...prev];
       });
     };
 
-    socket.on(
-      "connect",
-      handleConnect
-    );
+    socket.on("connect", handleConnect);
 
-    socket.on(
-      "disconnect",
-      handleDisconnect
-    );
+    socket.on("disconnect", handleDisconnect);
 
-    socket.on(
-      "connect_error",
-      handleConnectError
-    );
+    socket.on("connect_error", handleConnectError);
 
-    socket.on(
-      "session-request",
-      handleSessionRequest
-    );
+    socket.on("session-request", handleSessionRequest);
 
     if (!socket.connected) {
       socket.connect();
@@ -470,34 +352,20 @@ const MentorRequests = () => {
     }
 
     return () => {
-      socket.off(
-        "connect",
-        handleConnect
-      );
+      socket.off("connect", handleConnect);
 
-      socket.off(
-        "disconnect",
-        handleDisconnect
-      );
+      socket.off("disconnect", handleDisconnect);
 
-      socket.off(
-        "connect_error",
-        handleConnectError
-      );
+      socket.off("connect_error", handleConnectError);
 
-      socket.off(
-        "session-request",
-        handleSessionRequest
-      );
+      socket.off("session-request", handleSessionRequest);
     };
   }, []);
 
   const getTiming = (time) => {
     const match = String(time)
       .trim()
-      .match(
-        /^(\d{1,2})(?::\d{2})?\s*(AM|PM)$/i
-      );
+      .match(/^(\d{1,2})(?::\d{2})?\s*(AM|PM)$/i);
 
     if (!match) {
       return "Other";
@@ -505,20 +373,13 @@ const MentorRequests = () => {
 
     let hour = Number(match[1]);
 
-    const period =
-      match[2].toUpperCase();
+    const period = match[2].toUpperCase();
 
-    if (
-      period === "AM" &&
-      hour === 12
-    ) {
+    if (period === "AM" && hour === 12) {
       hour = 0;
     }
 
-    if (
-      period === "PM" &&
-      hour !== 12
-    ) {
+    if (period === "PM" && hour !== 12) {
       hour += 12;
     }
 
@@ -538,8 +399,7 @@ const MentorRequests = () => {
   };
 
   const getRole = (role) => {
-    const value =
-      String(role).toLowerCase();
+    const value = String(role).toLowerCase();
 
     if (value.includes("student")) {
       return "Student";
@@ -549,10 +409,7 @@ const MentorRequests = () => {
       return "Fresher";
     }
 
-    if (
-      value.includes("developer") ||
-      value.includes("engineer")
-    ) {
+    if (value.includes("developer") || value.includes("engineer")) {
       return "Developer";
     }
 
@@ -560,131 +417,73 @@ const MentorRequests = () => {
   };
 
   const filteredRequests = useMemo(() => {
-    return requests.filter(
-      (request) => {
-        if (
-          request.status !==
-          activeTab
-        ) {
-          return false;
-        }
+    return requests.filter((request) => {
+      if (request.status !== activeTab) {
+        return false;
+      }
 
-        if (
-          request.type !==
-          "Video Call"
-        ) {
-          return false;
-        }
+      if (request.type !== "Video Call") {
+        return false;
+      }
 
-        const search =
-          searchQuery
-            .toLowerCase()
-            .trim();
+      const search = searchQuery.toLowerCase().trim();
 
-        if (search) {
-          const searchableText =
-            `
+      if (search) {
+        const searchableText = `
               ${request.name}
               ${request.role}
               ${request.company}
               ${request.message}
             `.toLowerCase();
 
-          if (
-            !searchableText.includes(
-              search
-            )
-          ) {
-            return false;
-          }
-        }
-
-        if (
-          filters.timing !==
-            "All" &&
-          getTiming(request.time) !==
-            filters.timing
-        ) {
+        if (!searchableText.includes(search)) {
           return false;
         }
-
-        if (
-          filters.role !==
-            "All" &&
-          getRole(request.role) !==
-            filters.role
-        ) {
-          return false;
-        }
-
-        if (
-          filters.duration !==
-            "All"
-        ) {
-          const duration =
-            getDurationMinutes(
-              request.duration
-            );
-
-          const selectedDuration =
-            getDurationMinutes(
-              filters.duration
-            );
-
-          if (
-            duration !==
-            selectedDuration
-          ) {
-            return false;
-          }
-        }
-
-        if (
-          filters.amount !==
-          "All"
-        ) {
-          if (
-            filters.amount ===
-              "Below ₹300" &&
-            request.amount >= 300
-          ) {
-            return false;
-          }
-
-          if (
-            filters.amount ===
-              "₹300 - ₹400" &&
-            (
-              request.amount < 300 ||
-              request.amount > 400
-            )
-          ) {
-            return false;
-          }
-
-          if (
-            filters.amount ===
-              "Above ₹400" &&
-            request.amount <= 400
-          ) {
-            return false;
-          }
-        }
-
-        return true;
       }
-    );
-  }, [
-    requests,
-    activeTab,
-    searchQuery,
-    filters,
-  ]);
 
-  const openConfirmation = (
-    request,
-    type
-  ) => {
+      if (
+        filters.timing !== "All" &&
+        getTiming(request.time) !== filters.timing
+      ) {
+        return false;
+      }
+
+      if (filters.role !== "All" && getRole(request.role) !== filters.role) {
+        return false;
+      }
+
+      if (filters.duration !== "All") {
+        const duration = getDurationMinutes(request.duration);
+
+        const selectedDuration = getDurationMinutes(filters.duration);
+
+        if (duration !== selectedDuration) {
+          return false;
+        }
+      }
+
+      if (filters.amount !== "All") {
+        if (filters.amount === "Below ₹300" && request.amount >= 300) {
+          return false;
+        }
+
+        if (
+          filters.amount === "₹300 - ₹400" &&
+          (request.amount < 300 || request.amount > 400)
+        ) {
+          return false;
+        }
+
+        if (filters.amount === "Above ₹400" && request.amount <= 400) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [requests, activeTab, searchQuery, filters]);
+
+  const openConfirmation = (request, type) => {
     setSelectedRequest(request);
     setActionType(type);
     setAcceptError("");
@@ -700,53 +499,36 @@ const MentorRequests = () => {
     setAcceptError("");
   };
 
-  const updateRequestStatus = async (
-    request,
-    newStatus
-  ) => {
-    const requestGroupId =
-      request.requestGroupId ||
-      request.id;
+  const updateRequestStatus = async (request, newStatus) => {
+    const requestGroupId = request.requestGroupId || request.id;
 
     try {
       setActionLoading(true);
 
       const response = await fetch(
-        `${API_URL}/mentor/session-requests/${requestGroupId}`,
+        `${API_URL}/session/session-requests/${requestGroupId}`,
         {
           method: "PATCH",
           headers: {
-            "Content-Type":
-              "application/json",
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            status:
-              newStatus.toLowerCase(),
+            status: newStatus.toLowerCase(),
           }),
-        }
+        },
       );
 
-      const data =
-        await response.json();
+      const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(
-          data.message ||
-            "Failed to update request"
-        );
+        throw new Error(data.message || "Failed to update request");
       }
 
       return true;
     } catch (error) {
-      console.error(
-        "Request status update error:",
-        error
-      );
+      console.error("Request status update error:", error);
 
-      setAcceptError(
-        error.message ||
-          "Failed to update request"
-      );
+      setAcceptError(error.message || "Failed to update request");
 
       return false;
     } finally {
@@ -755,59 +537,34 @@ const MentorRequests = () => {
   };
 
   const confirmAction = async () => {
-    if (
-      !selectedRequest ||
-      !actionType
-    ) {
+    if (!selectedRequest || !actionType) {
       return;
     }
 
-    if (
-      actionType === "accept"
-    ) {
-      const conflict =
-        getSessionConflict(
-          selectedRequest
-        );
+    if (actionType === "accept") {
+      const conflict = getSessionConflict(selectedRequest);
 
       if (conflict) {
-        const existingSession =
-          conflict.session;
+        const existingSession = conflict.session;
 
-        const existingStart =
-          new Date(
-            conflict.existing.startMs
-          );
+        const existingStart = new Date(conflict.existing.startMs);
 
-        const existingEnd =
-          new Date(
-            conflict.existing.endMs
-          );
+        const existingEnd = new Date(conflict.existing.endMs);
 
-        const newSessionStart =
-          new Date(
-            conflict.requested.startMs
-          );
+        const newSessionStart = new Date(conflict.requested.startMs);
 
         let message = "";
 
-        if (
-          newSessionStart.getTime() >=
-          existingStart.getTime()
-        ) {
+        if (newSessionStart.getTime() >= existingStart.getTime()) {
           message =
             `Cannot accept this request. ` +
             `There must be at least ${SESSION_GAP_MINUTES} minutes gap after "${existingSession.name}" session. ` +
-            `"${existingSession.name}" ends at ${formatTime(
-              existingEnd
-            )}.`;
+            `"${existingSession.name}" ends at ${formatTime(existingEnd)}.`;
         } else {
           message =
             `Cannot accept this request. ` +
             `There must be at least ${SESSION_GAP_MINUTES} minutes gap before "${existingSession.name}" session. ` +
-            `"${existingSession.name}" starts at ${formatTime(
-              existingStart
-            )}.`;
+            `"${existingSession.name}" starts at ${formatTime(existingStart)}.`;
         }
 
         setAcceptError(message);
@@ -815,11 +572,7 @@ const MentorRequests = () => {
         return;
       }
 
-      const updated =
-        await updateRequestStatus(
-          selectedRequest,
-          "Accepted"
-        );
+      const updated = await updateRequestStatus(selectedRequest, "Accepted");
 
       if (!updated) {
         return;
@@ -831,61 +584,41 @@ const MentorRequests = () => {
         status: "Upcoming",
       };
 
-      persistAcceptedSession(
-        sessionForCalendar
-      );
+      persistAcceptedSession(sessionForCalendar);
 
       setRequests((prev) =>
         prev.filter(
-          (request) =>
-            String(request.id) !==
-            String(
-              selectedRequest.id
-            )
-        )
+          (request) => String(request.id) !== String(selectedRequest.id),
+        ),
       );
 
       closeConfirmation();
 
-      navigate(
-        "/mentor/sessions",
-        {
-          state: {
-            acceptedSession:
-              sessionForCalendar,
-          },
-        }
-      );
+      navigate("/mentor/sessions", {
+        state: {
+          acceptedSession: sessionForCalendar,
+        },
+      });
 
       return;
     }
 
-    if (
-      actionType === "reject"
-    ) {
-      const updated =
-        await updateRequestStatus(
-          selectedRequest,
-          "Rejected"
-        );
+    if (actionType === "reject") {
+      const updated = await updateRequestStatus(selectedRequest, "Rejected");
 
       if (!updated) {
         return;
       }
 
       setRequests((prev) =>
-        prev.map(
-          (request) =>
-            String(request.id) ===
-            String(
-              selectedRequest.id
-            )
-              ? {
-                  ...request,
-                  status: "Rejected",
-                }
-              : request
-        )
+        prev.map((request) =>
+          String(request.id) === String(selectedRequest.id)
+            ? {
+                ...request,
+                status: "Rejected",
+              }
+            : request,
+        ),
       );
 
       closeConfirmation();
@@ -906,7 +639,6 @@ const MentorRequests = () => {
   return (
     <div className="min-h-screen bg-slate-50 p-4 sm:p-6 lg:p-8">
       <div className="mx-auto max-w-7xl">
-
         <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">
@@ -921,22 +653,17 @@ const MentorRequests = () => {
           <div className="flex items-center gap-2 text-xs">
             <span
               className={`h-2.5 w-2.5 rounded-full ${
-                socketConnected
-                  ? "bg-emerald-500"
-                  : "bg-red-500"
+                socketConnected ? "bg-emerald-500" : "bg-red-500"
               }`}
             />
 
             <span className="text-slate-500">
-              {socketConnected
-                ? "Live"
-                : "Offline"}
+              {socketConnected ? "Live" : "Offline"}
             </span>
           </div>
         </div>
 
         <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-
           <div className="flex gap-2 overflow-x-auto rounded-xl bg-white p-1 shadow-sm">
             {tabs.map((tab) => {
               const Icon = tab.icon;
@@ -945,14 +672,9 @@ const MentorRequests = () => {
                 <button
                   key={tab.label}
                   type="button"
-                  onClick={() =>
-                    setActiveTab(
-                      tab.label
-                    )
-                  }
+                  onClick={() => setActiveTab(tab.label)}
                   className={`flex items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2.5 text-sm font-medium transition ${
-                    activeTab ===
-                    tab.label
+                    activeTab === tab.label
                       ? "bg-slate-900 text-white"
                       : "text-slate-600 hover:bg-slate-100"
                   }`}
@@ -965,7 +687,6 @@ const MentorRequests = () => {
           </div>
 
           <div className="flex gap-3">
-
             <div className="relative flex-1 lg:w-80">
               <Search
                 size={18}
@@ -975,11 +696,7 @@ const MentorRequests = () => {
               <input
                 type="text"
                 value={searchQuery}
-                onChange={(e) =>
-                  setSearchQuery(
-                    e.target.value
-                  )
-                }
+                onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search requests..."
                 className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm outline-none transition focus:border-slate-400"
               />
@@ -987,39 +704,24 @@ const MentorRequests = () => {
 
             <button
               type="button"
-              onClick={() =>
-                setShowFilters(
-                  (prev) => !prev
-                )
-              }
+              onClick={() => setShowFilters((prev) => !prev)}
               className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
-              <SlidersHorizontal
-                size={17}
-              />
+              <SlidersHorizontal size={17} />
 
-              <span className="hidden sm:inline">
-                Filters
-              </span>
+              <span className="hidden sm:inline">Filters</span>
             </button>
           </div>
         </div>
 
         {showFilters && (
           <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="font-semibold text-slate-900">
-                Filters
-              </h2>
+              <h2 className="font-semibold text-slate-900">Filters</h2>
 
               <button
                 type="button"
-                onClick={() =>
-                  setShowFilters(
-                    false
-                  )
-                }
+                onClick={() => setShowFilters(false)}
                 className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
               >
                 <X size={18} />
@@ -1027,108 +729,61 @@ const MentorRequests = () => {
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-
               <FilterSelect
                 label="Timing"
-                value={
-                  filters.timing
-                }
-                options={[
-                  "All",
-                  "Morning",
-                  "Afternoon",
-                  "Evening",
-                  "Night",
-                ]}
+                value={filters.timing}
+                options={["All", "Morning", "Afternoon", "Evening", "Night"]}
                 onChange={(value) =>
-                  setFilters(
-                    (prev) => ({
-                      ...prev,
-                      timing:
-                        value,
-                    })
-                  )
+                  setFilters((prev) => ({
+                    ...prev,
+                    timing: value,
+                  }))
                 }
               />
 
               <FilterSelect
                 label="Role"
-                value={
-                  filters.role
-                }
-                options={[
-                  "All",
-                  "Student",
-                  "Fresher",
-                  "Developer",
-                  "Other",
-                ]}
+                value={filters.role}
+                options={["All", "Student", "Fresher", "Developer", "Other"]}
                 onChange={(value) =>
-                  setFilters(
-                    (prev) => ({
-                      ...prev,
-                      role: value,
-                    })
-                  )
+                  setFilters((prev) => ({
+                    ...prev,
+                    role: value,
+                  }))
                 }
               />
 
               <FilterSelect
                 label="Duration"
-                value={
-                  filters.duration
-                }
-                options={[
-                  "All",
-                  "30 mins",
-                  "60 mins",
-                  "120 mins",
-                ]}
+                value={filters.duration}
+                options={["All", "30 mins", "60 mins", "120 mins"]}
                 onChange={(value) =>
-                  setFilters(
-                    (prev) => ({
-                      ...prev,
-                      duration:
-                        value,
-                    })
-                  )
+                  setFilters((prev) => ({
+                    ...prev,
+                    duration: value,
+                  }))
                 }
               />
 
               <FilterSelect
                 label="Amount"
-                value={
-                  filters.amount
-                }
-                options={[
-                  "All",
-                  "Below ₹300",
-                  "₹300 - ₹400",
-                  "Above ₹400",
-                ]}
+                value={filters.amount}
+                options={["All", "Below ₹300", "₹300 - ₹400", "Above ₹400"]}
                 onChange={(value) =>
-                  setFilters(
-                    (prev) => ({
-                      ...prev,
-                      amount:
-                        value,
-                    })
-                  )
+                  setFilters((prev) => ({
+                    ...prev,
+                    amount: value,
+                  }))
                 }
               />
-
             </div>
           </div>
         )}
 
         {filteredRequests.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
-
             <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-slate-100">
-              <CalendarDays
-                size={24}
-                className="text-slate-400"
-              />
+              <CalendarDays size={24} className="text-slate-400" />
             </div>
 
             <h2 className="text-lg font-semibold text-slate-900">
@@ -1147,40 +802,25 @@ const MentorRequests = () => {
           </div>
         ) : (
           <div className="space-y-4">
-            {filteredRequests.map(
-              (request) => (
-                <RequestCard
-                  key={request.id}
-                  request={request}
-                  onAccept={() =>
-                    openConfirmation(
-                      request,
-                      "accept"
-                    )
-                  }
-                  onReject={() =>
-                    openConfirmation(
-                      request,
-                      "reject"
-                    )
-                  }
-                />
-              )
-            )}
+            {filteredRequests.map((request) => (
+              <RequestCard
+                key={request.id}
+                request={request}
+                onAccept={() => openConfirmation(request, "accept")}
+                onReject={() => openConfirmation(request, "reject")}
+              />
+            ))}
           </div>
         )}
       </div>
 
       {selectedRequest && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
-
             <div className="mb-5 flex items-start justify-between">
               <div>
                 <h2 className="text-lg font-bold text-slate-900">
-                  {actionType ===
-                  "accept"
+                  {actionType === "accept"
                     ? "Accept Request?"
                     : "Reject Request?"}
                 </h2>
@@ -1192,20 +832,15 @@ const MentorRequests = () => {
 
               <button
                 type="button"
-                onClick={
-                  closeConfirmation
-                }
-                disabled={
-                  actionLoading
-                }
+                onClick={closeConfirmation}
+                disabled={actionLoading}
                 className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
               >
                 <X size={18} />
               </button>
             </div>
 
-            {actionType ===
-              "accept" && (
+            {actionType === "accept" && (
               <div className="mb-5 rounded-xl border border-blue-100 bg-blue-50 p-4">
                 <div className="flex gap-3">
                   <CalendarDays
@@ -1219,7 +854,8 @@ const MentorRequests = () => {
                     </p>
 
                     <p className="mt-1 text-xs leading-5 text-blue-700">
-                      Every session must have at least 30 minutes gap from the previous or next session.
+                      Every session must have at least 30 minutes gap from the
+                      previous or next session.
                     </p>
                   </div>
                 </div>
@@ -1228,109 +864,72 @@ const MentorRequests = () => {
 
             {acceptError && (
               <div className="mb-5 rounded-xl border border-red-200 bg-red-50 p-4">
-                <p className="text-sm leading-5 text-red-700">
-                  {acceptError}
-                </p>
+                <p className="text-sm leading-5 text-red-700">{acceptError}</p>
               </div>
             )}
 
             <div className="mb-6 rounded-xl bg-slate-50 p-4">
-
               <div className="mb-4 flex items-center gap-3">
                 <img
                   src={
-                    selectedRequest.avatar ||
-                    "https://i.pravatar.cc/150?img=12"
+                    selectedRequest.avatar || "https://i.pravatar.cc/150?img=12"
                   }
-                  alt={
-                    selectedRequest.name
-                  }
+                  alt={selectedRequest.name}
                   className="h-12 w-12 rounded-full object-cover"
                 />
 
                 <div>
                   <p className="font-semibold text-slate-900">
-                    {
-                      selectedRequest.name
-                    }
+                    {selectedRequest.name}
                   </p>
 
                   <p className="text-xs text-slate-500">
-                    {
-                      selectedRequest.role
-                    }
+                    {selectedRequest.role}
                   </p>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-
                 <div>
-                  <p className="text-xs text-slate-500">
-                    Date
-                  </p>
+                  <p className="text-xs text-slate-500">Date</p>
 
                   <p className="mt-1 text-sm font-semibold text-slate-900">
-                    {
-                      selectedRequest.date ||
-                      "Not specified"
-                    }
+                    {selectedRequest.date || "Not specified"}
                   </p>
                 </div>
 
                 <div>
-                  <p className="text-xs text-slate-500">
-                    Time
-                  </p>
+                  <p className="text-xs text-slate-500">Time</p>
 
                   <p className="mt-1 text-sm font-semibold text-slate-900">
-                    {
-                      selectedRequest.time ||
-                      "Not specified"
-                    }
+                    {selectedRequest.time || "Not specified"}
                   </p>
                 </div>
 
                 <div>
-                  <p className="text-xs text-slate-500">
-                    Duration
-                  </p>
+                  <p className="text-xs text-slate-500">Duration</p>
 
                   <p className="mt-1 text-sm font-semibold text-slate-900">
-                    {
-                      selectedRequest.duration
-                    }
+                    {selectedRequest.duration}
                   </p>
                 </div>
 
                 <div>
-                  <p className="text-xs text-slate-500">
-                    Amount
-                  </p>
+                  <p className="text-xs text-slate-500">Amount</p>
 
                   <p className="mt-1 flex items-center text-sm font-semibold text-slate-900">
-                    <IndianRupee
-                      size={14}
-                    />
-                    {
-                      selectedRequest.amount
-                    }
+                    <IndianRupee size={14} />
+                    {selectedRequest.amount}
                   </p>
                 </div>
-
               </div>
             </div>
 
             <div className="flex gap-3">
-
               <button
                 type="button"
-                onClick={
-                  closeConfirmation
-                }
-                disabled={
-                  actionLoading
-                }
+                onClick={closeConfirmation}
+                disabled={actionLoading}
                 className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
                 Cancel
@@ -1338,40 +937,28 @@ const MentorRequests = () => {
 
               <button
                 type="button"
-                onClick={
-                  confirmAction
-                }
-                disabled={
-                  actionLoading
-                }
+                onClick={confirmAction}
+                disabled={actionLoading}
                 className={`flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 ${
-                  actionType ===
-                  "accept"
+                  actionType === "accept"
                     ? "bg-emerald-600 hover:bg-emerald-700"
                     : "bg-red-600 hover:bg-red-700"
                 }`}
               >
                 {actionLoading ? (
                   <span className="flex items-center justify-center gap-2">
-                    <Loader2
-                      size={16}
-                      className="animate-spin"
-                    />
+                    <Loader2 size={16} className="animate-spin" />
                     Processing...
                   </span>
-                ) : actionType ===
-                  "accept" ? (
+                ) : actionType === "accept" ? (
                   <span className="flex items-center justify-center gap-2">
-                    <CheckCircle2
-                      size={16}
-                    />
+                    <CheckCircle2 size={16} />
                     Accept Request
                   </span>
                 ) : (
                   "Reject Request"
                 )}
               </button>
-
             </div>
           </div>
         </div>
@@ -1380,12 +967,7 @@ const MentorRequests = () => {
   );
 };
 
-const FilterSelect = ({
-  label,
-  value,
-  options,
-  onChange,
-}) => {
+const FilterSelect = ({ label, value, options, onChange }) => {
   return (
     <div>
       <label className="mb-1.5 block text-xs font-medium text-slate-600">
@@ -1394,65 +976,40 @@ const FilterSelect = ({
 
       <select
         value={value}
-        onChange={(e) =>
-          onChange(
-            e.target.value
-          )
-        }
+        onChange={(e) => onChange(e.target.value)}
         className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-400"
       >
-        {options.map(
-          (option) => (
-            <option
-              key={option}
-              value={option}
-            >
-              {option}
-            </option>
-          )
-        )}
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
       </select>
     </div>
   );
 };
 
-const RequestCard = ({
-  request,
-  onAccept,
-  onReject,
-}) => {
+const RequestCard = ({ request, onAccept, onReject }) => {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:shadow-md">
-
       <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-
         <div className="flex min-w-0 gap-4">
-
           <img
-            src={
-              request.avatar ||
-              "https://i.pravatar.cc/150?img=12"
-            }
+            src={request.avatar || "https://i.pravatar.cc/150?img=12"}
             alt={request.name}
             className="h-14 w-14 shrink-0 rounded-full object-cover"
           />
 
           <div className="min-w-0 flex-1">
-
             <div className="flex flex-wrap items-center gap-2">
-
-              <h3 className="font-semibold text-slate-900">
-                {request.name}
-              </h3>
+              <h3 className="font-semibold text-slate-900">{request.name}</h3>
 
               <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
                 {request.role}
               </span>
             </div>
 
-            <p className="mt-1 text-sm text-slate-500">
-              {request.company}
-            </p>
+            <p className="mt-1 text-sm text-slate-500">{request.company}</p>
 
             {request.message && (
               <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
@@ -1461,54 +1018,40 @@ const RequestCard = ({
             )}
 
             <div className="mt-4 flex flex-wrap gap-3 text-xs text-slate-500">
-
               {request.date && (
                 <span className="flex items-center gap-1.5">
-                  <CalendarDays
-                    size={14}
-                  />
+                  <CalendarDays size={14} />
                   {request.date}
                 </span>
               )}
 
               {request.time && (
                 <span className="flex items-center gap-1.5">
-                  <Clock3
-                    size={14}
-                  />
+                  <Clock3 size={14} />
                   {request.time}
                 </span>
               )}
 
               <span className="flex items-center gap-1.5">
-                <Clock3
-                  size={14}
-                />
+                <Clock3 size={14} />
                 {request.duration}
               </span>
 
               <span className="flex items-center gap-1.5">
-                <Video
-                  size={14}
-                />
+                <Video size={14} />
                 Video Call
               </span>
 
               <span className="flex items-center gap-1.5 font-semibold text-slate-700">
-                <IndianRupee
-                  size={14}
-                />
+                <IndianRupee size={14} />
                 {request.amount}
               </span>
-
             </div>
           </div>
         </div>
 
         <div className="flex shrink-0 gap-2">
-
-          {request.status ===
-            "Pending" && (
+          {request.status === "Pending" && (
             <>
               <button
                 type="button"
@@ -1528,13 +1071,11 @@ const RequestCard = ({
             </>
           )}
 
-          {request.status ===
-            "Rejected" && (
+          {request.status === "Rejected" && (
             <span className="rounded-xl bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-600">
               Rejected
             </span>
           )}
-
         </div>
       </div>
     </div>

@@ -1,7 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import socket from "../../socket";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -24,8 +23,6 @@ import {
   Video,
   Zap,
 } from "lucide-react";
-
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:5000";
 
 const mentor = {
   name: "Arun",
@@ -146,55 +143,7 @@ const impactSteps = [
   },
 ];
 function Home() {
-  const [isOnline, setIsOnline] = useState(socket.connected);
-
-  useEffect(() => {
-    const mentorId = localStorage.getItem("mentorId");
-
-    if (!mentorId) {
-      console.warn("mentorId not found in localStorage");
-      setIsOnline(false);
-      return;
-    }
-
-    const handleConnect = () => {
-      console.log("Home socket connected:", socket.id);
-
-      setIsOnline(true);
-
-      socket.emit("mentor-online", {
-        mentorId,
-      });
-
-      console.log("mentor-online emitted:", mentorId);
-    };
-
-    const handleDisconnect = (reason) => {
-      console.log("Home socket disconnected:", reason);
-      setIsOnline(false);
-    };
-
-    const handleConnectError = (error) => {
-      console.error("Home socket connection error:", error.message);
-      setIsOnline(false);
-    };
-
-    socket.on("connect", handleConnect);
-    socket.on("disconnect", handleDisconnect);
-    socket.on("connect_error", handleConnectError);
-
-    if (socket.connected) {
-      handleConnect();
-    } else {
-      socket.connect();
-    }
-
-    return () => {
-      socket.off("connect", handleConnect);
-      socket.off("disconnect", handleDisconnect);
-      socket.off("connect_error", handleConnectError);
-    };
-  }, []);
+  const isOnline = false;
 
   return (
     <div className="min-h-screen bg-[#f6f7f9] text-slate-950">

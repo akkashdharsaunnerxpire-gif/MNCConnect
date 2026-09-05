@@ -11,4 +11,4 @@ export const socket = io(SOCKET_URL, {
   reconnectionDelay: 1000,
 });
 
-export default socket;
+export default socket;  
