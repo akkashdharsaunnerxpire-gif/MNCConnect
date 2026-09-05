@@ -25,8 +25,7 @@ import {
 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
-const API_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 const WALLET_KEY = "fresherWallet_arundharsaun11@gmail.com";
 const PENDING_REQUEST_KEY = "fresher_pending_mentor_request";
@@ -115,12 +114,7 @@ const LANGUAGE_OPTIONS = [
 ];
 
 function getLoggedInUser() {
-  const keys = [
-    "user",
-    "currentUser",
-    "userData",
-    "authUser",
-  ];
+  const keys = ["user", "currentUser", "userData", "authUser"];
 
   for (const key of keys) {
     try {
@@ -165,13 +159,7 @@ function getUserEmail(user) {
 }
 
 function getUserImage(user) {
-  return (
-    user?.image ||
-    user?.profileImage ||
-    user?.avatar ||
-    user?.photo ||
-    ""
-  );
+  return user?.image || user?.profileImage || user?.avatar || user?.photo || "";
 }
 
 function normalizeImage(image) {
@@ -227,11 +215,7 @@ function RazorpayCoin({ success }) {
   );
 }
 
-function PaymentOverlay({
-  paymentState,
-  amount,
-  onSuccess,
-}) {
+function PaymentOverlay({ paymentState, amount, onSuccess }) {
   if (!paymentState) {
     return null;
   }
@@ -255,10 +239,7 @@ function PaymentOverlay({
               </p>
 
               <div className="mx-auto mt-6 flex items-center justify-center gap-2 text-sm font-semibold text-slate-700">
-                <Loader2
-                  size={18}
-                  className="animate-spin"
-                />
+                <Loader2 size={18} className="animate-spin" />
                 Verifying ₹{amount}
               </div>
             </>
@@ -292,10 +273,7 @@ function PaymentOverlay({
   );
 }
 
-function LanguageSelect({
-  value,
-  onChange,
-}) {
+function LanguageSelect({ value, onChange }) {
   return (
     <select
       value={value}
@@ -313,10 +291,7 @@ function LanguageSelect({
   );
 }
 
-function SessionRequirements({
-  requirements,
-  setRequirements,
-}) {
+function SessionRequirements({ requirements, setRequirements }) {
   const update = (field, value) => {
     setRequirements((prev) => ({
       ...prev,
@@ -334,9 +309,7 @@ function SessionRequirements({
 
           <select
             value={requirements.role}
-            onChange={(e) =>
-              update("role", e.target.value)
-            }
+            onChange={(e) => update("role", e.target.value)}
             className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
           >
             <option value="">Select Role</option>
@@ -358,12 +331,7 @@ function SessionRequirements({
             <input
               type="text"
               value={requirements.otherRole}
-              onChange={(e) =>
-                update(
-                  "otherRole",
-                  e.target.value
-                )
-              }
+              onChange={(e) => update("otherRole", e.target.value)}
               placeholder="Enter role"
               className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             />
@@ -377,19 +345,11 @@ function SessionRequirements({
 
           <select
             value={requirements.gender}
-            onChange={(e) =>
-              update(
-                "gender",
-                e.target.value
-              )
-            }
+            onChange={(e) => update("gender", e.target.value)}
             className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
           >
             {GENDER_OPTIONS.map((gender) => (
-              <option
-                key={gender.value}
-                value={gender.value}
-              >
+              <option key={gender.value} value={gender.value}>
                 {gender.label}
               </option>
             ))}
@@ -403,9 +363,7 @@ function SessionRequirements({
 
           <LanguageSelect
             value={requirements.language}
-            onChange={(value) =>
-              update("language", value)
-            }
+            onChange={(value) => update("language", value)}
           />
         </div>
 
@@ -416,38 +374,24 @@ function SessionRequirements({
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {SESSION_OPTIONS.map((option) => {
-              const selected =
-                requirements.duration ===
-                option.value;
+              const selected = requirements.duration === option.value;
 
               return (
                 <button
                   key={option.value}
                   type="button"
-                  onClick={() =>
-                    update(
-                      "duration",
-                      option.value
-                    )
-                  }
+                  onClick={() => update("duration", option.value)}
                   className={`rounded-xl border px-4 py-4 text-center transition ${
                     selected
                       ? "border-blue-500 bg-blue-50 text-blue-700 shadow-sm"
                       : "border-slate-200 bg-white text-slate-700 hover:border-blue-300"
                   }`}
                 >
-                  <Clock3
-                    size={20}
-                    className="mx-auto mb-2"
-                  />
+                  <Clock3 size={20} className="mx-auto mb-2" />
 
-                  <div className="text-sm font-bold">
-                    {option.label}
-                  </div>
+                  <div className="text-sm font-bold">{option.label}</div>
 
-                  <div className="mt-1 text-xs">
-                    ₹{option.price}
-                  </div>
+                  <div className="mt-1 text-xs">₹{option.price}</div>
                 </button>
               );
             })}
@@ -458,33 +402,21 @@ function SessionRequirements({
   );
 }
 
-function RequestStatusModal({
-  status,
-  request,
-  refundAmount,
-  onOk,
-}) {
+function RequestStatusModal({ status, request, refundAmount, onOk }) {
   if (!status) {
     return null;
   }
 
-  const accepted =
-    status === "accepted";
+  const accepted = status === "accepted";
 
-  const refunded =
-    status === "refunded";
+  const refunded = status === "refunded";
 
-  const waiting =
-    status === "waiting";
+  const waiting = status === "waiting";
 
-  const employee =
-    request?.employee || {};
+  const employee = request?.employee || {};
 
   const employeeName =
-    employee.name ||
-    employee.fullName ||
-    employee.full_name ||
-    "Employee";
+    employee.name || employee.fullName || employee.full_name || "Employee";
 
   const employeeImage =
     employee.image ||
@@ -493,16 +425,10 @@ function RequestStatusModal({
     employee.photo ||
     "";
 
-  const employeeEmail =
-    employee.email ||
-    employee.employeeEmail ||
-    "";
+  const employeeEmail = employee.email || employee.employeeEmail || "";
 
   const employeeDesignation =
-    employee.designation ||
-    employee.role ||
-    employee.jobTitle ||
-    "";
+    employee.designation || employee.role || employee.jobTitle || "";
 
   const finalRefundAmount =
     Number(
@@ -510,7 +436,7 @@ function RequestStatusModal({
         request?.refundAmount ||
         request?.amount ||
         request?.sessionDetails?.amount ||
-        0
+        0,
     ) || 0;
 
   return (
@@ -523,10 +449,7 @@ function RequestStatusModal({
 
               <div className="absolute inset-1 animate-spin rounded-full border-4 border-transparent border-t-blue-600" />
 
-              <Send
-                size={30}
-                className="text-blue-600"
-              />
+              <Send size={30} className="text-blue-600" />
             </div>
 
             <h2 className="mt-6 text-2xl font-bold text-slate-900">
@@ -534,32 +457,26 @@ function RequestStatusModal({
             </h2>
 
             <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-slate-500">
-              Your payment was successful and your
-              session request has been sent to an
-              eligible online employee.
+              Your payment was successful and your session request has been sent
+              to an eligible online employee.
             </p>
 
             <div className="mt-6 rounded-2xl border border-blue-100 bg-blue-50 p-5">
               <div className="flex items-center justify-center gap-2 text-sm font-semibold text-blue-700">
-                <Loader2
-                  size={17}
-                  className="animate-spin"
-                />
+                <Loader2 size={17} className="animate-spin" />
                 Waiting for employee acceptance...
               </div>
 
               <p className="mt-2 text-xs text-blue-600">
-                Please keep this page open while we wait
-                for an employee to accept your request.
+                Please keep this page open while we wait for an employee to
+                accept your request.
               </p>
             </div>
 
             <div className="mt-4 flex items-center justify-center gap-2 text-xs text-slate-400">
               <TimerReset size={14} />
-
-              If no employee accepts before your
-              selected session duration ends, your
-              payment will be refunded.
+              If no employee accepts before your selected session duration ends,
+              your payment will be refunded.
             </div>
           </div>
         )}
@@ -568,10 +485,7 @@ function RequestStatusModal({
           <div className="px-7 py-8">
             <div className="text-center">
               <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50">
-                <CheckCircle2
-                  size={34}
-                  className="text-emerald-600"
-                />
+                <CheckCircle2 size={34} className="text-emerald-600" />
               </div>
 
               <h2 className="mt-4 text-2xl font-bold text-slate-900">
@@ -579,8 +493,7 @@ function RequestStatusModal({
               </h2>
 
               <p className="mt-2 text-sm text-slate-500">
-                An employee has accepted your session
-                request.
+                An employee has accepted your session request.
               </p>
             </div>
 
@@ -588,18 +501,13 @@ function RequestStatusModal({
               <div className="flex items-center gap-4">
                 {employeeImage ? (
                   <img
-                    src={normalizeImage(
-                      employeeImage
-                    )}
+                    src={normalizeImage(employeeImage)}
                     alt={employeeName}
                     className="h-16 w-16 rounded-full object-cover"
                   />
                 ) : (
                   <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-slate-200">
-                    <UserRound
-                      size={28}
-                      className="text-slate-500"
-                    />
+                    <UserRound size={28} className="text-slate-500" />
                   </div>
                 )}
 
@@ -616,17 +524,13 @@ function RequestStatusModal({
                     <div className="mt-1 flex items-center gap-2 text-sm text-slate-500">
                       <Mail size={14} />
 
-                      <span className="break-all">
-                        {employeeEmail}
-                      </span>
+                      <span className="break-all">{employeeEmail}</span>
                     </div>
                   )}
 
                   {employeeDesignation && (
                     <div className="mt-1 flex items-center gap-2 text-sm text-slate-500">
-                      <BriefcaseBusiness
-                        size={14}
-                      />
+                      <BriefcaseBusiness size={14} />
 
                       {employeeDesignation}
                     </div>
@@ -652,10 +556,7 @@ function RequestStatusModal({
         {refunded && (
           <div className="px-7 py-9 text-center">
             <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-amber-50">
-              <IndianRupee
-                size={34}
-                className="text-amber-600"
-              />
+              <IndianRupee size={34} className="text-amber-600" />
             </div>
 
             <h2 className="mt-5 text-2xl font-bold text-slate-900">
@@ -663,9 +564,8 @@ function RequestStatusModal({
             </h2>
 
             <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-slate-500">
-              No employee accepted your session request
-              within the selected session duration.
-              Your payment has been refunded.
+              No employee accepted your session request within the selected
+              session duration. Your payment has been refunded.
             </p>
 
             <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
@@ -702,92 +602,66 @@ export default function SessionBoard() {
 
   const decodedCompanyName = useMemo(() => {
     try {
-      return decodeURIComponent(
-        company || ""
-      );
+      return decodeURIComponent(company || "");
     } catch {
       return company || "";
     }
   }, [company]);
 
-  const [companyDetails, setCompanyDetails] =
-    useState(null);
+  const [companyDetails, setCompanyDetails] = useState(null);
 
-  const [loadingCompany, setLoadingCompany] =
-    useState(true);
+  const [loadingCompany, setLoadingCompany] = useState(true);
 
-  const [requirements, setRequirements] =
-    useState({
-      sessionType: SESSION_TYPES[0].value,
-      role: "",
-      otherRole: "",
-      gender: "",
-      language: "",
-      duration: "30",
-    });
+  const [requirements, setRequirements] = useState({
+    sessionType: SESSION_TYPES[0].value,
+    role: "",
+    otherRole: "",
+    gender: "",
+    language: "",
+    duration: "30",
+  });
 
-  const [walletBalance, setWalletBalance] =
-    useState(0);
+  const [walletBalance, setWalletBalance] = useState(0);
 
-  const [paymentState, setPaymentState] =
-    useState(null);
+  const [paymentState, setPaymentState] = useState(null);
 
-  const [paymentMethod, setPaymentMethod] =
-    useState("");
+  const [paymentMethod, setPaymentMethod] = useState("");
 
-  const [requestStatus, setRequestStatus] =
-    useState(null);
+  const [requestStatus, setRequestStatus] = useState(null);
 
-  const [requestData, setRequestData] =
-    useState(null);
+  const [requestData, setRequestData] = useState(null);
 
-  const [refundAmount, setRefundAmount] =
-    useState(0);
+  const [refundAmount, setRefundAmount] = useState(0);
 
-  const requestGroupIdRef =
-    useRef(null);
+  const requestGroupIdRef = useRef(null);
 
   const pollRef = useRef(null);
 
-  const refundHandledRef =
-    useRef(false);
+  const refundHandledRef = useRef(false);
 
-  const loggedInUser = useMemo(
-    () => getLoggedInUser(),
-    []
-  );
+  const loggedInUser = useMemo(() => getLoggedInUser(), []);
 
-  const requesterName =
-    getUserName(loggedInUser);
+  const requesterName = getUserName(loggedInUser);
 
-  const requesterEmail =
-    getUserEmail(loggedInUser);
+  const requesterEmail = getUserEmail(loggedInUser);
 
-  const requesterImage =
-    getUserImage(loggedInUser);
+  const requesterImage = getUserImage(loggedInUser);
 
   const selectedType = useMemo(() => {
     return (
-      SESSION_TYPES.find(
-        (item) =>
-          item.value ===
-          requirements.sessionType
-      ) || SESSION_TYPES[0]
+      SESSION_TYPES.find((item) => item.value === requirements.sessionType) ||
+      SESSION_TYPES[0]
     );
   }, [requirements.sessionType]);
 
   const selectedDuration = useMemo(() => {
     return (
-      SESSION_OPTIONS.find(
-        (item) =>
-          item.value ===
-          requirements.duration
-      ) || SESSION_OPTIONS[0]
+      SESSION_OPTIONS.find((item) => item.value === requirements.duration) ||
+      SESSION_OPTIONS[0]
     );
   }, [requirements.duration]);
 
-  const sessionPrice =
-    selectedDuration.price;
+  const sessionPrice = selectedDuration.price;
 
   const isFormValid = useMemo(() => {
     if (!requirements.sessionType) {
@@ -798,10 +672,7 @@ export default function SessionBoard() {
       return false;
     }
 
-    if (
-      requirements.role === "Other" &&
-      !requirements.otherRole.trim()
-    ) {
+    if (requirements.role === "Other" && !requirements.otherRole.trim()) {
       return false;
     }
 
@@ -820,50 +691,30 @@ export default function SessionBoard() {
     try {
       setLoadingCompany(true);
 
-      const response = await fetch(
-        `${API_URL}/mentor/companies`
-      );
+      const response = await fetch(`${API_URL}/mentor/companies`);
 
       if (!response.ok) {
-        throw new Error(
-          "Unable to fetch companies"
-        );
+        throw new Error("Unable to fetch companies");
       }
 
-      const data =
-        await response.json();
+      const data = await response.json();
 
-      const companies =
-        Array.isArray(data)
-          ? data
-          : data.companies ||
-            data.data ||
-            [];
+      const companies = Array.isArray(data)
+        ? data
+        : data.companies || data.data || [];
 
-      const foundCompany =
-        companies.find((item) => {
-          const itemName =
-            item.companyName ||
-            item.name ||
-            item.slug ||
-            "";
+      const foundCompany = companies.find((item) => {
+        const itemName = item.companyName || item.name || item.slug || "";
 
-          return (
-            String(itemName).toLowerCase() ===
-            String(
-              decodedCompanyName
-            ).toLowerCase()
-          );
-        });
+        return (
+          String(itemName).toLowerCase() ===
+          String(decodedCompanyName).toLowerCase()
+        );
+      });
 
-      setCompanyDetails(
-        foundCompany || null
-      );
+      setCompanyDetails(foundCompany || null);
     } catch (error) {
-      console.error(
-        "Company fetch error:",
-        error
-      );
+      console.error("Company fetch error:", error);
 
       setCompanyDetails(null);
     } finally {
@@ -877,41 +728,27 @@ export default function SessionBoard() {
 
   useEffect(() => {
     try {
-      const savedWallet =
-        localStorage.getItem(
-          WALLET_KEY
-        );
+      const savedWallet = localStorage.getItem(WALLET_KEY);
 
       if (savedWallet !== null) {
-        setWalletBalance(
-          Number(savedWallet) || 0
-        );
+        setWalletBalance(Number(savedWallet) || 0);
       }
     } catch {
       setWalletBalance(0);
     }
   }, []);
 
-  const saveWallet = useCallback(
-    (amount) => {
-      const safeAmount = Math.max(
-        0,
-        Number(amount) || 0
-      );
+  const saveWallet = useCallback((amount) => {
+    const safeAmount = Math.max(0, Number(amount) || 0);
 
-      setWalletBalance(safeAmount);
+    setWalletBalance(safeAmount);
 
-      try {
-        localStorage.setItem(
-          WALLET_KEY,
-          String(safeAmount)
-        );
-      } catch {
-        return;
-      }
-    },
-    []
-  );
+    try {
+      localStorage.setItem(WALLET_KEY, String(safeAmount));
+    } catch {
+      return;
+    }
+  }, []);
 
   const validateForm = () => {
     if (!requirements.sessionType) {
@@ -922,10 +759,7 @@ export default function SessionBoard() {
       return false;
     }
 
-    if (
-      requirements.role === "Other" &&
-      !requirements.otherRole.trim()
-    ) {
+    if (requirements.role === "Other" && !requirements.otherRole.trim()) {
       return false;
     }
 
@@ -942,226 +776,154 @@ export default function SessionBoard() {
 
   const clearPolling = useCallback(() => {
     if (pollRef.current) {
-      clearInterval(
-        pollRef.current
-      );
+      clearInterval(pollRef.current);
 
       pollRef.current = null;
     }
   }, []);
 
-  const storePendingRequest =
-    useCallback(() => {
-      try {
-        localStorage.setItem(
-          PENDING_REQUEST_KEY,
-          JSON.stringify({
-            requestGroupId:
-              requestGroupIdRef.current,
+  const storePendingRequest = useCallback(() => {
+    try {
+      localStorage.setItem(
+        PENDING_REQUEST_KEY,
+        JSON.stringify({
+          requestGroupId: requestGroupIdRef.current,
 
-            companyName:
-              decodedCompanyName,
+          companyName: decodedCompanyName,
 
-            amount: sessionPrice,
+          amount: sessionPrice,
 
-            paymentMethod,
+          paymentMethod,
 
-            duration: Number(
-              requirements.duration
-            ),
+          duration: Number(requirements.duration),
 
-            createdAt: Date.now(),
+          createdAt: Date.now(),
 
-            expiresAt:
-              Date.now() +
-              Number(
-                requirements.duration
-              ) *
-                60 *
-                1000,
-          })
-        );
-      } catch {
-        return;
-      }
-    }, [
-      decodedCompanyName,
-      paymentMethod,
-      requirements.duration,
-      sessionPrice,
-    ]);
+          expiresAt: Date.now() + Number(requirements.duration) * 60 * 1000,
+        }),
+      );
+    } catch {
+      return;
+    }
+  }, [decodedCompanyName, paymentMethod, requirements.duration, sessionPrice]);
 
-  const clearPendingRequest =
-    useCallback(() => {
-      try {
-        localStorage.removeItem(
-          PENDING_REQUEST_KEY
-        );
-      } catch {
-        return;
-      }
-    }, []);
+  const clearPendingRequest = useCallback(() => {
+    try {
+      localStorage.removeItem(PENDING_REQUEST_KEY);
+    } catch {
+      return;
+    }
+  }, []);
 
-  const refundWalletIfNeeded =
-    useCallback(
-      (amount) => {
-        if (
-          paymentMethod !== "wallet" ||
-          refundHandledRef.current
-        ) {
-          return;
-        }
-
-        refundHandledRef.current = true;
-
-        const refund =
-          Number(amount) ||
-          sessionPrice;
-
-        setWalletBalance(
-          (currentBalance) => {
-            const newBalance =
-              currentBalance +
-              refund;
-
-            try {
-              localStorage.setItem(
-                WALLET_KEY,
-                String(newBalance)
-              );
-            } catch {
-              return newBalance;
-            }
-
-            return newBalance;
-          }
-        );
-      },
-      [paymentMethod, sessionPrice]
-    );
-
-  const checkRequestStatus =
-    useCallback(async () => {
-      const requestGroupId =
-        requestGroupIdRef.current;
-
-      if (!requestGroupId) {
+  const refundWalletIfNeeded = useCallback(
+    (amount) => {
+      if (paymentMethod !== "wallet" || refundHandledRef.current) {
         return;
       }
 
-      try {
-        const response = await fetch(
-          `${API_URL}/mentor/session-requests/${encodeURIComponent(
-            requestGroupId
-          )}`
-        );
+      refundHandledRef.current = true;
 
-        if (!response.ok) {
-          return;
+      const refund = Number(amount) || sessionPrice;
+
+      setWalletBalance((currentBalance) => {
+        const newBalance = currentBalance + refund;
+
+        try {
+          localStorage.setItem(WALLET_KEY, String(newBalance));
+        } catch {
+          return newBalance;
         }
 
-        const data =
-          await response.json();
+        return newBalance;
+      });
+    },
+    [paymentMethod, sessionPrice],
+  );
 
-        if (
-          !data?.success &&
-          !data?.request &&
-          !data?.data
-        ) {
-          return;
-        }
+  const checkRequestStatus = useCallback(async () => {
+    const requestGroupId = requestGroupIdRef.current;
 
-        const request =
-          data.request ||
-          data.data;
+    if (!requestGroupId) {
+      return;
+    }
 
-        if (!request) {
-          return;
-        }
+    try {
+      const response = await fetch(
+        `${API_URL}/mentor/session-requests/${encodeURIComponent(
+          requestGroupId,
+        )}`,
+      );
 
-        setRequestData(request);
-
-        const status =
-          String(
-            request.status ||
-              "pending"
-          ).toLowerCase();
-
-        if (
-          status === "accepted" ||
-          status === "confirmed"
-        ) {
-          clearPolling();
-          clearPendingRequest();
-
-          setRequestStatus(
-            "accepted"
-          );
-
-          return;
-        }
-
-        if (
-          status === "refunded" ||
-          status === "expired" ||
-          status === "cancelled"
-        ) {
-          clearPolling();
-
-          const amount =
-            Number(
-              request.refundAmount ??
-                request.amount ??
-                request.sessionDetails
-                  ?.amount ??
-                sessionPrice
-            ) || sessionPrice;
-
-          setRefundAmount(amount);
-
-          refundWalletIfNeeded(
-            amount
-          );
-
-          clearPendingRequest();
-
-          setRequestStatus(
-            "refunded"
-          );
-
-          return;
-        }
-
-        setRequestStatus(
-          "waiting"
-        );
-      } catch (error) {
-        console.error(
-          "Request status error:",
-          error
-        );
+      if (!response.ok) {
+        return;
       }
-    }, [
-      clearPendingRequest,
-      clearPolling,
-      refundWalletIfNeeded,
-      sessionPrice,
-    ]);
 
-  const startRequestPolling =
-    useCallback(() => {
-      clearPolling();
+      const data = await response.json();
 
+      if (!data?.success && !data?.request && !data?.data) {
+        return;
+      }
+
+      const request = data.request || data.data;
+
+      if (!request) {
+        return;
+      }
+
+      setRequestData(request);
+
+      const status = String(request.status || "pending").toLowerCase();
+
+      if (status === "accepted" || status === "confirmed") {
+        clearPolling();
+        clearPendingRequest();
+
+        setRequestStatus("accepted");
+
+        return;
+      }
+
+      if (
+        status === "refunded" ||
+        status === "expired" ||
+        status === "cancelled"
+      ) {
+        clearPolling();
+
+        const amount =
+          Number(
+            request.refundAmount ??
+              request.amount ??
+              request.sessionDetails?.amount ??
+              sessionPrice,
+          ) || sessionPrice;
+
+        setRefundAmount(amount);
+
+        refundWalletIfNeeded(amount);
+
+        clearPendingRequest();
+
+        setRequestStatus("refunded");
+
+        return;
+      }
+
+      setRequestStatus("waiting");
+    } catch (error) {
+      console.error("Request status error:", error);
+    }
+  }, [clearPendingRequest, clearPolling, refundWalletIfNeeded, sessionPrice]);
+
+  const startRequestPolling = useCallback(() => {
+    clearPolling();
+
+    checkRequestStatus();
+
+    pollRef.current = setInterval(() => {
       checkRequestStatus();
-
-      pollRef.current =
-        setInterval(() => {
-          checkRequestStatus();
-        }, 3000);
-    }, [
-      checkRequestStatus,
-      clearPolling,
-    ]);
+    }, 3000);
+  }, [checkRequestStatus, clearPolling]);
 
   useEffect(() => {
     return () => {
@@ -1169,256 +931,246 @@ export default function SessionBoard() {
     };
   }, [clearPolling]);
 
-  const sendSessionRequest =
-    async () => {
-      const requestGroupId =
-        requestGroupIdRef.current;
+  const sendSessionRequest = async () => {
+    const requestGroupId = requestGroupIdRef.current;
 
-      if (!requestGroupId) {
-        throw new Error(
-          "Request ID missing"
-        );
-      }
-
-      const durationMinutes =
-        Number(
-          requirements.duration
-        );
-
-      const expiresAt =
-        new Date(
-          Date.now() +
-            durationMinutes *
-              60 *
-              1000
-        ).toISOString();
-
-      const payload = {
-        requestGroupId,
-
-        companyName:
-          decodedCompanyName,
-
-        companyLogo:
-          companyDetails?.logo ||
-          companyDetails?.companyLogo ||
-          null,
-
-        companyImage:
-          companyDetails?.companyImage ||
-          null,
-
-        requester: {
-          fullName:
-            requesterName,
-
-          email:
-            requesterEmail,
-
-          image:
-            requesterImage,
-        },
-
-        sessionDetails: {
-          sessionType:
-            selectedType?.label ||
-            requirements.sessionType,
-
-          sessionTypeValue:
-            requirements.sessionType,
-
-          role:
-            requirements.role,
-
-          otherRole:
-            requirements.role ===
-            "Other"
-              ? requirements.otherRole.trim()
-              : "",
-
-          gender:
-            requirements.gender,
-
-          language:
-            requirements.language,
-
-          duration:
-            durationMinutes,
-
-          amount:
-            Number(sessionPrice),
-        },
-
-        paymentMethod,
-
-        status: "pending",
-
-        expiresAt,
-      };
-
-      console.log(
-        "Sending session request:",
-        payload
-      );
-
-      const response =
-        await fetch(
-          `${API_URL}/mentor/session-requests`,
-          {
-            method: "POST",
-
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-
-            body:
-              JSON.stringify(
-                payload
-              ),
-          }
-        );
-
-      const contentType =
-        response.headers.get(
-          "content-type"
-        ) || "";
-
-      let data = null;
-
-      if (
-        contentType.includes(
-          "application/json"
-        )
-      ) {
-        data =
-          await response.json();
-      } else {
-        const text =
-          await response.text();
-
-        throw new Error(
-          text ||
-            `Request failed with status ${response.status}`
-        );
-      }
-
-      if (!response.ok) {
-        throw new Error(
-          data?.message ||
-            data?.error ||
-            `Request failed with status ${response.status}`
-        );
-      }
-
-      if (
-        data?.success === false
-      ) {
-        throw new Error(
-          data?.message ||
-            "Unable to send session request"
-        );
-      }
-
-      console.log(
-        "Session request created:",
-        data
-      );
-
-      return data;
-    };
-
-  const finishPaymentSuccess =
-    async () => {
-      try {
-        setPaymentState(null);
-
-        await sendSessionRequest();
-
-        if (
-          paymentMethod ===
-          "wallet"
-        ) {
-          saveWallet(
-            walletBalance -
-              sessionPrice
-          );
-        }
-
-        refundHandledRef.current =
-          false;
-
-        storePendingRequest();
-
-        setRequestData(null);
-
-        setRefundAmount(0);
-
-        setRequestStatus(
-          "waiting"
-        );
-
-        startRequestPolling();
-      } catch (error) {
-        console.error(
-          "Session request failed:",
-          error
-        );
-
-        setPaymentState(null);
-
-        setRequestStatus(null);
-
-        console.error(
-          "Backend endpoint:",
-          `${API_URL}/mentor/session-requests`
-        );
-      }
-    };
-
-  const startPayment = (method) => {
-    if (!validateForm()) {
-      return;
+    if (!requestGroupId) {
+      throw new Error("Request ID missing");
     }
 
-    if (
-      method === "wallet" &&
-      walletBalance < sessionPrice
-    ) {
-      return;
+    const durationMinutes = Number(requirements.duration);
+
+    const expiresAt = new Date(
+      Date.now() + durationMinutes * 60 * 1000,
+    ).toISOString();
+
+    const payload = {
+      requestGroupId,
+
+      companyName: decodedCompanyName,
+
+      companyLogo: companyDetails?.logo || companyDetails?.companyLogo || null,
+
+      companyImage: companyDetails?.companyImage || null,
+
+      requester: {
+        fullName: requesterName,
+
+        email: requesterEmail,
+
+        image: requesterImage,
+      },
+
+      sessionDetails: {
+        sessionType: selectedType?.label || requirements.sessionType,
+
+        sessionTypeValue: requirements.sessionType,
+
+        role: requirements.role,
+
+        otherRole:
+          requirements.role === "Other" ? requirements.otherRole.trim() : "",
+
+        gender: requirements.gender,
+
+        language: requirements.language,
+
+        duration: durationMinutes,
+
+        amount: Number(sessionPrice),
+      },
+
+      paymentMethod,
+
+      status: "pending",
+
+      expiresAt,
+    };
+
+    console.log("Sending session request:", payload);
+
+    const response = await fetch(`${API_URL}/mentor/session-requests`, {
+      method: "POST",
+
+      headers: {
+        "Content-Type": "application/json",
+      },
+
+      body: JSON.stringify(payload),
+    });
+
+    const contentType = response.headers.get("content-type") || "";
+
+    let data = null;
+
+    if (contentType.includes("application/json")) {
+      data = await response.json();
+    } else {
+      const text = await response.text();
+
+      throw new Error(text || `Request failed with status ${response.status}`);
     }
 
-    requestGroupIdRef.current =
-      createRequestGroupId();
-
-    refundHandledRef.current =
-      false;
-
-    setPaymentMethod(method);
-
-    setPaymentState(
-      "processing"
-    );
-
-    setTimeout(() => {
-      setPaymentState(
-        "success"
+    if (!response.ok) {
+      throw new Error(
+        data?.message ||
+          data?.error ||
+          `Request failed with status ${response.status}`,
       );
-    }, 2500);
+    }
+
+    if (data?.success === false) {
+      throw new Error(data?.message || "Unable to send session request");
+    }
+
+    console.log("Session request created:", data);
+
+    return data;
   };
 
+  const finishPaymentSuccess = async () => {
+    try {
+      setPaymentState(null);
+
+      await sendSessionRequest();
+
+      if (paymentMethod === "wallet") {
+        saveWallet(walletBalance - sessionPrice);
+      }
+
+      refundHandledRef.current = false;
+
+      storePendingRequest();
+
+      setRequestData(null);
+
+      setRefundAmount(0);
+
+      setRequestStatus("waiting");
+
+      startRequestPolling();
+    } catch (error) {
+      console.error("Session request failed:", error);
+
+      setPaymentState(null);
+
+      setRequestStatus(null);
+
+      console.error("Backend endpoint:", `${API_URL}/mentor/session-requests`);
+    }
+  };
+
+  const startPayment = async () => {
+    if (!validateForm()) return;
+
+    try {
+      requestGroupIdRef.current = createRequestGroupId();
+
+      setPaymentMethod("razorpay");
+      setPaymentState("processing");
+
+      // 1. Create Razorpay order
+      const orderResponse = await fetch(`${API_URL}/payments/create-order`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          amount: sessionPrice,
+        }),
+      });
+
+      const order = await orderResponse.json();
+
+      if (!orderResponse.ok) {
+        throw new Error(order.message || "Unable to create payment order");
+      }
+
+      // 2. Open Razorpay Checkout
+      const options = {
+        key: import.meta.env.VITE_RAZORPAY_KEY_ID,
+
+        amount: order.amount,
+        currency: order.currency,
+
+        name: "MNCConnect",
+        description: "Mentoring Session",
+
+        order_id: order.id,
+
+        handler: async function (response) {
+          try {
+            // 3. Verify payment
+            const verifyResponse = await fetch(
+             `${API_URL}/payments/verify-payment`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  razorpay_order_id: response.razorpay_order_id,
+
+                  razorpay_payment_id: response.razorpay_payment_id,
+
+                  razorpay_signature: response.razorpay_signature,
+                }),
+              },
+            );
+
+            const verifyData = await verifyResponse.json();
+
+            if (!verifyResponse.ok || !verifyData.success) {
+              throw new Error(
+                verifyData.message || "Payment verification failed",
+              );
+            }
+
+            // 4. Payment verified → create session request
+            await finishPaymentSuccess();
+          } catch (error) {
+            console.error("Payment verification error:", error);
+
+            setPaymentState(null);
+          }
+        },
+
+        prefill: {
+          name: requesterName,
+          email: requesterEmail,
+        },
+
+        theme: {
+          color: "#2563eb",
+        },
+
+        modal: {
+          ondismiss: function () {
+            setPaymentState(null);
+          },
+        },
+      };
+
+      const razorpay = new window.Razorpay(options);
+
+      razorpay.open();
+    } catch (error) {
+      console.error("Razorpay error:", error);
+
+      setPaymentState(null);
+    }
+  };
   const handlePay = () => {
-    startPayment("razorpay");
+    startPayment();
   };
 
   const handleUseWallet = () => {
     startPayment("wallet");
   };
 
-  const handlePaymentSuccessContinue =
-    () => {
-      finishPaymentSuccess();
-    };
+  const handlePaymentSuccessContinue = () => {
+    finishPaymentSuccess();
+  };
 
   const handleRequestOk = () => {
     clearPolling();
@@ -1433,8 +1185,7 @@ export default function SessionBoard() {
 
     setPaymentMethod("");
 
-    requestGroupIdRef.current =
-      null;
+    requestGroupIdRef.current = null;
   };
 
   const companyLogo =
@@ -1447,24 +1198,17 @@ export default function SessionBoard() {
     <div className="min-h-screen bg-slate-50">
       <div className="mx-auto max-w-7xl px-5 py-8 lg:px-8">
         <div className="mb-7 flex items-center gap-2 text-sm text-slate-500">
-          <Link
-            to="/"
-            className="hover:text-slate-900"
-          >
+          <Link to="/" className="hover:text-slate-900">
             Home
           </Link>
 
           <ChevronRight size={16} />
 
-          <span>
-            {decodedCompanyName}
-          </span>
+          <span>{decodedCompanyName}</span>
 
           <ChevronRight size={16} />
 
-          <span className="font-semibold text-slate-900">
-            Session
-          </span>
+          <span className="font-semibold text-slate-900">Session</span>
         </div>
 
         <div className="grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -1477,24 +1221,19 @@ export default function SessionBoard() {
                   </h2>
 
                   <p className="mt-1 text-sm text-slate-500">
-                    Choose the type of guidance you
-                    need from an eligible employee.
+                    Choose the type of guidance you need from an eligible
+                    employee.
                   </p>
                 </div>
 
                 {loadingCompany ? (
                   <div className="flex items-center gap-2 text-xs text-slate-400">
-                    <Loader2
-                      size={15}
-                      className="animate-spin"
-                    />
+                    <Loader2 size={15} className="animate-spin" />
                     Loading company...
                   </div>
                 ) : companyLogo ? (
                   <img
-                    src={normalizeImage(
-                      companyLogo
-                    )}
+                    src={normalizeImage(companyLogo)}
                     alt={decodedCompanyName}
                     className="h-12 w-12 rounded-xl border border-slate-200 object-contain"
                   />
@@ -1502,77 +1241,59 @@ export default function SessionBoard() {
               </div>
 
               <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                {SESSION_TYPES.map(
-                  (type) => {
-                    const Icon =
-                      type.icon;
+                {SESSION_TYPES.map((type) => {
+                  const Icon = type.icon;
 
-                    const selected =
-                      requirements.sessionType ===
-                      type.value;
+                  const selected = requirements.sessionType === type.value;
 
-                    return (
-                      <button
-                        key={
-                          type.value
+                  return (
+                    <button
+                      key={type.value}
+                      type="button"
+                      onClick={() =>
+                        setRequirements((prev) => ({
+                          ...prev,
+                          sessionType: type.value,
+                        }))
+                      }
+                      className={`relative min-h-[105px] rounded-xl border p-4 text-left transition ${
+                        selected
+                          ? "border-blue-500 bg-blue-50 shadow-sm"
+                          : "border-slate-200 bg-white hover:border-blue-300"
+                      }`}
+                    >
+                      <Icon
+                        size={20}
+                        className={
+                          selected ? "text-blue-600" : "text-slate-500"
                         }
-                        type="button"
-                        onClick={() =>
-                          setRequirements(
-                            (prev) => ({
-                              ...prev,
-                              sessionType:
-                                type.value,
-                            })
-                          )
-                        }
-                        className={`relative min-h-[105px] rounded-xl border p-4 text-left transition ${
-                          selected
-                            ? "border-blue-500 bg-blue-50 shadow-sm"
-                            : "border-slate-200 bg-white hover:border-blue-300"
-                        }`}
-                      >
-                        <Icon
-                          size={20}
-                          className={
-                            selected
-                              ? "text-blue-600"
-                              : "text-slate-500"
-                          }
+                      />
+
+                      {selected && (
+                        <CheckCircle2
+                          size={18}
+                          className="absolute right-4 top-4 text-blue-600"
                         />
+                      )}
 
-                        {selected && (
-                          <CheckCircle2
-                            size={18}
-                            className="absolute right-4 top-4 text-blue-600"
-                          />
-                        )}
-
-                        <div className="mt-5 text-sm font-bold text-slate-800">
-                          {type.label}
-                        </div>
-                      </button>
-                    );
-                  }
-                )}
+                      <div className="mt-5 text-sm font-bold text-slate-800">
+                        {type.label}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
 
               <SessionRequirements
-                requirements={
-                  requirements
-                }
-                setRequirements={
-                  setRequirements
-                }
+                requirements={requirements}
+                setRequirements={setRequirements}
               />
             </div>
 
             <div className="mt-7 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex items-start gap-3">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-                  <ShieldCheck
-                    size={20}
-                  />
+                  <ShieldCheck size={20} />
                 </div>
 
                 <div>
@@ -1582,49 +1303,36 @@ export default function SessionBoard() {
 
                   <div className="mt-3 space-y-3 text-sm text-slate-500">
                     <div className="flex gap-3">
-                      <span className="font-bold text-slate-900">
-                        1.
-                      </span>
+                      <span className="font-bold text-slate-900">1.</span>
 
                       <span>
-                        Complete your session
-                        preferences and make the
-                        payment.
+                        Complete your session preferences and make the payment.
                       </span>
                     </div>
 
                     <div className="flex gap-3">
-                      <span className="font-bold text-slate-900">
-                        2.
-                      </span>
+                      <span className="font-bold text-slate-900">2.</span>
 
                       <span>
-                        Your request will be sent to
-                        an eligible employee who is
+                        Your request will be sent to an eligible employee who is
                         online at that moment.
                       </span>
                     </div>
 
                     <div className="flex gap-3">
-                      <span className="font-bold text-slate-900">
-                        3.
-                      </span>
+                      <span className="font-bold text-slate-900">3.</span>
 
                       <span>
-                        If the employee accepts, your
-                        session will be confirmed.
+                        If the employee accepts, your session will be confirmed.
                       </span>
                     </div>
 
                     <div className="flex gap-3">
-                      <span className="font-bold text-slate-900">
-                        4.
-                      </span>
+                      <span className="font-bold text-slate-900">4.</span>
 
                       <span>
-                        If nobody accepts before your
-                        selected duration ends, the
-                        payment will be refunded.
+                        If nobody accepts before your selected duration ends,
+                        the payment will be refunded.
                       </span>
                     </div>
                   </div>
@@ -1642,9 +1350,7 @@ export default function SessionBoard() {
 
                 <div className="mt-6 space-y-4">
                   <div className="flex items-center justify-between gap-4">
-                    <span className="text-sm text-slate-500">
-                      Session
-                    </span>
+                    <span className="text-sm text-slate-500">Session</span>
 
                     <span className="text-right text-sm font-semibold text-slate-900">
                       {selectedType.label}
@@ -1652,31 +1358,23 @@ export default function SessionBoard() {
                   </div>
 
                   <div className="flex items-center justify-between gap-4">
-                    <span className="text-sm text-slate-500">
-                      Role
-                    </span>
+                    <span className="text-sm text-slate-500">Role</span>
 
                     <span className="max-w-[170px] text-right text-sm font-semibold text-slate-900">
-                      {requirements.role ||
-                        "Not selected"}
+                      {requirements.role || "Not selected"}
                     </span>
                   </div>
 
                   <div className="flex items-center justify-between gap-4">
-                    <span className="text-sm text-slate-500">
-                      Language
-                    </span>
+                    <span className="text-sm text-slate-500">Language</span>
 
                     <span className="text-right text-sm font-semibold text-slate-900">
-                      {requirements.language ||
-                        "Not selected"}
+                      {requirements.language || "Not selected"}
                     </span>
                   </div>
 
                   <div className="flex items-center justify-between gap-4">
-                    <span className="text-sm text-slate-500">
-                      Duration
-                    </span>
+                    <span className="text-sm text-slate-500">Duration</span>
 
                     <span className="text-sm font-semibold text-slate-900">
                       {selectedDuration.label}
@@ -1707,32 +1405,21 @@ export default function SessionBoard() {
                         : "cursor-not-allowed bg-slate-200 text-slate-400"
                     }`}
                   >
-                    Pay ₹{sessionPrice} &
-                    Send Request
+                    Pay ₹{sessionPrice} & Send Request
                   </button>
 
                   <button
                     type="button"
-                    onClick={
-                      handleUseWallet
-                    }
-                    disabled={
-                      !isFormValid ||
-                      walletBalance <
-                        sessionPrice
-                    }
+                    onClick={handleUseWallet}
+                    disabled={!isFormValid || walletBalance < sessionPrice}
                     className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl border py-3.5 text-sm font-bold transition ${
-                      isFormValid &&
-                      walletBalance >=
-                        sessionPrice
+                      isFormValid && walletBalance >= sessionPrice
                         ? "border-yellow-300 bg-yellow-50 text-yellow-800 hover:bg-yellow-100"
                         : "cursor-not-allowed border-slate-200 bg-white text-slate-400"
                     }`}
                   >
                     <Wallet size={17} />
-
-                    Use Wallet ₹
-                    {sessionPrice}
+                    Use Wallet ₹{sessionPrice}
                   </button>
                 </div>
 
@@ -1744,12 +1431,10 @@ export default function SessionBoard() {
                     />
 
                     <p className="text-xs leading-5 text-slate-500">
-                      After successful payment, your
-                      request will be sent to an eligible
-                      employee who is online at that
-                      moment. If nobody accepts within
-                      the selected session duration,
-                      your payment will be refunded.
+                      After successful payment, your request will be sent to an
+                      eligible employee who is online at that moment. If nobody
+                      accepts within the selected session duration, your payment
+                      will be refunded.
                     </p>
                   </div>
                 </div>
@@ -1764,28 +1449,16 @@ export default function SessionBoard() {
       </div>
 
       <PaymentOverlay
-        paymentState={
-          paymentState
-        }
+        paymentState={paymentState}
         amount={sessionPrice}
-        onSuccess={
-          handlePaymentSuccessContinue
-        }
+        onSuccess={handlePaymentSuccessContinue}
       />
 
       <RequestStatusModal
-        status={
-          requestStatus
-        }
-        request={
-          requestData
-        }
-        refundAmount={
-          refundAmount
-        }
-        onOk={
-          handleRequestOk
-        }
+        status={requestStatus}
+        request={requestData}
+        refundAmount={refundAmount}
+        onOk={handleRequestOk}
       />
 
       <style>{`
