@@ -37,8 +37,8 @@ app.use(
   cors({
     origin: function (origin, callback) {
       // Allow requests without origin
-      // Example: Postman, server-to-server requests
-      if (!origin) {
+      // and admin form requests with Origin: null
+      if (!origin || origin === "null") {
         return callback(null, true);
       }
 
@@ -52,10 +52,10 @@ app.use(
         new Error(`CORS blocked for origin: ${origin}`)
       );
     },
+
     credentials: true,
   })
 );
-
 // ================= BODY PARSER =================
 
 app.use(express.json());
