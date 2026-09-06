@@ -13,9 +13,8 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: [
-      "http://localhost:5173",
+      CLIENT_URL,
       "http://localhost:5174",
-      "https://mncconnect-frontend.onrender.com",
     ],
     credentials: true,
   },
