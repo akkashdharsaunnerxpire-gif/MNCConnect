@@ -86,9 +86,18 @@ app.use(
 
 // ================= PUBLIC FILES =================
 
+// ================= PUBLIC FILES =================
+
 app.use(
   "/public",
   express.static(path.join(__dirname, "public"))
+);
+
+// ================= ADMIN STATIC FILES =================
+
+app.use(
+  "/admin",
+  express.static(path.join(__dirname, "admin"))
 );
 
 // ================= EJS =================
