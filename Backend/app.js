@@ -17,13 +17,34 @@ app.set("trust proxy", 1);
 
 const allowedOrigins = [
   process.env.CLIENT_URL,
+  "https://mncconnect.onrender.com",
+  "https://mncconnect-backend.onrender.com",
   "http://localhost:5173",
   "http://localhost:5174",
 ].filter(Boolean);
 
 console.log("Allowed CORS origins:", allowedOrigins);
 
-// ================= HELMET =================
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin || origin === "null") {
+        return callback(null, true);
+      }
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      console.log("CORS blocked origin:", origin);
+
+      return callback(
+        new Error(`CORS blocked for origin: ${origin}`)
+      );
+    },
+    credentials: true,
+  })
+);
 
 app.use(
   helmet({
