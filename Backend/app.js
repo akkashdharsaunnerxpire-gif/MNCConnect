@@ -28,9 +28,9 @@ console.log("Allowed CORS origins:", allowedOrigins);
 app.use(
   helmet({
     crossOriginResourcePolicy: false,
+    contentSecurityPolicy: false,
   })
 );
-
 // ================= CORS =================
 
 app.use(
@@ -88,6 +88,8 @@ app.use(
 
 // ================= PUBLIC FILES =================
 
+// ================= PUBLIC FILES =================
+
 app.use(
   "/public",
   express.static(path.join(__dirname, "public"))
@@ -97,9 +99,8 @@ app.use(
 
 app.use(
   "/admin",
-  express.static(path.join(__dirname, "admin"))
+  express.static(path.join(__dirname, "public", "admin"))
 );
-
 // ================= EJS =================
 
 app.set("view engine", "ejs");
