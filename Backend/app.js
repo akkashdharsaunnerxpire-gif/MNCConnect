@@ -13,44 +13,90 @@ const adminRoutes = require("./routes/adminRoutes");
 
 const app = express();
 
+// ================= CORS =================
+
+const allowedOrigins = [
+  process.env.CLIENT_URL,
+  "http://localhost:5173",
+  "http://localhost:5174",
+].filter(Boolean);
+
+console.log("Allowed CORS origins:", allowedOrigins);
+
+// ================= HELMET =================
+
 app.use(
   helmet({
     crossOriginResourcePolicy: false,
   })
 );
 
+// ================= CORS =================
+
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173",
-      "http://localhost:5174",
-      "https://mncconnect-frontend.onrender.com",
-    ],
+    origin: function (origin, callback) {
+      // Allow requests without origin
+      // Example: Postman, server-to-server requests
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      console.log("CORS blocked origin:", origin);
+
+      return callback(
+        new Error(`CORS blocked for origin: ${origin}`)
+      );
+    },
     credentials: true,
   })
 );
 
+// ================= BODY PARSER =================
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// ================= COOKIE =================
+
 app.use(cookieParser());
+
+// ================= SESSION =================
 
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "mncconnect-secret",
     resave: false,
     saveUninitialized: false,
+
     cookie: {
       secure: process.env.NODE_ENV === "production",
       httpOnly: true,
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      sameSite:
+        process.env.NODE_ENV === "production"
+          ? "none"
+          : "lax",
     },
   })
 );
 
-app.use("/public", express.static(path.join(__dirname, "public")));
+// ================= PUBLIC FILES =================
+
+app.use(
+  "/public",
+  express.static(path.join(__dirname, "public"))
+);
+
+// ================= EJS =================
 
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
+
+// ================= HEALTH CHECK =================
 
 app.get("/", (req, res) => {
   res.status(200).json({
@@ -66,11 +112,19 @@ app.get("/health", (req, res) => {
   });
 });
 
+// ================= API ROUTES =================
+
 app.use("/api/auth", authRoutes);
+
 app.use("/api/payments", paymentRoutes);
+
 app.use("/api/mentor", mentorRoutes);
+
 app.use("/api/session", sessionRoutes);
+
 app.use("/admin", adminRoutes);
+
+// ================= 404 =================
 
 app.use((req, res) => {
   res.status(404).json({
@@ -78,6 +132,8 @@ app.use((req, res) => {
     message: "Route not found",
   });
 });
+
+// ================= GLOBAL ERROR =================
 
 app.use((err, req, res, next) => {
   console.error("Global Error:", err);
