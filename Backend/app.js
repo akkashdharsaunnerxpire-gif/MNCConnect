@@ -12,7 +12,7 @@ const sessionRoutes = require("./routes/sessionroutes");
 const adminRoutes = require("./routes/adminRoutes");
 
 const app = express();
-
+app.set("trust proxy", 1);
 // ================= CORS =================
 
 const allowedOrigins = [
