@@ -7,6 +7,7 @@ const app = require("./app");
 const connectDB = require("./config/db");
 
 const PORT = process.env.PORT || 5000;
+const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
 
 const server = http.createServer(app);
 
@@ -31,6 +32,7 @@ app.set("onlineMentors", onlineMentors);
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
 
+  // ================= EMPLOYEE ONLINE =================
   socket.on("employee-online", (employeeId) => {
     if (!employeeId) return;
 
@@ -39,12 +41,12 @@ io.on("connection", (socket) => {
     }
 
     onlineEmployees.get(employeeId).add(socket.id);
-
     socket.employeeId = employeeId;
 
     console.log(`Employee ${employeeId} is ONLINE`);
   });
 
+  // ================= EMPLOYEE OFFLINE =================
   socket.on("employee-offline", (employeeId) => {
     if (!employeeId) return;
 
@@ -60,6 +62,7 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ================= MENTOR ONLINE =================
   socket.on("mentor-online", (mentorId) => {
     if (!mentorId) return;
 
@@ -68,11 +71,12 @@ io.on("connection", (socket) => {
     }
 
     onlineMentors.get(mentorId).add(socket.id);
-
     socket.mentorId = mentorId;
 
     console.log(`Mentor ${mentorId} is ONLINE`);
   });
+
+  // ================= MENTOR OFFLINE =================
   socket.on("mentor-offline", (mentorId) => {
     if (!mentorId) return;
 
@@ -88,9 +92,11 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ================= DISCONNECT =================
   socket.on("disconnect", () => {
     console.log("Socket disconnected:", socket.id);
 
+    // Employee cleanup
     if (socket.employeeId) {
       const sockets = onlineEmployees.get(socket.employeeId);
 
@@ -99,11 +105,15 @@ io.on("connection", (socket) => {
 
         if (sockets.size === 0) {
           onlineEmployees.delete(socket.employeeId);
-          console.log(`Employee ${socket.employeeId} is OFFLINE`);
+
+          console.log(
+            `Employee ${socket.employeeId} is OFFLINE`
+          );
         }
       }
     }
 
+    // Mentor cleanup
     if (socket.mentorId) {
       const sockets = onlineMentors.get(socket.mentorId);
 
@@ -112,7 +122,10 @@ io.on("connection", (socket) => {
 
         if (sockets.size === 0) {
           onlineMentors.delete(socket.mentorId);
-          console.log(`Mentor ${socket.mentorId} is OFFLINE`);
+
+          console.log(
+            `Mentor ${socket.mentorId} is OFFLINE`
+          );
         }
       }
     }
@@ -126,6 +139,7 @@ const startServer = async () => {
     server.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
       console.log(`Socket.IO running on port ${PORT}`);
+      console.log(`Allowed frontend: ${CLIENT_URL}`);
     });
   } catch (error) {
     console.error("Server startup failed:", error);
