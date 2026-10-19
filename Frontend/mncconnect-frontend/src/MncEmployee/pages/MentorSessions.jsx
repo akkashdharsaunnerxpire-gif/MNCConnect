@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { CalendarDays, CheckCircle2, Clock3, Video, Search, MessageSquare, Star, XCircle, Loader2, Radio } from "lucide-react";
 import useMentorSessions from "../../hooks/useMentorSessions";
 import { inr } from "../../services/mentorApi";
 
 const INDIA_TIMEZONE = "Asia/Kolkata";
-const JOIN_WINDOW_MINUTES = 2;
+const JOIN_WINDOW_MINUTES = 5; // the meeting room opens 5 minutes before the start time
 const TABS = ["Upcoming", "Completed", "Cancelled"];
 
 const fmtDateTime = (d) =>
@@ -45,11 +46,11 @@ const getJoinStatus = (session, nowMs) => {
 };
 
 const MentorSessions = () => {
+  const navigate = useNavigate();
   const { sessions, loading, error, connected, reload } = useMentorSessions();
   const [activeTab, setActiveTab] = useState("Upcoming");
   const [search, setSearch] = useState("");
   const [nowMs, setNowMs] = useState(Date.now());
-  const [joinError, setJoinError] = useState("");
 
   useEffect(() => {
     const t = setInterval(() => setNowMs(Date.now()), 1000);
@@ -73,20 +74,8 @@ const MentorSessions = () => {
     return list.sort((a, b) => dir * ((a.startsAt || 0) - (b.startsAt || 0)));
   }, [sessions, activeTab, search]);
 
-  // TODO: confirm the field name your backend/meeting util returns (meetingUrl / meetingLink / joinUrl).
-  // If your app joins through an in-app route instead, replace window.open with navigate(`/meeting/${session.id}`).
-  const handleJoin = (session) => {
-    const link = session.meetingUrl || session.meetingLink || session.joinUrl;
-
-    if (!link) {
-      setJoinError("Meeting link isn't ready yet. Please try again in a few seconds.");
-      reload();
-      return;
-    }
-
-    setJoinError("");
-    window.open(link, "_blank", "noopener,noreferrer");
-  };
+  // session.id is the requestGroupId, the same id the fresher joins with.
+  const handleJoin = (session) => navigate(`/mentor/meeting/${encodeURIComponent(session.id)}`);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-white via-sky-50 to-blue-100 text-slate-800">
@@ -128,12 +117,6 @@ const MentorSessions = () => {
         {error && (
           <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
             {error} <button onClick={reload} className="ml-2 font-semibold underline">Retry</button>
-          </div>
-        )}
-
-        {joinError && (
-          <div role="alert" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-            {joinError}
           </div>
         )}
 
@@ -248,7 +231,7 @@ const SessionCard = ({ session, nowMs, onJoin }) => {
       {isUpcoming && isJoinWindow && (
         <div className="mt-4 flex items-center gap-2 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-[11px] font-medium text-yellow-700">
           <span className="h-2 w-2 animate-pulse rounded-full bg-yellow-500" />
-          <span>Join window is open. Click "Join Now" to enter the session.</span>
+          <span>The meeting room is open. Click "Join Now". The timer starts when you and the fresher are both inside.</span>
         </div>
       )}
       {isUpcoming && isLive && (
