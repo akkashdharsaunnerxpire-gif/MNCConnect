@@ -5,6 +5,7 @@ const cors = require("cors");
 const session = require("express-session");
 const cookieParser = require("cookie-parser");
 const path = require("path");
+const mongoose = require("mongoose");
 
 const authRoutes = require("./routes/authRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
@@ -34,12 +35,16 @@ app.use(
 // ================= CORS (single instance) =================
 
 const allowedOrigins = [
-  process.env.CLIENT_URL,
-  "https://mncconnect.onrender.com",
-  "https://mncconnect-backend.onrender.com",
-  "http://localhost:5173",
-  "http://localhost:5174",
-].filter(Boolean);
+  ...new Set(
+    [
+      process.env.CLIENT_URL,
+      "https://mncconnect.onrender.com",
+      "https://mncconnect-backend.onrender.com",
+      "http://localhost:5173",
+      "http://localhost:5174",
+    ].filter(Boolean)
+  ),
+];
 
 // Socket.IO (server.js) reads the same list so HTTP and websocket CORS never drift apart
 app.set("allowedOrigins", allowedOrigins);
@@ -82,11 +87,20 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 // ================= SESSION =================
-// NOTE: the default MemoryStore resets on every restart (Render restarts often)
-// and is not meant for production. Use connect-mongo for persistent sessions:
-//   npm i connect-mongo
-//   const MongoStore = require("connect-mongo");
-//   store: MongoStore.create({ mongoUrl: process.env.MONGO_URI })
+// The default MemoryStore resets on every restart (Render restarts often) and leaks memory.
+// If connect-mongo is installed (npm i connect-mongo) sessions are stored in MongoDB,
+// re-using the same connection as mongoose. If it is not installed the app still starts
+// with MemoryStore and prints a warning.
+let store;
+try {
+  const MongoStore = require("connect-mongo");
+  store = (MongoStore.default || MongoStore).create({
+    clientPromise: mongoose.connection.asPromise().then((conn) => conn.getClient()),
+    collectionName: "sessions",
+  });
+} catch (error) {
+  console.warn("connect-mongo is not installed - sessions use MemoryStore. Run: npm i connect-mongo");
+}
 
 if (isProd && !process.env.SESSION_SECRET) {
   console.warn("⚠️  SESSION_SECRET is not set - using an insecure default!");
@@ -95,6 +109,7 @@ if (isProd && !process.env.SESSION_SECRET) {
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "mncconnect-secret",
+    store, // undefined -> MemoryStore
     resave: false,
     saveUninitialized: false,
     cookie: {
