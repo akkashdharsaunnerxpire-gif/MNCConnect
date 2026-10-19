@@ -1,655 +1,333 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  ArrowLeft,
-  Wallet,
-  TrendingUp,
-  Clock3,
-  IndianRupee,
-  ArrowDownToLine,
-  CalendarDays,
-  CheckCircle2,
-  MoreVertical,
-  Search,
-  CreditCard,
+  ArrowLeft, Wallet, TrendingUp, Clock3, IndianRupee, ArrowDownToLine,
+  CalendarDays, CheckCircle2, Search, Loader2, X, Radio,
 } from "lucide-react";
+import useLive from "../../hooks/useLive";
+import { api, ENDPOINTS, EVENTS, inr } from "../../services/mentorApi";
 
-/* ============================================================
-   MAIN COMPONENT
-============================================================ */
+const MIN_WITHDRAWAL = 500;
 
 const MentorEarnings = () => {
   const [activeTab, setActiveTab] = useState("All");
   const [search, setSearch] = useState("");
+  const [now, setNow] = useState(Date.now());
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [toast, setToast] = useState(null);
 
-  /* ============================================================
-     TRANSACTION DATA
-  ============================================================ */
+  const { data, loading, error, connected, reload } = useLive({
+    fetcher: () => api(ENDPOINTS.wallet),
+    events: [EVENTS.walletUpdated],
+    pollMs: 60000,
+  });
 
-  const transactions = [
-    {
-      id: 1,
-      fresher: "Arun Kumar",
-      session: "Career Guidance",
-      date: "Sep 01, 2026",
-      amount: 499,
-      status: "Completed",
-    },
-    {
-      id: 2,
-      fresher: "Rahul Raj",
-      session: "Technical Discussion",
-      date: "Aug 30, 2026",
-      amount: 699,
-      status: "Completed",
-    },
-    {
-      id: 3,
-      fresher: "Priya S",
-      session: "Portfolio Review",
-      date: "Aug 28, 2026",
-      amount: 399,
-      status: "Completed",
-    },
-    {
-      id: 4,
-      fresher: "Vignesh M",
-      session: "Mock Interview",
-      date: "Aug 27, 2026",
-      amount: 599,
-      status: "Pending",
-    },
-    {
-      id: 5,
-      fresher: "Sanjay K",
-      session: "Career Guidance",
-      date: "Aug 25, 2026",
-      amount: 499,
-      status: "Completed",
-    },
-  ];
+  // tick so a session flips Pending -> Completed without a refresh
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 15000);
+    return () => clearInterval(t);
+  }, []);
 
-  /* ============================================================
-     FILTER TRANSACTIONS
-  ============================================================ */
+  const showToast = (type, message) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 3500);
+  };
 
-  const filteredTransactions = useMemo(() => {
-    const keyword = search.toLowerCase().trim();
+  const wallet = { available: 0, pending: 0, lifetime: 0, week: 0, month: 0, withdrawn: 0, ...(data?.wallet || {}) };
 
-    return transactions.filter((transaction) => {
-      const matchesSearch =
-        !keyword ||
-        transaction.fresher.toLowerCase().includes(keyword) ||
-        transaction.session.toLowerCase().includes(keyword);
-
-      const matchesTab =
-        activeTab === "All" ||
-        transaction.status === activeTab;
-
-      return matchesSearch && matchesTab;
+  const transactions = useMemo(() => {
+    const list = data?.payments || data?.transactions || [];
+    return list.map((p) => {
+      const released = p.sessionEndsAt && new Date(p.sessionEndsAt).getTime() <= now;
+      return {
+        id: p._id || p.id,
+        fresher: p.fresherName || "Fresher",
+        session: p.topic || "Mentoring session",
+        date: new Date(p.paidAt || p.createdAt).toLocaleDateString("en-IN", {
+          day: "2-digit", month: "short", year: "numeric",
+        }),
+        amount: Number(p.mentorEarning) || 0,
+        status: released ? "Completed" : "Pending",
+      };
     });
-  }, [search, activeTab]);
+  }, [data, now]);
 
-  /* ============================================================
-     EARNINGS CALCULATIONS
-  ============================================================ */
+  const filtered = useMemo(() => {
+    const kw = search.toLowerCase().trim();
+    return transactions.filter(
+      (t) =>
+        (activeTab === "All" || t.status === activeTab) &&
+        (!kw || t.fresher.toLowerCase().includes(kw) || t.session.toLowerCase().includes(kw))
+    );
+  }, [transactions, activeTab, search]);
 
-  const completedAmount = transactions
-    .filter((item) => item.status === "Completed")
-    .reduce((sum, item) => sum + item.amount, 0);
+  const monthName = new Date().toLocaleDateString("en-IN", { month: "long", year: "numeric" });
 
-  const pendingAmount = transactions
-    .filter((item) => item.status === "Pending")
-    .reduce((sum, item) => sum + item.amount, 0);
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+        <Loader2 className="animate-spin text-blue-600" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-white via-sky-50 to-blue-100 text-slate-800">
-
-      {/* =====================================================
-          BACKGROUND
-      ===================================================== */}
-
-      <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
-
-        <div className="absolute w-[500px] h-[500px] -top-52 -left-52 rounded-full bg-blue-300/20 blur-3xl" />
-
-        <div className="absolute w-[500px] h-[500px] -bottom-52 -right-52 rounded-full bg-sky-300/20 blur-3xl" />
-
-      </div>
-
-      <main className="relative z-10 w-full max-w-7xl px-4 py-8 mx-auto sm:px-6 lg:px-8">
-
-        {/* =================================================
-            PAGE HEADER
-        ================================================= */}
-
-        <div className="flex flex-col justify-between gap-5 mb-8 sm:flex-row sm:items-end">
-
+      <main className="relative z-10 mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        <div className="mb-8 flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
           <div>
-
-            <p className="mb-2 text-xs font-semibold tracking-widest text-blue-600 uppercase">
-              Mentor Finance
+            <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-blue-600">Mentor Finance</p>
+            <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Your Earnings</h2>
+            <p className="mt-2 flex items-center gap-2 text-sm text-slate-500">
+              Updates live as sessions end.
+              <span className={`inline-flex items-center gap-1 text-xs font-medium ${connected ? "text-emerald-600" : "text-amber-600"}`}>
+                <Radio size={12} /> {connected ? "Live" : "Reconnecting…"}
+              </span>
             </p>
-
-            <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-              Your Earnings
-            </h2>
-
-            <p className="mt-2 text-sm text-slate-500">
-              Manage your mentoring income, payouts and transactions.
-            </p>
-
           </div>
-
           <Link
             to="/mentor/home"
-            className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-slate-600 transition border rounded-xl border-slate-200 bg-white hover:bg-blue-50 hover:text-blue-600 shadow-sm"
+            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-blue-50 hover:text-blue-600"
           >
-            Back to Home
-            <ArrowLeft size={16} />
+            Back to Home <ArrowLeft size={16} />
           </Link>
-
         </div>
 
-        {/* =================================================
-            EARNINGS CARDS
-        ================================================= */}
+        {error && (
+          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            {error} <button onClick={reload} className="ml-2 font-semibold underline">Retry</button>
+          </div>
+        )}
 
-        <div className="grid grid-cols-1 gap-4 mb-8 sm:grid-cols-2 lg:grid-cols-4">
-
-          <EarningCard
-            icon={<Wallet size={22} />}
-            label="Available Balance"
-            value="₹12,450"
-            description="Ready for withdrawal"
-          />
-
-          <EarningCard
-            icon={<TrendingUp size={22} />}
-            label="Total Earnings"
-            value="₹28,750"
-            description="All time earnings"
-          />
-
-          <EarningCard
-            icon={<Clock3 size={22} />}
-            label="Pending"
-            value={`₹${pendingAmount.toLocaleString("en-IN")}`}
-            description="Processing earnings"
-          />
-
-          <EarningCard
-            icon={<IndianRupee size={22} />}
-            label="This Month"
-            value="₹8,950"
-            description="September 2026"
-          />
-
+        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <EarningCard icon={<Wallet size={22} />} label="Available Balance" value={inr(wallet.available)} description="Ready for withdrawal" />
+          <EarningCard icon={<TrendingUp size={22} />} label="Total Earnings" value={inr(wallet.lifetime)} description="All time earnings" />
+          <EarningCard icon={<Clock3 size={22} />} label="Pending" value={inr(wallet.pending)} description="Clears after the session" />
+          <EarningCard icon={<IndianRupee size={22} />} label="This Month" value={inr(wallet.month)} description={monthName} />
         </div>
 
-        {/* =================================================
-            BALANCE + PAYOUT
-        ================================================= */}
-
-        <div className="grid grid-cols-1 gap-5 mb-8 lg:grid-cols-3">
-
-          {/* AVAILABLE BALANCE */}
-
-          <div className="relative p-6 overflow-hidden border lg:col-span-2 rounded-3xl border-blue-200 bg-white shadow-sm">
-
-            <div className="absolute w-56 h-56 rounded-full -right-20 -top-24 bg-blue-300/20 blur-3xl" />
-
-            <div className="absolute w-40 h-40 rounded-full -bottom-20 -left-10 bg-sky-300/15 blur-3xl" />
-
-            <div className="relative">
-
-              <div className="flex items-center justify-between">
-
-                <div>
-
-                  <p className="text-sm font-medium text-slate-500">
-                    Available for withdrawal
-                  </p>
-
-                  <h3 className="mt-2 text-4xl font-bold text-slate-900">
-                    ₹12,450
-                  </h3>
-
-                </div>
-
-                <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-blue-50 border border-blue-100">
-
-                  <Wallet
-                    size={27}
-                    className="text-blue-600"
-                  />
-
-                </div>
-
+        <div className="mb-8 grid grid-cols-1 gap-5 lg:grid-cols-3">
+          <div className="rounded-3xl border border-blue-200 bg-white p-6 shadow-sm lg:col-span-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-slate-500">Available for withdrawal</p>
+                <h3 className="mt-2 text-4xl font-bold text-slate-900">{inr(wallet.available)}</h3>
               </div>
-
-              <div className="flex flex-wrap items-center gap-3 mt-7">
-
-                <button
-                  type="button"
-                  className="flex items-center gap-2 px-5 py-3 text-sm font-semibold text-white transition rounded-xl bg-blue-600 hover:bg-blue-700 hover:scale-[1.02] hover:shadow-lg hover:shadow-blue-200"
-                >
-                  <ArrowDownToLine size={17} />
-                  Withdraw Earnings
-                </button>
-
-                <button
-                  type="button"
-                  className="flex items-center gap-2 px-5 py-3 text-sm font-medium text-slate-600 transition border rounded-xl border-slate-200 bg-white hover:bg-blue-50 hover:text-blue-600"
-                >
-                  <CreditCard size={17} />
-                  Payment Method
-                </button>
-
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-blue-100 bg-blue-50">
+                <Wallet size={27} className="text-blue-600" />
               </div>
-
             </div>
-
+            <div className="mt-7 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setWithdrawOpen(true)}
+                disabled={wallet.available < MIN_WITHDRAWAL}
+                className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <ArrowDownToLine size={17} /> Withdraw Earnings
+              </button>
+              {wallet.available < MIN_WITHDRAWAL && (
+                <span className="text-xs text-slate-500">Minimum withdrawal is {inr(MIN_WITHDRAWAL)}</span>
+              )}
+            </div>
           </div>
 
-          {/* PAYOUT STATUS */}
-
-          <div className="p-6 border rounded-3xl border-slate-200 bg-white shadow-sm">
-
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex items-center gap-3">
-
-              <div className="flex items-center justify-center w-11 h-11 rounded-xl bg-emerald-50 border border-emerald-100">
-
-                <CheckCircle2
-                  size={21}
-                  className="text-emerald-500"
-                />
-
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50">
+                <CheckCircle2 size={21} className="text-emerald-500" />
               </div>
-
               <div>
-
-                <h3 className="font-semibold text-slate-900">
-                  Payout Status
-                </h3>
-
-                <p className="text-xs text-slate-500">
-                  Everything looks good
-                </p>
-
+                <h3 className="font-semibold text-slate-900">Payout Status</h3>
+                <p className="text-xs text-slate-500">Money is released after each session</p>
               </div>
-
             </div>
-
             <div className="mt-6 space-y-4">
-
-              <InfoRow
-                label="Next payout"
-                value="Sep 07, 2026"
-              />
-
-              <InfoRow
-                label="Minimum withdrawal"
-                value="₹500"
-              />
-
-              <InfoRow
-                label="Processing time"
-                value="2–3 business days"
-              />
-
+              <InfoRow label="Withdrawn / requested" value={inr(wallet.withdrawn)} />
+              <InfoRow label="Earned this week" value={inr(wallet.week)} />
+              <InfoRow label="Minimum withdrawal" value={inr(MIN_WITHDRAWAL)} />
+              <InfoRow label="Processing time" value="2–3 business days" />
             </div>
-
           </div>
-
         </div>
 
-        {/* =================================================
-            TRANSACTION HISTORY
-        ================================================= */}
-
-        <div className="border rounded-3xl border-slate-200 bg-white shadow-sm overflow-hidden">
-
-          {/* HEADER */}
-
-          <div className="p-5 border-b sm:p-6 border-slate-200">
-
+        <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 p-5 sm:p-6">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-
               <div>
-
-                <h3 className="text-lg font-semibold text-slate-900">
-                  Transaction History
-                </h3>
-
-                <p className="mt-1 text-xs text-slate-500">
-                  Your recent mentoring payments
-                </p>
-
+                <h3 className="text-lg font-semibold text-slate-900">Transaction History</h3>
+                <p className="mt-1 text-xs text-slate-500">Your mentoring payments</p>
               </div>
-
-              {/* SEARCH */}
-
-              <div className="flex items-center gap-2 px-3 border rounded-xl border-slate-200 bg-slate-50 lg:w-[280px]">
-
-                <Search
-                  size={17}
-                  className="text-slate-400"
-                />
-
+              <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 lg:w-[280px]">
+                <Search size={17} className="text-slate-400" />
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search transactions..."
-                  className="w-full py-3 text-sm text-slate-800 bg-transparent outline-none placeholder:text-slate-400"
+                  className="w-full bg-transparent py-3 text-sm outline-none placeholder:text-slate-400"
                 />
-
               </div>
-
             </div>
-
-            {/* TABS */}
-
-            <div className="flex gap-2 mt-5 overflow-x-auto">
-
+            <div className="mt-5 flex gap-2 overflow-x-auto">
               {["All", "Completed", "Pending"].map((tab) => (
-
                 <button
                   key={tab}
                   type="button"
                   onClick={() => setActiveTab(tab)}
-                  className={`px-4 py-2 text-xs font-medium rounded-lg whitespace-nowrap transition ${
-                    activeTab === tab
-                      ? "bg-blue-600 text-white shadow-sm"
-                      : "text-slate-500 hover:text-blue-600 hover:bg-blue-50"
+                  className={`whitespace-nowrap rounded-lg px-4 py-2 text-xs font-medium transition ${
+                    activeTab === tab ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-blue-50 hover:text-blue-600"
                   }`}
                 >
                   {tab}
                 </button>
-
               ))}
-
             </div>
-
           </div>
 
-          {/* TRANSACTIONS */}
-
-          <div>
-
-            {filteredTransactions.length === 0 ? (
-
-              <div className="py-16 text-center">
-
-                <div className="flex items-center justify-center w-14 h-14 mx-auto rounded-2xl bg-blue-50">
-
-                  <Wallet
-                    size={25}
-                    className="text-blue-500"
-                  />
-
-                </div>
-
-                <h4 className="mt-4 font-semibold text-slate-900">
-                  No Transactions Found
-                </h4>
-
-                <p className="mt-1 text-xs text-slate-500">
-                  Try another search.
-                </p>
-
+          {filtered.length === 0 ? (
+            <div className="py-16 text-center">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50">
+                <Wallet size={25} className="text-blue-500" />
               </div>
-
-            ) : (
-
-              <div className="divide-y divide-slate-100">
-
-                {filteredTransactions.map((transaction) => (
-
-                  <TransactionRow
-                    key={transaction.id}
-                    transaction={transaction}
-                  />
-
-                ))}
-
-              </div>
-
-            )}
-
-          </div>
-
+              <h4 className="mt-4 font-semibold text-slate-900">No transactions yet</h4>
+              <p className="mt-1 text-xs text-slate-500">Accepted sessions will show up here automatically.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {filtered.map((t) => <TransactionRow key={t.id} transaction={t} />)}
+            </div>
+          )}
         </div>
 
-        {/* =================================================
-            FOOTER SUMMARY
-        ================================================= */}
-
-        <div className="grid grid-cols-1 gap-4 mt-6 sm:grid-cols-3">
-
-          <MiniSummary
-            label="Completed Transactions"
-            value={
-              transactions.filter(
-                (item) => item.status === "Completed"
-              ).length
-            }
-          />
-
-          <MiniSummary
-            label="Completed Earnings"
-            value={`₹${completedAmount.toLocaleString("en-IN")}`}
-          />
-
-          <MiniSummary
-            label="Pending Earnings"
-            value={`₹${pendingAmount.toLocaleString("en-IN")}`}
-          />
-
+        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <MiniSummary label="Completed Transactions" value={transactions.filter((t) => t.status === "Completed").length} />
+          <MiniSummary label="Completed Earnings" value={inr(wallet.lifetime)} />
+          <MiniSummary label="Pending Earnings" value={inr(wallet.pending)} />
         </div>
-
       </main>
 
-    </div>
-  );
-};
-
-/* ============================================================
-   EARNING CARD
-============================================================ */
-
-const EarningCard = ({
-  icon,
-  label,
-  value,
-  description,
-}) => {
-
-  return (
-
-    <div className="p-5 transition border rounded-2xl border-slate-200 bg-white shadow-sm hover:shadow-md hover:border-blue-200">
-
-      <div className="flex items-center justify-between">
-
-        <div className="flex items-center justify-center w-11 h-11 text-blue-600 rounded-xl bg-blue-50 border border-blue-100">
-          {icon}
-        </div>
-
-        <TrendingUp
-          size={16}
-          className="text-emerald-500"
+      {withdrawOpen && (
+        <WithdrawModal
+          available={wallet.available}
+          onClose={() => setWithdrawOpen(false)}
+          onDone={() => {
+            setWithdrawOpen(false);
+            showToast("success", "Withdrawal requested. We'll pay it to your UPI soon.");
+            reload();
+          }}
         />
+      )}
 
-      </div>
-
-      <p className="mt-5 text-xs font-medium text-slate-500">
-        {label}
-      </p>
-
-      <h3 className="mt-1 text-2xl font-bold text-slate-900">
-        {value}
-      </h3>
-
-      <p className="mt-1 text-xs text-slate-400">
-        {description}
-      </p>
-
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-50 rounded-xl border bg-white px-4 py-3 text-sm shadow-lg ${
+          toast.type === "error" ? "border-red-200 text-red-700" : "border-emerald-200 text-emerald-700"
+        }`}>
+          {toast.message}
+        </div>
+      )}
     </div>
-
   );
 };
 
-/* ============================================================
-   INFO ROW
-============================================================ */
+const WithdrawModal = ({ available, onClose, onDone }) => {
+  const [amount, setAmount] = useState(String(available));
+  const [upiId, setUpiId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
 
-const InfoRow = ({
-  label,
-  value,
-}) => {
+  const submit = async (e) => {
+    e.preventDefault();
+    const value = Number(amount);
+    if (!Number.isFinite(value) || value < MIN_WITHDRAWAL) return setErr(`Minimum withdrawal is ${inr(MIN_WITHDRAWAL)}.`);
+    if (value > available) return setErr("Amount is more than your available balance.");
+    if (!/^[\w.\-]{2,}@[\w.\-]{2,}$/.test(upiId.trim())) return setErr("Enter a valid UPI ID (e.g. name@okbank).");
+
+    setBusy(true);
+    setErr("");
+    try {
+      await api(ENDPOINTS.withdraw, { method: "POST", body: { amount: value, upiId: upiId.trim() } });
+      onDone();
+    } catch (e2) {
+      setErr(e2.message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
-
-    <div className="flex items-center justify-between gap-3">
-
-      <span className="text-xs text-slate-500">
-        {label}
-      </span>
-
-      <span className="text-xs font-semibold text-slate-700">
-        {value}
-      </span>
-
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <form onSubmit={submit} className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="mb-5 flex items-center justify-between">
+          <h2 className="text-lg font-bold text-slate-900">Withdraw earnings</h2>
+          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"><X size={18} /></button>
+        </div>
+        <label className="mb-1.5 block text-xs font-medium text-slate-500">Amount (max {inr(available)})</label>
+        <input
+          type="number" value={amount} onChange={(e) => setAmount(e.target.value)}
+          className="mb-4 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-400"
+        />
+        <label className="mb-1.5 block text-xs font-medium text-slate-500">UPI ID</label>
+        <input
+          value={upiId} onChange={(e) => setUpiId(e.target.value)} placeholder="name@okbank"
+          className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-400"
+        />
+        {err && <p className="mt-3 text-sm text-red-600">{err}</p>}
+        <div className="mt-6 flex gap-3">
+          <button type="button" onClick={onClose} className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
+          <button type="submit" disabled={busy} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60">
+            {busy && <Loader2 size={16} className="animate-spin" />} Request
+          </button>
+        </div>
+      </form>
     </div>
-
   );
 };
 
-/* ============================================================
-   TRANSACTION ROW
-============================================================ */
+const EarningCard = ({ icon, label, value, description }) => (
+  <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-200 hover:shadow-md">
+    <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-blue-100 bg-blue-50 text-blue-600">{icon}</div>
+    <p className="mt-5 text-xs font-medium text-slate-500">{label}</p>
+    <h3 className="mt-1 text-2xl font-bold text-slate-900">{value}</h3>
+    <p className="mt-1 text-xs text-slate-400">{description}</p>
+  </div>
+);
 
-const TransactionRow = ({
-  transaction,
-}) => {
+const InfoRow = ({ label, value }) => (
+  <div className="flex items-center justify-between gap-3">
+    <span className="text-xs text-slate-500">{label}</span>
+    <span className="text-xs font-semibold text-slate-700">{value}</span>
+  </div>
+);
 
-  const isCompleted =
-    transaction.status === "Completed";
-
+const TransactionRow = ({ transaction }) => {
+  const done = transaction.status === "Completed";
   return (
-
-    <div className="flex flex-col gap-4 p-5 transition sm:flex-row sm:items-center sm:justify-between hover:bg-blue-50/40">
-
-      {/* USER */}
-
+    <div className="flex flex-col gap-4 p-5 transition hover:bg-blue-50/40 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-center gap-4">
-
-        <div className="flex items-center justify-center w-11 h-11 text-sm font-bold text-blue-600 rounded-xl bg-blue-50 border border-blue-100">
-
-          {transaction.fresher
-            .split(" ")
-            .map((word) => word[0])
-            .join("")
-            .slice(0, 2)}
-
+        <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-blue-100 bg-blue-50 text-sm font-bold text-blue-600">
+          {transaction.fresher.split(" ").map((w) => w[0]).join("").slice(0, 2)}
         </div>
-
         <div>
-
-          <h4 className="text-sm font-semibold text-slate-900">
-            {transaction.fresher}
-          </h4>
-
-          <p className="mt-1 text-xs text-slate-500">
-            {transaction.session}
-          </p>
-
+          <h4 className="text-sm font-semibold text-slate-900">{transaction.fresher}</h4>
+          <p className="mt-1 text-xs text-slate-500">{transaction.session}</p>
         </div>
-
       </div>
-
-      {/* DATE */}
-
-      <div className="flex items-center gap-2 text-xs text-slate-500">
-
-        <CalendarDays size={15} />
-
-        {transaction.date}
-
-      </div>
-
-      {/* STATUS */}
-
-      <div>
-
-        <span
-          className={`px-3 py-1.5 text-[11px] font-semibold rounded-full border ${
-            isCompleted
-              ? "text-emerald-600 bg-emerald-50 border-emerald-100"
-              : "text-amber-600 bg-amber-50 border-amber-100"
-          }`}
-        >
-          {transaction.status}
-        </span>
-
-      </div>
-
-      {/* AMOUNT */}
-
-      <div className="flex items-center gap-3 sm:min-w-[120px] sm:justify-end">
-
-        <span
-          className={`text-sm font-bold ${
-            isCompleted
-              ? "text-emerald-600"
-              : "text-amber-600"
-          }`}
-        >
-          +₹{transaction.amount.toLocaleString("en-IN")}
-        </span>
-
-        <button
-          type="button"
-          className="flex items-center justify-center w-8 h-8 text-slate-400 rounded-lg hover:bg-slate-100 hover:text-slate-700"
-        >
-          <MoreVertical size={16} />
-        </button>
-
-      </div>
-
+      <div className="flex items-center gap-2 text-xs text-slate-500"><CalendarDays size={15} />{transaction.date}</div>
+      <span className={`w-fit rounded-full border px-3 py-1.5 text-[11px] font-semibold ${
+        done ? "border-emerald-100 bg-emerald-50 text-emerald-600" : "border-amber-100 bg-amber-50 text-amber-600"
+      }`}>{transaction.status}</span>
+      <span className={`text-sm font-bold sm:min-w-[100px] sm:text-right ${done ? "text-emerald-600" : "text-amber-600"}`}>
+        +{inr(transaction.amount)}
+      </span>
     </div>
-
   );
 };
 
-/* ============================================================
-   MINI SUMMARY
-============================================================ */
-
-const MiniSummary = ({
-  label,
-  value,
-}) => {
-
-  return (
-
-    <div className="p-4 border rounded-2xl border-slate-200 bg-white shadow-sm">
-
-      <p className="text-xs text-slate-500">
-        {label}
-      </p>
-
-      <p className="mt-1 text-lg font-bold text-slate-900">
-        {value}
-      </p>
-
-    </div>
-
-  );
-};
-
-/* ============================================================
-   EXPORT
-============================================================ */
+const MiniSummary = ({ label, value }) => (
+  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <p className="text-xs text-slate-500">{label}</p>
+    <p className="mt-1 text-lg font-bold text-slate-900">{value}</p>
+  </div>
+);
 
 export default MentorEarnings;

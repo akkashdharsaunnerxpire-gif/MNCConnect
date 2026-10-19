@@ -1,887 +1,448 @@
-<% 
-    pageTitle = 'Mentor Details';
-    pageSubtitle = 'View and manage mentor profile';
-    currentPage = 'mentors';
-%>
-
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <title>MNCConnect Admin - Mentor Details</title>
-
-    <link rel="stylesheet" href="/admin/css/output.css">
-    <link
-        rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
-    >
-</head>
-
-<body class="bg-slate-950 text-white min-h-screen">
-
-<div class="flex min-h-screen">
-
-    <!-- =========================================================
-         SIDEBAR
-    ========================================================== -->
-
-    <aside class="w-64 bg-slate-900 border-r border-slate-800 fixed h-screen overflow-y-auto">
-
-        <div class="p-6 border-b border-slate-800">
-            <h1 class="text-2xl font-bold text-indigo-500">
-                MNCConnect
-            </h1>
-
-            <p class="text-sm text-slate-400 mt-1">
-                Admin Panel
-            </p>
-        </div>
-
-        <nav class="p-4 space-y-2">
-
-            <a href="/admin"
-               class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
-                <i class="fas fa-chart-pie w-5"></i>
-                <span>Dashboard</span>
-            </a>
-
-            <a href="/admin/mentors"
-               class="flex items-center gap-3 px-4 py-3 rounded-lg bg-indigo-600">
-                <i class="fas fa-users w-5"></i>
-                <span>Mentors</span>
-            </a>
-
-            <a href="/admin/freshers"
-               class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
-                <i class="fas fa-graduation-cap w-5"></i>
-                <span>Freshers</span>
-            </a>
-
-            <a href="/admin/payments"
-               class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
-                <i class="fas fa-credit-card w-5"></i>
-                <span>Payments</span>
-            </a>
-
-            <a href="/admin/users"
-               class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
-                <i class="fas fa-user-cog w-5"></i>
-                <span>Users</span>
-            </a>
-
-            <a href="/admin/logout"
-               class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-red-600/20 text-red-400 transition mt-8">
-                <i class="fas fa-sign-out-alt w-5"></i>
-                <span>Logout</span>
-            </a>
-
-        </nav>
-    </aside>
-
-
-    <!-- =========================================================
-         MAIN CONTENT
-    ========================================================== -->
-
-    <main class="ml-64 flex-1 p-8">
-
-        <!-- Header -->
-
-        <div class="flex justify-between items-center mb-8">
-
-            <div>
-                <h2 class="text-3xl font-bold">
-                    Mentor Details
-                </h2>
-
-                <p class="text-slate-400 mt-1">
-                    Complete mentor profile and verification documents
-                </p>
-            </div>
-
-            <div class="text-slate-400">
-                <i class="fas fa-user-circle text-2xl"></i>
-
-                <%= admin ? admin.name : 'Admin' %>
-            </div>
-
-        </div>
-
-
-        <% if (mentor) { %>
-
-        <!-- =====================================================
-             PROFILE HEADER
-        ====================================================== -->
-
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-6">
-
-            <div class="flex flex-col md:flex-row md:items-center justify-between gap-6">
-
-                <div class="flex items-center gap-5">
-
-                    <!-- Profile -->
-
-                    <% if (mentor.profilePic) { %>
-
-                        <img
-                            src="<%= mentor.profilePic %>"
-                            alt="<%= mentor.name %>"
-                            class="w-24 h-24 rounded-2xl object-cover border border-slate-700"
-                        >
-
-                    <% } else { %>
-
-                        <div class="w-24 h-24 rounded-2xl bg-indigo-600/20
-                                    flex items-center justify-center
-                                    border border-indigo-500/20">
-
-                            <span class="text-4xl font-bold text-indigo-400">
-                                <%= mentor.name ? mentor.name.charAt(0).toUpperCase() : '?' %>
-                            </span>
-
-                        </div>
-
-                    <% } %>
-
-
-                    <div>
-
-                        <h3 class="text-2xl font-bold">
-                            <%= mentor.name || 'N/A' %>
-                        </h3>
-
-                        <p class="text-slate-400 mt-1">
-                            <%= mentor.email || 'N/A' %>
-                        </p>
-
-                        <p class="text-slate-500 text-sm mt-1">
-                            Employee ID:
-                            <span class="text-slate-300">
-                                <%= mentor.employeeId || 'N/A' %>
-                            </span>
-                        </p>
-
-                    </div>
-
-                </div>
-
-
-                <!-- Verification Status -->
-
-                <div class="flex flex-col items-start md:items-end gap-2">
-
-                    <span class="text-xs text-slate-500 uppercase tracking-wider">
-                        Verification
-                    </span>
-
-                    <span class="px-4 py-2 rounded-full text-sm font-semibold
-                        <%= mentor.verificationStatus === 'approved'
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                            : mentor.verificationStatus === 'rejected'
-                            ? 'bg-red-500/10 text-red-400 border border-red-500/20'
-                            : 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'
-                        %>">
-
-                        <i class="fas
-                            <%= mentor.verificationStatus === 'approved'
-                                ? 'fa-check-circle'
-                                : mentor.verificationStatus === 'rejected'
-                                ? 'fa-times-circle'
-                                : 'fa-clock'
-                            %> mr-1">
-                        </i>
-
-                        <%= mentor.verificationStatus
-                            ? mentor.verificationStatus.toUpperCase()
-                            : 'PENDING'
-                        %>
-
-                    </span>
-
-                </div>
-
-            </div>
-
-        </div>
-
-
-        <!-- =====================================================
-             PERSONAL INFORMATION
-        ====================================================== -->
-
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-6">
-
-            <div class="flex items-center gap-3 mb-6">
-
-                <div class="w-10 h-10 rounded-lg bg-indigo-500/10
-                            flex items-center justify-center">
-
-                    <i class="fas fa-user text-indigo-400"></i>
-
-                </div>
-
-                <div>
-                    <h3 class="text-lg font-semibold">
-                        Personal Information
-                    </h3>
-
-                    <p class="text-sm text-slate-500">
-                        Basic mentor details
-                    </p>
-                </div>
-
-            </div>
-
-
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-
-                <!-- Full Name -->
-
-                <div class="info-card">
-                    <p class="label">Full Name</p>
-                    <p class="value">
-                        <%= mentor.name || 'Not provided' %>
-                    </p>
-                </div>
-
-                <!-- Email -->
-
-                <div class="info-card">
-                    <p class="label">Email</p>
-                    <p class="value break-all">
-                        <%= mentor.email || 'Not provided' %>
-                    </p>
-                </div>
-
-                <!-- Mobile -->
-
-                <div class="info-card">
-                    <p class="label">Mobile</p>
-                    <p class="value">
-                        <%= mentor.mobile
-                            ? `${mentor.countryCode || '+91'} ${mentor.mobile}`
-                            : 'Not provided'
-                        %>
-                    </p>
-                </div>
-
-                <!-- Work Email -->
-
-                <div class="info-card">
-                    <p class="label">Work Email</p>
-                    <p class="value break-all">
-                        <%= mentor.workEmail || 'Not provided' %>
-                    </p>
-                </div>
-
-                <!-- Employee ID -->
-
-                <div class="info-card">
-                    <p class="label">Employee ID</p>
-                    <p class="value">
-                        <%= mentor.employeeId || 'Not provided' %>
-                    </p>
-                </div>
-
-                <!-- LinkedIn -->
-
-                <div class="info-card">
-
-                    <p class="label">LinkedIn</p>
-
-                    <% if (mentor.linkedinProfile) { %>
-
-                        <a
-                            href="<%= mentor.linkedinProfile %>"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="text-indigo-400 hover:text-indigo-300 break-all"
-                        >
-                            <i class="fab fa-linkedin mr-1"></i>
-                            View Profile
-                        </a>
-
-                    <% } else { %>
-
-                        <p class="value">
-                            Not provided
-                        </p>
-
-                    <% } %>
-
-                </div>
-
-            </div>
-
-        </div>
-
-
-        <!-- =====================================================
-             PROFESSIONAL INFORMATION
-        ====================================================== -->
-
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-6">
-
-            <div class="flex items-center gap-3 mb-6">
-
-                <div class="w-10 h-10 rounded-lg bg-blue-500/10
-                            flex items-center justify-center">
-
-                    <i class="fas fa-briefcase text-blue-400"></i>
-
-                </div>
-
-                <div>
-                    <h3 class="text-lg font-semibold">
-                        Professional Information
-                    </h3>
-
-                    <p class="text-sm text-slate-500">
-                        Current employment details
-                    </p>
-                </div>
-
-            </div>
-
-
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-
-                <div class="info-card">
-                    <p class="label">Company</p>
-                    <p class="value">
-                        <%= mentor.currentCompany || 'Not provided' %>
-                    </p>
-                </div>
-
-                <div class="info-card">
-                    <p class="label">Designation</p>
-                    <p class="value">
-                        <%= mentor.designation || 'Not provided' %>
-                    </p>
-                </div>
-
-                <div class="info-card">
-                    <p class="label">Department</p>
-                    <p class="value">
-                        <%= mentor.department || 'Not provided' %>
-                    </p>
-                </div>
-
-                <div class="info-card">
-                    <p class="label">Experience</p>
-                    <p class="value">
-                        <%= mentor.yearsOfExperience ?? 0 %> years
-                    </p>
-                </div>
-
-                <div class="info-card">
-                    <p class="label">Office Location</p>
-                    <p class="value">
-                        <%= mentor.officeLocation || 'Not provided' %>
-                    </p>
-                </div>
-
-                <div class="info-card">
-                    <p class="label">Hourly Rate</p>
-                    <p class="value">
-                        <%= mentor.hourlyRate
-                            ? '₹' + mentor.hourlyRate
-                            : 'Not specified'
-                        %>
-                    </p>
-                </div>
-
-            </div>
-
-
-            <!-- Languages -->
-
-            <% if (mentor.languages && mentor.languages.length > 0) { %>
-
-                <div class="mt-5">
-
-                    <p class="label mb-2">
-                        Languages
-                    </p>
-
-                    <div class="flex flex-wrap gap-2">
-
-                        <% mentor.languages.forEach(function(language) { %>
-
-                            <span class="px-3 py-1.5 rounded-full
-                                         bg-indigo-500/10
-                                         border border-indigo-500/20
-                                         text-indigo-400 text-sm">
-
-                                <%= language %>
-
-                            </span>
-
-                        <% }) %>
-
-                    </div>
-
-                </div>
-
-            <% } %>
-
-        </div>
-
-
-        <!-- =====================================================
-             BIO
-        ====================================================== -->
-
-        <% if (mentor.bio) { %>
-
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-6">
-
-            <div class="flex items-center gap-3 mb-4">
-
-                <i class="fas fa-align-left text-purple-400"></i>
-
-                <h3 class="text-lg font-semibold">
-                    About Mentor
-                </h3>
-
-            </div>
-
-            <p class="text-slate-300 leading-7 whitespace-pre-line">
-                <%= mentor.bio %>
-            </p>
-
-        </div>
-
-        <% } %>
-
-
-        <!-- =====================================================
-             VERIFICATION DOCUMENTS
-        ====================================================== -->
-
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-6">
-
-            <div class="flex items-center justify-between mb-6">
-
-                <div class="flex items-center gap-3">
-
-                    <div class="w-10 h-10 rounded-lg bg-orange-500/10
-                                flex items-center justify-center">
-
-                        <i class="fas fa-file-shield text-orange-400"></i>
-
-                    </div>
-
-                    <div>
-
-                        <h3 class="text-lg font-semibold">
-                            Verification Documents
-                        </h3>
-
-                        <p class="text-sm text-slate-500">
-                            Documents submitted by the mentor
-                        </p>
-
-                    </div>
-
-                </div>
-
-            </div>
-
-
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-
-                <!-- Offer Letter -->
-
-                <div class="document-card">
-
-                    <div class="flex items-center gap-3">
-
-                        <div class="document-icon bg-blue-500/10 text-blue-400">
-                            <i class="fas fa-file-contract"></i>
-                        </div>
-
-                        <div class="min-w-0">
-
-                            <h4 class="font-semibold">
-                                Offer Letter
-                            </h4>
-
-                            <p class="text-xs text-slate-500">
-                                Employment document
-                            </p>
-
-                        </div>
-
-                    </div>
-
-                    <% if (mentor.offerLetter) { %>
-
-                        <a
-                            href="<%= mentor.offerLetter %>"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="document-button bg-blue-600 hover:bg-blue-500"
-                        >
-                            <i class="fas fa-eye"></i>
-                            View Document
-                        </a>
-
-                    <% } else { %>
-
-                        <span class="text-sm text-slate-500">
-                            Not uploaded
-                        </span>
-
-                    <% } %>
-
-                </div>
-
-
-                <!-- Employee ID -->
-
-                <div class="document-card">
-
-                    <div class="flex items-center gap-3">
-
-                        <div class="document-icon bg-emerald-500/10 text-emerald-400">
-                            <i class="fas fa-id-card"></i>
-                        </div>
-
-                        <div>
-
-                            <h4 class="font-semibold">
-                                Employee ID Proof
-                            </h4>
-
-                            <p class="text-xs text-slate-500">
-                                Employee identification
-                            </p>
-
-                        </div>
-
-                    </div>
-
-                    <% if (mentor.employeeIdProof) { %>
-
-                        <a
-                            href="<%= mentor.employeeIdProof %>"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="document-button bg-emerald-600 hover:bg-emerald-500"
-                        >
-                            <i class="fas fa-eye"></i>
-                            View Document
-                        </a>
-
-                    <% } else { %>
-
-                        <span class="text-sm text-slate-500">
-                            Not uploaded
-                        </span>
-
-                    <% } %>
-
-                </div>
-
-
-                <!-- Additional Proof -->
-
-                <div class="document-card">
-
-                    <div class="flex items-center gap-3">
-
-                        <div class="document-icon bg-purple-500/10 text-purple-400">
-                            <i class="fas fa-file-circle-check"></i>
-                        </div>
-
-                        <div>
-
-                            <h4 class="font-semibold">
-                                Additional Proof
-                            </h4>
-
-                            <p class="text-xs text-slate-500">
-                                Supporting document
-                            </p>
-
-                        </div>
-
-                    </div>
-
-                    <% if (mentor.additionalProof) { %>
-
-                        <a
-                            href="<%= mentor.additionalProof %>"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="document-button bg-purple-600 hover:bg-purple-500"
-                        >
-                            <i class="fas fa-eye"></i>
-                            View Document
-                        </a>
-
-                    <% } else { %>
-
-                        <span class="text-sm text-slate-500">
-                            Not uploaded
-                        </span>
-
-                    <% } %>
-
-                </div>
-
-            </div>
-
-        </div>
-
-
-        <!-- =====================================================
-             VERIFICATION / ACCOUNT STATUS
-        ====================================================== -->
-
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-6">
-
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-
-                <div class="info-card">
-                    <p class="label">Verification Status</p>
-                    <p class="value capitalize">
-                        <%= mentor.verificationStatus || 'pending' %>
-                    </p>
-                </div>
-
-                <div class="info-card">
-                    <p class="label">Verification Method</p>
-                    <p class="value capitalize">
-                        <%= mentor.verificationMethod || 'pending' %>
-                    </p>
-                </div>
-
-                <div class="info-card">
-                    <p class="label">Account Status</p>
-                    <p class="value capitalize">
-                        <%= mentor.accountStatus || 'pending' %>
-                    </p>
-                </div>
-
-                <div class="info-card">
-                    <p class="label">Last Login</p>
-                    <p class="value">
-                        <%= mentor.lastLoginAt
-                            ? new Date(mentor.lastLoginAt).toLocaleString()
-                            : 'Never'
-                        %>
-                    </p>
-                </div>
-
-            </div>
-
-
-            <% if (mentor.rejectionReason) { %>
-
-                <div class="mt-5 p-4 rounded-lg bg-red-500/10
-                            border border-red-500/20">
-
-                    <p class="text-sm text-red-400 font-medium">
-                        Rejection Reason
-                    </p>
-
-                    <p class="text-slate-300 mt-1">
-                        <%= mentor.rejectionReason %>
-                    </p>
-
-                </div>
-
-            <% } %>
-
-        </div>
-
-
-        <!-- =====================================================
-             CREATED / UPDATED
-        ====================================================== -->
-
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-6">
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-
-                <div class="info-card">
-                    <p class="label">Registered On</p>
-                    <p class="value">
-                        <%= mentor.createdAt
-                            ? new Date(mentor.createdAt).toLocaleString()
-                            : 'N/A'
-                        %>
-                    </p>
-                </div>
-
-                <div class="info-card">
-                    <p class="label">Last Updated</p>
-                    <p class="value">
-                        <%= mentor.updatedAt
-                            ? new Date(mentor.updatedAt).toLocaleString()
-                            : 'N/A'
-                        %>
-                    </p>
-                </div>
-
-            </div>
-
-        </div>
-
-
-        <!-- =====================================================
-             ACTIONS
-        ====================================================== -->
-
-        <div class="flex flex-wrap gap-3">
-
-            <a
-                href="/admin/mentors"
-                class="bg-slate-700 hover:bg-slate-600 px-6 py-3 rounded-lg
-                       transition flex items-center gap-2"
-            >
-                <i class="fas fa-arrow-left"></i>
-                Back to Mentors
-            </a>
-
-
-            <% if (mentor.verificationStatus === 'pending') { %>
-
-                <button
-                    type="button"
-                    id="approveMentorBtn"
-                    data-mentor-id="<%= mentor._id %>"
-                    class="bg-emerald-600 hover:bg-emerald-500 px-6 py-3 rounded-lg transition flex items-center gap-2"
-                >
-                    <i class="fas fa-check"></i>
-                    Approve Mentor
-                </button>
-
-                <button
-                    type="button"
-                    id="rejectMentorBtn"
-                    data-mentor-id="<%= mentor._id %>"
-                    class="bg-red-600 hover:bg-red-500 px-6 py-3 rounded-lg transition flex items-center gap-2"
-                >
-                    <i class="fas fa-times"></i>
-                    Reject Mentor
-                </button>
-
-            <% } %>
-
-        </div>
-
-
-        <% } else { %>
-
-            <!-- Mentor Not Found -->
-
-            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-16 text-center">
-
-                <i class="fas fa-user-slash text-6xl text-slate-600 mb-5"></i>
-
-                <h3 class="text-2xl font-bold">
-                    Mentor Not Found
-                </h3>
-
-                <p class="text-slate-400 mt-2">
-                    The mentor you're looking for doesn't exist or has been removed.
-                </p>
-
-                <a
-                    href="/admin/mentors"
-                    class="inline-flex items-center gap-2 mt-6
-                           bg-indigo-600 hover:bg-indigo-500
-                           px-6 py-3 rounded-lg transition"
-                >
-                    <i class="fas fa-arrow-left"></i>
-                    Back to Mentors
-                </a>
-
-            </div>
-
-        <% } %>
-
-    </main>
-
-</div>
-
-
-<!-- =========================================================
-     STYLES
-========================================================== -->
+<%- include('partials/layout-start') %>
 
 <style>
+    /* ---------- Mentor details page ---------- */
+    .md-crumb { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+    .md-crumb a:hover { color: var(--text); }
+    .md-hero { overflow: hidden; margin-bottom: 20px; }
+    .md-cover { height: 112px; background: linear-gradient(120deg, #312e81, #6366f1 55%, #8b5cf6); }
+    .md-cover.st-approved { background: linear-gradient(120deg, #064e3b, #10b981 60%, #34d399); }
+    .md-cover.st-rejected { background: linear-gradient(120deg, #7f1d1d, #ef4444 60%, #f87171); }
+    .md-cover.st-pending { background: linear-gradient(120deg, #78350f, #f59e0b 60%, #fbbf24); }
+    .md-hero-body { padding: 0 28px 24px; display: flex; gap: 22px; align-items: flex-end; flex-wrap: wrap; margin-top: -44px; }
+    .md-avatar { width: 104px; height: 104px; border-radius: 24px; border: 4px solid var(--surface); background: var(--surface-2); display: grid; place-items: center; font-size: 40px; font-weight: 700; color: var(--primary-h); overflow: hidden; flex-shrink: 0; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+    .md-avatar img { width: 100%; height: 100%; object-fit: cover; }
+    .md-id { flex: 1; min-width: 240px; padding-bottom: 4px; }
+    .md-id h3 { font-size: 26px; letter-spacing: -.02em; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .md-id .sub { color: #cdd5ee; margin-top: 2px; }
+    .md-meta { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 10px; color: var(--muted); font-size: 13px; }
+    .md-meta i { margin-right: 6px; color: var(--primary-h); }
 
-    .info-card {
-        background: rgba(30, 41, 59, 0.5);
-        border: 1px solid rgb(51, 65, 85);
-        border-radius: 0.75rem;
-        padding: 1rem;
+    .md-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+    .md-stat { padding: 18px 20px; }
+    .md-stat small { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+    .md-stat b { display: block; font-size: 24px; margin-top: 4px; letter-spacing: -.02em; }
+
+    .md-grid { display: grid; grid-template-columns: minmax(0, 1fr) 350px; gap: 20px; align-items: start; }
+    .md-side { position: sticky; top: 96px; display: grid; gap: 20px; }
+
+    .md-tabs { display: flex; gap: 4px; padding: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 20px; width: max-content; max-width: 100%; overflow-x: auto; }
+    .md-tab { border: 0; background: none; padding: 9px 18px; border-radius: 8px; color: var(--muted); font-weight: 600; cursor: pointer; display: flex; gap: 8px; align-items: center; white-space: nowrap; }
+    .md-tab:hover { color: var(--text); }
+    .md-tab.active { background: var(--primary); color: #fff; }
+    .md-pane { display: none; gap: 20px; }
+    .md-pane.active { display: grid; }
+
+    .md-check { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--border); }
+    .md-check:first-of-type { border-top: 0; }
+    .md-check i { margin-top: 3px; }
+    .md-check .ok { color: var(--ok); }
+    .md-check .bad { color: var(--bad); }
+    .md-check .warn { color: var(--warn); }
+    .md-check span small { display: block; color: var(--muted); font-size: 12px; }
+
+    .md-contact { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); }
+    .md-contact:first-of-type { border-top: 0; }
+    .md-contact .ic { width: 34px; height: 34px; border-radius: 10px; background: var(--surface-2); display: grid; place-items: center; color: var(--primary-h); flex-shrink: 0; }
+    .md-contact div { min-width: 0; flex: 1; }
+    .md-contact small { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+    .md-contact b { font-weight: 500; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .md-decision .btn { width: 100%; }
+    .md-decision { display: grid; gap: 10px; }
+    .md-ready { padding: 12px 14px; border-radius: 12px; font-size: 13px; display: flex; gap: 10px; align-items: center; }
+    .md-ready.yes { background: rgba(16,185,129,.1); border: 1px solid rgba(16,185,129,.3); color: #6ee7b7; }
+    .md-ready.no { background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.3); color: #fcd34d; }
+
+    .md-doc { background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; transition: .2s; }
+    .md-doc:hover { border-color: var(--primary); transform: translateY(-2px); }
+    .md-doc-thumb { height: 150px; background: var(--bg); display: grid; place-items: center; font-size: 40px; color: var(--muted); position: relative; border: 0; width: 100%; padding: 0; }
+    button.md-doc-thumb { cursor: zoom-in; }
+    .md-doc-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .md-doc-thumb .tag { position: absolute; top: 10px; right: 10px; }
+    .md-doc-body { padding: 16px; display: grid; gap: 12px; }
+    .md-doc-body h4 { font-size: 14px; }
+    .md-doc-row { display: flex; gap: 8px; }
+    .md-doc-row .btn { flex: 1; }
+
+    .md-lightbox { position: fixed; inset: 0; background: rgba(3,6,18,.88); display: none; place-items: center; z-index: 150; padding: 30px; }
+    .md-lightbox.show { display: grid; }
+    .md-lightbox img { max-width: 100%; max-height: 88vh; border-radius: 12px; box-shadow: 0 30px 80px rgba(0,0,0,.6); }
+    .md-lb-close { position: absolute; top: 20px; right: 24px; width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--border); background: var(--surface); cursor: pointer; font-size: 16px; }
+
+    @media (max-width: 1100px) {
+        .md-grid { grid-template-columns: 1fr; }
+        .md-side { position: static; order: -1; }
+        .md-stats { grid-template-columns: repeat(2, 1fr); }
     }
-
-    .label {
-        color: rgb(148, 163, 184);
-        font-size: 0.75rem;
-        margin-bottom: 0.35rem;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
+    @media (max-width: 560px) {
+        .md-stats { grid-template-columns: 1fr; }
+        .md-hero-body { padding: 0 18px 20px; }
     }
-
-    .value {
-        color: white;
-        font-weight: 500;
-        line-height: 1.5;
-    }
-
-    .document-card {
-        background: rgba(30, 41, 59, 0.5);
-        border: 1px solid rgb(51, 65, 85);
-        border-radius: 0.75rem;
-        padding: 1rem;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        gap: 1rem;
-        min-height: 145px;
-    }
-
-    .document-icon {
-        width: 42px;
-        height: 42px;
-        border-radius: 10px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-    }
-
-    .document-button {
-        color: white;
-        padding: 0.65rem 1rem;
-        border-radius: 0.5rem;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.5rem;
-        font-size: 0.875rem;
-        font-weight: 500;
-        transition: 0.2s;
-    }
-
-    /* Button disabled state */
-    button:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-    }
-
 </style>
-<script src="/admin/js/admin.js"></script>
 
-</body>
-</html>
+<%
+  const safeUrl = (u) => (u && /^https?:\/\//i.test(String(u))) ? String(u) : '';
+  const isImg = (u) => /\.(png|jpe?g|webp|gif)(\?|$)/i.test(String(u || ''));
+  const dt = (d) => d ? new Date(d).toLocaleString('en-GB') : '—';
+  const ago = (d) => {
+    if (!d) return '';
+    const days = Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
+    if (days < 1) return 'today';
+    if (days === 1) return 'yesterday';
+    if (days < 30) return days + ' days ago';
+    const m = Math.floor(days / 30);
+    if (m < 12) return m + ' month' + (m > 1 ? 's' : '') + ' ago';
+    const y = Math.floor(days / 365);
+    return y + ' year' + (y > 1 ? 's' : '') + ' ago';
+  };
+%>
+
+<% if (!mentor) { %>
+
+    <div class="card empty" style="padding:80px 20px;">
+        <i class="fas fa-user-slash"></i>
+        <h4>Mentor not found</h4>
+        <p>The mentor you're looking for doesn't exist or has been removed.</p>
+        <a href="/admin/mentors" class="btn btn-primary" style="margin-top:20px;"><i class="fas fa-arrow-left"></i> Back to mentors</a>
+    </div>
+
+<% } else {
+    const linkedin = safeUrl(mentor.linkedinProfile);
+    const phone = mentor.mobile ? ((mentor.countryCode || '+91') + ' ' + mentor.mobile) : '';
+    const telHref = phone ? String(phone).replace(/[^\d+]/g, '') : '';
+
+    // ---- Documents ----
+    const docList = [
+      { k: 'offerLetter', t: 'Offer Letter', s: 'Employment document', i: 'fa-file-contract' },
+      { k: 'employeeIdProof', t: 'Employee ID Proof', s: 'Employee identification', i: 'fa-id-card' },
+      { k: 'additionalProof', t: 'Additional Proof', s: 'Supporting document', i: 'fa-file-circle-check' }
+    ].map(function (d) {
+      const url = safeUrl(mentor[d.k]);
+      const ext = url ? (url.split('?')[0].split('.').pop() || '').toUpperCase() : '';
+      return Object.assign({}, d, { url: url, img: isImg(url), type: (ext && ext.length <= 4) ? ext : 'FILE' });
+    });
+    const docsDone = docList.filter(function (d) { return d.url; }).length;
+
+    // ---- Verification checklist ----
+    const freeDomains = ['gmail.com', 'yahoo.com', 'yahoo.in', 'outlook.com', 'hotmail.com', 'live.com', 'icloud.com', 'proton.me', 'protonmail.com', 'rediffmail.com'];
+    const workDomain = (mentor.workEmail && String(mentor.workEmail).includes('@')) ? String(mentor.workEmail).split('@').pop().toLowerCase() : '';
+    const workIsCompany = !!workDomain && !freeDomains.includes(workDomain);
+
+    const checks = [
+      { t: 'Offer letter uploaded', ok: !!docList[0].url, req: true },
+      { t: 'Employee ID proof uploaded', ok: !!docList[1].url, req: true },
+      { t: 'Employee ID provided', ok: !!mentor.employeeId, req: true },
+      { t: 'Work email provided', ok: !!mentor.workEmail, req: true },
+      { t: 'Work email uses a company domain', ok: workIsCompany, req: false, hint: workDomain ? '@' + workDomain : 'No work email given' },
+      { t: 'LinkedIn profile added', ok: !!linkedin, req: false },
+      { t: 'Additional proof uploaded', ok: !!docList[2].url, req: false }
+    ];
+    const reqChecks = checks.filter(function (c) { return c.req; });
+    const reqDone = reqChecks.filter(function (c) { return c.ok; }).length;
+    const ready = reqDone === reqChecks.length;
+
+    // ---- Profile completeness ----
+    const fields = [
+      mentor.name, mentor.email, mentor.mobile, mentor.workEmail, mentor.employeeId, mentor.linkedinProfile,
+      mentor.currentCompany, mentor.designation, mentor.department, mentor.yearsOfExperience != null,
+      mentor.officeLocation, mentor.hourlyRate, mentor.bio, (mentor.languages && mentor.languages.length), mentor.profilePic
+    ];
+    const completeness = Math.round((fields.filter(Boolean).length / fields.length) * 100);
+%>
+
+<!-- Breadcrumb -->
+<div class="md-crumb">
+    <a href="/admin/mentors"><i class="fas fa-user-tie"></i> Mentors</a>
+    <i class="fas fa-chevron-right" style="font-size:10px;"></i>
+    <span style="color:var(--text);"><%= mentor.name || 'Mentor' %></span>
+</div>
+
+<!-- Hero -->
+<div class="card md-hero">
+    <div class="md-cover st-<%= mentor.status %>"></div>
+    <div class="md-hero-body">
+        <div class="md-avatar">
+            <% if (mentor.profilePic) { %><img src="<%= mentor.profilePic %>" alt="<%= mentor.name %>"><% } else { %><%= (mentor.name || '?').charAt(0).toUpperCase() %><% } %>
+        </div>
+        <div class="md-id">
+            <h3><%= mentor.name || 'N/A' %> <%- include('partials/status-badge', { st: mentor.status }) %></h3>
+            <div class="sub"><%= mentor.designation || 'Designation not provided' %><% if (mentor.currentCompany) { %> · <%= mentor.currentCompany %><% } %></div>
+            <div class="md-meta">
+                <% if (mentor.officeLocation) { %><span><i class="fas fa-location-dot"></i><%= mentor.officeLocation %></span><% } %>
+                <% if (mentor.department) { %><span><i class="fas fa-sitemap"></i><%= mentor.department %></span><% } %>
+                <span><i class="fas fa-calendar-check"></i>Registered <%= ago(mentor.createdAt) || '—' %></span>
+                <% if (mentor.employeeId) { %><span><i class="fas fa-id-badge"></i>ID: <%= mentor.employeeId %></span><% } %>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Stat strip -->
+<div class="md-stats">
+    <div class="card md-stat t-primary"><small>Experience</small><b><%= mentor.yearsOfExperience != null ? mentor.yearsOfExperience : 0 %> <span style="font-size:14px;color:var(--muted);font-weight:500;">yrs</span></b></div>
+    <div class="card md-stat t-ok"><small>Hourly Rate</small><b><%= mentor.hourlyRate ? '₹' + Number(mentor.hourlyRate).toLocaleString('en-IN') : '—' %></b></div>
+    <div class="card md-stat t-warn"><small>Documents</small><b><%= docsDone %><span style="font-size:14px;color:var(--muted);font-weight:500;"> / <%= docList.length %></span></b></div>
+    <div class="card md-stat t-info">
+        <small>Profile Complete</small><b><%= completeness %>%</b>
+        <div class="progress"><i style="width: <%= completeness %>%"></i></div>
+    </div>
+</div>
+
+<div class="md-grid">
+
+    <!-- ============ MAIN ============ -->
+    <div>
+        <div class="md-tabs">
+            <button type="button" class="md-tab active" data-tab="overview"><i class="fas fa-user"></i> Overview</button>
+            <button type="button" class="md-tab" data-tab="documents"><i class="fas fa-file-shield"></i> Documents <span class="badge <%= docsDone === docList.length ? 'b-ok' : 'b-warn' %>" style="padding:0 8px;"><%= docsDone %>/<%= docList.length %></span></button>
+            <button type="button" class="md-tab" data-tab="activity"><i class="fas fa-clock-rotate-left"></i> Activity</button>
+        </div>
+
+        <!-- Overview -->
+        <div class="md-pane active" id="pane-overview">
+
+            <div class="card">
+                <div class="card-head">
+                    <div class="sec-title t-primary"><div class="sec-ico"><i class="fas fa-user"></i></div>
+                        <div><h3>Personal Information</h3><p>Basic mentor details</p></div></div>
+                </div>
+                <div class="card-body">
+                    <div class="info-grid">
+                        <div class="info"><div class="k">Full Name</div><div class="v"><%= mentor.name || 'Not provided' %></div></div>
+                        <div class="info"><div class="k">Email</div><div class="v"><%= mentor.email || 'Not provided' %></div></div>
+                        <div class="info"><div class="k">Mobile</div><div class="v"><%= phone || 'Not provided' %></div></div>
+                        <div class="info"><div class="k">Work Email</div><div class="v"><%= mentor.workEmail || 'Not provided' %></div></div>
+                        <div class="info"><div class="k">Employee ID</div><div class="v"><%= mentor.employeeId || 'Not provided' %></div></div>
+                        <div class="info"><div class="k">LinkedIn</div>
+                            <div class="v"><% if (linkedin) { %><a href="<%= linkedin %>" target="_blank" rel="noopener noreferrer" style="color:var(--primary-h);"><i class="fab fa-linkedin"></i> View Profile</a><% } else { %>Not provided<% } %></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-head">
+                    <div class="sec-title t-info"><div class="sec-ico"><i class="fas fa-briefcase"></i></div>
+                        <div><h3>Professional Information</h3><p>Current employment details</p></div></div>
+                </div>
+                <div class="card-body">
+                    <div class="info-grid">
+                        <div class="info"><div class="k">Company</div><div class="v"><%= mentor.currentCompany || 'Not provided' %></div></div>
+                        <div class="info"><div class="k">Designation</div><div class="v"><%= mentor.designation || 'Not provided' %></div></div>
+                        <div class="info"><div class="k">Department</div><div class="v"><%= mentor.department || 'Not provided' %></div></div>
+                        <div class="info"><div class="k">Experience</div><div class="v"><%= mentor.yearsOfExperience != null ? mentor.yearsOfExperience : 0 %> years</div></div>
+                        <div class="info"><div class="k">Office Location</div><div class="v"><%= mentor.officeLocation || 'Not provided' %></div></div>
+                        <div class="info"><div class="k">Hourly Rate</div><div class="v"><%= mentor.hourlyRate ? '₹' + mentor.hourlyRate : 'Not specified' %></div></div>
+                    </div>
+
+                    <% if (mentor.languages && mentor.languages.length) { %>
+                        <div style="margin-top:18px;">
+                            <div class="label">Languages</div>
+                            <div class="chips"><% mentor.languages.forEach(function (l) { %><span class="chip"><%= l %></span><% }) %></div>
+                        </div>
+                    <% } %>
+                </div>
+            </div>
+
+            <% if (mentor.bio) { %>
+            <div class="card">
+                <div class="card-head"><div class="sec-title t-purple"><div class="sec-ico"><i class="fas fa-align-left"></i></div><div><h3>About Mentor</h3></div></div></div>
+                <div class="card-body"><p style="white-space:pre-line;line-height:1.75;color:#cdd5ee;"><%= mentor.bio %></p></div>
+            </div>
+            <% } %>
+        </div>
+
+        <!-- Documents -->
+        <div class="md-pane" id="pane-documents">
+            <div class="card">
+                <div class="card-head">
+                    <div class="sec-title t-warn"><div class="sec-ico"><i class="fas fa-file-shield"></i></div>
+                        <div><h3>Verification Documents</h3><p>Click an image to preview it full size</p></div></div>
+                </div>
+                <div class="card-body">
+                    <div class="docs">
+                        <% docList.forEach(function (d) { %>
+                            <div class="md-doc">
+                                <% if (d.url && d.img) { %>
+                                    <button type="button" class="md-doc-thumb" data-preview="<%= d.url %>" title="Preview">
+                                        <img src="<%= d.url %>" alt="<%= d.t %>" loading="lazy">
+                                        <span class="badge b-ok tag"><i class="dot"></i>Uploaded</span>
+                                    </button>
+                                <% } else { %>
+                                    <div class="md-doc-thumb">
+                                        <i class="fas <%= d.i %>"></i>
+                                        <% if (d.url) { %><span class="badge b-ok tag"><i class="dot"></i>Uploaded</span>
+                                        <% } else { %><span class="badge b-bad tag"><i class="dot"></i>Missing</span><% } %>
+                                    </div>
+                                <% } %>
+                                <div class="md-doc-body">
+                                    <div>
+                                        <h4><%= d.t %></h4>
+                                        <span class="muted small"><%= d.s %><% if (d.url) { %> · <%= d.type %><% } %></span>
+                                    </div>
+                                    <% if (d.url) { %>
+                                        <div class="md-doc-row">
+                                            <% if (d.img) { %><button type="button" class="btn btn-ghost btn-sm" data-preview="<%= d.url %>"><i class="fas fa-expand"></i> Preview</button><% } %>
+                                            <a href="<%= d.url %>" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm"><i class="fas fa-up-right-from-square"></i> Open</a>
+                                        </div>
+                                    <% } else { %>
+                                        <span class="muted small">Mentor has not uploaded this document.</span>
+                                    <% } %>
+                                </div>
+                            </div>
+                        <% }) %>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Activity -->
+        <div class="md-pane" id="pane-activity">
+            <div class="card">
+                <div class="card-head"><div><h3>Activity Timeline</h3><p>Account history</p></div></div>
+                <div class="card-body timeline">
+                    <div class="tl"><i class="fas fa-user-plus"></i><div><b>Registered</b><div class="muted small"><%= dt(mentor.createdAt) %> · <%= ago(mentor.createdAt) %></div></div></div>
+                    <div class="tl"><i class="fas fa-pen"></i><div><b>Profile last updated</b><div class="muted small"><%= dt(mentor.updatedAt) %> · <%= ago(mentor.updatedAt) %></div></div></div>
+                    <div class="tl"><i class="fas fa-right-to-bracket"></i><div><b>Last login</b><div class="muted small"><%= mentor.lastLoginAt ? dt(mentor.lastLoginAt) : 'Never logged in' %></div></div></div>
+                    <div class="tl"><i class="fas fa-shield-halved"></i><div>
+                        <b>Current verification: <span style="text-transform:capitalize;"><%= mentor.status %></span></b>
+                        <div class="muted small">Method: <span style="text-transform:capitalize;"><%= mentor.verificationMethod || 'pending' %></span> · Account: <span style="text-transform:capitalize;"><%= mentor.accountStatus || 'pending' %></span></div>
+                        <% if (mentor.rejectionReason) { %><div class="small" style="color:#fca5a5;margin-top:4px;">Reason: <%= mentor.rejectionReason %></div><% } %>
+                    </div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ SIDEBAR ============ -->
+    <aside class="md-side">
+
+        <!-- Decision panel -->
+        <div class="card">
+            <div class="card-head"><h3>Verification Decision</h3><%- include('partials/status-badge', { st: mentor.status }) %></div>
+            <div class="card-body md-decision">
+
+                <% if (mentor.status === 'pending') { %>
+                    <% if (ready) { %>
+                        <div class="md-ready yes"><i class="fas fa-circle-check"></i> All required checks passed. Ready for review.</div>
+                    <% } else { %>
+                        <div class="md-ready no"><i class="fas fa-triangle-exclamation"></i> <%= reqChecks.length - reqDone %> required check(s) incomplete.</div>
+                    <% } %>
+                    <button class="btn btn-ok" data-action="approve" data-id="<%= mentor._id %>" data-name="<%= mentor.name %>"><i class="fas fa-check"></i> Approve Mentor</button>
+                    <button class="btn btn-bad" data-action="reject" data-id="<%= mentor._id %>" data-name="<%= mentor.name %>"><i class="fas fa-xmark"></i> Reject Mentor</button>
+                <% } else if (mentor.status === 'approved') { %>
+                    <div class="md-ready yes"><i class="fas fa-circle-check"></i> This mentor is approved and active.</div>
+                    <button class="btn btn-ghost" data-action="pending" data-id="<%= mentor._id %>" data-name="<%= mentor.name %>"><i class="fas fa-rotate-left"></i> Move back to Pending</button>
+                    <button class="btn btn-bad" data-action="reject" data-id="<%= mentor._id %>" data-name="<%= mentor.name %>"><i class="fas fa-ban"></i> Revoke &amp; Reject</button>
+                <% } else { %>
+                    <div class="md-ready no"><i class="fas fa-circle-xmark"></i> This mentor was rejected.</div>
+                    <% if (mentor.rejectionReason) { %>
+                        <div class="reject-box"><div class="small" style="color:#f87171;font-weight:600;">Rejection reason</div><div style="margin-top:4px;color:#cdd5ee;"><%= mentor.rejectionReason %></div></div>
+                    <% } %>
+                    <button class="btn btn-ok" data-action="approve" data-id="<%= mentor._id %>" data-name="<%= mentor.name %>"><i class="fas fa-check"></i> Approve Now</button>
+                    <button class="btn btn-ghost" data-action="pending" data-id="<%= mentor._id %>" data-name="<%= mentor.name %>"><i class="fas fa-rotate-left"></i> Move back to Pending</button>
+                <% } %>
+
+                <a href="/admin/mentors" class="btn btn-ghost"><i class="fas fa-arrow-left"></i> Back to Mentors</a>
+            </div>
+        </div>
+
+        <!-- Checklist -->
+        <div class="card">
+            <div class="card-head">
+                <div><h3>Verification Checklist</h3><p><%= reqDone %> of <%= reqChecks.length %> required checks passed</p></div>
+            </div>
+            <div class="card-body" style="padding-top:12px;">
+                <div class="progress" style="margin:0 0 8px;"><i style="width: <%= Math.round((reqDone / reqChecks.length) * 100) %>%; background: <%= ready ? 'var(--ok)' : 'var(--warn)' %>;"></i></div>
+                <% checks.forEach(function (c) { %>
+                    <div class="md-check">
+                        <% if (c.ok) { %><i class="fas fa-circle-check ok"></i>
+                        <% } else if (c.req) { %><i class="fas fa-circle-xmark bad"></i>
+                        <% } else { %><i class="fas fa-triangle-exclamation warn"></i><% } %>
+                        <span><%= c.t %>
+                            <% if (c.hint) { %><small><%= c.hint %></small><% } %>
+                            <% if (!c.req) { %><small>Optional</small><% } %>
+                        </span>
+                    </div>
+                <% }) %>
+            </div>
+        </div>
+
+        <!-- Contact -->
+        <div class="card">
+            <div class="card-head"><h3>Contact</h3></div>
+            <div class="card-body" style="padding-top:12px;">
+                <div class="md-contact">
+                    <span class="ic"><i class="fas fa-envelope"></i></span>
+                    <div><small>Email</small><b><%= mentor.email || '—' %></b></div>
+                    <% if (mentor.email) { %>
+                        <button class="btn btn-ghost btn-sm btn-icon" data-copy="<%= mentor.email %>" title="Copy"><i class="fas fa-copy"></i></button>
+                        <a class="btn btn-ghost btn-sm btn-icon" href="mailto:<%= mentor.email %>" title="Send email"><i class="fas fa-paper-plane"></i></a>
+                    <% } %>
+                </div>
+                <div class="md-contact">
+                    <span class="ic"><i class="fas fa-briefcase"></i></span>
+                    <div><small>Work email</small><b><%= mentor.workEmail || '—' %></b></div>
+                    <% if (mentor.workEmail) { %>
+                        <button class="btn btn-ghost btn-sm btn-icon" data-copy="<%= mentor.workEmail %>" title="Copy"><i class="fas fa-copy"></i></button>
+                    <% } %>
+                </div>
+                <div class="md-contact">
+                    <span class="ic"><i class="fas fa-phone"></i></span>
+                    <div><small>Mobile</small><b><%= phone || '—' %></b></div>
+                    <% if (phone) { %>
+                        <button class="btn btn-ghost btn-sm btn-icon" data-copy="<%= phone %>" title="Copy"><i class="fas fa-copy"></i></button>
+                        <a class="btn btn-ghost btn-sm btn-icon" href="tel:<%= telHref %>" title="Call"><i class="fas fa-phone-volume"></i></a>
+                    <% } %>
+                </div>
+                <% if (linkedin) { %>
+                <div class="md-contact">
+                    <span class="ic"><i class="fab fa-linkedin"></i></span>
+                    <div><small>LinkedIn</small><b>Profile</b></div>
+                    <a class="btn btn-ghost btn-sm btn-icon" href="<%= linkedin %>" target="_blank" rel="noopener noreferrer" title="Open"><i class="fas fa-up-right-from-square"></i></a>
+                </div>
+                <% } %>
+            </div>
+        </div>
+    </aside>
+</div>
+
+<!-- Image lightbox -->
+<div class="md-lightbox" id="lightbox">
+    <button type="button" class="md-lb-close" aria-label="Close"><i class="fas fa-xmark"></i></button>
+    <img id="lightboxImg" alt="Document preview">
+</div>
+
+<script>
+(function () {
+    var tabs = document.querySelectorAll('.md-tab');
+    var panes = document.querySelectorAll('.md-pane');
+    var names = ['overview', 'documents', 'activity'];
+
+    function show(name) {
+        tabs.forEach(function (t) { t.classList.toggle('active', t.dataset.tab === name); });
+        panes.forEach(function (p) { p.classList.toggle('active', p.id === 'pane-' + name); });
+        if (history.replaceState) history.replaceState(null, '', '#' + name);
+    }
+    tabs.forEach(function (t) { t.addEventListener('click', function () { show(t.dataset.tab); }); });
+
+    var hash = location.hash.replace('#', '');
+    if (names.indexOf(hash) > -1) show(hash);
+
+    // Lightbox
+    var lb = document.getElementById('lightbox');
+    var lbImg = document.getElementById('lightboxImg');
+    document.querySelectorAll('[data-preview]').forEach(function (b) {
+        b.addEventListener('click', function () { lbImg.src = b.dataset.preview; lb.classList.add('show'); });
+    });
+    function closeLb() { lb.classList.remove('show'); lbImg.removeAttribute('src'); }
+    lb.addEventListener('click', function (e) {
+        if (e.target === lb || e.target.closest('.md-lb-close')) closeLb();
+    });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeLb(); });
+})();
+</script>
+
+<% } %>
+
+<%- include('partials/layout-end') %>

@@ -1,3 +1,4 @@
+// app.js
 const express = require("express");
 const helmet = require("helmet");
 const cors = require("cors");
@@ -10,10 +11,27 @@ const paymentRoutes = require("./routes/paymentRoutes");
 const mentorRoutes = require("./routes/mentorRoutes");
 const sessionRoutes = require("./routes/sessionroutes");
 const adminRoutes = require("./routes/adminRoutes");
+const mentorPanelRoutes = require("./routes/mentorPanelRoutes"); // wallet, reviews, notifications
+// bookings, fresher notifications, mentor accept/reject (file name fixed: was ./routes/bookingRoutes)
+const fresherBookingRoutes = require("./routes/fresherBookingRoutes");
 
 const app = express();
+
+app.disable("x-powered-by");
 app.set("trust proxy", 1);
-// ================= CORS =================
+
+const isProd = process.env.NODE_ENV === "production";
+
+// ================= SECURITY HEADERS =================
+
+app.use(
+  helmet({
+    crossOriginResourcePolicy: false,
+    contentSecurityPolicy: false,
+  })
+);
+
+// ================= CORS (single instance) =================
 
 const allowedOrigins = [
   process.env.CLIENT_URL,
@@ -23,60 +41,37 @@ const allowedOrigins = [
   "http://localhost:5174",
 ].filter(Boolean);
 
+// Socket.IO (server.js) reads the same list so HTTP and websocket CORS never drift apart
+app.set("allowedOrigins", allowedOrigins);
+
 console.log("Allowed CORS origins:", allowedOrigins);
 
 app.use(
-  cors({
-    origin: function (origin, callback) {
-      if (!origin || origin === "null") {
-        return callback(null, true);
-      }
+  cors((req, callback) => {
+    const origin = req.header("Origin");
 
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
+    // Admin panel is served from this same server -> same-origin is always allowed
+    const sameOrigin = origin === `${req.protocol}://${req.get("host")}`;
 
+    // NOTE: "null" origin + credentials is risky (sandboxed iframes, file://).
+    // Remove it if nothing in your setup needs it.
+    const allowed =
+      !origin ||
+      origin === "null" ||
+      sameOrigin ||
+      allowedOrigins.includes(origin);
+
+    if (!allowed) {
       console.log("CORS blocked origin:", origin);
+      const err = new Error(`CORS blocked for origin: ${origin}`);
+      err.status = 403; // otherwise the global handler answers 500
+      return callback(err);
+    }
 
-      return callback(
-        new Error(`CORS blocked for origin: ${origin}`)
-      );
-    },
-    credentials: true,
+    callback(null, { origin: true, credentials: true });
   })
 );
 
-app.use(
-  helmet({
-    crossOriginResourcePolicy: false,
-    contentSecurityPolicy: false,
-  })
-);
-// ================= CORS =================
-
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      // Allow requests without origin
-      // and admin form requests with Origin: null
-      if (!origin || origin === "null") {
-        return callback(null, true);
-      }
-
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-
-      console.log("CORS blocked origin:", origin);
-
-      return callback(
-        new Error(`CORS blocked for origin: ${origin}`)
-      );
-    },
-
-    credentials: true,
-  })
-);
 // ================= BODY PARSER =================
 
 app.use(express.json());
@@ -87,41 +82,37 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 // ================= SESSION =================
+// NOTE: the default MemoryStore resets on every restart (Render restarts often)
+// and is not meant for production. Use connect-mongo for persistent sessions:
+//   npm i connect-mongo
+//   const MongoStore = require("connect-mongo");
+//   store: MongoStore.create({ mongoUrl: process.env.MONGO_URI })
+
+if (isProd && !process.env.SESSION_SECRET) {
+  console.warn("⚠️  SESSION_SECRET is not set - using an insecure default!");
+}
 
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "mncconnect-secret",
     resave: false,
     saveUninitialized: false,
-
     cookie: {
-      secure: process.env.NODE_ENV === "production",
+      secure: isProd,
       httpOnly: true,
-      sameSite:
-        process.env.NODE_ENV === "production"
-          ? "none"
-          : "lax",
+      sameSite: isProd ? "none" : "lax",
+      maxAge: 1000 * 60 * 60 * 8, // 8 hours
     },
   })
 );
 
-// ================= PUBLIC FILES =================
+// ================= STATIC FILES =================
 
-// ================= PUBLIC FILES =================
+app.use("/public", express.static(path.join(__dirname, "public")));
 
-// ================= PUBLIC FILES =================
+// Admin assets: /admin/css/admin.css, /admin/js/admin.js
+app.use("/admin", express.static(path.join(__dirname, "public", "admin")));
 
-app.use(
-  "/public",
-  express.static(path.join(__dirname, "public"))
-);
-
-// ================= ADMIN STATIC FILES =================
-
-app.use(
-  "/admin",
-  express.static(path.join(__dirname, "public", "admin"))
-);
 // ================= EJS =================
 
 app.set("view engine", "ejs");
@@ -130,38 +121,61 @@ app.set("views", path.join(__dirname, "views"));
 // ================= HEALTH CHECK =================
 
 app.get("/", (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: "MNCConnect Backend is running",
-  });
+  res.status(200).json({ success: true, message: "MNCConnect Backend is running" });
 });
 
 app.get("/health", (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: "Server is healthy",
-  });
+  res.status(200).json({ success: true, message: "Server is healthy" });
 });
 
-// ================= API ROUTES =================
+// ================= ROUTES =================
+// ORDER MATTERS. Express uses the first matching route.
 
 app.use("/api/auth", authRoutes);
 
+// Booking router FIRST (before /api/session and the /api panels):
+//  - it owns PATCH /api/session/session-requests/:id (new bookingController)
+//    so the old handler inside sessionRoutes is never reached for that path
+//  - it only declares specific paths, so every other request falls through untouched
+app.use("/api", fresherBookingRoutes);
+
 app.use("/api/payments", paymentRoutes);
-
 app.use("/api/mentor", mentorRoutes);
-
 app.use("/api/session", sessionRoutes);
 
+// Mentor panel: /api/wallet/*, /api/reviews/*, /api/notifications/*, /api/payments/assign-to-me
+// Mounted after the specific routers above so they keep priority.
+app.use("/api", mentorPanelRoutes);
+
 app.use("/admin", adminRoutes);
+
+// ================= ROUTE CHECK (dev) =================
+// Prints the booking routes that are really mounted, so a 404 is easy to debug.
+if (!isProd) {
+  const listed = [];
+  (fresherBookingRoutes.stack || []).forEach((layer) => {
+    if (layer.route) {
+      Object.keys(layer.route.methods).forEach((m) =>
+        listed.push(`${m.toUpperCase()} /api${layer.route.path}`)
+      );
+    }
+  });
+  console.log(
+    "Booking routes mounted:\n  " +
+      (listed.join("\n  ") || "NONE - check routes/fresherBookingRoutes.js")
+  );
+  if (!listed.some((l) => l.includes("/session/session-requests/"))) {
+    console.warn(
+      "⚠️  PATCH /api/session/session-requests/:requestGroupId is NOT handled by bookingController " +
+        "(controllers/bookingController.js must export `updateRequest`)"
+    );
+  }
+}
 
 // ================= 404 =================
 
 app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: "Route not found",
-  });
+  res.status(404).json({ success: false, message: `Route not found: ${req.method} ${req.originalUrl}` });
 });
 
 // ================= GLOBAL ERROR =================
@@ -169,9 +183,12 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   console.error("Global Error:", err);
 
-  res.status(err.status || 500).json({
+  const status = err.status || 500;
+
+  res.status(status).json({
     success: false,
-    message: err.message || "Internal Server Error",
+    // don't leak internal error text for 5xx in production
+    message: isProd && status >= 500 ? "Internal Server Error" : err.message || "Internal Server Error",
   });
 });
 

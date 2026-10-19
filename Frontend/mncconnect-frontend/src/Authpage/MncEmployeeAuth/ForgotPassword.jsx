@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Mail, ArrowLeft, CheckCircle2, AlertCircle } from 'lucide-react';
 
-const API_URL = import.meta.env.VITE_API_URL;
-
+const API_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:5000";
+  
 const inputClass =
   "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none placeholder:text-slate-400 transition focus:border-amber-500 focus:ring-4 focus:ring-amber-50";
 

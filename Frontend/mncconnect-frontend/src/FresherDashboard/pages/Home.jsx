@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import {
@@ -8,12 +8,14 @@ import {
   ShieldCheck,
   Building2,
   BriefcaseBusiness,
-  Filter,
   Award,
   BarChart3,
   BadgeCheck,
-  Sparkles,
   ArrowRight,
+  X,
+  LayoutGrid,
+  List,
+  RotateCcw,
 } from "lucide-react";
 
 // Import company catalog
@@ -31,27 +33,57 @@ const categories = [
   "Marketing",
 ];
 
-// ============================================================
-// NORMALIZE COMPANY NAME
-// ============================================================
+const SORT_OPTIONS = ["Popular", "Rating", "Employees", "Online now"];
 
-const normalizeCompanyName = (name = "") => {
-  return String(name)
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, "")
-    .replace(/[._-]/g, "");
-};
+const AVATAR_COLORS = [
+  "bg-violet-100 text-violet-700",
+  "bg-sky-100 text-sky-700",
+  "bg-emerald-100 text-emerald-700",
+  "bg-amber-100 text-amber-700",
+  "bg-rose-100 text-rose-700",
+];
 
 // ============================================================
-// FIND COMPANY DETAILS
+// HELPERS
 // ============================================================
+
+const normalizeCompanyName = (name = "") =>
+  String(name).toLowerCase().trim().replace(/\s+/g, "").replace(/[._-]/g, "");
 
 const findCompanyDetails = (companyName) => {
   const normalizedName = normalizeCompanyName(companyName);
 
   return companyCatalog.find(
     (company) => normalizeCompanyName(company.name) === normalizedName,
+  );
+};
+
+const initialsOf = (name = "") =>
+  String(name)
+    .split(" ")
+    .filter(Boolean)
+    .map((word) => word[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "?";
+
+const mentorPhoto = (m = {}) =>
+  m.profilePic || m.image || m.avatar || m.profileImage || "";
+
+const hashIndex = (text = "", mod = AVATAR_COLORS.length) => {
+  let h = 0;
+  for (let i = 0; i < text.length; i += 1) h = (h * 31 + text.charCodeAt(i)) >>> 0;
+  return h % mod;
+};
+
+const matchesCategory = (company, category) => {
+  if (category === "All Companies") return true;
+
+  const key = category.toLowerCase();
+
+  return (
+    (company.industry || "").toLowerCase().includes(key) ||
+    (company.category || "").toLowerCase().includes(key)
   );
 };
 
@@ -70,10 +102,7 @@ const groupMentorsByCompany = (mentors) => {
     const normalizedName = normalizeCompanyName(companyName);
 
     if (!grouped[normalizedName]) {
-      grouped[normalizedName] = {
-        companyName,
-        mentors: [],
-      };
+      grouped[normalizedName] = { companyName, mentors: [] };
     }
 
     grouped[normalizedName].mentors.push(mentor);
@@ -87,9 +116,7 @@ const groupMentorsByCompany = (mentors) => {
 // ============================================================
 
 const buildCompanyData = (apiData) => {
-  if (!Array.isArray(apiData)) {
-    return [];
-  }
+  if (!Array.isArray(apiData)) return [];
 
   // CASE 1: API already returns company objects
   const looksLikeCompanyData =
@@ -110,23 +137,18 @@ const buildCompanyData = (apiData) => {
         logo: details?.logo || null,
         companyImage: details?.companyImage || null,
         mentors: company.mentors || [],
-        mentorCount:
-          company.mentorCount || company.mentors?.length || 0,
+        mentorCount: company.mentorCount || company.mentors?.length || 0,
         onlineCount: company.onlineCount || 0,
         averageRating: company.averageRating || 0,
-        ratingCount: company.ratingCount || "1.2K",
-        industry:
-          company.industry || details?.industry || "Technology",
-        category:
-          company.category || details?.category || "Industry",
+        ratingCount: company.ratingCount ?? null,
+        industry: company.industry || details?.industry || "Technology",
+        category: company.category || details?.category || "Industry",
       };
     });
   }
 
   // CASE 2: API returns individual mentors
-  const grouped = groupMentorsByCompany(apiData);
-
-  return grouped.map((company) => {
+  return groupMentorsByCompany(apiData).map((company) => {
     const details = findCompanyDetails(company.companyName);
 
     const onlineMentors = company.mentors.filter(
@@ -137,19 +159,12 @@ const buildCompanyData = (apiData) => {
     );
 
     const ratings = company.mentors
-      .map(
-        (mentor) =>
-          Number(mentor.averageRating) ||
-          Number(mentor.rating) ||
-          0,
-      )
+      .map((mentor) => Number(mentor.averageRating) || Number(mentor.rating) || 0)
       .filter((rating) => rating > 0);
 
-    const averageRating =
-      ratings.length > 0
-        ? ratings.reduce((sum, rating) => sum + rating, 0) /
-          ratings.length
-        : 0;
+    const averageRating = ratings.length
+      ? ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length
+      : 0;
 
     return {
       companyName: company.companyName,
@@ -159,7 +174,7 @@ const buildCompanyData = (apiData) => {
       mentorCount: company.mentors.length,
       onlineCount: onlineMentors.length,
       averageRating,
-      ratingCount: "1.2K",
+      ratingCount: ratings.length || null,
       industry: details?.industry || "Technology",
       category: details?.category || "Industry",
     };
@@ -176,21 +191,14 @@ const BrowseMentors = () => {
   const [error, setError] = useState("");
 
   const [search, setSearch] = useState("");
-  const [activeCategory, setActiveCategory] =
-    useState("All Companies");
-
+  const [activeCategory, setActiveCategory] = useState("All Companies");
   const [sort, setSort] = useState("Popular");
+  const [onlineOnly, setOnlineOnly] = useState(false);
+  const [view, setView] = useState("grid");
 
-  // FILTER DRAWER
-  const [filterOpen, setFilterOpen] = useState(false);
+  const searchRef = useRef(null);
 
-  // ============================================================
-  // FETCH COMPANIES
-  // ============================================================
-
-  useEffect(() => {
-    fetchCompanies();
-  }, []);
+  // ---------------- fetch ----------------
 
   const fetchCompanies = async () => {
     try {
@@ -198,977 +206,670 @@ const BrowseMentors = () => {
       setError("");
 
       const response = await fetch(`${API_URL}/mentor/companies`);
-
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(
-          data.message || "Failed to load companies",
-        );
+        throw new Error(data.message || "Failed to load companies");
       }
 
-      const apiCompanies = data.companies || [];
-
-      const finalCompanies = buildCompanyData(apiCompanies);
+      const finalCompanies = buildCompanyData(data.companies || []);
 
       // Remove duplicates
-      const uniqueCompanies = [];
-      const seenNames = new Set();
+      const unique = [];
+      const seen = new Set();
 
       finalCompanies.forEach((company) => {
-        const name = company.companyName
-          ?.trim()
-          .toLowerCase();
+        const name = company.companyName?.trim().toLowerCase();
 
-        if (name && !seenNames.has(name)) {
-          seenNames.add(name);
-          uniqueCompanies.push(company);
+        if (name && !seen.has(name)) {
+          seen.add(name);
+          unique.push(company);
         }
       });
 
-      setCompanies(uniqueCompanies);
+      setCompanies(unique);
     } catch (err) {
       console.error("Company fetch error:", err);
-
       setError(err.message || "Something went wrong");
     } finally {
       setLoading(false);
     }
   };
 
-  // ============================================================
-  // FILTER + SEARCH + SORT
-  // ============================================================
+  useEffect(() => {
+    fetchCompanies();
+  }, []);
+
+  // press "/" anywhere to jump into the search box
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+
+      const tag = document.activeElement?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      e.preventDefault();
+      searchRef.current?.focus();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // ---------------- derived data ----------------
+
+  const categoryCounts = useMemo(
+    () =>
+      Object.fromEntries(
+        categories.map((c) => [c, companies.filter((co) => matchesCategory(co, c)).length]),
+      ),
+    [companies],
+  );
+
+  const totals = useMemo(
+    () => ({
+      companies: companies.length,
+      employees: companies.reduce((sum, c) => sum + (c.mentorCount || 0), 0),
+      online: companies.reduce((sum, c) => sum + (c.onlineCount || 0), 0),
+    }),
+    [companies],
+  );
 
   const filteredCompanies = useMemo(() => {
-    let data = [...companies];
+    const keyword = search.toLowerCase().trim();
 
-    // SEARCH
-    if (search.trim()) {
-      const keyword = search.toLowerCase().trim();
+    const data = companies.filter((company) => {
+      if (!matchesCategory(company, activeCategory)) return false;
+      if (onlineOnly && !(company.onlineCount > 0)) return false;
 
-      data = data.filter((company) => {
-        const companyName =
-          company.companyName?.toLowerCase() || "";
+      if (keyword) {
+        const haystack = [company.companyName, company.industry, company.category]
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(keyword)) return false;
+      }
 
-        const industry =
-          company.industry?.toLowerCase() || "";
+      return true;
+    });
 
-        const category =
-          company.category?.toLowerCase() || "";
+    const byEmployees = (a, b) => (b.mentorCount || 0) - (a.mentorCount || 0);
+    const byOnline = (a, b) => (b.onlineCount || 0) - (a.onlineCount || 0);
 
-        return (
-          companyName.includes(keyword) ||
-          industry.includes(keyword) ||
-          category.includes(keyword)
-        );
-      });
-    }
-
-    // CATEGORY
-    if (activeCategory !== "All Companies") {
-      const category = activeCategory.toLowerCase();
-
-      data = data.filter((company) => {
-        const industry =
-          company.industry?.toLowerCase() || "";
-
-        const companyCategory =
-          company.category?.toLowerCase() || "";
-
-        return (
-          industry.includes(category) ||
-          companyCategory.includes(category)
-        );
-      });
-    }
-
-    // SORT
-    if (sort === "Rating") {
-      data.sort(
-        (a, b) =>
-          (b.averageRating || 0) -
-          (a.averageRating || 0),
-      );
-    }
-
-    if (sort === "Mentors") {
-      data.sort(
-        (a, b) =>
-          (b.mentorCount || 0) -
-          (a.mentorCount || 0),
-      );
-    }
+    if (sort === "Rating") data.sort((a, b) => (b.averageRating || 0) - (a.averageRating || 0));
+    else if (sort === "Employees") data.sort(byEmployees);
+    else if (sort === "Online now") data.sort((a, b) => byOnline(a, b) || byEmployees(a, b));
+    else data.sort((a, b) => byEmployees(a, b) || byOnline(a, b)); // Popular
 
     return data;
-  }, [companies, search, activeCategory, sort]);
+  }, [companies, search, activeCategory, sort, onlineOnly]);
 
-  // ============================================================
-  // LOCK BODY SCROLL
-  // ============================================================
-
-  useEffect(() => {
-    if (filterOpen) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
-    }
-
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [filterOpen]);
-
-  // ============================================================
-  // CLOSE FILTER
-  // ============================================================
-
-  const closeFilter = () => {
-    setFilterOpen(false);
-  };
-
-  // ============================================================
-  // SELECT CATEGORY
-  // ============================================================
-
-  const handleCategoryChange = (category) => {
-    setActiveCategory(category);
-    setFilterOpen(false);
-  };
-
-  // ============================================================
-  // SELECT SORT
-  // ============================================================
-
-  const handleSortChange = (sortValue) => {
-    setSort(sortValue);
-    setFilterOpen(false);
-  };
-
-  // ============================================================
-  // CLEAR FILTERS
-  // ============================================================
-
-  const clearFilters = () => {
+  const clearAll = () => {
     setSearch("");
     setActiveCategory("All Companies");
     setSort("Popular");
-    setFilterOpen(false);
+    setOnlineOnly(false);
   };
 
-  // ============================================================
-  // LOADING
-  // ============================================================
+  const activeFilters = [];
+  if (search.trim()) activeFilters.push({ key: "search", label: `“${search.trim()}”`, clear: () => setSearch("") });
+  if (activeCategory !== "All Companies") activeFilters.push({ key: "cat", label: activeCategory, clear: () => setActiveCategory("All Companies") });
+  if (onlineOnly) activeFilters.push({ key: "online", label: "Online now", clear: () => setOnlineOnly(false) });
+  if (sort !== "Popular") activeFilters.push({ key: "sort", label: `Sort: ${sort}`, clear: () => setSort("Popular") });
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen text-white bg-gradient-to-br from-[#0a0a1a] via-[#1a0a2e] to-[#0a1a2e]">
-        <div className="text-center">
-          <div className="relative flex items-center justify-center w-16 h-16 mx-auto">
-            <div className="absolute inset-0 border-4 rounded-full border-purple-500/20 border-t-purple-500 animate-spin" />
-
-            <Sparkles
-              size={24}
-              className="text-purple-400"
-            />
-          </div>
-
-          <p className="mt-6 text-sm tracking-wide text-gray-400">
-            Loading premium mentors...
-          </p>
-        </div>
-      </div>
-    );
-  }
+  const dash = loading || error ? "–" : null;
 
   // ============================================================
-  // ERROR
-  // ============================================================
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center min-h-screen px-5 text-white bg-gradient-to-br from-[#0a0a1a] via-[#1a0a2e] to-[#0a1a2e]">
-        <div className="w-full max-w-md p-10 text-center border rounded-3xl border-white/10 bg-white/[0.04] backdrop-blur-xl">
-          <div className="flex items-center justify-center w-16 h-16 mx-auto rounded-2xl bg-purple-500/10">
-            <Building2
-              size={32}
-              className="text-purple-400"
-            />
-          </div>
-
-          <h2 className="mt-6 text-2xl font-semibold">
-            Something went wrong
-          </h2>
-
-          <p className="mt-3 text-sm leading-6 text-gray-400">
-            {error}
-          </p>
-
-          <button
-            onClick={fetchCompanies}
-            className="px-7 py-3.5 mt-7 font-semibold transition rounded-xl bg-gradient-to-r from-violet-600 to-purple-500 hover:scale-105"
-          >
-            Try Again
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // ============================================================
-  // MAIN UI
+  // UI
   // ============================================================
 
   return (
-    <div className="relative min-h-screen overflow-x-hidden text-white bg-gradient-to-br from-[#0a0a1a] via-[#1a0a2e] to-[#0a1a2e]">
+    <div className="min-h-screen bg-white text-slate-900">
+      <style>{`
+        @keyframes mc-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+        .mc-rise { animation: mc-rise .5s cubic-bezier(.2,.7,.2,1) both; }
+        .mc-no-scrollbar { scrollbar-width: none; }
+        .mc-no-scrollbar::-webkit-scrollbar { display: none; }
+        @media (prefers-reduced-motion: reduce) { .mc-rise { animation: none; } }
+      `}</style>
 
       {/* ======================================================
-          ANIMATED BACKGROUND
+          HERO
       ====================================================== */}
-
-      <div className="fixed inset-0 z-0 pointer-events-none">
-
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(124,58,237,0.15),transparent_40%),radial-gradient(circle_at_80%_80%,rgba(37,99,235,0.12),transparent_40%),radial-gradient(circle_at_50%_50%,rgba(139,92,246,0.05),transparent_50%)]" />
-
-        <div className="absolute inset-0 opacity-[0.03]">
-
-          <div className="absolute w-64 h-64 bg-purple-600 rounded-full top-1/4 left-1/4 blur-3xl animate-pulse" />
-
-          <div className="absolute w-64 h-64 delay-1000 bg-blue-600 rounded-full bottom-1/4 right-1/4 blur-3xl animate-pulse" />
-
-          <div className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full top-1/2 left-1/2 w-96 h-96 bg-violet-600 blur-3xl animate-pulse delay-2000" />
-
+      <section className="relative overflow-hidden border-b border-slate-100">
+        <div className="pointer-events-none absolute inset-0" aria-hidden="true">
+          <div className="absolute inset-0 bg-gradient-to-b from-violet-50/70 via-white to-white" />
+          <div className="absolute -left-24 -top-24 h-80 w-80 rounded-full bg-violet-200/40 blur-3xl" />
+          <div className="absolute -right-24 top-10 h-80 w-80 rounded-full bg-sky-200/40 blur-3xl" />
+          <div className="absolute inset-0 opacity-[0.35] [background-image:linear-gradient(to_right,rgba(15,23,42,0.05)_1px,transparent_1px),linear-gradient(to_bottom,rgba(15,23,42,0.05)_1px,transparent_1px)] [background-size:56px_56px] [mask-image:radial-gradient(ellipse_at_center,black_30%,transparent_75%)]" />
         </div>
 
-        <div className="absolute inset-0 opacity-[0.02] bg-[linear-gradient(rgba(255,255,255,.3)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.3)_1px,transparent_1px)] bg-[size:60px_60px]" />
+        <div className="relative mx-auto max-w-5xl px-5 pb-12 pt-14 text-center sm:px-8 sm:pt-16">
+          <span className="mc-rise inline-flex items-center gap-2 rounded-full border border-violet-200 bg-white px-3.5 py-1 text-xs font-semibold uppercase tracking-widest text-violet-700 shadow-sm">
+            <BadgeCheck size={14} /> Learn from the best
+          </span>
 
-      </div>
-
-      {/* ======================================================
-          HERO SECTION
-      ====================================================== */}
-
-      <section className="relative z-10 w-full">
-
-        <div className="relative min-h-[500px] sm:min-h-[530px] lg:min-h-[450px] xl:min-h-[470px] overflow-hidden border-b border-white/[0.08]">
-
-          <div className="absolute inset-0 bg-gradient-to-br from-[#0a0a1a] via-[#1a0a2e] to-[#0a1a2e]" />
-
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(139,92,246,0.12),transparent_50%)]" />
-
-          <div className="absolute top-0 left-0 w-[450px] h-[450px] rounded-full bg-violet-600/10 blur-[120px]" />
-
-          <div className="absolute top-0 right-0 w-[450px] h-[450px] rounded-full bg-blue-600/10 blur-[120px]" />
-
-          <div className="relative z-20 flex flex-col items-center justify-center min-h-[500px] sm:min-h-[530px] lg:min-h-[450px] xl:min-h-[470px] px-5 sm:px-8 text-center">
-
-            <div className="inline-block px-4 py-1 mb-4 text-xs font-semibold tracking-widest text-purple-300 uppercase border rounded-full bg-purple-500/10 border-purple-500/20 backdrop-blur-sm">
-              LEARN FROM THE BEST
-            </div>
-
-            <h1 className="mt-2 text-4xl font-bold leading-none tracking-tight sm:mt-3 sm:text-5xl md:text-6xl xl:text-7xl">
-
-              Browse{" "}
-
-              <span className="text-transparent bg-gradient-to-r from-violet-400 via-purple-400 to-fuchsia-300 bg-clip-text">
-                MNC EMPLOYEES
-              </span>
-
-            </h1>
-
-            <p className="max-w-xl mt-4 text-sm text-gray-300 sm:text-base lg:text-lg">
-              Connect with professionals from the world's leading companies
-            </p>
-
-            <div className="grid grid-cols-2 mt-7 overflow-hidden border md:grid-cols-4 sm:mt-8 rounded-2xl border-white/10 bg-white/[0.035] backdrop-blur-xl shadow-[0_15px_50px_rgba(0,0,0,0.2)]">
-
-              <Stat
-                icon={<BriefcaseBusiness size={20} />}
-                value="500+"
-                label="Companies"
-              />
-
-              <Stat
-                icon={<Users size={20} />}
-                value="2000+"
-                label="Mnc Employees"
-              />
-
-              <Stat
-                icon={<BadgeCheck size={20} />}
-                value="10K+"
-                label="Sessions"
-              />
-
-              <Stat
-                icon={<Star size={20} />}
-                value="4.9"
-                label="Avg Rating"
-              />
-
-            </div>
-
-          </div>
-
-        </div>
-
-      </section>
-
-      {/* ======================================================
-          ONE COMBINED SEARCH BLOCK
-          FILTER + SEARCH + TOP COMPANIES
-      ====================================================== */}
-
-      <section className="relative z-30  px-5 mx-auto sm:px-6">
-
-        <div className="flex items-center w-full gap-3 p-2 mt-4 overflow-hidden border rounded-2xl border-purple-500/30 bg-[#0d091b]/90 backdrop-blur-xl shadow-[0_0_40px_rgba(139,92,246,0.12)]">
-
-          {/* ==================================================
-              FILTER BUTTON
-          ================================================== */}
-
-          <button
-            type="button"
-            onClick={() => setFilterOpen(true)}
-            aria-label="Open filters"
-            className="flex items-center w-[12rem] justify-center h-[58px] gap-2 px-5 text-sm font-medium text-gray-200 transition-all duration-200 border rounded-xl border-purple-500/50 bg-[#100b20] hover:bg-purple-500/20 hover:border-purple-400/70 active:scale-[0.97] shrink-0"
-          >
-
-            <Filter
-              size={18}
-              className="text-purple-300"
-            />
-
-            <span className="hidden sm:inline">
-              Filters
+          <h1 className="mc-rise mt-5 text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl" style={{ animationDelay: "60ms" }}>
+            Browse{" "}
+            <span className="bg-gradient-to-r from-violet-600 via-indigo-600 to-sky-500 bg-clip-text text-transparent">
+              MNC Employees
             </span>
+          </h1>
 
-          </button>
+          <p className="mc-rise mx-auto mt-4 max-w-xl text-base text-slate-500 sm:text-lg" style={{ animationDelay: "120ms" }}>
+            Book 1:1 sessions with verified professionals from the world's leading companies.
+          </p>
 
-          {/* ==================================================
-              SEARCH BAR
-          ================================================== */}
-
-          <div className="flex items-center flex-1 min-w-0 h-[58px] gap-2 px-2 border rounded-xl border-purple-500/40 bg-black/40">
-
-            <Search
-              size={21}
-              className="ml-2 text-gray-400 shrink-0"
-            />
-
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search company or industry..."
-              className="flex-1 min-w-0 px-2 text-sm text-gray-200 bg-transparent outline-none sm:px-3 sm:text-base placeholder:text-gray-500"
-            />
-
+          {/* search */}
+          <div className="mc-rise mx-auto mt-8 max-w-2xl" style={{ animationDelay: "180ms" }}>
+            <label
+              htmlFor="company-search"
+              className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3.5 shadow-lg shadow-slate-200/60 transition focus-within:border-violet-400 focus-within:ring-4 focus-within:ring-violet-100"
+            >
+              <Search size={20} className="shrink-0 text-slate-400" />
+              <input
+                id="company-search"
+                ref={searchRef}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search company or industry…"
+                autoComplete="off"
+                className="min-w-0 flex-1 bg-transparent text-base text-slate-800 outline-none placeholder:text-slate-400"
+              />
+              {search ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearch("");
+                    searchRef.current?.focus();
+                  }}
+                  aria-label="Clear search"
+                  className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                >
+                  <X size={16} />
+                </button>
+              ) : (
+                <kbd className="hidden rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-400 sm:block">
+                  /
+                </kbd>
+              )}
+            </label>
           </div>
 
-          {/* ==================================================
-              TOP COMPANIES - SAME BLOCK
-          ================================================== */}
-
-          <div className="flex items-center h-[58px] gap-2 pl-3 pr-2 border-l border-white/10 shrink-0">
-
-            {/* TOP COMPANY ICONS */}
-
-            <div className="flex items-center">
-
-              {companyCatalog
-                .slice(0, 5)
-                .map((company, index) => {
-
-                  const initials =
-                    company.name
-                      ?.split(" ")
-                      .map((word) => word[0])
-                      .join("")
-                      .slice(0, 2)
-                      .toUpperCase();
-
-                  return (
-                    <div
-                      key={`${company.name}-${index}`}
-                      title={company.name}
-                      className={`relative flex items-center justify-center w-10 h-10 sm:w-11 sm:h-11 overflow-hidden bg-white border-2 rounded-full border-[#100b20] shadow-md transition-transform duration-200 hover:z-20 hover:scale-110 ${
-                        index !== 0 ? "-ml-2" : ""
-                      }`}
-                    >
-
-                      {company.logo ? (
-                        <img
-                          src={company.logo}
-                          alt={company.name}
-                          className="object-contain w-full h-full p-1.5 rounded-full"
-                        />
-                      ) : (
-                        <span className="text-[9px] font-bold text-purple-600">
-                          {initials}
-                        </span>
-                      )}
-
-                    </div>
-                  );
-                })}
-
-              {/* + CIRCLE */}
-
-              <div className="relative z-10 flex items-center justify-center w-10 h-10 sm:w-11 sm:h-11 -ml-2 text-xs font-bold text-white border-2 rounded-full border-[#100b20] bg-gradient-to-br from-violet-600 to-purple-500 shadow-lg shadow-purple-500/20">
-
-                +
-                {Math.max(
-                  (companyCatalog?.length || 0) - 5,
-                  0,
-                )}
-
-              </div>
-
-            </div>
-
+          {/* live stats */}
+          <div className="mc-rise mx-auto mt-8 grid max-w-3xl grid-cols-2 gap-3 md:grid-cols-4" style={{ animationDelay: "240ms" }}>
+            <StatPill icon={<BriefcaseBusiness size={18} />} value={dash ?? totals.companies} label="Companies" />
+            <StatPill icon={<Users size={18} />} value={dash ?? totals.employees} label="MNC employees" />
+            <StatPill icon={<span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 motion-safe:animate-ping" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" /></span>} value={dash ?? totals.online} label="Online now" />
+            <StatPill icon={<ShieldCheck size={18} />} value={companyCatalog?.length || 0} label="Companies supported" />
           </div>
-
         </div>
-
       </section>
 
       {/* ======================================================
-          FILTER DRAWER
+          TRUSTED LOGOS
       ====================================================== */}
-
-      <div
-        className={`fixed inset-0 z-[100] ${
-          filterOpen
-            ? "pointer-events-auto"
-            : "pointer-events-none"
-        }`}
-      >
-
-        {/* OVERLAY */}
-
-        <div
-          onClick={closeFilter}
-          className={`absolute inset-0 bg-black/65 transition-opacity duration-300 ease-out ${
-            filterOpen
-              ? "opacity-100"
-              : "opacity-0"
-          }`}
-        />
-
-        {/* FILTER PANEL */}
-
-        <aside
-          className={`absolute top-0 bottom-0 left-0 w-[390px] max-w-[88vw] bg-[#0b0918] border-r border-purple-500/20 shadow-[20px_0_60px_rgba(0,0,0,0.45)] transform-gpu will-change-transform transition-transform duration-300 ease-out ${
-            filterOpen
-              ? "translate-x-0"
-              : "-translate-x-full"
-          }`}
-        >
-
-          {/* ==================================================
-              FILTER HEADER
-          ================================================== */}
-
-          <div className="flex items-center h-[76px] px-5 border-b border-white/10">
-
-            {/* BOOTSTRAP BACK ARROW */}
-
-            <button
-              type="button"
-              onClick={closeFilter}
-              aria-label="Back"
-              className="flex items-center justify-center w-10 h-10 mr-3 text-gray-400 transition-all duration-200 rounded-xl hover:text-white hover:bg-white/10 active:scale-95"
-            >
-              <i className="bi bi-arrow-left text-xl"></i>
-            </button>
-
-            <div>
-
-              <h2 className="text-lg font-semibold text-white">
-                Filters
-              </h2>
-
-              <p className="mt-0.5 text-xs text-gray-500">
-                Refine your search
-              </p>
-
+      {companyCatalog?.length > 0 && (
+        <section className="border-b border-slate-100 bg-slate-50/50">
+          <div className="mx-auto flex max-w-[1400px] items-center gap-6 overflow-x-auto px-5 py-4 mc-no-scrollbar sm:px-8">
+            <span className="shrink-0 text-xs font-semibold uppercase tracking-wider text-slate-400">
+              Employees from
+            </span>
+            <div className="flex items-center gap-5">
+              {companyCatalog.slice(0, 10).map((company, index) => (
+                <div
+                  key={`${company.name}-${index}`}
+                  title={company.name}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center opacity-60 grayscale transition duration-200 hover:scale-110 hover:opacity-100 hover:grayscale-0"
+                >
+                  {company.logo ? (
+                    <img src={company.logo} alt={company.name} className="max-h-full max-w-full object-contain" />
+                  ) : (
+                    <span className="text-[10px] font-bold text-slate-500">{initialsOf(company.name)}</span>
+                  )}
+                </div>
+              ))}
+              {companyCatalog.length > 10 && (
+                <span className="shrink-0 text-xs font-medium text-slate-400">+{companyCatalog.length - 10} more</span>
+              )}
             </div>
-
           </div>
-
-          {/* FILTER CONTENT */}
-
-          <div className="h-[calc(100vh-76px)] px-5 py-6 overflow-y-auto overscroll-contain">
-
-            {/* COMPANY CATEGORY */}
-
-            <div>
-
-              <p className="mb-4 text-xs font-semibold tracking-wider text-gray-500 uppercase">
-                Company Category
-              </p>
-
-              <div className="space-y-2">
-
-                {categories.map((item) => {
-
-                  const active =
-                    activeCategory === item;
-
-                  return (
-                    <button
-                      key={item}
-                      type="button"
-                      onClick={() =>
-                        handleCategoryChange(item)
-                      }
-                      className={`flex items-center justify-between w-full px-4 py-3.5 text-sm font-medium text-left rounded-xl border transition-colors duration-150 ${
-                        active
-                          ? "bg-gradient-to-r from-violet-600 to-purple-500 border-transparent text-white shadow-lg shadow-purple-500/20"
-                          : "bg-white/[0.035] border-white/[0.08] text-gray-300 hover:bg-white/[0.07] hover:border-purple-500/30"
-                      }`}
-                    >
-
-                      <span>{item}</span>
-
-                      {active && (
-                        <span className="text-sm font-bold">
-                          ✓
-                        </span>
-                      )}
-
-                    </button>
-                  );
-                })}
-
-              </div>
-
-            </div>
-
-            {/* DIVIDER */}
-
-            <div className="my-7 border-t border-white/[0.08]" />
-
-            {/* SORT */}
-
-            <div>
-
-              <p className="mb-4 text-xs font-semibold tracking-wider text-gray-500 uppercase">
-                Sort By
-              </p>
-
-              <div className="space-y-2">
-
-                {[
-                  "Popular",
-                  "Rating",
-                  "Mentors",
-                ].map((item) => {
-
-                  const active = sort === item;
-
-                  return (
-                    <button
-                      key={item}
-                      type="button"
-                      onClick={() =>
-                        handleSortChange(item)
-                      }
-                      className={`flex items-center justify-between w-full px-4 py-3.5 text-sm font-medium text-left rounded-xl border transition-colors duration-150 ${
-                        active
-                          ? "bg-purple-500/15 border-purple-500/50 text-purple-200"
-                          : "bg-white/[0.035] border-white/[0.08] text-gray-300 hover:bg-white/[0.07] hover:border-purple-500/30"
-                      }`}
-                    >
-
-                      <span>
-                        Sort: {item}
-                      </span>
-
-                      {active && (
-                        <span className="text-sm font-bold text-purple-300">
-                          ✓
-                        </span>
-                      )}
-
-                    </button>
-                  );
-                })}
-
-              </div>
-
-            </div>
-
-            {/* CLEAR */}
-
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="w-full px-4 py-3.5 mt-8 text-sm font-semibold text-purple-300 transition-colors duration-150 border rounded-xl border-purple-500/30 bg-purple-500/5 hover:bg-purple-500/15 hover:border-purple-500/50"
-            >
-              Clear All Filters
-            </button>
-
-          </div>
-
-        </aside>
-
-      </div>
+        </section>
+      )}
 
       {/* ======================================================
-          COMPANY CARDS
-          UNCHANGED
+          RESULTS
       ====================================================== */}
+      <main className="mx-auto max-w-[1400px] px-5 py-8 sm:px-8 sm:py-10">
+        {/* category chips */}
+        <div className="mc-no-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Company category">
+          {categories.map((item) => {
+            const active = activeCategory === item;
+            return (
+              <button
+                key={item}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setActiveCategory(item)}
+                className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition active:scale-95 ${
+                  active
+                    ? "border-violet-600 bg-violet-600 text-white shadow-md shadow-violet-200"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-violet-300 hover:text-violet-700"
+                }`}
+              >
+                {item}
+                {!loading && (
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
+                    {categoryCounts[item] ?? 0}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
 
-      <main className="relative z-10 max-w-[1540px] px-5 sm:px-6 lg:px-8 mx-auto py-8 sm:py-10 lg:py-12">
+        {/* toolbar */}
+        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-slate-500" aria-live="polite">
+            {loading ? (
+              "Loading companies…"
+            ) : (
+              <>
+                Showing <span className="font-semibold text-slate-900">{filteredCompanies.length}</span> of{" "}
+                <span className="font-semibold text-slate-900">{companies.length}</span> companies
+              </>
+            )}
+          </p>
 
-        {filteredCompanies.length === 0 ? (
-
-          <div className="py-20 text-center">
-
-            <div className="flex items-center justify-center w-16 h-16 mx-auto rounded-2xl bg-white/5">
-              <Building2
-                size={34}
-                className="text-gray-600"
-              />
-            </div>
-
-            <h2 className="mt-6 text-2xl font-semibold">
-              No Companies Found
-            </h2>
-
-            <p className="mt-2 text-sm text-gray-400">
-              Try searching another company.
-            </p>
-
+          <div className="flex flex-wrap items-center gap-3">
             <button
-              onClick={clearFilters}
-              className="px-6 py-3 mt-6 text-sm font-medium transition shadow-lg bg-gradient-to-r from-purple-600 to-violet-600 rounded-xl hover:scale-105 shadow-purple-500/20"
+              type="button"
+              role="switch"
+              aria-checked={onlineOnly}
+              onClick={() => setOnlineOnly((v) => !v)}
+              className="inline-flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-violet-300"
             >
-              Clear Filters
+              <span className={`relative h-5 w-9 rounded-full transition ${onlineOnly ? "bg-emerald-500" : "bg-slate-200"}`}>
+                <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${onlineOnly ? "left-[18px]" : "left-0.5"}`} />
+              </span>
+              Online now
             </button>
 
+            <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-500 transition focus-within:border-violet-400 hover:border-violet-300">
+              Sort
+              <select
+                value={sort}
+                onChange={(e) => setSort(e.target.value)}
+                className="cursor-pointer bg-transparent font-medium text-slate-800 outline-none"
+              >
+                {SORT_OPTIONS.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </label>
+
+            <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1" role="group" aria-label="View">
+              {[
+                { id: "grid", icon: LayoutGrid, label: "Grid view" },
+                { id: "list", icon: List, label: "List view" },
+              ].map(({ id, icon: Icon, label }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setView(id)}
+                  aria-label={label}
+                  aria-pressed={view === id}
+                  className={`rounded-lg p-1.5 transition ${view === id ? "bg-violet-50 text-violet-700" : "text-slate-400 hover:text-slate-700"}`}
+                >
+                  <Icon size={17} />
+                </button>
+              ))}
+            </div>
           </div>
+        </div>
 
-        ) : (
-
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-
-            {filteredCompanies.map((company) => (
-              <CompanyCard
-                key={company.companyName}
-                company={company}
-              />
+        {/* active filter chips */}
+        {activeFilters.length > 0 && (
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            {activeFilters.map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                onClick={f.clear}
+                className="group inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700 transition hover:bg-violet-100"
+              >
+                {f.label}
+                <X size={12} className="opacity-60 transition group-hover:opacity-100" />
+              </button>
             ))}
-
+            <button type="button" onClick={clearAll} className="text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-900 hover:underline">
+              Clear all
+            </button>
           </div>
-
         )}
 
+        {/* content */}
+        <div className="mt-6">
+          {loading ? (
+            <div className={view === "grid" ? "grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" : "space-y-3"} aria-busy="true">
+              {Array.from({ length: 8 }).map((_, i) =>
+                view === "grid" ? <SkeletonCard key={i} /> : <SkeletonRow key={i} />,
+              )}
+            </div>
+          ) : error ? (
+            <div className="mx-auto max-w-md rounded-3xl border border-red-100 bg-red-50/50 p-10 text-center">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-red-100 text-red-500">
+                <Building2 size={28} />
+              </div>
+              <h2 className="mt-5 text-xl font-semibold">Something went wrong</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-500">{error}</p>
+              <button
+                type="button"
+                onClick={fetchCompanies}
+                className="mt-6 inline-flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-violet-200 transition hover:bg-violet-700 active:scale-95"
+              >
+                <RotateCcw size={15} /> Try again
+              </button>
+            </div>
+          ) : filteredCompanies.length === 0 ? (
+            <div className="mx-auto max-w-md rounded-3xl border border-dashed border-slate-300 px-8 py-14 text-center">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+                <Building2 size={28} />
+              </div>
+              <h2 className="mt-5 text-xl font-semibold">No companies found</h2>
+              <p className="mt-2 text-sm text-slate-500">Try a different search or remove a filter.</p>
+              <button
+                type="button"
+                onClick={clearAll}
+                className="mt-6 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-violet-200 transition hover:bg-violet-700 active:scale-95"
+              >
+                Clear filters
+              </button>
+            </div>
+          ) : view === "grid" ? (
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {filteredCompanies.map((company, index) => (
+                <CompanyCard key={company.companyName} company={company} index={index} />
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {filteredCompanies.map((company, index) => (
+                <CompanyRow key={company.companyName} company={company} index={index} />
+              ))}
+            </div>
+          )}
+        </div>
       </main>
 
       {/* ======================================================
-          BOTTOM FEATURES
+          TRUST FEATURES
       ====================================================== */}
-
-      <section className="relative z-10 max-w-[1300px] px-5 mx-auto pb-10 sm:pb-14">
-
-        <div className="grid grid-cols-1 gap-5 p-5 border sm:grid-cols-2 lg:grid-cols-4 lg:gap-0 rounded-3xl border-purple-500/20 bg-gradient-to-r from-[#1a0a2e]/80 via-[#2a1a3e]/80 to-[#0a1a3e]/80 backdrop-blur-xl sm:p-6 lg:p-5">
-
-          <Feature
-            icon={<Award />}
-            title="Learn from Top 1%"
-            desc="Industry leading professionals"
-          />
-
-          <Feature
-            icon={<Users />}
-            title="1:1 Personalized Sessions"
-            desc="Get personalized guidance"
-          />
-
-          <Feature
-            icon={<BarChart3 />}
-            title="Career Growth"
-            desc="Accelerate your career"
-          />
-
-          <Feature
-            icon={<ShieldCheck />}
-            title="Verified MNC Employees"
-            desc="Background verified"
-          />
-
+      <section className="mx-auto max-w-[1400px] px-5 pb-14 sm:px-8">
+        <div className="grid gap-4 rounded-3xl border border-slate-200 bg-gradient-to-br from-violet-50/60 via-white to-sky-50/60 p-5 sm:grid-cols-2 sm:p-6 lg:grid-cols-4">
+          <Feature icon={<Award size={20} />} title="Learn from the top 1%" desc="Industry-leading professionals" />
+          <Feature icon={<Users size={20} />} title="1:1 personalised sessions" desc="Guidance built around you" />
+          <Feature icon={<BarChart3 size={20} />} title="Accelerate your career" desc="Real, practical insight" />
+          <Feature icon={<ShieldCheck size={20} />} title="Verified MNC employees" desc="Background verified" />
         </div>
-
       </section>
-
     </div>
   );
 };
 
 // ============================================================
-// STAT
+// SMALL PIECES
 // ============================================================
 
-const Stat = ({ icon, value, label }) => {
+const StatPill = ({ icon, value, label }) => (
+  <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3.5 text-left shadow-sm backdrop-blur transition hover:-translate-y-0.5 hover:shadow-md">
+    <div className="flex h-5 items-center text-violet-600">{icon}</div>
+    <p className="mt-2 text-2xl font-semibold tracking-tight tabular-nums text-slate-900">{value}</p>
+    <p className="text-xs text-slate-500">{label}</p>
+  </div>
+);
+
+const Feature = ({ icon, title, desc }) => (
+  <div className="flex items-center gap-4 rounded-2xl p-3 transition hover:bg-white">
+    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-700">{icon}</div>
+    <div className="min-w-0">
+      <h4 className="text-sm font-semibold text-slate-900">{title}</h4>
+      <p className="mt-0.5 text-xs text-slate-500">{desc}</p>
+    </div>
+  </div>
+);
+
+const Logo = ({ company, size = "h-14 w-14", rounded = "rounded-2xl" }) => {
+  const [failed, setFailed] = useState(false);
+  const name = company.companyName || "";
+
   return (
-    <div className="relative px-4 py-4 border-r sm:px-6 sm:py-5 border-white/10 last:border-r-0">
-
-      <div className="flex justify-center text-purple-400">
-        {icon}
-      </div>
-
-      <h3 className="mt-1.5 sm:mt-2 text-lg sm:text-xl font-semibold bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
-        {value}
-      </h3>
-
-      <p className="mt-1 text-[10px] sm:text-xs text-gray-400">
-        {label}
-      </p>
-
+    <div className={`flex ${size} shrink-0 items-center justify-center overflow-hidden ${rounded} border border-slate-200 bg-white shadow-md`}>
+      {company.logo && !failed ? (
+        <img
+          src={company.logo}
+          alt={`${name} logo`}
+          className="h-full w-full object-contain p-2"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <span className="text-base font-bold text-violet-600">{initialsOf(name)}</span>
+      )}
     </div>
   );
 };
 
-// ============================================================
-// FEATURE
-// ============================================================
+const MiniAvatar = ({ mentor }) => {
+  const [failed, setFailed] = useState(false);
+  const photo = mentorPhoto(mentor);
+  const name = mentor.name || mentor.fullName || "";
 
-const Feature = ({ icon, title, desc }) => {
+  return photo && !failed ? (
+    <img
+      src={photo}
+      alt={name || "Employee"}
+      onError={() => setFailed(true)}
+      className="h-8 w-8 rounded-full border-2 border-white object-cover"
+    />
+  ) : (
+    <span className={`flex h-8 w-8 items-center justify-center rounded-full border-2 border-white text-[11px] font-semibold ${AVATAR_COLORS[hashIndex(name)]}`}>
+      {initialsOf(name)}
+    </span>
+  );
+};
+
+// real employees only; no placeholder faces
+const AvatarStack = ({ mentors = [], total = 0, max = 4 }) => {
+  const shown = mentors.slice(0, max);
+  const extra = Math.max(total - shown.length, 0);
+
+  if (!shown.length && !total) {
+    return <span className="text-xs text-slate-400">No employees yet</span>;
+  }
+
   return (
-    <div className="flex items-center gap-4 lg:px-5 lg:border-r lg:last:border-r-0 border-white/10">
-
-      <div className="flex items-center justify-center text-purple-300 w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-purple-500/15 shrink-0">
-        {icon}
-      </div>
-
-      <div className="min-w-0">
-
-        <h4 className="text-sm font-semibold sm:text-base">
-          {title}
-        </h4>
-
-        <p className="mt-1 text-xs text-gray-400 sm:text-sm">
-          {desc}
-        </p>
-
-      </div>
-
+    <div className="flex items-center -space-x-2">
+      {shown.map((m, i) => (
+        <MiniAvatar key={m._id || m.id || i} mentor={m} />
+      ))}
+      {extra > 0 && (
+        <span className="flex h-8 min-w-[2rem] items-center justify-center rounded-full border-2 border-white bg-slate-100 px-1.5 text-[11px] font-semibold text-slate-600">
+          +{extra}
+        </span>
+      )}
     </div>
   );
 };
 
+const OnlineBadge = ({ count }) =>
+  count > 0 ? (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-100">
+      <span className="relative flex h-1.5 w-1.5">
+        <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 motion-safe:animate-ping" />
+        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+      </span>
+      {count} online
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-500">
+      <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+      Offline
+    </span>
+  );
+
+const RatingText = ({ company }) => {
+  const rating = Number(company.averageRating) > 0 ? Number(company.averageRating).toFixed(1) : null;
+
+  return rating ? (
+    <span className="inline-flex items-center gap-1 text-sm font-semibold text-slate-800">
+      <Star size={14} className="fill-amber-400 text-amber-400" />
+      {rating}
+      {company.ratingCount ? <span className="font-normal text-slate-400">({company.ratingCount})</span> : null}
+    </span>
+  ) : (
+    <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">New</span>
+  );
+};
+
+const sessionLink = (company) => `/Home/sessionboard/${encodeURIComponent(company.companyName || "")}`;
+
 // ============================================================
-// COMPANY CARD
+// GRID CARD
 // ============================================================
 
-const CompanyCard = ({ company }) => {
-
-  const companyName = company.companyName || "";
-
-  const initials = companyName
-    ?.split(" ")
-    .map((word) => word[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-
-  const rating = company.averageRating
-    ? Number(company.averageRating).toFixed(1)
-    : "4.9";
-
-  const ratingCount =
-    company.ratingCount || "1.2K";
-
-  const mentorCount =
-    company.mentorCount || 0;
-
-  const onlineCount =
-    company.onlineCount || 0;
+const CompanyCard = ({ company, index }) => {
+  const name = company.companyName || "";
 
   return (
-    <div className="group relative overflow-hidden rounded-[22px] border border-white/10 bg-gradient-to-br from-[#1a0a2e] to-[#0a1a2e] shadow-[0_15px_45px_rgba(0,0,0,0.3)] transition-all duration-300 hover:-translate-y-2 hover:border-purple-500/40 hover:shadow-[0_20px_60px_rgba(139,92,246,0.2)]">
-
-      {/* Company Image */}
-
-      <div className="relative h-[140px] overflow-hidden">
-
+    <Link
+      to={sessionLink(company)}
+      aria-label={`View ${name} employees`}
+      className="mc-rise group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:border-violet-300 hover:shadow-xl hover:shadow-violet-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2"
+      style={{ animationDelay: `${Math.min(index, 12) * 40}ms` }}
+    >
+      <div className="relative h-32 overflow-hidden bg-slate-100">
         {company.companyImage ? (
-
           <img
             src={company.companyImage}
-            alt={`${companyName} office`}
-            className="object-cover w-full h-full transition duration-500 group-hover:scale-105"
+            alt={`${name} office`}
+            className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
           />
-
         ) : (
-
-          <div className="flex items-center justify-center w-full h-full bg-gradient-to-br from-gray-800 to-gray-900">
-
-            <Building2
-              size={45}
-              className="text-gray-600"
-            />
-
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-violet-100 to-sky-100">
+            <Building2 size={40} className="text-violet-300" />
           </div>
-
         )}
-
-        <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a1a] via-transparent to-black/10" />
-
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-900/35 to-transparent" />
+        <div className="absolute right-3 top-3">
+          <OnlineBadge count={company.onlineCount || 0} />
+        </div>
       </div>
 
-      {/* Content */}
-
-      <div className="relative px-4 pt-3 pb-5 sm:px-5">
-
-        {/* Company Logo */}
-
-        <div className="absolute flex items-center justify-center w-[50px] h-[50px] overflow-hidden bg-white/90 backdrop-blur-sm border-2 border-white/20 shadow-xl rounded-xl -top-6 left-4">
-
-          {company.logo ? (
-
-            <img
-              src={company.logo}
-              alt={`${companyName} logo`}
-              className="object-contain w-full h-full p-1.5"
-            />
-
-          ) : (
-
-            <span className="text-lg font-bold text-gray-700">
-              {initials}
-            </span>
-
-          )}
-
+      <div className="relative flex flex-1 flex-col px-5 pb-5 pt-9">
+        <div className="absolute -top-7 left-5">
+          <Logo company={company} />
         </div>
 
-        <div className="pt-2">
-
-          {/* Mentors and Rating */}
-
-          <div className="flex items-center justify-between gap-2 mt-6 text-xs sm:text-sm">
-
-            <div className="flex items-center gap-1.5 text-gray-300">
-
-              <Users
-                size={15}
-                className="text-gray-400"
-              />
-
-              <span className="font-medium">
-                {mentorCount} Employees
-              </span>
-
-            </div>
-
-            <div className="flex items-center gap-1">
-
-              <Star
-                size={15}
-                fill="currentColor"
-                className="text-yellow-400"
-              />
-
-              <span className="font-medium text-white">
-                {rating}
-              </span>
-
-              <span className="text-gray-500">
-                ({ratingCount})
-              </span>
-
-            </div>
-
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="truncate text-base font-semibold text-slate-900">{name}</h3>
+            <p className="mt-0.5 truncate text-xs text-slate-500">{company.industry}</p>
           </div>
-
-          {/* Mentor Avatars */}
-
-          <div className="flex mt-4 -space-x-3">
-
-            {[1, 2, 3, 4, 5].map((i) => (
-
-              <img
-                key={i}
-                src={`https://i.pravatar.cc/100?img=${i + 10}`}
-                className="object-cover w-8 h-8 sm:w-9 sm:h-9 rounded-full border-2 border-[#0a0a1a]"
-                alt="Mentor"
-                onError={(e) => {
-                  e.target.src =
-                    `https://ui-avatars.com/api/?name=M${i}&background=7c3aed&color=fff&size=32&bold=true`;
-                }}
-              />
-
-            ))}
-
-            <div className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 text-[10px] sm:text-xs font-bold rounded-full bg-gradient-to-r from-purple-600 to-violet-600 border-2 border-[#0a0a1a] shadow-lg shadow-purple-500/30 text-white">
-
-              +{onlineCount || 0}
-
-            </div>
-
-          </div>
-
-          {/* View Mentors Button */}
-
-          <Link
-            to={`/Home/sessionboard/${encodeURIComponent(
-              companyName,
-            )}`}
-            className="flex items-center justify-center w-full gap-2.5 py-2.5 sm:py-3 mt-4 text-sm font-semibold text-purple-300 transition-all border border-purple-500/30 rounded-xl hover:bg-gradient-to-r hover:from-purple-600 hover:to-violet-600 hover:text-white hover:border-transparent hover:shadow-[0_0_25px_rgba(139,92,246,0.3)] group"
-          >
-
-            {company.logo ? (
-
-              <span className="relative flex items-center justify-center w-10 h-10 overflow-hidden transition-all bg-white border rounded-full sm:w-7 sm:h-7 border-purple-500/30 group-hover:border-white/50">
-
-                <img
-                  src={company.logo}
-                  alt={`${companyName} logo`}
-                  className="object-contain w-full h-full p-0.5"
-                  onError={(e) => {
-                    e.target.style.display =
-                      "none";
-
-                    e.target.parentElement.innerHTML =
-                      `<span class="text-[10px] font-bold text-purple-600">${initials}</span>`;
-                  }}
-                />
-
-              </span>
-
-            ) : (
-
-              <span className="flex items-center justify-center w-6 h-6 transition-all border rounded-full sm:w-7 sm:h-7 bg-purple-500/20 border-purple-500/30 group-hover:border-white/50 group-hover:bg-white/20">
-
-                <Building2
-                  size={14}
-                  className="group-hover:text-white"
-                />
-
-              </span>
-
-            )}
-
-            <span className="truncate max-w-[140px] sm:max-w-[160px]">
-              Employees
-            </span>
-
-            <ArrowRight
-              size={16}
-              className="transition-transform group-hover:translate-x-1 shrink-0"
-            />
-
-          </Link>
-
+          <RatingText company={company} />
         </div>
 
+        <div className="mt-4 flex items-center gap-2 text-sm text-slate-600">
+          <Users size={15} className="text-slate-400" />
+          <span>
+            <span className="font-semibold text-slate-900">{company.mentorCount || 0}</span>{" "}
+            {(company.mentorCount || 0) === 1 ? "employee" : "employees"}
+          </span>
+        </div>
+
+        <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4">
+          <AvatarStack mentors={company.mentors} total={company.mentorCount || 0} />
+          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-violet-700">
+            View
+            <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
+          </span>
+        </div>
       </div>
-
-    </div>
+    </Link>
   );
 };
+
+// ============================================================
+// LIST ROW
+// ============================================================
+
+const CompanyRow = ({ company, index }) => {
+  const name = company.companyName || "";
+
+  return (
+    <Link
+      to={sessionLink(company)}
+      aria-label={`View ${name} employees`}
+      className="mc-rise group flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition duration-200 hover:border-violet-300 hover:shadow-lg hover:shadow-violet-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 sm:flex-row sm:items-center"
+      style={{ animationDelay: `${Math.min(index, 12) * 30}ms` }}
+    >
+      <Logo company={company} size="h-14 w-14" rounded="rounded-xl" />
+
+      <div className="min-w-0 flex-1">
+        <h3 className="truncate text-base font-semibold text-slate-900">{name}</h3>
+        <p className="mt-0.5 truncate text-xs text-slate-500">{company.industry}</p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+        <span className="inline-flex items-center gap-2 text-sm text-slate-600">
+          <Users size={15} className="text-slate-400" />
+          <span className="font-semibold text-slate-900">{company.mentorCount || 0}</span> employees
+        </span>
+        <RatingText company={company} />
+        <OnlineBadge count={company.onlineCount || 0} />
+        <AvatarStack mentors={company.mentors} total={company.mentorCount || 0} max={3} />
+      </div>
+
+      <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-violet-700 sm:ml-2">
+        View
+        <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
+      </span>
+    </Link>
+  );
+};
+
+// ============================================================
+// SKELETONS
+// ============================================================
+
+const SkeletonCard = () => (
+  <div className="animate-pulse overflow-hidden rounded-2xl border border-slate-100 bg-white" aria-hidden="true">
+    <div className="h-32 bg-slate-100" />
+    <div className="relative px-5 pb-5 pt-9">
+      <div className="absolute -top-7 left-5 h-14 w-14 rounded-2xl border border-white bg-slate-200" />
+      <div className="h-4 w-2/3 rounded bg-slate-100" />
+      <div className="mt-2 h-3 w-1/3 rounded bg-slate-100" />
+      <div className="mt-5 h-3 w-1/2 rounded bg-slate-100" />
+      <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4">
+        <div className="flex -space-x-2">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="h-8 w-8 rounded-full border-2 border-white bg-slate-100" />
+          ))}
+        </div>
+        <div className="h-4 w-12 rounded bg-slate-100" />
+      </div>
+    </div>
+  </div>
+);
+
+const SkeletonRow = () => (
+  <div className="flex animate-pulse items-center gap-4 rounded-2xl border border-slate-100 bg-white p-4" aria-hidden="true">
+    <div className="h-14 w-14 rounded-xl bg-slate-100" />
+    <div className="flex-1 space-y-2">
+      <div className="h-4 w-1/3 rounded bg-slate-100" />
+      <div className="h-3 w-1/5 rounded bg-slate-100" />
+    </div>
+    <div className="h-4 w-24 rounded bg-slate-100" />
+  </div>
+);
 
 export default BrowseMentors;

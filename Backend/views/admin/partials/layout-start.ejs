@@ -1,0 +1,67 @@
+<%
+  const _page = locals.currentPage || '';
+  const _admin = locals.admin || { name: 'Admin' };
+  const _nav = [
+    { k: 'dashboard', href: '/admin', icon: 'fa-chart-pie', label: 'Dashboard' },
+    { k: 'mentors', href: '/admin/mentors', icon: 'fa-user-tie', label: 'Mentors', badge: locals.pendingCount },
+    { k: 'freshers', href: '/admin/freshers', icon: 'fa-graduation-cap', label: 'Freshers' },
+    { k: 'payments', href: '/admin/payments', icon: 'fa-credit-card', label: 'Payments' },
+    { k: 'users', href: '/admin/users', icon: 'fa-users-gear', label: 'All Users' }
+  ];
+%>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= locals.pageTitle || 'Admin' %> · MNCConnect Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="/admin/css/admin.css">
+</head>
+<body>
+
+<div class="overlay" id="overlay"></div>
+
+<aside class="sidebar" id="sidebar">
+    <div class="brand">
+        <div class="brand-logo"><i class="fas fa-link"></i></div>
+        <div>
+            <h1>MNCConnect</h1>
+            <p>Admin Panel</p>
+        </div>
+    </div>
+
+    <nav class="nav">
+        <div class="nav-label">Menu</div>
+        <% _nav.forEach(function (n) { %>
+            <a href="<%= n.href %>" class="<%= _page === n.k ? 'active' : '' %>">
+                <i class="fas <%= n.icon %>"></i>
+                <span><%= n.label %></span>
+                <% if (n.badge > 0) { %><span class="count"><%= n.badge %></span><% } %>
+            </a>
+        <% }) %>
+    </nav>
+
+    <div class="sidebar-foot">
+        <a href="/admin/logout"><i class="fas fa-right-from-bracket"></i><span>Logout</span></a>
+    </div>
+</aside>
+
+<div class="main">
+    <header class="topbar">
+        <button class="menu-btn" id="menuBtn" aria-label="Menu"><i class="fas fa-bars"></i></button>
+        <div>
+            <h2><%= locals.pageTitle || 'Dashboard' %></h2>
+            <p><%= locals.pageSubtitle || '' %></p>
+        </div>
+        <div class="spacer"></div>
+        <div class="admin-chip">
+            <div class="av"><%= String(_admin.name || 'A').charAt(0).toUpperCase() %></div>
+            <span><%= _admin.name || 'Admin' %><small><%= _admin.role || 'admin' %></small></span>
+        </div>
+    </header>
+
+    <div class="content">

@@ -45,6 +45,17 @@ const fresherSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    passwordResetToken: {
+  type: String,
+  default: undefined,
+  select: false,
+},
+
+passwordResetExpires: {
+  type: Date,
+  default: undefined,
+  select: false,
+},
   },
   {
     timestamps: true,

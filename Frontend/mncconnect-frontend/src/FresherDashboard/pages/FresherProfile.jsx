@@ -1127,7 +1127,7 @@ const FresherProfile = () => {
     localStorage.removeItem("user");
     clearLocalStorage();
 
-    navigate("/login");
+    navigate("/");
   };
 
   const updateUserAndSave = (updatedUser) => {
@@ -1138,7 +1138,7 @@ const FresherProfile = () => {
   /* =======================================================================
      AVATAR UPLOAD
   ======================================================================= */
-
+    
  const handleAvatarUpload = async (file) => {
   if (!file) return;
 

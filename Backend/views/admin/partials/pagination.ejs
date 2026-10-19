@@ -1,0 +1,43 @@
+<%
+  const _p = pagination;
+  const _base = (locals.baseQuery ? locals.baseQuery + '&' : '');
+  const _url = function (n) { return '?' + _base + 'page=' + n; };
+  const _from = _p.total === 0 ? 0 : (_p.page - 1) * _p.limit + 1;
+  const _to = Math.min(_p.page * _p.limit, _p.total);
+
+  // Windowed page numbers: 1 ... 4 5 6 ... 20
+  const _nums = [];
+  for (let i = 1; i <= _p.pages; i++) {
+    if (i === 1 || i === _p.pages || Math.abs(i - _p.page) <= 1) _nums.push(i);
+    else if (_nums[_nums.length - 1] !== '...') _nums.push('...');
+  }
+%>
+<div class="pager">
+    <span class="muted small">Showing <b><%= _from %></b>–<b><%= _to %></b> of <b><%= _p.total %></b></span>
+
+    <% if (_p.pages > 1) { %>
+    <div class="pages">
+        <% if (_p.page > 1) { %>
+            <a href="<%= _url(_p.page - 1) %>"><i class="fas fa-chevron-left"></i></a>
+        <% } else { %>
+            <span class="off"><i class="fas fa-chevron-left"></i></span>
+        <% } %>
+
+        <% _nums.forEach(function (n) { %>
+            <% if (n === '...') { %>
+                <span class="off">…</span>
+            <% } else if (n === _p.page) { %>
+                <span class="cur"><%= n %></span>
+            <% } else { %>
+                <a href="<%= _url(n) %>"><%= n %></a>
+            <% } %>
+        <% }) %>
+
+        <% if (_p.page < _p.pages) { %>
+            <a href="<%= _url(_p.page + 1) %>"><i class="fas fa-chevron-right"></i></a>
+        <% } else { %>
+            <span class="off"><i class="fas fa-chevron-right"></i></span>
+        <% } %>
+    </div>
+    <% } %>
+</div>

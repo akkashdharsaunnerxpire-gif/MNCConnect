@@ -1,150 +1,184 @@
-<% 
-  pageTitle = 'Dashboard';
-  pageSubtitle = 'Overview of your platform';
-  currentPage = 'dashboard';
+<%- include('partials/layout-start') %>
+
+<%
+  const fmt = (n) => Number(n || 0).toLocaleString('en-IN');
+  const total = stats.totalMentors;
+  const aDeg = total ? (stats.approvedMentors / total) * 360 : 0;
+  const pDeg = total ? (stats.pendingMentors / total) * 360 : 0;
+  const donutBg = total
+    ? `conic-gradient(var(--ok) 0 ${aDeg}deg, var(--warn) ${aDeg}deg ${aDeg + pDeg}deg, var(--bad) ${aDeg + pDeg}deg 360deg)`
+    : 'var(--surface-2)';
+  const maxMonth = Math.max.apply(null, monthly.map(m => m.count).concat([1]));
+  const maxCompany = Math.max.apply(null, topCompanies.map(c => c.count).concat([1]));
+
+  const mentorCards = [
+    { l: 'Total Mentors', v: stats.totalMentors, i: 'fa-user-tie', t: 't-primary', href: '/admin/mentors' },
+    { l: 'Pending Approvals', v: stats.pendingMentors, i: 'fa-clock', t: 't-warn', href: '/admin/mentors?status=pending' },
+    { l: 'Approved Mentors', v: stats.approvedMentors, i: 'fa-circle-check', t: 't-ok', href: '/admin/mentors?status=approved' },
+    { l: 'Rejected Mentors', v: stats.rejectedMentors, i: 'fa-circle-xmark', t: 't-bad', href: '/admin/mentors?status=rejected' }
+  ];
+
+  const platformCards = [];
+  if (stats.totalUsers !== null) platformCards.push({ l: 'Total Users', v: fmt(stats.totalUsers), i: 'fa-users', t: 't-info', href: '/admin/users' });
+  if (stats.totalFreshers !== null) platformCards.push({ l: 'Freshers', v: fmt(stats.totalFreshers), i: 'fa-graduation-cap', t: 't-purple', href: '/admin/freshers' });
+  if (stats.totalPayments !== null) platformCards.push({ l: 'Payments', v: fmt(stats.totalPayments), i: 'fa-receipt', t: 't-primary', href: '/admin/payments' });
+  if (stats.revenue !== null) platformCards.push({ l: 'Revenue', v: '₹' + fmt(stats.revenue), i: 'fa-indian-rupee-sign', t: 't-ok', href: '/admin/payments' });
 %>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MNCConnect Admin - Dashboard</title>
-    <link rel="stylesheet" href="/admin/css/output.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-</head>
-<body class="bg-slate-950 text-white min-h-screen">
-    
-    <!-- Sidebar -->
-    <div class="flex h-screen">
-        <aside class="w-64 bg-slate-900 border-r border-slate-800 fixed h-full overflow-y-auto">
-            <div class="p-6 border-b border-slate-800">
-                <h1 class="text-2xl font-bold text-indigo-500">MNCConnect</h1>
-                <p class="text-sm text-slate-400">Admin Panel</p>
+<% if (stats.pendingMentors > 0) { %>
+<div class="alert alert-warn">
+    <i class="fas fa-bell"></i>
+    <div><b><%= stats.pendingMentors %></b> mentor<%= stats.pendingMentors > 1 ? 's are' : ' is' %> waiting for verification.</div>
+    <a href="/admin/mentors?status=pending" class="btn btn-sm btn-primary">Review now</a>
+</div>
+<% } %>
+
+<!-- Mentor stats -->
+<div class="grid g-4 mb">
+    <% mentorCards.forEach(function (c) { %>
+        <a href="<%= c.href %>" class="card stat <%= c.t %>">
+            <div><small><%= c.l %></small><h3><%= c.v %></h3></div>
+            <div class="stat-ico"><i class="fas <%= c.i %>"></i></div>
+        </a>
+    <% }) %>
+</div>
+
+<!-- Platform stats -->
+<% if (platformCards.length) { %>
+<div class="grid g-4 mb">
+    <% platformCards.forEach(function (c) { %>
+        <a href="<%= c.href %>" class="card stat <%= c.t %>">
+            <div><small><%= c.l %></small><h3><%= c.v %></h3></div>
+            <div class="stat-ico"><i class="fas <%= c.i %>"></i></div>
+        </a>
+    <% }) %>
+</div>
+<% } %>
+
+<!-- Charts -->
+<div class="grid g-main mb">
+    <div class="card">
+        <div class="card-head">
+            <div><h3>Mentor Registrations</h3><p>Last 6 months</p></div>
+        </div>
+        <div class="card-body">
+            <div class="bars">
+                <% monthly.forEach(function (m) { %>
+                    <div class="bar" title="<%= m.count %> registrations">
+                        <b><%= m.count %></b>
+                        <div class="bar-fill" style="height: <%= Math.round((m.count / maxMonth) * 100) %>%"></div>
+                        <span><%= m.label %></span>
+                    </div>
+                <% }) %>
             </div>
-            
-            <nav class="p-4 space-y-2">
-                <a href="/admin" class="flex items-center gap-3 px-4 py-3 rounded-lg bg-indigo-600 transition">
-                    <i class="fas fa-chart-pie w-5"></i>
-                    <span>Dashboard</span>
-                </a>
-                <a href="/admin/mentors" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
-                    <i class="fas fa-users w-5"></i>
-                    <span>Mentors</span>
-                </a>
-                <a href="/admin/freshers" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
-                    <i class="fas fa-graduation-cap w-5"></i>
-                    <span>Freshers</span>
-                </a>
-                <a href="/admin/payments" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
-                    <i class="fas fa-credit-card w-5"></i>
-                    <span>Payments</span>
-                </a>
-                <a href="/admin/users" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
-                    <i class="fas fa-user-cog w-5"></i>
-                    <span>Users</span>
-                </a>
-                <a href="/admin/logout" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-red-600/20 text-red-400 transition mt-8">
-                    <i class="fas fa-sign-out-alt w-5"></i>
-                    <span>Logout</span>
-                </a>
-            </nav>
-        </aside>
-        
-        <!-- Main Content -->
-        <main class="ml-64 flex-1 p-8 overflow-y-auto">
-            <div class="flex justify-between items-center mb-8">
-                <div>
-                    <h2 class="text-3xl font-bold text-white">Dashboard</h2>
-                    <p class="text-slate-400">Welcome back, <%= admin ? admin.name : 'Admin' %></p>
-                </div>
-                <div class="flex items-center gap-4">
-                    <span class="text-slate-400"><i class="fas fa-user-circle text-2xl"></i> <%= admin ? admin.name : 'Admin' %></span>
-                </div>
-            </div>
-            
-            <!-- Stats Grid -->
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-slate-400 text-sm">Total Mentors</p>
-                            <h3 class="text-3xl font-bold text-white mt-1"><%= stats.totalMentors || 0 %></h3>
-                        </div>
-                        <div class="w-12 h-12 bg-indigo-600/20 rounded-lg flex items-center justify-center">
-                            <i class="fas fa-users text-indigo-500 text-xl"></i>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-slate-400 text-sm">Pending Approvals</p>
-                            <h3 class="text-3xl font-bold text-yellow-400 mt-1"><%= stats.pendingMentors || 0 %></h3>
-                        </div>
-                        <div class="w-12 h-12 bg-yellow-600/20 rounded-lg flex items-center justify-center">
-                            <i class="fas fa-clock text-yellow-500 text-xl"></i>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-slate-400 text-sm">Approved Mentors</p>
-                            <h3 class="text-3xl font-bold text-emerald-400 mt-1"><%= stats.approvedMentors || 0 %></h3>
-                        </div>
-                        <div class="w-12 h-12 bg-emerald-600/20 rounded-lg flex items-center justify-center">
-                            <i class="fas fa-check-circle text-emerald-500 text-xl"></i>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-slate-400 text-sm">Rejected Mentors</p>
-                            <h3 class="text-3xl font-bold text-red-400 mt-1"><%= stats.rejectedMentors || 0 %></h3>
-                        </div>
-                        <div class="w-12 h-12 bg-red-600/20 rounded-lg flex items-center justify-center">
-                            <i class="fas fa-times-circle text-red-500 text-xl"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Quick Actions -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                    <h4 class="text-lg font-semibold text-white mb-4">Quick Actions</h4>
-                    <div class="space-y-3">
-                        <a href="/admin/mentors?status=pending" class="flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg hover:bg-slate-800 transition">
-                            <div class="w-10 h-10 bg-yellow-600/20 rounded-lg flex items-center justify-center">
-                                <i class="fas fa-user-check text-yellow-500"></i>
-                            </div>
-                            <div>
-                                <p class="text-white font-medium">Review Pending Mentors</p>
-                                <p class="text-sm text-slate-400"><%= stats.pendingMentors || 0 %> pending approvals</p>
-                            </div>
-                            <i class="fas fa-chevron-right text-slate-600 ml-auto"></i>
-                        </a>
-                        <a href="/admin/mentors" class="flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg hover:bg-slate-800 transition">
-                            <div class="w-10 h-10 bg-indigo-600/20 rounded-lg flex items-center justify-center">
-                                <i class="fas fa-list text-indigo-500"></i>
-                            </div>
-                            <div>
-                                <p class="text-white font-medium">View All Mentors</p>
-                                <p class="text-sm text-slate-400">Manage mentor profiles</p>
-                            </div>
-                            <i class="fas fa-chevron-right text-slate-600 ml-auto"></i>
-                        </a>
-                    </div>
-                </div>
-            </div>
-        </main>
+        </div>
     </div>
-    
-    <script src="/admin/js/admin.js"></script>
-</body>
-</html>
+
+    <div class="card">
+        <div class="card-head">
+            <div><h3>Verification Status</h3><p>Approval rate: <b><%= approvalRate %>%</b></p></div>
+        </div>
+        <div class="card-body donut-wrap">
+          <div class="donut" <%- 'style="background:' + donutBg + '"' %>>
+                <div class="donut-in"><div><b><%= total %></b><small>Mentors</small></div></div>
+            </div>
+            <div class="legend">
+                <div><i style="background:var(--ok)"></i>Approved<span><%= stats.approvedMentors %></span></div>
+                <div><i style="background:var(--warn)"></i>Pending<span><%= stats.pendingMentors %></span></div>
+                <div><i style="background:var(--bad)"></i>Rejected<span><%= stats.rejectedMentors %></span></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Pending queue + Top companies -->
+<div class="grid g-main mb">
+    <div class="card">
+        <div class="card-head">
+            <div><h3>Pending Verification Queue</h3><p>Oldest requests first</p></div>
+            <a href="/admin/mentors?status=pending" class="btn btn-ghost btn-sm">View all</a>
+        </div>
+        <% if (pendingQueue.length) { %>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Mentor</th><th>Company</th><th>Applied</th><th class="t-right">Actions</th></tr></thead>
+                <tbody>
+                <% pendingQueue.forEach(function (m) { %>
+                    <tr>
+                        <td>
+                            <div class="cell-user">
+                                <div class="av"><%= (m.name || 'M').charAt(0).toUpperCase() %></div>
+                                <div><b><%= m.name || 'Unnamed' %></b><span class="muted small"><%= m.email || '' %></span></div>
+                            </div>
+                        </td>
+                        <td class="muted"><%= m.currentCompany || '—' %></td>
+                        <td class="muted small"><%= m.createdAt ? new Date(m.createdAt).toLocaleDateString('en-GB') : '—' %></td>
+                        <td>
+                            <div class="row-actions">
+                                <a href="/admin/mentors/<%= m._id %>" class="btn btn-ghost btn-sm">Review</a>
+                                <button class="btn btn-ok btn-sm" data-action="approve" data-id="<%= m._id %>" data-name="<%= m.name %>">Approve</button>
+                            </div>
+                        </td>
+                    </tr>
+                <% }) %>
+                </tbody>
+            </table>
+        </div>
+        <% } else { %>
+            <div class="empty"><i class="fas fa-check-double"></i><h4>All caught up</h4><p>No mentors waiting for review.</p></div>
+        <% } %>
+    </div>
+
+    <div class="card">
+        <div class="card-head"><div><h3>Top Companies</h3><p>By mentor count</p></div></div>
+        <div class="card-body">
+            <% if (topCompanies.length) { %>
+                <% topCompanies.forEach(function (c) { %>
+                    <div class="list-row" style="display:block;">
+                        <div style="display:flex;justify-content:space-between;">
+                            <span><%= c.name %></span><b><%= c.count %></b>
+                        </div>
+                        <div class="progress"><i style="width: <%= Math.round((c.count / maxCompany) * 100) %>%"></i></div>
+                    </div>
+                <% }) %>
+            <% } else { %>
+                <div class="empty" style="padding:24px 0;">No company data yet</div>
+            <% } %>
+        </div>
+    </div>
+</div>
+
+<!-- Recent mentors -->
+<div class="card">
+    <div class="card-head">
+        <div><h3>Recently Registered</h3><p>Latest 5 mentors</p></div>
+        <a href="/admin/mentors" class="btn btn-ghost btn-sm">All mentors</a>
+    </div>
+    <% if (recentMentors.length) { %>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Mentor</th><th>Designation</th><th>Status</th><th>Joined</th><th class="t-right"></th></tr></thead>
+            <tbody>
+            <% recentMentors.forEach(function (m) { %>
+                <tr>
+                    <td>
+                        <div class="cell-user">
+                            <div class="av"><% if (m.profilePic) { %><img src="<%= m.profilePic %>" alt=""><% } else { %><%= (m.name || 'M').charAt(0).toUpperCase() %><% } %></div>
+                            <div><b><%= m.name || 'Unnamed' %></b><span class="muted small"><%= m.email || '' %></span></div>
+                        </div>
+                    </td>
+                    <td class="muted"><%= m.designation || '—' %><% if (m.currentCompany) { %> · <%= m.currentCompany %><% } %></td>
+                    <td><%- include('partials/status-badge', { st: m.status }) %></td>
+                    <td class="muted small"><%= m.createdAt ? new Date(m.createdAt).toLocaleDateString('en-GB') : '—' %></td>
+                    <td class="t-right"><a href="/admin/mentors/<%= m._id %>" class="btn btn-ghost btn-sm">View</a></td>
+                </tr>
+            <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <% } else { %>
+        <div class="empty"><i class="fas fa-users"></i><h4>No mentors yet</h4></div>
+    <% } %>
+</div>
+
+<%- include('partials/layout-end') %>

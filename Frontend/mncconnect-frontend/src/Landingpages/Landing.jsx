@@ -128,6 +128,7 @@ const features = [
 ];
 
 export default function Landing() {
+  const navigate = useNavigate();
   const [persona, setPersona] = useState("fresher");
   const [menuOpen, setMenuOpen] = useState(false);
   const [videoOpen, setVideoOpen] = useState(false);
@@ -183,7 +184,6 @@ export default function Landing() {
       });
     };
   }, [showAuthModal]);
-
 
   const [stats, setStats] = useState({
     sessions: 0,
@@ -257,8 +257,8 @@ export default function Landing() {
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
 
-    const rotateX = ((y / rect.height) - 0.5) * -9;
-    const rotateY = ((x / rect.width) - 0.5) * 9;
+    const rotateX = (y / rect.height - 0.5) * -9;
+    const rotateY = (x / rect.width - 0.5) * 9;
 
     card.style.transform = `
       perspective(1100px)
@@ -281,8 +281,10 @@ export default function Landing() {
 
   const fresherMode = persona === "fresher";
 
-  const nextMentor = () => setMentorIndex((value) => (value + 1) % mentors.length);
-  const prevMentor = () => setMentorIndex((value) => (value - 1 + mentors.length) % mentors.length);
+  const nextMentor = () =>
+    setMentorIndex((value) => (value + 1) % mentors.length);
+  const prevMentor = () =>
+    setMentorIndex((value) => (value - 1 + mentors.length) % mentors.length);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -733,16 +735,21 @@ export default function Landing() {
               >
                 {item}
               </a>
-            )
-            )}
+            ))}
           </div>
 
           <div className="hidden items-center gap-3 md:flex">
-            <button className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-indigo-600" onClick={() => setShowAuthModal(true)}>
+            <button
+              className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-indigo-600"
+              onClick={() => setShowAuthModal(true)}
+            >
               Log in
             </button>
 
-            <button className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-bold text-white shadow-lg transition hover:-translate-y-0.5 hover:bg-indigo-600" onClick={() => setShowAuthModal(true)}>
+            <button
+              className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-bold text-white shadow-lg transition hover:-translate-y-0.5 hover:bg-indigo-600"
+              onClick={() => setShowAuthModal(true)}
+            >
               Get Started
             </button>
           </div>
@@ -787,10 +794,15 @@ export default function Landing() {
             </h1>
 
             <p className="mt-8 max-w-2xl text-lg leading-8 text-slate-700 sm:text-xl">
-              For Freshers: Find working MNC professionals who match your target role, connect with them 1:1 on video, learn how to crack interviews, ask career questions and discover internships, jobs and referral opportunities.<br />
-              For MNC Employees: Share your real industry experience, guide the next generation and 
-              <span className="font-bold text-emerald-600"> Earn up</span>{" "} 
-               to in your spare time.
+              For Freshers: Find working MNC professionals who match your target
+              role, connect with them 1:1 on video, learn how to crack
+              interviews, ask career questions and discover internships, jobs
+              and referral opportunities.
+              <br />
+              For MNC Employees: Share your real industry experience, guide the
+              next generation and
+              <span className="font-bold text-emerald-600"> Earn up</span> to in
+              your spare time.
             </p>
 
             <div className="mt-9 flex flex-col gap-3 sm:flex-row">
@@ -810,15 +822,13 @@ export default function Landing() {
               </button>
 
               <button
-                onClick={() => ()=>useNavigate('/mentor/register')}
-                className="group flex items-center justify-center gap-3 rounded-xl border border-emerald-200 bg-white px-7 py-4 text-sm font-bold text-slate-700 shadow-[0_12px_35px_rgba(15,23,42,.07)] transition hover:-translate-y-1 hover:border-emerald-300 hover:text-emerald-600"
+                type="button"
+                onClick={() => navigate("/mentor/register")}
+                className="group flex items-center justify-center gap-3 rounded-xl border border-emerald-200 bg-white px-7 py-4 text-sm font-bold text-slate-700"
               >
                 <CircleDollarSign size={18} />
                 Become a Paid Employee
-                <ArrowRight
-                  size={16}
-                  className="transition group-hover:translate-x-1"
-                />
+                <ArrowRight size={16} />
               </button>
             </div>
 
@@ -1018,7 +1028,10 @@ export default function Landing() {
       </section>
 
       {/* PERSONA SWITCHER */}
-      <section id="section-2" className="relative z-10 px-5 py-28 sm:px-8 lg:px-12">
+      <section
+        id="section-2"
+        className="relative z-10 px-5 py-28 sm:px-8 lg:px-12"
+      >
         <div className="mx-auto max-w-[1400px]">
           <div className="mx-auto max-w-3xl text-center">
             <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 font-mono text-[8px] tracking-[.25em] text-slate-600 shadow-sm">
@@ -1034,8 +1047,9 @@ export default function Landing() {
             </h2>
 
             <p className="mt-6 text-base leading-7 text-slate-700">
-              Freshers get direct access to working professionals. MNC employees turn their
-              experience into meaningful mentorship and paid sessions.
+              Freshers get direct access to working professionals. MNC employees
+              turn their experience into meaningful mentorship and paid
+              sessions.
             </p>
           </div>
 
@@ -1043,40 +1057,42 @@ export default function Landing() {
           <div className="mx-auto mt-10 flex w-fit rounded-2xl border border-slate-200 bg-slate-100 p-1.5 shadow-sm">
             <button
               onClick={() => setPersona("fresher")}
-              className={`flex items-center gap-2 rounded-xl px-5 py-3 text-sm font-bold transition ${fresherMode
-                ? "bg-white text-indigo-600 shadow-md"
-                : "text-slate-600"
-                }`}
+              className={`flex items-center gap-2 rounded-xl px-5 py-3 text-sm font-bold transition ${
+                fresherMode
+                  ? "bg-white text-indigo-600 shadow-md"
+                  : "text-slate-600"
+              }`}
             >
-              <GraduationCap size={17} />
-              I am a Fresher
+              <GraduationCap size={17} />I am a Fresher
             </button>
 
             <button
               onClick={() => setPersona("mentor")}
-              className={`flex items-center gap-2 rounded-xl px-5 py-3 text-sm font-bold transition ${!fresherMode
-                ? "bg-white text-emerald-600 shadow-md"
-                : "text-slate-600"
-                }`}
+              className={`flex items-center gap-2 rounded-xl px-5 py-3 text-sm font-bold transition ${
+                !fresherMode
+                  ? "bg-white text-emerald-600 shadow-md"
+                  : "text-slate-600"
+              }`}
             >
-              <Award size={17} />
-              I am an MNC Employee
+              <Award size={17} />I am an MNC Employee
             </button>
           </div>
 
           {/* Dynamic persona panel */}
           <div className="perspective mt-14">
             <div
-              className={`preserve-3d overflow-hidden rounded-[32px] border p-8 shadow-[0_30px_100px_rgba(15,23,42,.08)] transition-all duration-500 md:p-12 ${fresherMode
-                ? "border-indigo-100 bg-gradient-to-br from-indigo-50/80 via-white to-violet-50/60"
-                : "border-emerald-100 bg-gradient-to-br from-emerald-50/80 via-white to-teal-50/60"
-                }`}
+              className={`preserve-3d overflow-hidden rounded-[32px] border p-8 shadow-[0_30px_100px_rgba(15,23,42,.08)] transition-all duration-500 md:p-12 ${
+                fresherMode
+                  ? "border-indigo-100 bg-gradient-to-br from-indigo-50/80 via-white to-violet-50/60"
+                  : "border-emerald-100 bg-gradient-to-br from-emerald-50/80 via-white to-teal-50/60"
+              }`}
             >
               <div className="grid items-center gap-12 lg:grid-cols-[1fr_.8fr]">
                 <div>
                   <div
-                    className={`font-mono text-[8px] font-bold tracking-[.3em] ${fresherMode ? "text-indigo-500" : "text-emerald-600"
-                      }`}
+                    className={`font-mono text-[8px] font-bold tracking-[.3em] ${
+                      fresherMode ? "text-indigo-500" : "text-emerald-600"
+                    }`}
                   >
                     {fresherMode
                       ? "FRESHER CAREER ENGINE"
@@ -1098,19 +1114,19 @@ export default function Landing() {
                   <div className="mt-8 grid gap-3 sm:grid-cols-2">
                     {(fresherMode
                       ? [
-                        "Role & company matched mentors",
-                        "Interview & mock interview guidance",
-                        "Internship & job opportunity insights",
-                        "Referral & career guidance",
-                        "Ask questions & stay connected",
-                      ]
+                          "Role & company matched mentors",
+                          "Interview & mock interview guidance",
+                          "Internship & job opportunity insights",
+                          "Referral & career guidance",
+                          "Ask questions & stay connected",
+                        ]
                       : [
-                        "Register as a working MNC professional",
-                        "Choose your availability",
-                        "Share real industry experience",
-                        "Mentor freshers in your expertise",
-                        "Earn from 1:1 sessions",
-                      ]
+                          "Register as a working MNC professional",
+                          "Choose your availability",
+                          "Share real industry experience",
+                          "Mentor freshers in your expertise",
+                          "Earn from 1:1 sessions",
+                        ]
                     ).map((item) => (
                       <div
                         key={item}
@@ -1119,9 +1135,7 @@ export default function Landing() {
                         <CheckCircle2
                           size={15}
                           className={
-                            fresherMode
-                              ? "text-indigo-500"
-                              : "text-emerald-500"
+                            fresherMode ? "text-indigo-500" : "text-emerald-500"
                           }
                         />
                         {item}
@@ -1131,19 +1145,23 @@ export default function Landing() {
 
                   <button
                     onClick={() => setShowAuthModal(true)}
-                    className={`mt-9 inline-flex items-center gap-3 rounded-xl px-6 py-3.5 text-sm font-bold text-white shadow-lg transition hover:-translate-y-1 ${fresherMode
-                      ? "bg-indigo-600 shadow-indigo-200"
-                      : "bg-emerald-600 shadow-emerald-200"
-                      }`}
+                    className={`mt-9 inline-flex items-center gap-3 rounded-xl px-6 py-3.5 text-sm font-bold text-white shadow-lg transition hover:-translate-y-1 ${
+                      fresherMode
+                        ? "bg-indigo-600 shadow-indigo-200"
+                        : "bg-emerald-600 shadow-emerald-200"
+                    }`}
                   >
-                    {fresherMode ? "Explore MNC Working Employees" : "Start Earning"}
+                    {fresherMode
+                      ? "Explore MNC Working Employees"
+                      : "Start Earning"}
                   </button>
                 </div>
 
                 <div className="relative flex min-h-[330px] items-center justify-center">
                   <div
-                    className={`absolute h-64 w-64 rounded-full blur-[70px] ${fresherMode ? "bg-indigo-300/30" : "bg-emerald-300/30"
-                      }`}
+                    className={`absolute h-64 w-64 rounded-full blur-[70px] ${
+                      fresherMode ? "bg-indigo-300/30" : "bg-emerald-300/30"
+                    }`}
                   />
 
                   <div className="float-block relative w-full max-w-sm rounded-3xl border border-white bg-white/80 p-6 shadow-[0_25px_70px_rgba(15,23,42,.1)] backdrop-blur-xl">
@@ -1153,17 +1171,17 @@ export default function Landing() {
                       </span>
 
                       <span
-                        className={`h-2 w-2 rounded-full ${fresherMode ? "bg-indigo-500" : "bg-emerald-500"
-                          }`}
+                        className={`h-2 w-2 rounded-full ${
+                          fresherMode ? "bg-indigo-500" : "bg-emerald-500"
+                        }`}
                       />
                     </div>
 
                     <div className="mt-7 flex items-end gap-3">
                       <div
-                        className={`text-5xl font-black ${fresherMode
-                          ? "text-indigo-600"
-                          : "text-emerald-600"
-                          }`}
+                        className={`text-5xl font-black ${
+                          fresherMode ? "text-indigo-600" : "text-emerald-600"
+                        }`}
                       >
                         {fresherMode ? "1:1" : "₹3K"}
                       </div>
@@ -1177,9 +1195,7 @@ export default function Landing() {
 
                     <div className="mt-8 space-y-4">
                       <TelemetryBar
-                        label={
-                          fresherMode ? "Role match" : "Profile strength"
-                        }
+                        label={fresherMode ? "Role match" : "Profile strength"}
                         value={fresherMode ? "92%" : "96%"}
                         width={fresherMode ? "92%" : "96%"}
                         emerald={!fresherMode}
@@ -1249,31 +1265,34 @@ export default function Landing() {
                   key={feature.title}
                   onMouseMove={tiltCard}
                   onMouseLeave={resetTilt}
-                  className={`feature-card-premium preserve-3d group relative min-h-[410px] overflow-hidden rounded-[28px] border p-8 backdrop-blur-xl transition-transform duration-200 ${feature.accent === "emerald"
-                    ? "border-emerald-400/25"
-                    : feature.accent === "violet"
-                      ? "border-violet-400/20"
-                      : "border-indigo-400/20"
-                    }`}
+                  className={`feature-card-premium preserve-3d group relative min-h-[410px] overflow-hidden rounded-[28px] border p-8 backdrop-blur-xl transition-transform duration-200 ${
+                    feature.accent === "emerald"
+                      ? "border-emerald-400/25"
+                      : feature.accent === "violet"
+                        ? "border-violet-400/20"
+                        : "border-indigo-400/20"
+                  }`}
                 >
                   <div
-                    className={`absolute -right-20 -top-20 h-48 w-48 rounded-full blur-[70px] ${feature.accent === "emerald"
-                      ? "bg-emerald-400/10"
-                      : feature.accent === "violet"
-                        ? "bg-violet-400/10"
-                        : "bg-indigo-400/10"
-                      }`}
+                    className={`absolute -right-20 -top-20 h-48 w-48 rounded-full blur-[70px] ${
+                      feature.accent === "emerald"
+                        ? "bg-emerald-400/10"
+                        : feature.accent === "violet"
+                          ? "bg-violet-400/10"
+                          : "bg-indigo-400/10"
+                    }`}
                   />
 
                   <div className="relative">
                     <div className="flex items-start justify-between">
                       <div
-                        className={`feature-icon-premium flex h-14 w-14 items-center justify-center rounded-2xl ${feature.accent === "emerald"
-                          ? "bg-emerald-400/10 text-emerald-300"
-                          : feature.accent === "violet"
-                            ? "bg-violet-400/10 text-violet-300"
-                            : "bg-indigo-400/10 text-indigo-300"
-                          }`}
+                        className={`feature-icon-premium flex h-14 w-14 items-center justify-center rounded-2xl ${
+                          feature.accent === "emerald"
+                            ? "bg-emerald-400/10 text-emerald-300"
+                            : feature.accent === "violet"
+                              ? "bg-violet-400/10 text-violet-300"
+                              : "bg-indigo-400/10 text-indigo-300"
+                        }`}
                       >
                         <Icon size={24} />
                       </div>
@@ -1332,7 +1351,9 @@ export default function Landing() {
             className="mentor-carousel-stage relative mx-auto mt-14 h-[610px] max-w-[1400px] touch-pan-y select-none"
             onPointerDown={handleMentorPointerDown}
             onPointerUp={handleMentorPointerUp}
-            onPointerCancel={() => { mentorDragging.current = false; }}
+            onPointerCancel={() => {
+              mentorDragging.current = false;
+            }}
           >
             <div className="pointer-events-none absolute left-1/2 top-1/2 h-[430px] w-[850px] -translate-x-1/2 -translate-y-1/2 rounded-[50%] border border-indigo-200/60 [transform:translate(-50%,-50%)_rotateX(67deg)]" />
             <div className="pointer-events-none absolute left-1/2 top-1/2 h-[330px] w-[680px] -translate-x-1/2 -translate-y-1/2 rounded-[50%] border border-violet-200/50 [transform:translate(-50%,-50%)_rotateX(67deg)]" />
@@ -1369,7 +1390,9 @@ export default function Landing() {
                       draggable="false"
                       className="h-full w-full object-cover transition duration-700"
                     />
-                    <div className={`absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t ${mentor.gradient} opacity-30`} />
+                    <div
+                      className={`absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t ${mentor.gradient} opacity-30`}
+                    />
                     <div className="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-transparent to-transparent" />
 
                     <div className="absolute left-4 top-4 rounded-full border border-white/70 bg-white/90 px-3 py-1.5 font-mono text-[7px] font-bold tracking-[.16em] text-slate-700 backdrop-blur-xl">
@@ -1377,9 +1400,15 @@ export default function Landing() {
                     </div>
 
                     <div className="absolute bottom-5 left-5 right-5">
-                      <div className="text-2xl font-black tracking-tight text-white drop-shadow-lg">{mentor.name}</div>
-                      <div className="mt-1 text-xs font-semibold text-white/85">{mentor.role} • {mentor.company}</div>
-                      <div className="mt-1 text-[9px] text-white/70">{mentor.expertise}</div>
+                      <div className="text-2xl font-black tracking-tight text-white drop-shadow-lg">
+                        {mentor.name}
+                      </div>
+                      <div className="mt-1 text-xs font-semibold text-white/85">
+                        {mentor.role} • {mentor.company}
+                      </div>
+                      <div className="mt-1 text-[9px] text-white/70">
+                        {mentor.expertise}
+                      </div>
                     </div>
                   </div>
 
@@ -1396,12 +1425,19 @@ export default function Landing() {
 
                     <div className="mt-5 flex items-end justify-between">
                       <div>
-                        <div className="font-mono text-[7px] tracking-[.18em] text-slate-500">SESSION RATE</div>
-                        <div className="mt-1 text-2xl font-black text-emerald-600">{mentor.earned}</div>
+                        <div className="font-mono text-[7px] tracking-[.18em] text-slate-500">
+                          SESSION RATE
+                        </div>
+                        <div className="mt-1 text-2xl font-black text-emerald-600">
+                          {mentor.earned}
+                        </div>
                       </div>
                       <button
                         type="button"
-                        onClick={(event) => { event.stopPropagation(); setMentorIndex(index); }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setMentorIndex(index);
+                        }}
                         className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 transition hover:bg-indigo-600 hover:text-white"
                         aria-label={`View ${mentor.name}`}
                       >
@@ -1518,7 +1554,11 @@ export default function Landing() {
       </section>
 
       {/* PROFESSIONALS ANCHOR */}
-      <div id="section-4" className="relative z-10 h-0 scroll-mt-24" aria-hidden="true" />
+      <div
+        id="section-4"
+        className="relative z-10 h-0 scroll-mt-24"
+        aria-hidden="true"
+      />
 
       {/* FINAL CTA */}
       <section className="relative z-10 overflow-hidden px-5 py-32 sm:px-8 lg:px-12">
@@ -1539,25 +1579,19 @@ export default function Landing() {
           </h2>
 
           <p className="mx-auto mt-8 max-w-2xl text-lg leading-8 text-slate-700">
-            One relevant MNC Employee. One focused video session. Real guidance for the role
-            and company you want.
+            One relevant MNC Employee. One focused video session. Real guidance
+            for the role and company you want.
           </p>
 
           <div className="mt-10 flex flex-col justify-center gap-3 sm:flex-row">
-            <button
-              className="group flex items-center justify-center gap-3 rounded-xl bg-indigo-600 px-8 py-4 text-sm font-bold text-white shadow-[0_20px_50px_rgba(79,70,229,.25)] transition hover:-translate-y-1 hover:bg-indigo-700"
-            >
+            <button className="group flex items-center justify-center gap-3 rounded-xl bg-indigo-600 px-8 py-4 text-sm font-bold text-white shadow-[0_20px_50px_rgba(79,70,229,.25)] transition hover:-translate-y-1 hover:bg-indigo-700">
               <GraduationCap size={18} />
-              Find a MNC Employee
-              in  M-N-C Connects
+              Find a MNC Employee in M-N-C Connects
             </button>
 
-            <button
-              className="group flex items-center justify-center gap-3 rounded-xl border border-emerald-200 bg-white px-8 py-4 text-sm font-bold text-emerald-600 shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
-            >
+            <button className="group flex items-center justify-center gap-3 rounded-xl border border-emerald-200 bg-white px-8 py-4 text-sm font-bold text-emerald-600 shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
               <DollarSign size={18} />
-              Start Earning as a MNC Employee
-              in  M-N-C Connects
+              Start Earning as a MNC Employee in M-N-C Connects
             </button>
           </div>
         </div>
@@ -1739,9 +1773,7 @@ function MentorFloatCard({ mentor, className, delay }) {
             {mentor.name}
           </div>
 
-          <div className="mt-0.5 text-[8px] text-slate-600">
-            {mentor.role}
-          </div>
+          <div className="mt-0.5 text-[8px] text-slate-600">{mentor.role}</div>
 
           <div className="mt-1 inline-flex rounded bg-indigo-50 px-1.5 py-0.5 font-mono text-[7px] font-bold text-indigo-600">
             {mentor.company}
@@ -1775,10 +1807,11 @@ function TelemetryBar({ label, value, width, emerald = false }) {
 
       <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
         <div
-          className={`h-full rounded-full transition-all duration-1000 ${emerald
-            ? "bg-gradient-to-r from-emerald-400 to-emerald-600"
-            : "bg-gradient-to-r from-indigo-400 to-violet-600"
-            }`}
+          className={`h-full rounded-full transition-all duration-1000 ${
+            emerald
+              ? "bg-gradient-to-r from-emerald-400 to-emerald-600"
+              : "bg-gradient-to-r from-indigo-400 to-violet-600"
+          }`}
           style={{ width }}
         />
       </div>
@@ -1786,13 +1819,7 @@ function TelemetryBar({ label, value, width, emerald = false }) {
   );
 }
 
-function SectionHeading({
-  eyebrow,
-  number,
-  title,
-  gradient,
-  description,
-}) {
+function SectionHeading({ eyebrow, number, title, gradient, description }) {
   return (
     <div className="grid gap-8 lg:grid-cols-[1fr_.9fr] lg:items-end">
       <div>

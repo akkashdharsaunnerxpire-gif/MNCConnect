@@ -1,712 +1,775 @@
-import React from "react";
-import { Link } from "react-router-dom";
-import { motion } from "framer-motion";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import {
-  ArrowRight,
-  ArrowUpRight,
-  BriefcaseBusiness,
-  Building2,
-  Check,
-  CheckCircle2,
-  ChevronRight,
-  Clock3,
-  ExternalLink,
-  GraduationCap,
-  Heart,
-  MessageCircle,
-  Radio,
-  Sparkles,
-  Target,
-  TrendingUp,
-  UserRoundCheck,
-  Users,
-  Video,
-  Zap,
+  ArrowDownToLine, ArrowRight, Bell, CalendarDays, CheckCircle2, ChevronDown, Clock3,
+  Inbox, IndianRupee, Loader2, Star, Video, Volume2, VolumeX, Wallet, X,
 } from "lucide-react";
+import socket from "../../socket";
+import useLive from "../../hooks/useLive";
+import useMentorSessions from "../../hooks/useMentorSessions";
+import { api, ENDPOINTS, EVENTS, inr, timeAgo } from "../../services/mentorApi";
+import {
+  assignPaymentToMentor,
+  getConflictMessage,
+  getDurationMinutes,
+  getSessionConflict,
+  normalizeSessionRequest,
+  persistAcceptedSession,
+  respondToSessionRequest,
+} from "../../utils/sessionRequests";
 
-const mentor = {
-  name: "Arun",
-  company: "Microsoft",
-  role: "Software Engineer",
-  experience: "3+ Years",
-  expertise: [
-    "System Design",
-    "Interview Preparation",
-    "Career Strategy",
-    "Software Engineering",
-  ],
+const PLATFORM_FEE = 0.25; // only used to preview the mentor share on live requests
+const CLAIM_WINDOW_SECONDS = 120;
+const CLAIM_WINDOW_MS = CLAIM_WINDOW_SECONDS * 1000;
+const JOIN_READY_MS = 2 * 60 * 1000;
+const SOUND_KEY = "mncconnect_request_sound";
+
+const QUICK_LINKS = [
+  { to: "/mentor/requests", label: "Requests", icon: Inbox },
+  { to: "/mentor/sessions", label: "Sessions", icon: CalendarDays },
+  { to: "/mentor/earnings", label: "Earnings", icon: Wallet },
+  { to: "/mentor/reviews", label: "Reviews", icon: Star },
+];
+
+const mentorShare = (amount) => Math.round(amount * (1 - PLATFORM_FEE));
+
+const countdown = (ms) => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  if (d > 0) return `${d}d ${pad(h)}h ${pad(m)}m`;
+  if (h > 0) return `${h}h ${pad(m)}m ${pad(sec)}s`;
+  return `${pad(m)}m ${pad(sec)}s`;
 };
 
-const completedSessions = [
-  {
-    name: "Rahul Kumar",
-    initials: "RK",
-    role: "Software Engineer",
-    skills: ["React", "Node.js", "DSA"],
-    session: "System Design",
-    readiness: 94,
-    status: "Referral Ready",
-    completed: "Today",
-  },
-  {
-    name: "Priya S",
-    initials: "PS",
-    role: "Frontend Engineer",
-    skills: ["React", "TypeScript", "UI"],
-    session: "Interview Preparation",
-    readiness: 91,
-    status: "Referral Ready",
-    completed: "Yesterday",
-  },
-  {
-    name: "Vignesh R",
-    initials: "VR",
-    role: "Backend Engineer",
-    skills: ["Node.js", "MongoDB", "APIs"],
-    session: "Career Strategy",
-    readiness: 88,
-    status: "Needs Review",
-    completed: "2 days ago",
-  },
-];
+const greetingFor = (date) => {
+  const h = date.getHours();
+  if (h < 5) return "Burning the midnight oil";
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  if (h < 21) return "Good evening";
+  return "Good night";
+};
 
-const referralStats = [
-  {
-    label: "Referral Ready",
-    value: "07",
-    icon: UserRoundCheck,
-  },
-  {
-    label: "Referrals Sent",
-    value: "04",
-    icon: ArrowUpRight,
-  },
-  {
-    label: "Interview Stage",
-    value: "02",
-    icon: Video,
-  },
-  {
-    label: "Opportunities",
-    value: "02",
-    icon: TrendingUp,
-  },
-];
+// short two-tone chime, no audio file needed (browsers allow it after the first click on the page)
+const playChime = () => {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const t = ctx.currentTime;
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(880, t);
+    osc.frequency.setValueAtTime(1175, t + 0.13);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.15, t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.38);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.4);
+    setTimeout(() => ctx.close().catch(() => {}), 600);
+  } catch {
+    /* sound is optional */
+  }
+};
 
-const hiringAreas = [
-  {
-    title: "Software Engineering",
-    openings: 5,
-    skills: "React · Java · Node.js",
-  },
-  {
-    title: "AI & Machine Learning",
-    openings: 3,
-    skills: "Python · ML · GenAI",
-  },
-  {
-    title: "Data Engineering",
-    openings: 2,
-    skills: "SQL · Spark · Python",
-  },
-  {
-    title: "Cloud & Platform",
-    openings: 2,
-    skills: "Azure · DevOps · Kubernetes",
-  },
-];
+// numbers glide to their new value instead of jumping
+const useCountUp = (target, duration = 700) => {
+  const [value, setValue] = useState(0);
+  const last = useRef(0);
 
-const impactSteps = [
-  {
-    number: "01",
-    title: "Session",
-    text: "Understand the fresher's goals, skills and career direction.",
-    icon: Video,
-  },
-  {
-    number: "02",
-    title: "Prepare",
-    text: "Use your experience to make them interview-ready.",
-    icon: Target,
-  },
-  {
-    number: "03",
-    title: "Refer",
-    text: "When they're ready, refer them to your own company.",
-    icon: UserRoundCheck,
-  },
-  {
-    number: "04",
-    title: "Opportunity",
-    text: "Your guidance becomes a real career opportunity.",
-    icon: BriefcaseBusiness,
-  },
-];
-function Home() {
-  const isOnline = false;
+  useEffect(() => {
+    const to = Number(target) || 0;
+    const from = last.current;
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+    if (reduce || from === to) {
+      last.current = to;
+      setValue(to);
+      return undefined;
+    }
+
+    let raf;
+    const start = performance.now();
+    const tick = (now) => {
+      const p = Math.min(1, (now - start) / duration);
+      setValue(Math.round(from + (to - from) * (1 - Math.pow(1 - p, 3))));
+      if (p < 1) raf = requestAnimationFrame(tick);
+      else last.current = to;
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, duration]);
+
+  return value;
+};
+
+const Home = () => {
+  const navigate = useNavigate();
+  const mentorName = localStorage.getItem("mentorName") || "Mentor";
+
+  const [connected, setConnected] = useState(socket.connected);
+  const [requests, setRequests] = useState([]); // live requests, expired ones are pruned by the timer
+  const [now, setNow] = useState(Date.now());
+  const [claimingId, setClaimingId] = useState(null);
+  const [toast, setToast] = useState(null);
+  const [tab, setTab] = useState("upcoming");
+  const [soundOn, setSoundOn] = useState(() => localStorage.getItem(SOUND_KEY) !== "off");
+
+  const toastTimer = useRef(null);
+  const soundRef = useRef(soundOn);
+  const seenIds = useRef(new Set()); // chime only for requests we have not seen before
+
+  /* ---------- live server data ---------- */
+  const {
+    sessions,
+    wallet,
+    loading: sessionsLoading,
+    error: walletError,
+    reload: reloadWallet,
+  } = useMentorSessions();
+
+  const { data: notifData } = useLive({
+    fetcher: () => api(`${ENDPOINTS.notifications}?limit=5`),
+    events: [EVENTS.notification],
+  });
+
+  const { data: reviewData } = useLive({
+    fetcher: () => api(ENDPOINTS.reviews),
+    events: [EVENTS.reviewNew, EVENTS.reviewUpdated],
+  });
+
+  const rating = useMemo(() => {
+    const list = reviewData?.reviews || [];
+    if (!list.length) return { avg: "0.0", count: 0 };
+    const avg = list.reduce((s, r) => s + (Number(r.rating) || 0), 0) / list.length;
+    return { avg: avg.toFixed(1), count: list.length };
+  }, [reviewData]);
+
+  const activity = (notifData?.notifications || []).slice(0, 4);
+  const unreadActivity = activity.filter((n) => !n.read).length;
+
+  // all upcoming sessions from the server -> used for the 30-minute gap check
+  const serverUpcoming = useMemo(
+    () => sessions.filter((s) => s.status === "Upcoming"),
+    [sessions]
+  );
+
+  // what we show: soonest first, and hide sessions whose end time has already passed
+  const upcomingSessions = useMemo(
+    () =>
+      serverUpcoming
+        .filter((s) => !s.endsAt || s.endsAt > now)
+        .sort((a, b) => (a.startsAt || 0) - (b.startsAt || 0)),
+    [serverUpcoming, now]
+  );
+  const nextSession = upcomingSessions[0];
+
+  const showToast = useCallback((type, message) => {
+    clearTimeout(toastTimer.current);
+    setToast({ type, message });
+    toastTimer.current = setTimeout(() => setToast(null), type === "error" ? 6000 : 3500);
+  }, []);
+
+  useEffect(() => () => clearTimeout(toastTimer.current), []);
+
+  useEffect(() => {
+    soundRef.current = soundOn;
+    localStorage.setItem(SOUND_KEY, soundOn ? "on" : "off");
+  }, [soundOn]);
+
+  // "(2) MNCConnect" in the browser tab while requests are waiting
+  useEffect(() => {
+    const base = document.title.replace(/^\(\d+\)\s*/, "");
+    document.title = requests.length ? `(${requests.length}) ${base}` : base;
+    return () => {
+      document.title = base;
+    };
+  }, [requests.length]);
+
+  /* one clock for the whole page; it also drops requests whose claim window is over */
+  useEffect(() => {
+    const t = setInterval(() => {
+      const ts = Date.now();
+      setNow(ts);
+      setRequests((prev) => {
+        const next = prev.filter((r) => ts - r.receivedAt < CLAIM_WINDOW_MS);
+        return next.length === prev.length ? prev : next;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  /* ---------- live request feed ---------- */
+  useEffect(() => {
+    const mentorId = localStorage.getItem("mentorId");
+    if (!mentorId) return;
+
+    const onConnect = () => {
+      setConnected(true);
+      socket.emit("mentor-online", mentorId); // server re-sends pending requests
+    };
+    const onDisconnect = () => setConnected(false);
+
+    const onRequest = (incoming) => {
+      const req = { ...normalizeSessionRequest(incoming), receivedAt: Date.now() };
+      if (!req.id) return;
+
+      if (!seenIds.current.has(String(req.id))) {
+        seenIds.current.add(String(req.id));
+        if (soundRef.current) playChime();
+      }
+
+      setRequests((prev) =>
+        prev.some((p) => String(p.id) === String(req.id)) ? prev : [req, ...prev]
+      );
+    };
+
+    // server may send either id or requestGroupId
+    const onTaken = ({ id, requestGroupId } = {}) => {
+      const key = String(id ?? requestGroupId ?? "");
+      if (!key) return;
+      setRequests((prev) =>
+        prev.filter((p) => String(p.id) !== key && String(p.requestGroupId) !== key)
+      );
+    };
+
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+    socket.on("session-request", onRequest);
+    socket.on("session-request-taken", onTaken);
+
+    if (socket.connected) onConnect();
+    else socket.connect();
+
+    return () => {
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+      socket.off("session-request", onRequest);
+      socket.off("session-request-taken", onTaken);
+    };
+  }, []);
+
+  /* first mentor to accept wins: backend answers 409 if already taken */
+  const claim = useCallback(
+    async (req) => {
+      if (claimingId) return; // one accept at a time, otherwise two overlapping sessions can slip through
+
+      // same 30-minute gap rule as the Requests page (server data once loaded, local copy before that)
+      const serverReady = !sessionsLoading && !walletError;
+      const conflict = getSessionConflict(req, serverReady ? serverUpcoming : null);
+      if (conflict) {
+        showToast("error", getConflictMessage(conflict));
+        return;
+      }
+
+      setClaimingId(req.id);
+
+      try {
+        const result = await respondToSessionRequest(req, "accepted");
+
+        if (result.taken) {
+          setRequests((p) => p.filter((x) => String(x.id) !== String(req.id)));
+          showToast("error", "Another mentor accepted this request first.");
+          return;
+        }
+        if (!result.ok) throw new Error(result.data.message || "Could not accept request");
+
+        assignPaymentToMentor(result.requestGroupId);
+
+        const session = { ...req, status: "Upcoming" };
+        persistAcceptedSession(session); // fallback copy for the gap check
+
+        setRequests((p) => p.filter((x) => String(x.id) !== String(req.id)));
+        reloadWallet();
+        navigate("/mentor/sessions", { state: { acceptedSession: session } });
+      } catch (e) {
+        showToast("error", e.message || "Network error. Please try again.");
+      } finally {
+        setClaimingId(null);
+      }
+    },
+    [claimingId, navigate, reloadWallet, serverUpcoming, sessionsLoading, showToast, walletError]
+  );
+
+  const skip = (id) => setRequests((p) => p.filter((x) => String(x.id) !== String(id)));
+
+  const msToNext = nextSession?.startsAt ? nextSession.startsAt - now : null;
 
   return (
-    <div className="min-h-screen bg-[#f6f7f9] text-slate-950">
-      <main className="mx-auto max-w-[1500px] px-4 py-5 sm:px-6 lg:px-8">
-        <section className="relative overflow-hidden rounded-[32px] bg-slate-950 text-white shadow-2xl">
-          <div className="absolute -right-32 -top-32 h-[420px] w-[420px] rounded-full bg-blue-500/10 blur-3xl" />
-          <div className="absolute -bottom-40 left-1/3 h-[420px] w-[420px] rounded-full bg-indigo-500/10 blur-3xl" />
+    <div
+      className="min-h-screen bg-white text-slate-900"
+      style={{ backgroundImage: "radial-gradient(900px circle at 50% -200px, rgba(37,99,235,0.06), transparent 70%)" }}
+    >
+      <style>{`
+        @keyframes mc-fade-up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+        @keyframes mc-slide-in { from { opacity: 0; transform: translateX(-14px) scale(.98); } to { opacity: 1; transform: none; } }
+        .mc-fade-up { animation: mc-fade-up .5s cubic-bezier(.2,.7,.2,1) both; }
+        .mc-slide-in { animation: mc-slide-in .45s cubic-bezier(.2,.7,.2,1) both; }
+        @media (prefers-reduced-motion: reduce) { .mc-fade-up, .mc-slide-in { animation: none; } }
+      `}</style>
 
-          <div className="relative grid gap-12 px-6 py-8 sm:px-9 sm:py-10 lg:grid-cols-[1.15fr_0.85fr] lg:px-12 lg:py-12">
-            <div className="flex flex-col justify-center">
-              <div className="mb-6 flex flex-wrap items-center gap-3">
-                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-semibold tracking-wide text-white">
-                  <Sparkles size={13} />
-                  NEXT GENERATION
-                </div>
-                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-300">
-                  <span
-                    className={`h-2 w-2 rounded-full ${
-                      isOnline ? "bg-emerald-400" : "bg-slate-500"
-                    }`}
-                  />
+      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        {/* ---------- header ---------- */}
+        <header className="mc-fade-up flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-medium text-blue-600">{greetingFor(new Date(now))}</p>
+            <h1 className="mt-1 text-3xl font-semibold tracking-tight">Welcome back, {mentorName}</h1>
+            <p className="mt-1 text-sm text-slate-500">
+              Requests, earnings and reviews update the moment they happen.
+            </p>
+          </div>
 
-                  {isOnline ? "Available for mentorship" : "Currently offline"}
-                </div>
-              </div>
-
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-500">
-                Mentor → MNC → Opportunity
-              </p>
-
-              <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-[1.04] tracking-[-0.045em] sm:text-5xl lg:text-[64px]">
-                Your session can become their{" "}
-                <span className="text-slate-500">first opportunity.</span>
-              </h1>
-
-              <p className="mt-6 max-w-2xl text-base leading-7 text-slate-300 sm:text-lg">
-                Share your experience, prepare the next generation and, when a
-                fresher is ready, open a door inside the company you already
-                know.
-              </p>
-
-              <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-                <Link
-                  to="/mentor/sessions"
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-3.5 text-sm font-semibold text-slate-950 transition hover:bg-slate-100"
-                >
-                  <Video size={18} />
-                  Start a Session
-                  <ArrowRight size={16} />
-                </Link>
-
-                <Link
-                  to="/mentor/requests"
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-white/10"
-                >
-                  <UserRoundCheck size={18} />
-                  Refer a Fresher
-                </Link>
-              </div>
-
-              <div className="mt-9 flex flex-wrap gap-x-7 gap-y-3 text-sm text-slate-400">
-                <span className="flex items-center gap-2">
-                  <Building2 size={16} />
-                  {mentor.company}
-                </span>
-
-                <span className="flex items-center gap-2">
-                  <BriefcaseBusiness size={16} />
-                  {mentor.role}
-                </span>
-
-                <span className="flex items-center gap-2">
-                  <Clock3 size={16} />
-                  {mentor.experience}
-                </span>
-              </div>
-            </div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 25 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5 }}
-              className="flex items-center"
+          <div className="flex flex-wrap items-center gap-3">
+            <span
+              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium ${
+                connected ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"
+              }`}
             >
-              <div className="w-full rounded-[28px] border border-white/10 bg-white/[0.06] p-5 backdrop-blur-xl sm:p-6">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
-                      Your Company
-                    </p>
+              <span className="relative flex h-2 w-2">
+                {connected && <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 motion-safe:animate-ping" />}
+                <span className={`relative inline-flex h-2 w-2 rounded-full ${connected ? "bg-emerald-500" : "bg-amber-500"}`} />
+              </span>
+              {connected ? "You're live" : "Reconnecting…"}
+            </span>
 
-                    <h2 className="mt-2 text-3xl font-semibold">
-                      {mentor.company}
-                    </h2>
-
-                    <p className="mt-1 text-sm text-slate-400">
-                      Your network can become their next step.
-                    </p>
-                  </div>
-
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-slate-950">
-                    <Building2 size={21} />
-                  </div>
-                </div>
-
-                <div className="mt-7 rounded-2xl border border-white/10 bg-black/10 p-5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-slate-500">
-                        Fresher readiness
-                      </p>
-
-                      <p className="mt-1 text-lg font-semibold">
-                        7 students ready
-                      </p>
-                    </div>
-
-                    <div className="flex h-11 w-11 items-center justify-center rounded-full border border-emerald-400/20 bg-emerald-400/10 text-emerald-400">
-                      <Check size={20} />
-                    </div>
-                  </div>
-
-                  <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/10">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: "78%" }}
-                      transition={{ duration: 1 }}
-                      className="h-full rounded-full bg-emerald-400"
-                    />
-                  </div>
-
-                  <div className="mt-3 flex justify-between text-xs text-slate-500">
-                    <span>Preparation</span>
-                    <span>78% average readiness</span>
-                  </div>
-                </div>
-
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
-                    <p className="text-2xl font-semibold">04</p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      Referrals sent
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
-                    <p className="text-2xl font-semibold">02</p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      Interviews started
-                    </p>
-                  </div>
-                </div>
-
-                <Link
-                  to="/mentor/requests"
-                  className="mt-4 flex items-center justify-between rounded-2xl bg-white px-5 py-4 text-sm font-semibold text-slate-950 transition hover:bg-slate-100"
-                >
-                  <span className="flex items-center gap-2">
-                    <Zap size={17} />
-                    Find someone to refer
-                  </span>
-
-                  <ChevronRight size={18} />
-                </Link>
-              </div>
-            </motion.div>
-          </div>
-        </section>
-
-        <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {referralStats.map((item, index) => {
-            const Icon = item.icon;
-
-            return (
-              <motion.div
-                key={item.label}
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.08 }}
-                className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100">
-                    <Icon size={19} />
-                  </div>
-
-                  <ArrowUpRight size={17} className="text-slate-300" />
-                </div>
-
-                <p className="mt-5 text-3xl font-semibold tracking-tight">
-                  {item.value}
-                </p>
-
-                <p className="mt-1 text-sm text-slate-500">{item.label}</p>
-              </motion.div>
-            );
-          })}
-        </section>
-
-        <section className="mt-10 rounded-[30px] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-          <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-              The MNCConnect difference
-            </p>
-
-            <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
-              One session can change the direction of a career.
-            </h2>
-
-            <p className="mt-4 text-sm leading-7 text-slate-500 sm:text-base">
-              Your role doesn't stop when the video call ends. If the fresher is
-              ready, your professional experience and company network can help
-              them take the next step.
-            </p>
-          </div>
-
-          <div className="mt-9 grid gap-3 md:grid-cols-4">
-            {impactSteps.map((step, index) => {
-              const Icon = step.icon;
-
-              return (
-                <motion.div
-                  key={step.number}
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.08 }}
-                  className="relative rounded-2xl bg-slate-50 p-5"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-300">
-                      {step.number}
-                    </span>
-
-                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white shadow-sm">
-                      <Icon size={17} />
-                    </div>
-                  </div>
-
-                  <h3 className="mt-6 text-lg font-semibold">{step.title}</h3>
-
-                  <p className="mt-2 text-sm leading-6 text-slate-500">
-                    {step.text}
-                  </p>
-
-                  {index < impactSteps.length - 1 && (
-                    <ChevronRight
-                      size={18}
-                      className="absolute -right-2 top-1/2 z-10 hidden -translate-y-1/2 rounded-full bg-white text-slate-300 shadow-sm md:block"
-                    />
-                  )}
-                </motion.div>
-              );
-            })}
-          </div>
-        </section>
-
-        <section className="mt-10 grid gap-6 lg:grid-cols-[1.35fr_0.65fr]">
-          <div className="rounded-[30px] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-            <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                  Completed sessions
-                </p>
-
-                <h2 className="mt-2 text-3xl font-semibold tracking-tight">
-                  Freshers you can help next.
-                </h2>
-
-                <p className="mt-2 text-sm text-slate-500">
-                  Your completed sessions can become your referral pipeline.
-                </p>
-              </div>
-
-              <Link
-                to="/mentor/sessions"
-                className="inline-flex items-center gap-2 text-sm font-semibold"
-              >
-                View sessions
-                <ArrowUpRight size={16} />
-              </Link>
-            </div>
-
-            <div className="mt-7 space-y-3">
-              {completedSessions.map((student, index) => (
-                <motion.div
-                  key={student.name}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: index * 0.08 }}
-                  className="rounded-2xl border border-slate-200 p-4 transition hover:border-slate-300 hover:shadow-sm"
-                >
-                  <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-slate-950 text-sm font-semibold text-white">
-                        {student.initials}
-                      </div>
-
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="font-semibold">{student.name}</h3>
-
-                          <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-500">
-                            {student.completed}
-                          </span>
-                        </div>
-
-                        <p className="mt-1 text-sm text-slate-500">
-                          {student.role}
-                        </p>
-
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {student.skills.map((skill) => (
-                            <span
-                              key={skill}
-                              className="rounded-md bg-slate-50 px-2 py-1 text-[11px] text-slate-500"
-                            >
-                              {skill}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                      <div className="min-w-[145px]">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-slate-400">Readiness</span>
-
-                          <span className="font-semibold">
-                            {student.readiness}%
-                          </span>
-                        </div>
-
-                        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                          <div
-                            className="h-full rounded-full bg-slate-900"
-                            style={{
-                              width: `${student.readiness}%`,
-                            }}
-                          />
-                        </div>
-                      </div>
-
-                      {student.status === "Referral Ready" ? (
-                        <Link
-                          to="/mentor/requests"
-                          className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-3 text-xs font-semibold text-white transition hover:bg-slate-800"
-                        >
-                          <UserRoundCheck size={15} />
-                          Refer to {mentor.company}
-                        </Link>
-                      ) : (
-                        <Link
-                          to="/mentor/sessions"
-                          className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-3 text-xs font-semibold transition hover:bg-slate-50"
-                        >
-                          <Target size={15} />
-                          Review Student
-                        </Link>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-3 text-xs text-slate-400">
-                    <MessageCircle size={13} />
-                    Last session: {student.session}
-                  </div>
-                </motion.div>
-              ))}
-            </div>
-          </div>
-
-          <div className="rounded-[30px] bg-slate-950 p-6 text-white shadow-sm sm:p-8">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10">
-              <Heart size={21} />
-            </div>
-
-            <p className="mt-8 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-              Next Generation
-            </p>
-
-            <h2 className="mt-3 text-3xl font-semibold leading-tight">
-              Your experience can become their advantage.
-            </h2>
-
-            <p className="mt-4 text-sm leading-7 text-slate-400">
-              You know the interview process. You know the culture. You know
-              what your company looks for. Give the next generation access to
-              that knowledge.
-            </p>
-
-            <div className="mt-8 border-t border-white/10 pt-6">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-500">
-                  Students mentored
-                </span>
-
-                <span className="text-2xl font-semibold">48</span>
-              </div>
-
-              <div className="mt-5 flex items-center justify-between">
-                <span className="text-sm text-slate-500">Goals completed</span>
-
-                <span className="text-2xl font-semibold">37</span>
-              </div>
-
-              <div className="mt-5 flex items-center justify-between">
-                <span className="text-sm text-slate-500">Success rate</span>
-
-                <span className="text-2xl font-semibold">86%</span>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="mt-10 rounded-[30px] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                Company opportunities
-              </p>
-
-              <h2 className="mt-2 text-3xl font-semibold tracking-tight">
-                Where your referral can make a difference.
-              </h2>
-
-              <p className="mt-2 text-sm text-slate-500">
-                Roles where your company knowledge can help a fresher prepare
-                better.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2 rounded-full bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600">
-              <Building2 size={14} />
-              {mentor.company}
-            </div>
-          </div>
-
-          <div className="mt-7 grid gap-3 md:grid-cols-2">
-            {hiringAreas.map((area) => (
-              <div
-                key={area.title}
-                className="group rounded-2xl border border-slate-200 p-5 transition hover:border-slate-300 hover:shadow-sm"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h3 className="font-semibold">{area.title}</h3>
-
-                    <p className="mt-2 text-sm text-slate-400">{area.skills}</p>
-                  </div>
-
-                  <div className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600">
-                    {area.openings} openings
-                  </div>
-                </div>
-
-                <div className="mt-5 flex items-center gap-2 text-xs font-semibold text-slate-500">
-                  <CheckCircle2 size={14} />
-                  Suitable for referral
-                  <ArrowUpRight
-                    size={14}
-                    className="ml-auto transition group-hover:translate-x-0.5"
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="relative mt-10 overflow-hidden rounded-[30px] bg-slate-900 p-7 text-white sm:p-10">
-          <div className="absolute right-0 top-0 h-64 w-64 rounded-full bg-white/5 blur-3xl" />
-
-          <div className="relative flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
-            <div className="max-w-3xl">
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-                <GraduationCap size={15} />
-                From mentor to opportunity
-              </div>
-
-              <h2 className="mt-4 text-3xl font-semibold leading-tight sm:text-4xl">
-                Don't let the session be the end of the journey.
-              </h2>
-
-              <p className="mt-4 text-sm leading-7 text-slate-400 sm:text-base">
-                If a fresher has the skills, preparation and potential, your
-                referral can be the bridge between what they know and where they
-                want to go.
-              </p>
-            </div>
+            <button
+              type="button"
+              onClick={() => setSoundOn((v) => !v)}
+              aria-pressed={soundOn}
+              title={soundOn ? "Sound alerts on" : "Sound alerts off"}
+              className={`inline-flex h-9 w-9 items-center justify-center rounded-full border transition active:scale-90 ${
+                soundOn ? "border-blue-200 bg-blue-50 text-blue-600" : "border-slate-200 text-slate-400 hover:bg-slate-50"
+              }`}
+            >
+              {soundOn ? <Volume2 size={16} /> : <VolumeX size={16} />}
+              <span className="sr-only">Toggle sound alerts</span>
+            </button>
 
             <Link
-              to="/mentor/requests"
-              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-white px-6 py-3.5 text-sm font-semibold text-slate-950 transition hover:bg-slate-100"
+              to="/mentor/reviews"
+              className="group flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 transition hover:-translate-y-0.5 hover:border-yellow-300 hover:shadow-md"
             >
-              Refer a Fresher
-              <ArrowUpRight size={17} />
+              <Star size={16} className="fill-yellow-400 text-yellow-400 transition group-hover:rotate-12 group-hover:scale-110" />
+              <span className="text-lg font-semibold">{rating.avg}</span>
+              <span className="text-xs text-slate-500">{rating.count} review{rating.count !== 1 ? "s" : ""}</span>
             </Link>
           </div>
-        </section>
+        </header>
 
-        <section className="mt-8 rounded-[26px] border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                Mentor
-              </p>
-
-              <h2 className="mt-2 text-xl font-semibold">
-                {mentor.name} · {mentor.role}
-              </h2>
-
-              <p className="mt-1 text-sm text-slate-500">
-                {mentor.expertise.join(" · ")}
-              </p>
-            </div>
-
+        {/* ---------- quick links ---------- */}
+        <nav className="mc-fade-up mt-6 flex gap-2 overflow-x-auto pb-1" style={{ animationDelay: "60ms" }} aria-label="Shortcuts">
+          {QUICK_LINKS.map(({ to, label, icon: Icon }) => (
             <Link
-              to="/mentor/profile"
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold transition hover:bg-slate-50"
+              key={to}
+              to={to}
+              className="group relative inline-flex shrink-0 items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition hover:-translate-y-0.5 hover:border-blue-300 hover:text-blue-600 hover:shadow-sm active:scale-95"
             >
-              Manage Profile
-              <ExternalLink size={15} />
+              <Icon size={15} className="transition group-hover:scale-110" />
+              {label}
+              {label === "Requests" && requests.length > 0 && (
+                <span className="ml-0.5 rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
+                  {requests.length}
+                </span>
+              )}
             </Link>
+          ))}
+        </nav>
+
+        {walletError && (
+          <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            Couldn't load your earnings. <button onClick={reloadWallet} className="font-semibold underline">Retry</button>
           </div>
-        </section>
+        )}
 
-        <footer className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 py-8 text-xs text-slate-400">
-          <Link
-            to="/mentor/requests"
-            className="transition hover:text-slate-700"
-          >
-            Requests
-          </Link>
-
+        {/* ---------- next session banner ---------- */}
+        {nextSession && msToNext !== null && (
           <Link
             to="/mentor/sessions"
-            className="transition hover:text-slate-700"
+            className={`mc-fade-up group mt-6 flex items-center justify-between gap-4 rounded-2xl border px-5 py-4 transition hover:-translate-y-0.5 hover:shadow-md ${
+              msToNext <= JOIN_READY_MS ? "border-green-200 bg-green-50" : "border-blue-100 bg-blue-50/60"
+            }`}
+            style={{ animationDelay: "100ms" }}
           >
-            Sessions
+            <div className="flex min-w-0 items-center gap-3">
+              <Avatar name={nextSession.name} src={nextSession.avatar} />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold">
+                  {msToNext <= JOIN_READY_MS ? "Your session is ready to join" : `Next session with ${nextSession.name}`}
+                </p>
+                <p className="text-xs text-slate-500">{nextSession.date} at {nextSession.time}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="font-mono text-sm font-semibold tabular-nums text-slate-700">
+                {msToNext > 0 ? `in ${countdown(msToNext)}` : "Live now"}
+              </span>
+              <ArrowRight size={16} className="text-slate-400 transition group-hover:translate-x-1 group-hover:text-slate-700" />
+            </div>
           </Link>
+        )}
 
-          <Link
-            to="/mentor/earnings"
-            className="transition hover:text-slate-700"
-          >
-            Earnings
-          </Link>
+        {/* ---------- earnings ---------- */}
+        <section
+          onMouseMove={(e) => {
+            const el = e.currentTarget;
+            const r = el.getBoundingClientRect();
+            el.style.setProperty("--gx", `${((e.clientX - r.left) / r.width) * 100}%`);
+            el.style.setProperty("--gy", `${((e.clientY - r.top) / r.height) * 100}%`);
+          }}
+          className="mc-fade-up relative mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white"
+          style={{
+            animationDelay: "140ms",
+            backgroundImage:
+              "radial-gradient(420px circle at var(--gx, 50%) var(--gy, 0%), rgba(37,99,235,0.07), transparent 60%)",
+          }}
+        >
+          <div className="grid gap-px bg-slate-100 sm:grid-cols-2 lg:grid-cols-4">
+            <Stat label="Available to withdraw" amount={wallet.available} icon={Wallet} strong />
+            <Stat label="Clearing after sessions" amount={wallet.pending} icon={Clock3} />
+            <Stat label="Earned this week" amount={wallet.week} icon={IndianRupee} />
+            <Stat label="Lifetime earnings" amount={wallet.lifetime} icon={Star} />
+          </div>
+          <div className="flex flex-col gap-3 border-t border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-slate-500">
+              You keep {Math.round((1 - PLATFORM_FEE) * 100)}% of every session. Earnings are released when a session ends,
+              and you can withdraw anytime above ₹500.
+            </p>
+            <Link
+              to="/mentor/earnings"
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+            >
+              <ArrowDownToLine size={16} /> Withdraw
+            </Link>
+          </div>
+        </section>
 
-          <Link
-            to="/mentor/reviews"
-            className="transition hover:text-slate-700"
-          >
-            Reviews
-          </Link>
+        {/* ---------- requests + side panel ---------- */}
+        <div className="mt-8 grid gap-8 lg:grid-cols-[1.5fr_1fr]">
+          <section aria-live="polite">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-lg font-semibold">
+                Live requests
+                {requests.length > 0 && (
+                  <span className="rounded-full bg-blue-600 px-2 py-0.5 text-xs font-semibold text-white">{requests.length}</span>
+                )}
+              </h2>
+              <Link to="/mentor/requests" className="text-sm font-medium text-blue-600 hover:underline">All requests</Link>
+            </div>
 
-          <span className="flex items-center gap-1.5">
-            <Radio size={12} />
-            {isOnline ? "Online" : "Offline"}
-          </span>
-        </footer>
+            {requests.length === 0 ? (
+              <Scanning connected={connected} />
+            ) : (
+              <div className="space-y-4">
+                {requests.map((r) => (
+                  <RequestCard
+                    key={r.id} req={r} now={now}
+                    busy={claimingId === r.id}
+                    disabled={Boolean(claimingId)}
+                    onClaim={() => claim(r)} onSkip={() => skip(r.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section>
+            <div role="tablist" aria-label="Sessions and activity" className="mb-4 inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+              {[
+                { id: "upcoming", label: "Upcoming", count: upcomingSessions.length },
+                { id: "activity", label: "Activity", count: unreadActivity },
+              ].map((t) => (
+                <button
+                  key={t.id} type="button" role="tab" aria-selected={tab === t.id}
+                  onClick={() => setTab(t.id)}
+                  className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition active:scale-95 ${
+                    tab === t.id ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  {t.label}
+                  {t.count > 0 && (
+                    <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${tab === t.id ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"}`}>
+                      {t.count}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            <div key={tab} className="mc-fade-up">
+              {tab === "upcoming" ? (
+                sessionsLoading ? (
+                  <SkeletonList />
+                ) : upcomingSessions.length === 0 ? (
+                  <Empty icon={CalendarDays} title="No sessions booked" text="Accepted requests show up here with their start time." />
+                ) : (
+                  <>
+                    <ul className="space-y-2">
+                      {upcomingSessions.slice(0, 4).map((s) => {
+                        const ms = s.startsAt ? s.startsAt - now : null;
+                        const soon = ms !== null && ms <= JOIN_READY_MS;
+                        return (
+                          <li key={s.id}>
+                            <Link
+                              to="/mentor/sessions"
+                              className="group flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-4 transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-md"
+                            >
+                              <Avatar name={s.name} src={s.avatar} />
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-semibold">{s.name}</p>
+                                <p className="mt-0.5 text-xs text-slate-500">{s.date} at {s.time}</p>
+                                {ms !== null && (
+                                  <span className={`mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${soon ? "bg-green-50 text-green-700" : "bg-slate-100 text-slate-500"}`}>
+                                    <Clock3 size={11} />
+                                    {ms > 0 ? `in ${countdown(ms)}` : "Live now"}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-sm font-semibold text-slate-700">{inr(s.earning || mentorShare(s.amount))}</span>
+                            </Link>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <Link to="/mentor/sessions" className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:underline">
+                      View all <ArrowRight size={14} />
+                    </Link>
+                  </>
+                )
+              ) : activity.length === 0 ? (
+                <Empty icon={Bell} title="Nothing yet" text="Bookings, payments and reviews will appear here live." />
+              ) : (
+                <>
+                  <ul className="space-y-2">
+                    {activity.map((n) => (
+                      <li key={n.id || n._id} className="flex gap-3 rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-blue-200 hover:shadow-sm">
+                        <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${n.read ? "bg-slate-300" : "bg-blue-600"}`} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold">{n.title}</p>
+                          <p className="mt-0.5 line-clamp-2 text-xs text-slate-500">{n.message}</p>
+                        </div>
+                        <span className="whitespace-nowrap text-[11px] text-slate-400">{timeAgo(n.createdAt)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <Link to="/mentor/notifications" className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:underline">
+                    All notifications <ArrowRight size={14} />
+                  </Link>
+                </>
+              )}
+            </div>
+          </section>
+        </div>
       </main>
+
+      {toast && (
+        <div
+          role="status"
+          className={`mc-fade-up fixed bottom-6 right-6 z-50 flex max-w-sm items-center gap-3 rounded-xl border bg-white px-4 py-3 text-sm shadow-lg ${
+            toast.type === "error" ? "border-red-200 text-red-700" : "border-emerald-200 text-emerald-700"
+          }`}
+        >
+          {toast.type === "error" ? <X size={16} className="shrink-0" /> : <CheckCircle2 size={16} className="shrink-0" />}
+          {toast.message}
+        </div>
+      )}
     </div>
   );
-}
+};
+
+/* ---------- pieces ---------- */
+
+const Stat = ({ label, amount, icon: Icon, strong }) => {
+  const shown = useCountUp(amount);
+  return (
+    <Link to="/mentor/earnings" className="group relative block bg-white p-5 transition hover:bg-blue-50/40">
+      <div className="flex items-center gap-2 text-slate-400 transition group-hover:text-blue-600">
+        <Icon size={16} />
+        <span className="text-xs text-slate-500">{label}</span>
+        <ArrowRight size={13} className="ml-auto -translate-x-1 opacity-0 transition group-hover:translate-x-0 group-hover:opacity-100" />
+      </div>
+      <p className={`mt-3 font-semibold tracking-tight tabular-nums ${strong ? "text-3xl" : "text-2xl"}`}>{inr(shown)}</p>
+    </Link>
+  );
+};
+
+const Avatar = ({ name, src }) =>
+  src ? (
+    <img src={src} alt={name} className="h-11 w-11 shrink-0 rounded-full object-cover" />
+  ) : (
+    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-50 text-sm font-semibold text-blue-700">
+      {(name || "F").split(" ").filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase()}
+    </div>
+  );
+
+const Empty = ({ icon: Icon, title, text }) => (
+  <div className="rounded-2xl border border-dashed border-slate-300 px-6 py-10 text-center">
+    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+      <Icon size={22} />
+    </div>
+    <h3 className="mt-4 font-semibold">{title}</h3>
+    <p className="mx-auto mt-1 max-w-xs text-sm text-slate-500">{text}</p>
+  </div>
+);
+
+const SkeletonList = () => (
+  <ul className="space-y-2" aria-hidden="true">
+    {[0, 1, 2].map((i) => (
+      <li key={i} className="flex animate-pulse items-center gap-4 rounded-2xl border border-slate-100 p-4">
+        <div className="h-11 w-11 rounded-full bg-slate-100" />
+        <div className="flex-1 space-y-2">
+          <div className="h-3 w-2/3 rounded bg-slate-100" />
+          <div className="h-3 w-1/3 rounded bg-slate-100" />
+        </div>
+      </li>
+    ))}
+  </ul>
+);
+
+const Scanning = ({ connected }) => (
+  <div className="flex flex-col items-center rounded-2xl border border-slate-200 bg-white px-6 py-12 text-center">
+    <div className="relative flex h-40 w-40 items-center justify-center" aria-hidden="true">
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="absolute inset-0 rounded-full border border-blue-300 motion-safe:animate-ping motion-reduce:opacity-30"
+          style={{ animationDuration: "3s", animationDelay: `${i}s`, opacity: 0.5 }}
+        />
+      ))}
+      <span className="absolute inset-4 rounded-full border border-slate-200" />
+      <span className="absolute inset-10 rounded-full border border-slate-200" />
+      <span
+        className="absolute inset-0 rounded-full motion-safe:animate-spin"
+        style={{
+          animationDuration: "2.8s",
+          background: "conic-gradient(from 0deg, rgba(37,99,235,0) 0deg, rgba(37,99,235,0) 270deg, rgba(37,99,235,0.28) 360deg)",
+        }}
+      />
+      <span className="relative flex h-3 w-3">
+        <span className="absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-40 motion-safe:animate-ping" />
+        <span className="relative inline-flex h-3 w-3 rounded-full bg-blue-600" />
+      </span>
+    </div>
+    <h3 className="mt-6 font-semibold text-slate-900">{connected ? "Scanning for requests" : "Reconnecting…"}</h3>
+    <p className="mx-auto mt-1 max-w-xs text-sm text-slate-500">
+      {connected
+        ? "Keep this page open. The first mentor to accept gets the session."
+        : "Check your internet connection. We'll resume scanning automatically."}
+    </p>
+  </div>
+);
+
+// circular countdown, turns red in the last 20 seconds
+const Ring = ({ pct, urgent, label, seconds }) => {
+  const radius = 18;
+  const circumference = 2 * Math.PI * radius;
+  return (
+    <div className="relative h-11 w-11 shrink-0" role="timer" aria-label={`${seconds} seconds left to accept`}>
+      <svg viewBox="0 0 44 44" className="h-11 w-11 -rotate-90" aria-hidden="true">
+        <circle cx="22" cy="22" r={radius} fill="none" strokeWidth="3" className="stroke-slate-100" />
+        <circle
+          cx="22" cy="22" r={radius} fill="none" strokeWidth="3" strokeLinecap="round"
+          className={`transition-[stroke-dashoffset] duration-1000 ease-linear ${urgent ? "stroke-red-500" : "stroke-blue-600"}`}
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference * (1 - pct / 100)}
+        />
+      </svg>
+      <span className={`absolute inset-0 flex items-center justify-center font-mono text-[11px] font-semibold tabular-nums ${urgent ? "text-red-600" : "text-slate-600"}`}>
+        {label}
+      </span>
+    </div>
+  );
+};
+
+const RequestCard = ({ req, now, busy, disabled, onClaim, onSkip }) => {
+  const [open, setOpen] = useState(false);
+  const left = Math.max(0, CLAIM_WINDOW_SECONDS - Math.floor((now - req.receivedAt) / 1000));
+  const pct = (left / CLAIM_WINDOW_SECONDS) * 100;
+  const urgent = left <= 20;
+  const longMessage = (req.message || "").length > 110;
+
+  return (
+    <article
+      className={`mc-slide-in overflow-hidden rounded-2xl border bg-white transition duration-200 hover:-translate-y-0.5 hover:shadow-lg ${
+        urgent ? "border-red-200" : "border-slate-200 hover:border-blue-300"
+      }`}
+    >
+      <div className="p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <Avatar name={req.name} src={req.avatar} />
+            <div className="min-w-0">
+              <h3 className="truncate font-semibold">{req.name}</h3>
+              <p className="truncate text-xs text-slate-500">{req.role} · {req.topic}</p>
+            </div>
+          </div>
+          <Ring
+            pct={pct} urgent={urgent} seconds={left}
+            label={`${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`}
+          />
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-600">
+          {req.date && <Chip icon={CalendarDays}>{req.date}</Chip>}
+          {req.time && <Chip icon={Clock3}>{req.time}</Chip>}
+          <Chip icon={Video}>{getDurationMinutes(req.duration)} min video call</Chip>
+        </div>
+
+        {req.message && (
+          <div className="mt-4 rounded-xl bg-slate-50 p-3">
+            <p className={`text-sm leading-6 text-slate-600 ${open ? "" : "line-clamp-2"}`}>{req.message}</p>
+            {longMessage && (
+              <button
+                type="button" onClick={() => setOpen((v) => !v)}
+                className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline"
+                aria-expanded={open}
+              >
+                {open ? "Show less" : "Read more"}
+                <ChevronDown size={13} className={`transition ${open ? "rotate-180" : ""}`} />
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="mt-4 flex items-end justify-between">
+          <div>
+            <p className="text-xs text-slate-400">You earn</p>
+            <p className="text-2xl font-semibold tracking-tight">{inr(mentorShare(req.amount))}</p>
+          </div>
+          <p className="text-xs text-slate-400">of {inr(req.amount)} total</p>
+        </div>
+
+        <div className="mt-4 flex items-center gap-3">
+          <button
+            type="button" onClick={onClaim} disabled={disabled}
+            className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-sm shadow-blue-200 transition hover:bg-blue-700 hover:shadow-md active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none"
+          >
+            {busy ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+            {busy ? "Accepting…" : "Accept session"}
+          </button>
+          <button
+            type="button" onClick={onSkip} disabled={busy}
+            className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50 active:scale-95 disabled:opacity-60"
+          >
+            Skip
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+};
+
+const Chip = ({ icon: Icon, children }) => (
+  <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1">
+    <Icon size={13} className="text-slate-400" />
+    {children}
+  </span>
+);
 
 export default Home;

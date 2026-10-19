@@ -1,122 +1,93 @@
-<% 
-  pageTitle = 'Users';
-  pageSubtitle = 'Manage all platform users';
-  currentPage = 'users';
+<%- include('partials/layout-start') %>
+
+<%
+  const isFreshers = mode === 'freshers';
+  const basePath = isFreshers ? '/admin/freshers' : '/admin/users';
+  const roleBadge = (r) => r === 'admin' ? 'b-purple' : r === 'mentor' ? 'b-info' : 'b-ok';
 %>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MNCConnect Admin - Users</title>
-    <link rel="stylesheet" href="/admin/css/output.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-</head>
-<body class="bg-slate-950 text-white min-h-screen">
-    
-    <div class="flex h-screen">
-        <aside class="w-64 bg-slate-900 border-r border-slate-800 fixed h-full overflow-y-auto">
-            <div class="p-6 border-b border-slate-800">
-                <h1 class="text-2xl font-bold text-indigo-500">MNCConnect</h1>
-                <p class="text-sm text-slate-400">Admin Panel</p>
-            </div>
-            <nav class="p-4 space-y-2">
-                <a href="/admin" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
-                    <i class="fas fa-chart-pie w-5"></i>
-                    <span>Dashboard</span>
-                </a>
-                <a href="/admin/mentors" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
-                    <i class="fas fa-users w-5"></i>
-                    <span>Mentors</span>
-                </a>
-                <a href="/admin/freshers" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
-                    <i class="fas fa-graduation-cap w-5"></i>
-                    <span>Freshers</span>
-                </a>
-                <a href="/admin/payments" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
-                    <i class="fas fa-credit-card w-5"></i>
-                    <span>Payments</span>
-                </a>
-                <a href="/admin/users" class="flex items-center gap-3 px-4 py-3 rounded-lg bg-indigo-600 transition">
-                    <i class="fas fa-user-cog w-5"></i>
-                    <span>Users</span>
-                </a>
-                <a href="/admin/logout" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-red-600/20 text-red-400 transition mt-8">
-                    <i class="fas fa-sign-out-alt w-5"></i>
-                    <span>Logout</span>
-                </a>
-            </nav>
-        </aside>
-        
-        <main class="ml-64 flex-1 p-8 overflow-y-auto">
-            <div class="flex justify-between items-center mb-8">
-                <div>
-                    <h2 class="text-3xl font-bold text-white">Users</h2>
-                    <p class="text-slate-400">Manage all platform users</p>
-                </div>
-                <span class="text-slate-400"><i class="fas fa-user-circle text-2xl"></i> <%= admin ? admin.name : 'Admin' %></span>
-            </div>
-            
-            <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                <div class="flex items-center justify-between mb-6">
-                    <p class="text-slate-400">View and manage all users</p>
-                    <span class="bg-indigo-600/20 text-indigo-400 px-4 py-2 rounded-lg text-sm">
-                        <i class="fas fa-users"></i> Total: <%= users ? users.length : 0 %>
-                    </span>
-                </div>
-                
-                <div class="overflow-x-auto">
-                    <table class="w-full">
-                        <thead>
-                            <tr class="border-b border-slate-800">
-                                <th class="text-left px-4 py-3 text-sm text-slate-400">Name</th>
-                                <th class="text-left px-4 py-3 text-sm text-slate-400">Email</th>
-                                <th class="text-left px-4 py-3 text-sm text-slate-400">Role</th>
-                                <th class="text-left px-4 py-3 text-sm text-slate-400">Status</th>
-                                <th class="text-left px-4 py-3 text-sm text-slate-400">Joined</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <% if (users && users.length > 0) { %>
-                                <% users.forEach(function(user) { %>
-                                    <tr class="border-b border-slate-800 hover:bg-slate-800/50 transition">
-                                        <td class="px-4 py-3 text-white"><%= user.name %></td>
-                                        <td class="px-4 py-3 text-slate-300"><%= user.email %></td>
-                                        <td class="px-4 py-3">
-                                            <span class="px-3 py-1 rounded-full text-xs font-medium 
-                                                <%= user.role === 'admin' ? 'bg-purple-600/20 text-purple-400' : 
-                                                   user.role === 'mentor' ? 'bg-blue-600/20 text-blue-400' : 
-                                                   'bg-emerald-600/20 text-emerald-400' %>">
-                                                <%= user.role || 'user' %>
-                                            </span>
-                                        </td>
-                                        <td class="px-4 py-3">
-                                            <span class="px-3 py-1 rounded-full text-xs font-medium 
-                                                <%= user.isActive ? 'bg-emerald-600/20 text-emerald-400' : 'bg-red-600/20 text-red-400' %>">
-                                                <%= user.isActive ? 'Active' : 'Inactive' %>
-                                            </span>
-                                        </td>
-                                        <td class="px-4 py-3 text-slate-400 text-sm">
-                                            <%= new Date(user.createdAt).toLocaleDateString() %>
-                                        </td>
-                                    </tr>
-                                <% }) %>
-                            <% } else { %>
-                                <tr>
-                                    <td colspan="5" class="px-4 py-12 text-center text-slate-400">
-                                        <i class="fas fa-user text-4xl block mb-3 text-slate-600"></i>
-                                        <p>No users found</p>
-                                    </td>
-                                </tr>
-                            <% } %>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </main>
+<% if (modelMissing) { %>
+    <div class="alert alert-warn">
+        <i class="fas fa-triangle-exclamation"></i>
+        <div>User model was not found. Make sure <code>models/User.js</code> exists and exports a Mongoose model named <b>User</b>.</div>
     </div>
-    
-    <script src="/admin/js/admin.js"></script>
-</body>
-</html>
+<% } %>
+
+<div class="card mb">
+    <div class="card-body" style="padding:16px 20px;">
+        <form method="GET" action="<%= basePath %>" class="filters">
+            <div class="search-box">
+                <i class="fas fa-search"></i>
+                <input class="input" type="text" name="search" value="<%= search %>" placeholder="Search by name or email...  (press / )">
+            </div>
+            <% if (!isFreshers) { %>
+            <select name="role" class="select" data-autosubmit>
+                <option value="all" <%= role === 'all' ? 'selected' : '' %>>All roles</option>
+                <option value="admin" <%= role === 'admin' ? 'selected' : '' %>>Admin</option>
+                <option value="mentor" <%= role === 'mentor' ? 'selected' : '' %>>Mentor</option>
+                <option value="fresher" <%= role === 'fresher' ? 'selected' : '' %>>Fresher</option>
+                <option value="user" <%= role === 'user' ? 'selected' : '' %>>User</option>
+            </select>
+            <% } %>
+            <select name="status" class="select" data-autosubmit>
+                <option value="all" <%= status === 'all' ? 'selected' : '' %>>All status</option>
+                <option value="active" <%= status === 'active' ? 'selected' : '' %>>Active</option>
+                <option value="inactive" <%= status === 'inactive' ? 'selected' : '' %>>Inactive</option>
+            </select>
+            <button class="btn btn-primary" type="submit"><i class="fas fa-search"></i> Search</button>
+            <a href="<%= basePath %>" class="btn btn-ghost"><i class="fas fa-rotate-left"></i> Reset</a>
+            <span class="badge b-info" style="margin-left:auto;"><i class="fas fa-users"></i>&nbsp;Total: <%= pagination.total %></span>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <% if (users.length) { %>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr><th>User</th><th>Role</th><th>Status</th><th>Joined</th><th class="t-right">Actions</th></tr>
+            </thead>
+            <tbody>
+            <% users.forEach(function (u) { %>
+                <tr>
+                    <td>
+                        <div class="cell-user">
+                            <div class="av"><%= (u.name || u.email || 'U').charAt(0).toUpperCase() %></div>
+                            <div><b><%= u.name || 'Unnamed' %></b><span class="muted small"><%= u.email || '—' %></span></div>
+                        </div>
+                    </td>
+                    <td><span class="badge <%= roleBadge(u.role) %>"><%= u.role || 'user' %></span></td>
+                    <td>
+                        <% if (u.isActive === false) { %>
+                            <span class="badge b-bad"><i class="dot"></i>Inactive</span>
+                        <% } else { %>
+                            <span class="badge b-ok"><i class="dot"></i>Active</span>
+                        <% } %>
+                    </td>
+                    <td class="muted small"><%= u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-GB') : '—' %></td>
+                    <td>
+                        <div class="row-actions">
+                            <% if (u.role !== 'admin') { %>
+                                <% if (u.isActive === false) { %>
+                                    <button class="btn btn-ok btn-sm" data-action="toggle-user" data-next="activate" data-id="<%= u._id %>" data-name="<%= u.name || u.email %>"><i class="fas fa-user-check"></i> Activate</button>
+                                <% } else { %>
+                                    <button class="btn btn-ghost btn-sm" data-action="toggle-user" data-next="deactivate" data-id="<%= u._id %>" data-name="<%= u.name || u.email %>"><i class="fas fa-user-slash"></i> Deactivate</button>
+                                <% } %>
+                            <% } else { %>
+                                <span class="muted small">Protected</span>
+                            <% } %>
+                        </div>
+                    </td>
+                </tr>
+            <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <%- include('partials/pagination') %>
+    <% } else { %>
+        <div class="empty"><i class="fas fa-user"></i><h4>No users found</h4><p>Try adjusting your search or filter.</p></div>
+    <% } %>
+</div>
+
+<%- include('partials/layout-end') %>

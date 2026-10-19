@@ -1,117 +1,72 @@
-<% 
-  pageTitle = 'Payments';
-  pageSubtitle = 'Manage all payments';
-  currentPage = 'payments';
+<%- include('partials/layout-start') %>
+
+<%
+  const fmt = (n) => Number(n || 0).toLocaleString('en-IN');
+  const stBadge = (s) => {
+    s = String(s || '').toLowerCase();
+    if (['success', 'paid', 'captured', 'completed', 'successful'].includes(s)) return 'b-ok';
+    if (['failed', 'cancelled', 'canceled', 'error'].includes(s)) return 'b-bad';
+    if (['refunded'].includes(s)) return 'b-purple';
+    return 'b-warn';
+  };
+  const tabs = [
+    { k: 'all', l: 'All' },
+    { k: 'success', l: 'Successful' },
+    { k: 'pending', l: 'Pending' },
+    { k: 'failed', l: 'Failed' }
+  ];
 %>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MNCConnect Admin - Payments</title>
-    <link rel="stylesheet" href="/admin/css/output.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-</head>
-<body class="bg-slate-950 text-white min-h-screen">
-    
-    <div class="flex h-screen">
-        <aside class="w-64 bg-slate-900 border-r border-slate-800 fixed h-full overflow-y-auto">
-            <div class="p-6 border-b border-slate-800">
-                <h1 class="text-2xl font-bold text-indigo-500">MNCConnect</h1>
-                <p class="text-sm text-slate-400">Admin Panel</p>
-            </div>
-            <nav class="p-4 space-y-2">
-                <a href="/admin" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
-                    <i class="fas fa-chart-pie w-5"></i>
-                    <span>Dashboard</span>
-                </a>
-                <a href="/admin/mentors" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
-                    <i class="fas fa-users w-5"></i>
-                    <span>Mentors</span>
-                </a>
-                <a href="/admin/freshers" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
-                    <i class="fas fa-graduation-cap w-5"></i>
-                    <span>Freshers</span>
-                </a>
-                <a href="/admin/payments" class="flex items-center gap-3 px-4 py-3 rounded-lg bg-indigo-600 transition">
-                    <i class="fas fa-credit-card w-5"></i>
-                    <span>Payments</span>
-                </a>
-                <a href="/admin/users" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 transition">
-                    <i class="fas fa-user-cog w-5"></i>
-                    <span>Users</span>
-                </a>
-                <a href="/admin/logout" class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-red-600/20 text-red-400 transition mt-8">
-                    <i class="fas fa-sign-out-alt w-5"></i>
-                    <span>Logout</span>
-                </a>
-            </nav>
-        </aside>
-        
-        <main class="ml-64 flex-1 p-8 overflow-y-auto">
-            <div class="flex justify-between items-center mb-8">
-                <div>
-                    <h2 class="text-3xl font-bold text-white">Payments</h2>
-                    <p class="text-slate-400">Manage all payments</p>
-                </div>
-                <span class="text-slate-400"><i class="fas fa-user-circle text-2xl"></i> <%= admin ? admin.name : 'Admin' %></span>
-            </div>
-            
-            <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                <div class="flex items-center justify-between mb-6">
-                    <p class="text-slate-400">Track and manage all transactions</p>
-                    <span class="bg-emerald-600/20 text-emerald-400 px-4 py-2 rounded-lg text-sm">
-                        <i class="fas fa-credit-card"></i> Total: <%= payments ? payments.length : 0 %>
-                    </span>
-                </div>
-                
-                <div class="overflow-x-auto">
-                    <table class="w-full">
-                        <thead>
-                            <tr class="border-b border-slate-800">
-                                <th class="text-left px-4 py-3 text-sm text-slate-400">User</th>
-                                <th class="text-left px-4 py-3 text-sm text-slate-400">Amount</th>
-                                <th class="text-left px-4 py-3 text-sm text-slate-400">Status</th>
-                                <th class="text-left px-4 py-3 text-sm text-slate-400">Method</th>
-                                <th class="text-left px-4 py-3 text-sm text-slate-400">Date</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <% if (payments && payments.length > 0) { %>
-                                <% payments.forEach(function(payment) { %>
-                                    <tr class="border-b border-slate-800 hover:bg-slate-800/50 transition">
-                                        <td class="px-4 py-3 text-white"><%= payment.userName || 'N/A' %></td>
-                                        <td class="px-4 py-3 text-emerald-400 font-medium">₹<%= payment.amount %></td>
-                                        <td class="px-4 py-3">
-                                            <span class="px-3 py-1 rounded-full text-xs font-medium 
-                                                <%= payment.status === 'completed' ? 'bg-emerald-600/20 text-emerald-400' : 
-                                                   payment.status === 'pending' ? 'bg-yellow-600/20 text-yellow-400' : 
-                                                   'bg-red-600/20 text-red-400' %>">
-                                                <%= payment.status || 'pending' %>
-                                            </span>
-                                        </td>
-                                        <td class="px-4 py-3 text-slate-300"><%= payment.method || 'N/A' %></td>
-                                        <td class="px-4 py-3 text-slate-400 text-sm">
-                                            <%= new Date(payment.createdAt).toLocaleDateString() %>
-                                        </td>
-                                    </tr>
-                                <% }) %>
-                            <% } else { %>
-                                <tr>
-                                    <td colspan="5" class="px-4 py-12 text-center text-slate-400">
-                                        <i class="fas fa-money-bill-wave text-4xl block mb-3 text-slate-600"></i>
-                                        <p>No payments recorded yet</p>
-                                    </td>
-                                </tr>
-                            <% } %>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </main>
+<% if (modelMissing) { %>
+    <div class="alert alert-warn">
+        <i class="fas fa-triangle-exclamation"></i>
+        <div>Payment model was not found. Make sure <code>models/Payment.js</code> exists and exports a Mongoose model named <b>Payment</b>.</div>
     </div>
-    
-    <script src="/admin/js/admin.js"></script>
-</body>
-</html>
+<% } %>
+
+<div class="grid g-3 mb">
+    <div class="card stat t-primary"><div><small>Total Payments</small><h3><%= fmt(summary.count) %></h3></div><div class="stat-ico"><i class="fas fa-receipt"></i></div></div>
+    <div class="card stat t-ok"><div><small>Revenue (successful)</small><h3>₹<%= fmt(summary.revenue) %></h3></div><div class="stat-ico"><i class="fas fa-indian-rupee-sign"></i></div></div>
+    <div class="card stat t-bad"><div><small>Failed</small><h3><%= fmt(summary.failed) %></h3></div><div class="stat-ico"><i class="fas fa-circle-xmark"></i></div></div>
+</div>
+
+<div class="tabs">
+    <% tabs.forEach(function (t) { %>
+        <a href="/admin/payments?status=<%= t.k %>" class="<%= status === t.k ? 'active' : '' %>"><%= t.l %></a>
+    <% }) %>
+</div>
+
+<div class="card">
+    <% if (payments.length) { %>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr><th>Payment ID</th><th>Payer</th><th>Amount</th><th>Status</th><th>Date</th></tr>
+            </thead>
+            <tbody>
+            <% payments.forEach(function (p) {
+                const pid = p.paymentId || p.razorpayPaymentId || p.razorpay_payment_id || p.transactionId || p.orderId || String(p._id);
+                const payer = p.email || p.userEmail || p.name || (p.user ? String(p.user) : '') || (p.fresher ? String(p.fresher) : '');
+            %>
+                <tr>
+                    <td class="mono"><%= pid %></td>
+                    <td class="muted"><%= payer || '—' %></td>
+                    <td><b><%= (p.currency && p.currency !== 'INR' ? p.currency + ' ' : '₹') %><%= fmt(p.amount) %></b></td>
+                    <td><span class="badge <%= stBadge(p.status) %>"><i class="dot"></i><%= p.status || 'unknown' %></span></td>
+                    <td class="muted small"><%= p.createdAt ? new Date(p.createdAt).toLocaleString('en-GB') : '—' %></td>
+                </tr>
+            <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <%- include('partials/pagination') %>
+    <% } else { %>
+        <div class="empty"><i class="fas fa-credit-card"></i><h4>No payments found</h4><p>Payments will appear here once users start paying.</p></div>
+    <% } %>
+</div>
+
+<p class="muted small" style="margin-top:14px;">
+    Amounts are shown exactly as stored in the database. If you store amounts in paise, divide by 100 in the controller.
+</p>
+
+<%- include('partials/layout-end') %>

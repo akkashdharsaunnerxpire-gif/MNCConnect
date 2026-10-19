@@ -1,6 +1,5 @@
 const Mentor = require("../models/Mentor");
 
-const sessionRequests = new Map();
 
 const normalize = (value) => {
   return String(value || "")
