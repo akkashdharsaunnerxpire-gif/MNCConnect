@@ -10,9 +10,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Camera, CameraOff, Loader2, Mic, MicOff, PhoneOff, Clock3, UserRound } from "lucide-react";
-import socket from "../socket";
-import ReviewModal from "../FresherDashboard/Component/ReviewModal";
-import { API_URL, ENDPOINTS, fmtClock } from "../services/fresherApi";
+import socket from "../../socket";
+import ReviewModal from "../../FresherDashboard/pages/Reviewmodal";
+import { API_URL, ENDPOINTS, fmtClock } from "../../services/fresherApi";
 
 const ICE = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }] };
 
