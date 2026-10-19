@@ -10,9 +10,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Camera, CameraOff, Loader2, Mic, MicOff, PhoneOff, Clock3, UserRound } from "lucide-react";
-import socket from "../../socket";
-import ReviewModal from "../pages/Reviewmodal";
-import { API_URL, ENDPOINTS, fmtClock } from "../../services/fresherApi";
+import socket from "../socket";
+import ReviewModal from "../FresherDashboard/Component/ReviewModal";
+import { API_URL, ENDPOINTS, fmtClock } from "../services/fresherApi";
 
 const ICE = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }] };
 
@@ -254,8 +254,8 @@ export default function MeetingRoom() {
     : `Waiting for the ${otherRole} to join. The timer is paused.`;
 
   return (
-    <div className="relative flex h-screen flex-col bg-slate-950 text-white">
-      <div className="flex items-center justify-between px-5 py-3">
+    <div className="fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-slate-950 text-white">
+      <div className="flex shrink-0 items-center justify-between px-5 py-3">
         <div>
           <p className="text-sm font-semibold">{booking?.companyName || "MNCConnect session"}</p>
           <p className={`text-xs ${clock.running ? "text-emerald-400" : "text-amber-300"}`}>{status}</p>
@@ -265,9 +265,9 @@ export default function MeetingRoom() {
         </div>
       </div>
 
-      <div className="relative flex-1 px-4 pb-4">
+      <div className="relative min-h-0 flex-1 px-4 pb-4">
         <div className="relative h-full overflow-hidden rounded-2xl bg-slate-900">
-          <video ref={remoteVideo} autoPlay playsInline className="h-full w-full object-cover" />
+          <video ref={remoteVideo} autoPlay playsInline className="absolute inset-0 h-full w-full bg-black object-contain" />
           {!otherHere && (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
               <div className="flex h-20 w-20 items-center justify-center rounded-full bg-slate-800"><UserRound size={36} /></div>
@@ -279,12 +279,12 @@ export default function MeetingRoom() {
         {mediaNote && <p className="absolute left-8 top-4 rounded-lg bg-amber-500/90 px-3 py-1.5 text-xs font-medium text-slate-950">{mediaNote}</p>}
       </div>
 
-      <div className="flex items-center justify-center gap-3 pb-6">
+      <div className="flex shrink-0 items-center justify-center gap-3 pb-3">
         <button onClick={() => toggle("mic")} className={`flex h-12 w-12 items-center justify-center rounded-full ${micOn ? "bg-slate-700 hover:bg-slate-600" : "bg-red-600"}`} aria-label="Toggle microphone">{micOn ? <Mic size={20} /> : <MicOff size={20} />}</button>
         <button onClick={() => toggle("cam")} className={`flex h-12 w-12 items-center justify-center rounded-full ${camOn ? "bg-slate-700 hover:bg-slate-600" : "bg-red-600"}`} aria-label="Toggle camera">{camOn ? <Camera size={20} /> : <CameraOff size={20} />}</button>
         <button onClick={leaveRoom} className="flex h-12 items-center gap-2 rounded-full bg-red-600 px-6 text-sm font-bold hover:bg-red-700"><PhoneOff size={18} /> Leave</button>
       </div>
-      <p className="pb-3 text-center text-[11px] text-slate-500">If you leave, the timer pauses. Rejoin from My Bookings and it resumes where it stopped.</p>
+      <p className="shrink-0 pb-3 text-center text-[11px] text-slate-500">If you leave, the timer pauses. Rejoin from My Bookings and it resumes where it stopped.</p>
     </div>
   );
 }
