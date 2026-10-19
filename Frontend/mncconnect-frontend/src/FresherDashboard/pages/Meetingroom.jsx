@@ -11,7 +11,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Camera, CameraOff, Loader2, Mic, MicOff, PhoneOff, Clock3, UserRound } from "lucide-react";
 import socket from "../../socket";
-import ReviewModal from "../../FresherDashboard/pages/Reviewmodal";
+import ReviewModal from "../pages/Reviewmodal";
 import { API_URL, ENDPOINTS, fmtClock } from "../../services/fresherApi";
 
 const ICE = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }] };
@@ -36,6 +36,7 @@ export default function MeetingRoom() {
 
   const localVideo = useRef(null);
   const remoteVideo = useRef(null);
+  const remoteStream = useRef(null);
   const localStream = useRef(null);
   const pc = useRef(null);
   const pendingIce = useRef([]);
@@ -47,6 +48,7 @@ export default function MeetingRoom() {
     pc.current?.close();
     pc.current = null;
     pendingIce.current = [];
+    remoteStream.current = null;
     if (remoteVideo.current) remoteVideo.current.srcObject = null;
   }, []);
 
@@ -55,7 +57,11 @@ export default function MeetingRoom() {
     const peer = new RTCPeerConnection(ICE);
     localStream.current?.getTracks().forEach((t) => peer.addTrack(t, localStream.current));
     peer.ontrack = (e) => {
-      if (remoteVideo.current) remoteVideo.current.srcObject = e.streams[0];
+      remoteStream.current = e.streams[0];
+      if (remoteVideo.current) {
+        remoteVideo.current.srcObject = e.streams[0];
+        remoteVideo.current.play?.().catch(() => {});
+      }
     };
     peer.onicecandidate = (e) => e.candidate && socket.emit("meeting:signal", { data: { candidate: e.candidate } });
     pc.current = peer;
@@ -267,14 +273,32 @@ export default function MeetingRoom() {
 
       <div className="relative min-h-0 flex-1 px-4 pb-4">
         <div className="relative h-full overflow-hidden rounded-2xl bg-slate-900">
-          <video ref={remoteVideo} autoPlay playsInline className="absolute inset-0 h-full w-full bg-black object-contain" />
+          <video
+            ref={(el) => {
+              remoteVideo.current = el;
+              if (el && remoteStream.current && el.srcObject !== remoteStream.current) {
+                el.srcObject = remoteStream.current;
+                el.play?.().catch(() => {});
+              }
+            }}
+            autoPlay
+            playsInline
+            className="absolute inset-0 h-full w-full bg-black object-cover"
+          />
           {!otherHere && (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
               <div className="flex h-20 w-20 items-center justify-center rounded-full bg-slate-800"><UserRound size={36} /></div>
               <p className="mt-4 text-sm">Waiting for the {otherRole}…</p>
             </div>
           )}
-          <video ref={localVideo} autoPlay playsInline muted className="absolute bottom-4 right-4 h-32 w-24 rounded-xl border border-white/20 bg-slate-800 object-cover sm:h-40 sm:w-56" />
+          <video
+            ref={(el) => {
+              localVideo.current = el;
+              if (el && localStream.current && el.srcObject !== localStream.current) el.srcObject = localStream.current;
+            }}
+            autoPlay
+            playsInline
+            muted className="absolute bottom-4 right-4 h-32 w-24 rounded-xl border border-white/20 bg-slate-800 object-cover sm:h-40 sm:w-56" />
         </div>
         {mediaNote && <p className="absolute left-8 top-4 rounded-lg bg-amber-500/90 px-3 py-1.5 text-xs font-medium text-slate-950">{mediaNote}</p>}
       </div>
