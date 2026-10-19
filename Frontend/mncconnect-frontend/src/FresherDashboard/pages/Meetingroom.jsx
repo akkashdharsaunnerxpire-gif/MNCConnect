@@ -271,8 +271,11 @@ export default function MeetingRoom() {
         </div>
       </div>
 
-      <div className="relative min-h-0 flex-1 px-4 pb-4">
-        <div className="relative h-full overflow-hidden rounded-2xl bg-slate-900">
+      <div className="relative min-h-0 flex-1 px-4 pb-4" style={{ minHeight: 0 }}>
+        <div
+          className="relative h-full w-full overflow-hidden rounded-2xl bg-black"
+          style={{ width: "100%", height: "100%", minHeight: 0 }}
+        >
           <video
             ref={(el) => {
               remoteVideo.current = el;
@@ -283,7 +286,18 @@ export default function MeetingRoom() {
             }}
             autoPlay
             playsInline
-            className="absolute inset-0 h-full w-full bg-black object-cover"
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "block",
+              width: "100%",
+              height: "100%",
+              maxWidth: "none",
+              maxHeight: "none",
+              objectFit: "cover",
+              objectPosition: "center center",
+              backgroundColor: "#000",
+            }}
           />
           {!otherHere && (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
@@ -298,7 +312,22 @@ export default function MeetingRoom() {
             }}
             autoPlay
             playsInline
-            muted className="absolute bottom-4 right-4 h-32 w-24 rounded-xl border border-white/20 bg-slate-800 object-cover sm:h-40 sm:w-56" />
+            muted
+            style={{
+              position: "absolute",
+              zIndex: 10,
+              right: "16px",
+              bottom: "16px",
+              display: "block",
+              width: "clamp(110px, 18vw, 220px)",
+              height: "clamp(85px, 22vh, 160px)",
+              objectFit: "cover",
+              objectPosition: "center center",
+              borderRadius: "12px",
+              border: "1px solid rgba(255,255,255,0.25)",
+              backgroundColor: "#0f172a",
+            }}
+          />
         </div>
         {mediaNote && <p className="absolute left-8 top-4 rounded-lg bg-amber-500/90 px-3 py-1.5 text-xs font-medium text-slate-950">{mediaNote}</p>}
       </div>
