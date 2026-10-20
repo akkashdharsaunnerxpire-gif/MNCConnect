@@ -16,7 +16,6 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import useMentorSessions from "../../hooks/useMentorSessions";
-import useLive from "../../hooks/useLive";
 import { inr, api, ENDPOINTS, EVENTS } from "../../services/mentorApi";
 import socket from "../../socket";
 
@@ -89,29 +88,27 @@ const getJoinStatus = (session, nowMs) => {
 const MentorSessions = () => {
   const navigate = useNavigate();
 
-  // Live sessions data from server (auto-refreshes on wallet:updated)
   const { sessions, loading, error, connected, reload } = useMentorSessions();
 
-  // 🆕 Poll the booking detail endpoints so the timer is accurate
-  // fetch each active session's remaining time
-  const [liveTimers, setLiveTimers] = useState({});
+  // id -> { remainingMs, running, at }   (live meeting timer, synced from the server)
+  const [timers, setTimers] = useState({});
 
   const [activeTab, setActiveTab] = useState("Upcoming");
   const [search, setSearch] = useState("");
   const [nowMs, setNowMs] = useState(Date.now());
 
-  // 1-second clock for countdowns
+  // 1-second clock for countdowns + smooth timer ticking
   useEffect(() => {
     const t = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  // 🆕 Poll active sessions' remaining time every 5 seconds
+  // Poll active sessions (backup in case a socket event is missed)
   useEffect(() => {
     const active = sessions.filter((s) =>
       ["Upcoming", "Awaiting Confirmation"].includes(s.status)
     );
-    if (!active.length) return;
+    if (!active.length) return undefined;
 
     let cancelled = false;
     const fetchTimers = async () => {
@@ -123,8 +120,8 @@ const MentorSessions = () => {
             if (d?.booking) {
               results[s.id] = {
                 remainingMs: d.booking.remainingMs,
-                status: d.booking.status,
-                reviewed: d.booking.reviewed,
+                running: Boolean(d.booking.timerRunning),
+                at: Date.now(),
               };
             }
           } catch {
@@ -132,11 +129,11 @@ const MentorSessions = () => {
           }
         })
       );
-      if (!cancelled) setLiveTimers(results);
+      if (!cancelled) setTimers((prev) => ({ ...prev, ...results }));
     };
 
     fetchTimers();
-    const t = setInterval(fetchTimers, 5000);
+    const t = setInterval(fetchTimers, 10000);
     return () => {
       cancelled = true;
       clearInterval(t);
@@ -144,7 +141,21 @@ const MentorSessions = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessions.length]);
 
-  // 🆕 Socket event — booking updated → refresh list
+  // Server pushes the live meeting timer every ~5s (and on every join/leave)
+  useEffect(() => {
+    const onTimer = (p) => {
+      const id = p?.requestGroupId || p?.bookingId;
+      if (!id) return;
+      setTimers((prev) => ({
+        ...prev,
+        [id]: { remainingMs: p.remainingMs, running: Boolean(p.running), at: Date.now() },
+      }));
+    };
+    socket.on("meeting:timer", onTimer);
+    return () => socket.off("meeting:timer", onTimer);
+  }, []);
+
+  // booking updated -> refresh list
   useEffect(() => {
     const onUpdated = () => reload();
     socket.on(EVENTS.booking || "booking:updated", onUpdated);
@@ -244,10 +255,7 @@ const MentorSessions = () => {
         {error && (
           <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
             {error}{" "}
-            <button
-              onClick={reload}
-              className="ml-2 font-semibold underline"
-            >
+            <button onClick={reload} className="ml-2 font-semibold underline">
               Retry
             </button>
           </div>
@@ -273,7 +281,7 @@ const MentorSessions = () => {
                 key={s.id}
                 session={s}
                 nowMs={nowMs}
-                liveTimer={liveTimers[s.id]}
+                timer={timers[s.id]}
                 onJoin={handleJoin}
               />
             ))
@@ -284,38 +292,32 @@ const MentorSessions = () => {
   );
 };
 
-const SessionCard = ({ session, nowMs, liveTimer, onJoin }) => {
+const SessionCard = ({ session, nowMs, timer, onJoin }) => {
   const isUpcoming = session.status === "Upcoming";
   const isAwaitingConfirmation = session.status === "awaiting_confirmation";
   const isCompleted = session.status === "Completed";
   const isCancelled = session.status === "Cancelled";
 
-  const {
-    isLive,
-    isJoinWindow,
-    hasEnded,
-    joinOpenAt,
-    sessionEndAt,
-    msUntilStart,
-  } = getJoinStatus(session, nowMs);
-  const c = countdownParts(msUntilStart);
+  const base = getJoinStatus(session, nowMs);
+  const c = countdownParts(base.msUntilStart);
   const pad = (n) => String(n).padStart(2, "0");
-  const joinable = isUpcoming && (isLive || isJoinWindow);
 
-  // Server-synced remaining time (from liveTimer polling)
-  const serverRemaining =
-    typeof liveTimer?.remainingMs === "number"
-      ? liveTimer.remainingMs
-      : session.remainingMs;
-
-  // Sub-second countdown using local clock for smooth display
-  const isTimerRunning = isLive && typeof serverRemaining === "number";
-  const localRemaining =
-    isTimerRunning && serverRemaining > 0
-      ? Math.max(0, serverRemaining - 0) // server updates every 5s
+  // ---- LIVE MEETING TIMER (same value as inside the video call) ----
+  const timerRunning = isUpcoming && Boolean(timer?.running);
+  const baseRemaining =
+    typeof timer?.remainingMs === "number" ? timer.remainingMs : session.remainingMs;
+  const remaining =
+    timerRunning && typeof baseRemaining === "number"
+      ? Math.max(0, baseRemaining - (nowMs - (timer?.at || nowMs)))
       : 0;
+  const isFinalWarning = timerRunning && remaining <= FINAL_WARNING_MS;
 
-  const isFinalWarning = isTimerRunning && serverRemaining <= FINAL_WARNING_MS;
+  // if the timer is running the session is live, even if the clock window passed
+  const isLive = base.isLive || timerRunning;
+  const isJoinWindow = base.isJoinWindow && !timerRunning;
+  const hasEnded = base.hasEnded && !timerRunning;
+  const { joinOpenAt, sessionEndAt } = base;
+  const joinable = isUpcoming && (isLive || isJoinWindow);
 
   const btnStyle = isLive
     ? "bg-green-600 text-white hover:bg-green-700 hover:shadow-lg hover:shadow-green-200 cursor-pointer"
@@ -326,7 +328,7 @@ const SessionCard = ({ session, nowMs, liveTimer, onJoin }) => {
   const btnContent = isLive ? (
     <>
       <Video size={14} />
-      <span>Join Session</span>
+      <span>{timerRunning ? "Rejoin Session" : "Join Session"}</span>
     </>
   ) : isJoinWindow ? (
     <>
@@ -370,31 +372,15 @@ const SessionCard = ({ session, nowMs, liveTimer, onJoin }) => {
         </div>
 
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:w-[500px]">
-          <SessionInfo
-            icon={<CalendarDays size={15} />}
-            label="Date"
-            value={session.date}
-          />
-          <SessionInfo
-            icon={<Clock3 size={15} />}
-            label="Time"
-            value={session.time}
-          />
-          <SessionInfo
-            icon={<Video size={15} />}
-            label="Duration"
-            value={session.duration}
-          />
-          <SessionInfo
-            icon={<Star size={15} />}
-            label="You earn"
-            value={inr(session.earning ?? 0)}
-          />
+          <SessionInfo icon={<CalendarDays size={15} />} label="Date" value={session.date} />
+          <SessionInfo icon={<Clock3 size={15} />} label="Time" value={session.time} />
+          <SessionInfo icon={<Video size={15} />} label="Duration" value={session.duration} />
+          <SessionInfo icon={<Star size={15} />} label="You earn" value={inr(session.earning ?? 0)} />
         </div>
       </div>
 
-      {/* 🆕 LIVE TIMER BAR */}
-      {isLive && isTimerRunning && (
+      {/* LIVE TIMER BAR - shows the running meeting time outside the video */}
+      {timerRunning && (
         <div
           className={`mt-4 flex items-center justify-between gap-4 rounded-xl border p-3 ${
             isFinalWarning
@@ -412,30 +398,22 @@ const SessionCard = ({ session, nowMs, liveTimer, onJoin }) => {
               </span>
             )}
             <div>
-              <p
-                className={`text-[11px] font-semibold ${isFinalWarning ? "text-amber-800" : "text-emerald-800"}`}
-              >
-                {isFinalWarning
-                  ? "Final 5 minutes — start wrapping up"
-                  : "Session in progress"}
+              <p className={`text-[11px] font-semibold ${isFinalWarning ? "text-amber-800" : "text-emerald-800"}`}>
+                {isFinalWarning ? "Final 5 minutes — start wrapping up" : "Session in progress"}
               </p>
-              <p
-                className={`text-[10px] ${isFinalWarning ? "text-amber-700" : "text-emerald-600"}`}
-              >
+              <p className={`text-[10px] ${isFinalWarning ? "text-amber-700" : "text-emerald-600"}`}>
                 {isFinalWarning
                   ? "Ask the fresher to confirm the session went well"
-                  : "Timer is running"}
+                  : "Time left in the meeting"}
               </p>
             </div>
           </div>
           <div
             className={`rounded-lg px-3 py-1.5 font-mono text-xl font-bold tabular-nums ${
-              isFinalWarning
-                ? "bg-amber-200 text-amber-900"
-                : "bg-emerald-200 text-emerald-900"
+              isFinalWarning ? "bg-amber-200 text-amber-900" : "bg-emerald-200 text-emerald-900"
             }`}
           >
-            {fmtClock(localRemaining)}
+            {fmtClock(remaining)}
           </div>
         </div>
       )}
@@ -446,7 +424,7 @@ const SessionCard = ({ session, nowMs, liveTimer, onJoin }) => {
             <>
               <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
               <span className="text-xs font-medium text-emerald-600">
-                Upcoming Session
+                {timerRunning ? "Session in progress" : "Upcoming Session"}
               </span>
             </>
           )}
@@ -461,25 +439,19 @@ const SessionCard = ({ session, nowMs, liveTimer, onJoin }) => {
           {isAwaitingConfirmation && (
             <>
               <ShieldCheck size={16} className="text-amber-500" />
-              <span className="text-xs font-medium text-amber-700">
-                Waiting for fresher to confirm
-              </span>
+              <span className="text-xs font-medium text-amber-700">Waiting for fresher to confirm</span>
             </>
           )}
           {isCompleted && (
             <>
               <CheckCircle2 size={16} className="text-emerald-500" />
-              <span className="text-xs font-medium text-emerald-600">
-                Completed · Earnings released
-              </span>
+              <span className="text-xs font-medium text-emerald-600">Completed · Earnings released</span>
             </>
           )}
           {isCancelled && (
             <>
               <XCircle size={16} className="text-red-500" />
-              <span className="text-xs font-medium text-red-500">
-                Cancelled
-              </span>
+              <span className="text-xs font-medium text-red-500">Cancelled</span>
             </>
           )}
         </div>
@@ -532,23 +504,21 @@ const SessionCard = ({ session, nowMs, liveTimer, onJoin }) => {
         <div className="mt-4 flex items-center gap-2 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-[11px] font-medium text-yellow-700">
           <span className="h-2 w-2 animate-pulse rounded-full bg-yellow-500" />
           <span>
-            The meeting room is open. Click "Join Now". The timer starts when you
-            and the fresher are both inside.
+            The meeting room is open. Click "Join Now". The timer starts when you and the fresher are both inside.
           </span>
         </div>
       )}
-      {isUpcoming && isLive && (
+      {isUpcoming && isLive && !timerRunning && (
         <div className="mt-4 flex items-center gap-2 rounded-lg border border-green-100 bg-green-50 px-3 py-2 text-[11px] font-medium text-green-600">
           <span className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
-          <span>Session is live! Click "Join Session" to enter.</span>
+          <span>Session time reached. The timer starts when you and the fresher are both inside.</span>
         </div>
       )}
       {isAwaitingConfirmation && (
         <div className="mt-4 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-700">
           <ShieldCheck size={14} />
           <span>
-            The timer has ended. Waiting for the fresher to confirm the session.
-            Once they click "Yes", your earnings will be released.
+            The timer has ended. Waiting for the fresher to confirm the session. Once they click "Yes", your earnings will be released.
           </span>
         </div>
       )}

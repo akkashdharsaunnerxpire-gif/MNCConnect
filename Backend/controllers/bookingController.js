@@ -125,6 +125,15 @@ const mentorCard = (m) =>
     ? { id: String(m._id), name: m.name, designation: m.designation || "", company: m.currentCompany || "", image: m.profilePic || "", email: m.email || "" }
     : null;
 
+// live timer of a meeting room that is currently in memory (lazy require = no circular import)
+const liveTimer = (id) => {
+  try {
+    return require("../utils/meeting").getRoomState(id);
+  } catch (_) {
+    return null;
+  }
+};
+
 const toClient = (b) => ({
   id: b.requestGroupId,
   requestGroupId: b.requestGroupId,
@@ -146,7 +155,8 @@ const toClient = (b) => ({
   mentor: mentorCard(b.mentor),
   reviewed: Boolean(b.reviewed),
   refundStatus: b.refundStatus || "",
-  remainingMs: b.meeting?.remainingMs ?? null,
+  remainingMs: liveTimer(b.requestGroupId)?.remainingMs ?? b.meeting?.remainingMs ?? null,
+  timerRunning: Boolean(liveTimer(b.requestGroupId)?.running),
 });
 
 const POPULATE_MENTOR = "name email profilePic currentCompany designation";

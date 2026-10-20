@@ -34,6 +34,32 @@ const stateOf = (r) => ({
   serverNow: Date.now(),
 });
 
+// ---- live timer for pages OUTSIDE the meeting (sessions list, my bookings) ----
+const timerPayload = (r) => ({
+  bookingId: r.id,
+  requestGroupId: r.id,
+  running: Boolean(r.running),
+  remainingMs: Math.max(0, Math.round(r.remainingMs)),
+  serverNow: Date.now(),
+});
+
+const pushTimer = (r) => {
+  try {
+    const { emitToUser } = require("./realtime");
+    const payload = timerPayload(r);
+    if (r.mentorId) emitToUser(r.mentorId, "meeting:timer", payload);
+    if (r.fresherId) emitToUser(r.fresherId, "meeting:timer", payload);
+  } catch (_) {
+    /* never break the meeting because of a UI push */
+  }
+};
+
+// used by bookingController.toClient so every API response has the LIVE remaining time
+exports.getRoomState = (id) => {
+  const r = rooms.get(String(id));
+  return r ? timerPayload(r) : null;
+};
+
 const advance = (r) => {
   if (!r.running) return;
   const now = Date.now();
@@ -86,6 +112,7 @@ const refresh = (io, r) => {
   }
 
   io.to(channel(r.id)).emit("meeting:state", stateOf(r));
+  pushTimer(r);
 };
 
 const leave = (io, socket) => {
@@ -161,6 +188,8 @@ exports.initMeetings = (io) => {
           const started = Boolean(saved.startedAt);
           r = {
             id: b.requestGroupId,
+            mentorId: b.mentor ? String(b.mentor) : "",
+            fresherId: b.fresher ? String(b.fresher) : "",
             totalMs: total,
             remainingMs: typeof saved.remainingMs === "number" ? Math.max(0, saved.remainingMs) : total,
             mentor: new Set(),
@@ -238,6 +267,7 @@ exports.initMeetings = (io) => {
 
         if (r.ticks % STATE_BROADCAST_EVERY_TICKS === 0) {
           io.to(channel(r.id)).emit("meeting:state", stateOf(r));
+          pushTimer(r);
         }
       }
 

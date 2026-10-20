@@ -316,6 +316,11 @@ export default function MeetingRoom() {
             )}
             <video ref={(el) => { localVideo.current = el; if (el && localStream.current && el.srcObject !== localStream.current) el.srcObject = localStream.current; }} autoPlay playsInline muted style={{ position: "absolute", zIndex: 10, right: "16px", bottom: "16px", width: "clamp(110px, 18vw, 220px)", height: "clamp(85px, 22vh, 160px)", objectFit: "cover", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.25)", backgroundColor: "#0f172a" }} />
           </div>
+          {clock.running && currentRemaining > 0 && currentRemaining <= 5 * 60 * 1000 && (
+            <p className="absolute right-8 top-4 z-20 rounded-lg bg-amber-500/95 px-3 py-1.5 text-xs font-semibold text-slate-950 shadow-lg">
+              ⏱ Last 5 minutes. Please start wrapping up.
+            </p>
+          )}
           {mediaNote && <p className="absolute left-8 top-4 rounded-lg bg-amber-500/90 px-3 py-1.5 text-xs font-medium text-slate-950">{mediaNote}</p>}
         </div>
 
