@@ -1,3 +1,4 @@
+// src/Routes/MentorRoutes.jsx
 import React from "react";
 import { Routes, Route, Navigate, Outlet } from "react-router-dom";
 
@@ -14,7 +15,8 @@ import MentorHeader from "../MncEmployee/Components/MentorHeader";
 import ResetPassword from "../Authpage/MncEmployeeAuth/ResetPassword";
 import MeetingRoom from "../FresherDashboard/pages/Meetingroom";
 
-const isMentorLoggedIn = () => Boolean(localStorage.getItem("mnc_mentor_token"));
+const isMentorLoggedIn = () =>
+  Boolean(localStorage.getItem("mnc_mentor_token"));
 
 const MentorProtectedRoute = () => {
   if (!isMentorLoggedIn()) {
@@ -23,16 +25,14 @@ const MentorProtectedRoute = () => {
   return <Outlet />;
 };
 
-const MentorLayout = () => {
-  return (
-    <div className="min-h-screen bg-[#080612] text-white">
-      <MentorHeader />
-      <main className="min-h-[calc(100vh-64px)]">
-        <Outlet />
-      </main>
-    </div>
-  );
-};
+const MentorLayout = () => (
+  <div className="min-h-screen bg-[#080612] text-white">
+    <MentorHeader />
+    <main className="min-h-[calc(100vh-64px)]">
+      <Outlet />
+    </main>
+  </div>
+);
 
 const MentorRoutes = () => {
   return (
@@ -49,9 +49,13 @@ const MentorRoutes = () => {
         <Route element={<MentorLayout />}>
           <Route
             index
-            element={<Navigate to={isMentorLoggedIn() ? "/mentor/home" : "/mentor/login"} replace />}
+            element={
+              <Navigate
+                to={isMentorLoggedIn() ? "/mentor/home" : "/mentor/login"}
+                replace
+              />
+            }
           />
-
           <Route path="home" element={<Home />} />
           <Route path="requests" element={<MentorRequests />} />
           <Route path="sessions" element={<MentorSessions />} />
@@ -65,7 +69,12 @@ const MentorRoutes = () => {
 
       <Route
         path="*"
-        element={<Navigate to={isMentorLoggedIn() ? "/mentor/home" : "/mentor/login"} replace />}
+        element={
+          <Navigate
+            to={isMentorLoggedIn() ? "/mentor/home" : "/mentor/login"}
+            replace
+          />
+        }
       />
     </Routes>
   );

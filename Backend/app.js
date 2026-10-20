@@ -12,9 +12,9 @@ const paymentRoutes = require("./routes/paymentRoutes");
 const mentorRoutes = require("./routes/mentorRoutes");
 const sessionRoutes = require("./routes/sessionroutes");
 const adminRoutes = require("./routes/adminRoutes");
-const mentorPanelRoutes = require("./routes/mentorPanelRoutes"); // wallet, reviews, notifications
-// bookings, fresher notifications, mentor accept/reject (file name fixed: was ./routes/bookingRoutes)
+const mentorPanelRoutes = require("./routes/mentorPanelRoutes");
 const fresherBookingRoutes = require("./routes/fresherBookingRoutes");
+const instructionRoutes = require("./routes/instructionRoutes");
 
 const app = express();
 
@@ -32,7 +32,7 @@ app.use(
   })
 );
 
-// ================= CORS (single instance) =================
+// ================= CORS =================
 
 const allowedOrigins = [
   ...new Set(
@@ -46,20 +46,14 @@ const allowedOrigins = [
   ),
 ];
 
-// Socket.IO (server.js) reads the same list so HTTP and websocket CORS never drift apart
 app.set("allowedOrigins", allowedOrigins);
-
 console.log("Allowed CORS origins:", allowedOrigins);
 
 app.use(
   cors((req, callback) => {
     const origin = req.header("Origin");
-
-    // Admin panel is served from this same server -> same-origin is always allowed
     const sameOrigin = origin === `${req.protocol}://${req.get("host")}`;
 
-    // NOTE: "null" origin + credentials is risky (sandboxed iframes, file://).
-    // Remove it if nothing in your setup needs it.
     const allowed =
       !origin ||
       origin === "null" ||
@@ -69,7 +63,7 @@ app.use(
     if (!allowed) {
       console.log("CORS blocked origin:", origin);
       const err = new Error(`CORS blocked for origin: ${origin}`);
-      err.status = 403; // otherwise the global handler answers 500
+      err.status = 403;
       return callback(err);
     }
 
@@ -78,28 +72,27 @@ app.use(
 );
 
 // ================= BODY PARSER =================
+// MUST come before any route that reads req.body
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// ================= COOKIE =================
-
 app.use(cookieParser());
 
 // ================= SESSION =================
-// The default MemoryStore resets on every restart (Render restarts often) and leaks memory.
-// If connect-mongo is installed (npm i connect-mongo) sessions are stored in MongoDB,
-// re-using the same connection as mongoose. If it is not installed the app still starts
-// with MemoryStore and prints a warning.
+
 let store;
 try {
   const MongoStore = require("connect-mongo");
   store = (MongoStore.default || MongoStore).create({
-    clientPromise: mongoose.connection.asPromise().then((conn) => conn.getClient()),
+    clientPromise: mongoose.connection
+      .asPromise()
+      .then((conn) => conn.getClient()),
     collectionName: "sessions",
   });
 } catch (error) {
-  console.warn("connect-mongo is not installed - sessions use MemoryStore. Run: npm i connect-mongo");
+  console.warn(
+    "connect-mongo is not installed - sessions use MemoryStore. Run: npm i connect-mongo"
+  );
 }
 
 if (isProd && !process.env.SESSION_SECRET) {
@@ -109,14 +102,14 @@ if (isProd && !process.env.SESSION_SECRET) {
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "mncconnect-secret",
-    store, // undefined -> MemoryStore
+    store,
     resave: false,
     saveUninitialized: false,
     cookie: {
       secure: isProd,
       httpOnly: true,
       sameSite: isProd ? "none" : "lax",
-      maxAge: 1000 * 60 * 60 * 8, // 8 hours
+      maxAge: 1000 * 60 * 60 * 8,
     },
   })
 );
@@ -124,8 +117,6 @@ app.use(
 // ================= STATIC FILES =================
 
 app.use("/public", express.static(path.join(__dirname, "public")));
-
-// Admin assets: /admin/css/admin.css, /admin/js/admin.js
 app.use("/admin", express.static(path.join(__dirname, "public", "admin")));
 
 // ================= EJS =================
@@ -144,28 +135,27 @@ app.get("/health", (req, res) => {
 });
 
 // ================= ROUTES =================
-// ORDER MATTERS. Express uses the first matching route.
+// ORDER MATTERS.
 
 app.use("/api/auth", authRoutes);
 
-// Booking router FIRST (before /api/session and the /api panels):
-//  - it owns PATCH /api/session/session-requests/:id (new bookingController)
-//    so the old handler inside sessionRoutes is never reached for that path
-//  - it only declares specific paths, so every other request falls through untouched
+// Booking router FIRST so it owns PATCH /api/session/session-requests/:id
 app.use("/api", fresherBookingRoutes);
 
 app.use("/api/payments", paymentRoutes);
 app.use("/api/mentor", mentorRoutes);
 app.use("/api/session", sessionRoutes);
 
-// Mentor panel: /api/wallet/*, /api/reviews/*, /api/notifications/*, /api/payments/assign-to-me
-// Mounted after the specific routers above so they keep priority.
+// Mentor panel: /api/wallet/*, /api/reviews/*, /api/notifications/*
 app.use("/api", mentorPanelRoutes);
+
+// Meeting instructions (used by both mentor and fresher)
+app.use("/api/instructions", instructionRoutes);
 
 app.use("/admin", adminRoutes);
 
-// ================= ROUTE CHECK (dev) =================
-// Prints the booking routes that are really mounted, so a 404 is easy to debug.
+// ================= DEV ROUTE CHECK =================
+
 if (!isProd) {
   const listed = [];
   (fresherBookingRoutes.stack || []).forEach((layer) => {
@@ -181,8 +171,7 @@ if (!isProd) {
   );
   if (!listed.some((l) => l.includes("/session/session-requests/"))) {
     console.warn(
-      "⚠️  PATCH /api/session/session-requests/:requestGroupId is NOT handled by bookingController " +
-        "(controllers/bookingController.js must export `updateRequest`)"
+      "⚠️  PATCH /api/session/session-requests/:requestGroupId is NOT handled by bookingController"
     );
   }
 }
@@ -190,20 +179,23 @@ if (!isProd) {
 // ================= 404 =================
 
 app.use((req, res) => {
-  res.status(404).json({ success: false, message: `Route not found: ${req.method} ${req.originalUrl}` });
+  res.status(404).json({
+    success: false,
+    message: `Route not found: ${req.method} ${req.originalUrl}`,
+  });
 });
 
 // ================= GLOBAL ERROR =================
 
 app.use((err, req, res, next) => {
   console.error("Global Error:", err);
-
   const status = err.status || 500;
-
   res.status(status).json({
     success: false,
-    // don't leak internal error text for 5xx in production
-    message: isProd && status >= 500 ? "Internal Server Error" : err.message || "Internal Server Error",
+    message:
+      isProd && status >= 500
+        ? "Internal Server Error"
+        : err.message || "Internal Server Error",
   });
 });
 

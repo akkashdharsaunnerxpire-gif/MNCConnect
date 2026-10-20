@@ -12,9 +12,19 @@ const Fresher = require("../models/Fresher");
 const Notification = require("../models/Notification");
 
 const { optionalAuth } = require("../middleware/panelAuth");
-const { notify, emitToUser, serializeNotification } = require("../utils/realtime");
-const { buildSessionFields, parseSessionStart } = require("../utils/sessionTime");
-const { linkPaymentToRequest, assignMentorToRequest } = require("./paymentController");
+const {
+  notify,
+  emitToUser,
+  serializeNotification,
+} = require("../utils/realtime");
+const {
+  buildSessionFields,
+  parseSessionStart,
+} = require("../utils/sessionTime");
+const {
+  linkPaymentToRequest,
+  assignMentorToRequest,
+} = require("./paymentController");
 
 /* ============================================================
    CONFIG
@@ -42,14 +52,24 @@ let razorpay = null;
 const getRazorpay = () => {
   if (razorpay) return razorpay;
   const { RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET } = process.env;
-  if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) throw new Error("Razorpay keys are not configured");
-  razorpay = new Razorpay({ key_id: RAZORPAY_KEY_ID, key_secret: RAZORPAY_KEY_SECRET });
+  if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET)
+    throw new Error("Razorpay keys are not configured");
+  razorpay = new Razorpay({
+    key_id: RAZORPAY_KEY_ID,
+    key_secret: RAZORPAY_KEY_SECRET,
+  });
   return razorpay;
 };
 
-const arr = (v) => (Array.isArray(v) ? v : typeof v === "string" ? v.split(",") : []);
-const norm = (v) => String(v || "").trim().toLowerCase().replace(/\s+/g, " ");
-const isAny = (v) => ["", "any", "all", "no preference", "none"].includes(norm(v));
+const arr = (v) =>
+  Array.isArray(v) ? v : typeof v === "string" ? v.split(",") : [];
+const norm = (v) =>
+  String(v || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+const isAny = (v) =>
+  ["", "any", "all", "no preference", "none"].includes(norm(v));
 const loose = (a, b) => {
   const x = norm(a);
   const y = norm(b);
@@ -74,13 +94,23 @@ const whyNot = (m, b) => {
   }
 
   const spoken = arr(m.spokenLanguages).map(norm).filter(Boolean);
-  if (!isAny(b.language) && spoken.length && !spoken.some((l) => loose(l, b.language))) {
+  if (
+    !isAny(b.language) &&
+    spoken.length &&
+    !spoken.some((l) => loose(l, b.language))
+  ) {
     return `speaks [${spoken.join(", ")}], request needs "${b.language}"`;
   }
 
   if (STRICT_MATCH && !isAny(b.role)) {
     const target = norm(b.role) === "other" ? b.otherRole : b.role;
-    const values = [m.designation, m.department, ...arr(m.skills), ...arr(m.expertise), ...arr(m.languages)];
+    const values = [
+      m.designation,
+      m.department,
+      ...arr(m.skills),
+      ...arr(m.expertise),
+      ...arr(m.languages),
+    ];
     if (!isAny(target) && !values.some((v) => loose(v, target))) {
       return `role "${target}" not found in profile`;
     }
@@ -118,8 +148,13 @@ const toMentorPayload = (b) => ({
   requestGroupId: b.requestGroupId,
   name: b.fresherName || "Fresher",
   avatar: b.fresherImage || "",
-  requester: { fullName: b.fresherName, email: b.fresherEmail, image: b.fresherImage },
-  role: norm(b.role) === "other" && b.otherRole ? b.otherRole : b.role || "Fresher",
+  requester: {
+    fullName: b.fresherName,
+    email: b.fresherEmail,
+    image: b.fresherImage,
+  },
+  role:
+    norm(b.role) === "other" && b.otherRole ? b.otherRole : b.role || "Fresher",
   company: b.companyName,
   companyName: b.companyName,
   topic: b.sessionType || "Session",
@@ -189,13 +224,25 @@ const refundPayment = async (payment, reason = "") => {
       speed: "normal",
       notes: { reason: String(reason).slice(0, 100) },
     });
-    await Payment.updateOne({ _id: payment._id }, { $set: { status: "refunded", sessionStatus: "cancelled" } });
-    return "refunded";
-  } catch (error) {
-    console.error("REFUND FAILED:", payment.razorpayPaymentId, error?.error?.description || error.message);
     await Payment.updateOne(
       { _id: payment._id },
-      { $set: { sessionStatus: "cancelled", failureReason: "REFUND_FAILED - refund manually" } }
+      { $set: { status: "refunded", sessionStatus: "cancelled" } },
+    );
+    return "refunded";
+  } catch (error) {
+    console.error(
+      "REFUND FAILED:",
+      payment.razorpayPaymentId,
+      error?.error?.description || error.message,
+    );
+    await Payment.updateOne(
+      { _id: payment._id },
+      {
+        $set: {
+          sessionStatus: "cancelled",
+          failureReason: "REFUND_FAILED - refund manually",
+        },
+      },
     );
     return "failed";
   }
@@ -206,14 +253,27 @@ const refundPayment = async (payment, reason = "") => {
    Logs EXACTLY why each approved mentor did or did not get the request.
 ============================================================ */
 
-const broadcastLoop = async (req, mentors, booking, payload, startsAt, endsAt, requestGroupId, notified) => {
+const broadcastLoop = async (
+  req,
+  mentors,
+  booking,
+  payload,
+  startsAt,
+  endsAt,
+  requestGroupId,
+  notified,
+) => {
   const report = [];
 
   for (const m of mentors) {
     const reason =
       whyNot(m, booking) ||
-      (socketIdsOf(req.app, m._id).length === 0 ? "not online right now" : "") ||
-      ((await hasConflict(m._id, startsAt, endsAt, requestGroupId)) ? "has another session within 30 minutes" : "");
+      (socketIdsOf(req.app, m._id).length === 0
+        ? "not online right now"
+        : "") ||
+      ((await hasConflict(m._id, startsAt, endsAt, requestGroupId))
+        ? "has another session within 30 minutes"
+        : "");
 
     report.push(`${m.name || m._id}: ${reason || "SENT"}`);
     if (reason) continue;
@@ -230,7 +290,9 @@ const broadcastLoop = async (req, mentors, booking, payload, startsAt, endsAt, r
     });
   }
 
-  console.log(`[request ${requestGroupId}] ${mentors.length} approved mentor(s):\n  ${report.join("\n  ") || "none"}`);
+  console.log(
+    `[request ${requestGroupId}] ${mentors.length} approved mentor(s):\n  ${report.join("\n  ") || "none"}`,
+  );
 };
 
 /* ============================================================
@@ -247,14 +309,31 @@ exports.createRequest = async (req, res) => {
     const paymentId = String(body.razorpayPaymentId || "").trim();
 
     if (!requestGroupId) return fail(res, 400, "requestGroupId is required");
-    if (!paymentId) return fail(res, 402, "Payment is required before sending a request");
+    if (!paymentId)
+      return fail(res, 402, "Payment is required before sending a request");
 
     // idempotent: the same request sent twice returns the first one
-    const existing = await Booking.findOne({ requestGroupId }).populate("mentor", POPULATE_MENTOR);
-    if (existing) return res.json({ success: true, booking: toClient(existing), notifiedCount: existing.notified.length });
+    const existing = await Booking.findOne({ requestGroupId }).populate(
+      "mentor",
+      POPULATE_MENTOR,
+    );
+    if (existing)
+      return res.json({
+        success: true,
+        booking: toClient(existing),
+        notifiedCount: existing.notified.length,
+      });
 
-    const payment = await Payment.findOne({ razorpayPaymentId: paymentId, status: "paid" });
-    if (!payment) return fail(res, 402, "Payment not verified yet. Please try again in a moment.");
+    const payment = await Payment.findOne({
+      razorpayPaymentId: paymentId,
+      status: "paid",
+    });
+    if (!payment)
+      return fail(
+        res,
+        402,
+        "Payment not verified yet. Please try again in a moment.",
+      );
     if (payment.requestGroupId && payment.requestGroupId !== requestGroupId) {
       return fail(res, 409, "This payment is already used for another request");
     }
@@ -262,11 +341,21 @@ exports.createRequest = async (req, res) => {
     // every failure after this point refunds the fresher automatically
     const reject = async (status, message, extra) => {
       const result = await refundPayment(payment, message);
-      return fail(res, status, `${message}${result === "refunded" ? " Your payment has been refunded." : ""}`, extra);
+      return fail(
+        res,
+        status,
+        `${message}${result === "refunded" ? " Your payment has been refunded." : ""}`,
+        extra,
+      );
     };
 
     const minutes = Number(sd.duration);
-    if (!Number.isInteger(minutes) || minutes < MIN_MINUTES || minutes > MAX_MINUTES || minutes % 30 !== 0) {
+    if (
+      !Number.isInteger(minutes) ||
+      minutes < MIN_MINUTES ||
+      minutes > MAX_MINUTES ||
+      minutes % 30 !== 0
+    ) {
       return reject(400, "Duration must be between 30 minutes and 4 hours.");
     }
     if (Number(payment.amount) !== priceFor(minutes)) {
@@ -277,7 +366,11 @@ exports.createRequest = async (req, res) => {
     const reason = String(sd.reason || "").trim();
     const language = String(sd.language || "").trim();
     if (!companyName) return reject(400, "Company is required.");
-    if (reason.length < 10) return reject(400, "Please describe why you want to attend (at least 10 characters).");
+    if (reason.length < 10)
+      return reject(
+        400,
+        "Please describe why you want to attend (at least 10 characters).",
+      );
     if (!language) return reject(400, "Please select a language.");
 
     const startsAt = parseSessionStart(sd.date, sd.time);
@@ -287,25 +380,44 @@ exports.createRequest = async (req, res) => {
     }
     const endsAt = new Date(startsAt.getTime() + minutes * 60000);
 
-    const fresherId = req.user?.role === "fresher" ? req.user.id : payment.fresher ? String(payment.fresher) : null;
+    const fresherId =
+      req.user?.role === "fresher"
+        ? req.user.id
+        : payment.fresher
+          ? String(payment.fresher)
+          : null;
 
     if (fresherId) {
-      const pendingReview = await Booking.exists({ fresher: fresherId, status: "completed", reviewed: false });
+      const pendingReview = await Booking.exists({
+        fresher: fresherId,
+        status: "completed",
+        reviewed: false,
+      });
       if (pendingReview) {
-        return reject(403, "Please review your previous session first.", { code: "REVIEW_REQUIRED" });
+        return reject(403, "Please review your previous session first.", {
+          code: "REVIEW_REQUIRED",
+        });
       }
     }
 
-    const fresherDoc = fresherId ? await Fresher.findById(fresherId).select("name email").lean() : null;
+    const fresherDoc = fresherId
+      ? await Fresher.findById(fresherId).select("name email").lean()
+      : null;
     const requester = body.requester || {};
     const image = String(requester.image || "");
 
     const booking = await Booking.create({
       requestGroupId,
       fresher: fresherId || null,
-      fresherName: fresherDoc?.name || requester.fullName || payment.fresherName || "Fresher",
-      fresherEmail: fresherDoc?.email || requester.email || payment.fresherEmail || "",
-      fresherImage: image.startsWith("http") || image.startsWith("/") ? image : "",
+      fresherName:
+        fresherDoc?.name ||
+        requester.fullName ||
+        payment.fresherName ||
+        "Fresher",
+      fresherEmail:
+        fresherDoc?.email || requester.email || payment.fresherEmail || "",
+      fresherImage:
+        image.startsWith("http") || image.startsWith("/") ? image : "",
       companyName,
       sessionType: String(sd.sessionType || "").slice(0, 60),
       reason: reason.slice(0, 1000),
@@ -334,21 +446,40 @@ exports.createRequest = async (req, res) => {
     if (fresherId && !payment.fresher) {
       await Payment.updateOne(
         { _id: payment._id },
-        { $set: { fresher: fresherId, fresherName: booking.fresherName, fresherEmail: booking.fresherEmail } }
+        {
+          $set: {
+            fresher: fresherId,
+            fresherName: booking.fresherName,
+            fresherEmail: booking.fresherEmail,
+          },
+        },
       );
     }
 
     // ---- broadcast to every eligible employee who is online right now ----
-    const mentors = await Mentor.find({ verificationStatus: "approved", accountStatus: "active" })
+    const mentors = await Mentor.find({
+      verificationStatus: "approved",
+      accountStatus: "active",
+    })
       .select(MENTOR_FIELDS)
       .lean();
 
     const payload = toMentorPayload(booking);
     const notified = [];
 
-    await broadcastLoop(req, mentors, booking, payload, startsAt, endsAt, requestGroupId, notified);
+    await broadcastLoop(
+      req,
+      mentors,
+      booking,
+      payload,
+      startsAt,
+      endsAt,
+      requestGroupId,
+      notified,
+    );
 
-    if (notified.length) await Booking.updateOne({ _id: booking._id }, { $set: { notified } });
+    if (notified.length)
+      await Booking.updateOne({ _id: booking._id }, { $set: { notified } });
 
     notify({
       user: fresherId,
@@ -361,7 +492,11 @@ exports.createRequest = async (req, res) => {
       link: "/Home/my-bookings",
     });
 
-    return res.status(201).json({ success: true, booking: toClient(booking), notifiedCount: notified.length });
+    return res.status(201).json({
+      success: true,
+      booking: toClient(booking),
+      notifiedCount: notified.length,
+    });
   } catch (error) {
     console.error("createRequest error:", error);
     return fail(res, 500, "Failed to create session request");
@@ -376,11 +511,13 @@ const expireBooking = async (app, bookingId, reason) => {
   const b = await Booking.findOneAndUpdate(
     { _id: bookingId, status: "pending" },
     { $set: { status: "expired" } },
-    { returnDocument: "after" }
+    { returnDocument: "after" },
   );
   if (!b) return null;
 
-  const payment = await Payment.findOne({ razorpayPaymentId: b.razorpayPaymentId });
+  const payment = await Payment.findOne({
+    razorpayPaymentId: b.razorpayPaymentId,
+  });
   const result = await refundPayment(payment, reason);
   b.refundStatus = result === "refunded" ? "refunded" : "failed";
   await b.save();
@@ -398,7 +535,11 @@ const expireBooking = async (app, bookingId, reason) => {
   });
   emitToUser(b.fresher, "booking:updated", toClient(b));
 
-  (b.notified || []).forEach((id) => emitToMentorSockets(app, id, "session-request-taken", { id: b.requestGroupId }));
+  (b.notified || []).forEach((id) =>
+    emitToMentorSockets(app, id, "session-request-taken", {
+      id: b.requestGroupId,
+    }),
+  );
   return b;
 };
 
@@ -407,24 +548,37 @@ exports.updateRequest = async (req, res) => {
     optionalAuth(req, null, () => {});
 
     // route may be declared as :requestGroupId or :id
-    const requestGroupId = String(req.params.requestGroupId || req.params.id || "").trim();
-    const status = String(req.body?.status || "").trim().toLowerCase();
-    const mentorId = req.user?.role === "mentor" ? req.user.id : req.body?.mentorId;
+    const requestGroupId = String(
+      req.params.requestGroupId || req.params.id || "",
+    ).trim();
+    const status = String(req.body?.status || "")
+      .trim()
+      .toLowerCase();
+    const mentorId =
+      req.user?.role === "mentor" ? req.user.id : req.body?.mentorId;
 
-    if (!["accepted", "rejected"].includes(status)) return fail(res, 400, "Status must be accepted or rejected");
-    if (!mongoose.Types.ObjectId.isValid(mentorId)) return fail(res, 400, "A valid mentor is required");
+    if (!["accepted", "rejected"].includes(status))
+      return fail(res, 400, "Status must be accepted or rejected");
+    if (!mongoose.Types.ObjectId.isValid(mentorId))
+      return fail(res, 400, "A valid mentor is required");
 
     const booking = await Booking.findOne({ requestGroupId });
     if (!booking) return fail(res, 404, "Session request not found");
 
     // ---------- reject = this employee declines (others can still accept) ----------
     if (status === "rejected") {
-      await Booking.updateOne({ _id: booking._id }, { $addToSet: { declinedBy: mentorId } });
+      await Booking.updateOne(
+        { _id: booking._id },
+        { $addToSet: { declinedBy: mentorId } },
+      );
+
       const fresh = await Booking.findById(booking._id);
       if (
         fresh.status === "pending" &&
         fresh.notified.length > 0 &&
-        fresh.notified.every((id) => fresh.declinedBy.some((d) => String(d) === String(id)))
+        fresh.notified.every((id) =>
+          fresh.declinedBy.some((d) => String(d) === String(id)),
+        )
       ) {
         await expireBooking(req.app, fresh._id, "All employees declined");
       }
@@ -435,29 +589,54 @@ exports.updateRequest = async (req, res) => {
     if (booking.status !== "pending" || booking.expiresAt <= new Date()) {
       return fail(res, 409, "This request is no longer available");
     }
-    if (booking.notified.length && !booking.notified.some((id) => String(id) === String(mentorId))) {
+    if (
+      booking.notified.length &&
+      !booking.notified.some((id) => String(id) === String(mentorId))
+    ) {
       return fail(res, 403, "This request was not sent to you");
     }
-    if (await hasConflict(mentorId, booking.startsAt, booking.endsAt, requestGroupId)) {
-      return fail(res, 400, "You already have a session within 30 minutes of this time.");
+    if (
+      await hasConflict(
+        mentorId,
+        booking.startsAt,
+        booking.endsAt,
+        requestGroupId,
+      )
+    ) {
+      return fail(
+        res,
+        400,
+        "You already have a session within 30 minutes of this time.",
+      );
     }
 
     const accepted = await Booking.findOneAndUpdate(
       { requestGroupId, status: "pending" },
-      { $set: { status: "accepted", mentor: mentorId, acceptedAt: new Date() } },
-      { returnDocument: "after" }
+      {
+        $set: { status: "accepted", mentor: mentorId, acceptedAt: new Date() },
+      },
+      { returnDocument: "after" },
     ).populate("mentor", POPULATE_MENTOR);
 
-    if (!accepted) return fail(res, 409, "Another employee accepted this request first");
+    if (!accepted)
+      return fail(res, 409, "Another employee accepted this request first");
 
     // the wallet is linked here, so the frontend must NOT call ENDPOINTS.assignPayment again
-    const assign = await assignMentorToRequest({ requestGroupId, mentorId }).catch(() => ({ assigned: false }));
-    if (!assign?.assigned) console.warn("Wallet not linked for", requestGroupId, assign?.reason);
+    const assign = await assignMentorToRequest({
+      requestGroupId,
+      mentorId,
+    }).catch(() => ({ assigned: false }));
+    if (!assign?.assigned)
+      console.warn("Wallet not linked for", requestGroupId, assign?.reason);
 
     // remove the request from every other employee's screen
     accepted.notified
       .filter((id) => String(id) !== String(mentorId))
-      .forEach((id) => emitToMentorSockets(req.app, id, "session-request-taken", { id: requestGroupId }));
+      .forEach((id) =>
+        emitToMentorSockets(req.app, id, "session-request-taken", {
+          id: requestGroupId,
+        }),
+      );
 
     const mentor = mentorCard(accepted.mentor);
     notify({
@@ -470,7 +649,11 @@ exports.updateRequest = async (req, res) => {
     });
     emitToUser(accepted.fresher, "booking:updated", toClient(accepted));
 
-    return res.json({ success: true, status: "accepted", booking: toClient(accepted) });
+    return res.json({
+      success: true,
+      status: "accepted",
+      booking: toClient(accepted),
+    });
   } catch (error) {
     console.error("updateRequest error:", error);
     return fail(res, 500, "Failed to update session request");
@@ -487,12 +670,17 @@ exports.respondToRequest = exports.updateRequest;
 // GET /api/session/session-requests/:requestGroupId   (old shape kept)
 exports.getRequestStatus = async (req, res) => {
   try {
-    const b = await Booking.findOne({ requestGroupId: String(req.params.requestGroupId || "") }).populate(
-      "mentor",
-      POPULATE_MENTOR
-    );
+    const b = await Booking.findOne({
+      requestGroupId: String(req.params.requestGroupId || ""),
+    }).populate("mentor", POPULATE_MENTOR);
     if (!b) return fail(res, 404, "Session request not found");
-    return res.json({ success: true, request: toClient(b), booking: toClient(b), status: b.status, assigned: Boolean(b.mentor) });
+    return res.json({
+      success: true,
+      request: toClient(b),
+      booking: toClient(b),
+      status: b.status,
+      assigned: Boolean(b.mentor),
+    });
   } catch (error) {
     return fail(res, 500, "Failed to fetch session request");
   }
@@ -503,10 +691,17 @@ exports.getAcceptedBookings = async (req, res) => {
   try {
     const email = norm(req.query.email);
     if (!email) return fail(res, 400, "Email is required");
-    const list = await Booking.find({ fresherEmail: email, status: { $in: ["accepted", "completed"] } })
+    const list = await Booking.find({
+      fresherEmail: email,
+      status: { $in: ["accepted", "completed"] },
+    })
       .populate("mentor", POPULATE_MENTOR)
       .sort({ startsAt: -1 });
-    const bookings = list.map((b) => ({ ...toClient(b), bookingId: b.requestGroupId, mentorName: b.mentor?.name || "Mentor" }));
+    const bookings = list.map((b) => ({
+      ...toClient(b),
+      bookingId: b.requestGroupId,
+      mentorName: b.mentor?.name || "Mentor",
+    }));
     return res.json({ success: true, bookings, count: bookings.length });
   } catch (error) {
     return fail(res, 500, "Failed to fetch bookings");
@@ -516,7 +711,10 @@ exports.getAcceptedBookings = async (req, res) => {
 // GET /api/bookings/me   (fresher)
 exports.myBookings = async (req, res) => {
   try {
-    const list = await Booking.find({ fresher: req.user.id }).populate("mentor", POPULATE_MENTOR).sort({ startsAt: -1 }).limit(100);
+    const list = await Booking.find({ fresher: req.user.id })
+      .populate("mentor", POPULATE_MENTOR)
+      .sort({ startsAt: -1 })
+      .limit(100);
     return res.json({ success: true, bookings: list.map(toClient) });
   } catch (error) {
     console.error("myBookings error:", error.message);
@@ -527,7 +725,11 @@ exports.myBookings = async (req, res) => {
 // GET /api/bookings/needs-review   (fresher)
 exports.needsReview = async (req, res) => {
   try {
-    const b = await Booking.findOne({ fresher: req.user.id, status: "completed", reviewed: false })
+    const b = await Booking.findOne({
+      fresher: req.user.id,
+      status: "completed",
+      reviewed: false,
+    })
       .populate("mentor", POPULATE_MENTOR)
       .sort({ completedAt: 1 });
     return res.json({ success: true, booking: b ? toClient(b) : null });
@@ -539,9 +741,13 @@ exports.needsReview = async (req, res) => {
 // GET /api/bookings/:id   (fresher or mentor who owns it)
 exports.getBooking = async (req, res) => {
   try {
-    const b = await Booking.findOne({ requestGroupId: String(req.params.id) }).populate("mentor", POPULATE_MENTOR);
+    const b = await Booking.findOne({
+      requestGroupId: String(req.params.id),
+    }).populate("mentor", POPULATE_MENTOR);
     if (!b) return fail(res, 404, "Booking not found");
-    const mine = String(b.fresher) === req.user.id || String(b.mentor?._id || b.mentor) === req.user.id;
+    const mine =
+      String(b.fresher) === req.user.id ||
+      String(b.mentor?._id || b.mentor) === req.user.id;
     if (!mine) return fail(res, 403, "You do not have access to this booking");
 
     const data = toClient(b);
@@ -579,7 +785,11 @@ exports.getFresherNotifications = async (req, res) => {
       Notification.find(filter).sort({ createdAt: -1 }).limit(limit),
       Notification.countDocuments({ ...filter, read: false }),
     ]);
-    return res.json({ success: true, notifications: items.map(serializeNotification), unreadCount });
+    return res.json({
+      success: true,
+      notifications: items.map(serializeNotification),
+      unreadCount,
+    });
   } catch (error) {
     return fail(res, 500, "Unable to load notifications.");
   }
@@ -587,8 +797,12 @@ exports.getFresherNotifications = async (req, res) => {
 
 exports.markFresherNotificationRead = async (req, res) => {
   try {
-    if (!mongoose.Types.ObjectId.isValid(req.params.id)) return fail(res, 400, "Invalid id.");
-    await Notification.updateOne({ _id: req.params.id, user: req.user.id }, { $set: { read: true, readAt: new Date() } });
+    if (!mongoose.Types.ObjectId.isValid(req.params.id))
+      return fail(res, 400, "Invalid id.");
+    await Notification.updateOne(
+      { _id: req.params.id, user: req.user.id },
+      { $set: { read: true, readAt: new Date() } },
+    );
     return res.json({ success: true });
   } catch (error) {
     return fail(res, 500, "Unable to update notification.");
@@ -599,7 +813,7 @@ exports.markAllFresherNotificationsRead = async (req, res) => {
   try {
     await Notification.updateMany(
       { user: req.user.id, role: "fresher", read: false },
-      { $set: { read: true, readAt: new Date() } }
+      { $set: { read: true, readAt: new Date() } },
     );
     return res.json({ success: true });
   } catch (error) {
@@ -611,46 +825,189 @@ exports.markAllFresherNotificationsRead = async (req, res) => {
    5. COMPLETION (called by the meeting timer and the sweeper)
 ============================================================ */
 
+/* ============================================================
+   5. COMPLETION (called by the meeting timer and the sweeper)
+============================================================ */
+
 const completeBooking = async (requestGroupId) => {
   const now = new Date();
+  
+  // 🟢 Step 1: Session timer over — but NOT completed yet!
+  // We move to "awaiting_confirmation" — mentor won't get paid until fresher confirms.
   const b = await Booking.findOneAndUpdate(
     { requestGroupId, status: "accepted" },
-    { $set: { status: "completed", completedAt: now, "meeting.remainingMs": 0, "meeting.endedAt": now } },
-    { returnDocument: "after" }
+    {
+      $set: {
+        status: "awaiting_confirmation", // NEW STATUS
+        "meeting.remainingMs": 0,
+        "meeting.endedAt": now,
+      },
+    },
+    { returnDocument: "after" },
   ).populate("mentor", POPULATE_MENTOR);
+  
   if (!b) return null;
 
-  // the mentor's share is released as soon as the session really ends
-  await Payment.updateOne(
-    { requestGroupId, status: "paid" },
-    { $set: { sessionEndsAt: now, sessionStatus: "upcoming" } }
-  );
-
+  // 🟢 Step 2: NOTIFY both — no payment released yet
   notify({
     user: b.fresher,
     role: "fresher",
-    title: "Session completed",
-    message: "Please rate your session. A review is required before your next booking.",
-    type: "review",
-    link: "/Home/my-bookings",
+    title: "Session ended",
+    message: "Did the session go well? Please confirm to release the mentor's payment and leave a review.",
+    type: "session",
+    link: `/Home/meeting/${b.requestGroupId}`,
   });
+  
   if (b.mentor) {
     notify({
       user: b.mentor._id,
       role: "mentor",
-      title: "Session completed",
-      message: "Your earnings for this session are now available.",
-      type: "payment",
-      link: "/mentor/earnings",
+      title: "Session ended",
+      message: "Waiting for the fresher to confirm the session. Your earnings will be released shortly.",
+      type: "session",
+      link: `/mentor/sessions`,
     });
-    emitToUser(b.mentor._id, "wallet:updated", { requestGroupId });
   }
+
   emitToUser(b.fresher, "booking:updated", toClient(b));
+  if (b.mentor) emitToUser(b.mentor._id, "booking:updated", toClient(b));
+  
   return b;
 };
 
 exports.completeBooking = completeBooking;
 
+/* ============================================================
+   5b. FRESHER CONFIRMATION → release payment
+============================================================ */
+
+exports.confirmCompletion = async (req, res) => {
+  try {
+    const requestGroupId = String(req.params.requestGroupId || "").trim();
+    const accepted = Boolean(req.body?.accepted);
+
+    if (!requestGroupId) {
+      return fail(res, 400, "requestGroupId is required.");
+    }
+
+    // Only the fresher of this booking can confirm
+    const booking = await Booking.findOne({ requestGroupId }).populate(
+      "mentor",
+      POPULATE_MENTOR
+    );
+    if (!booking) return fail(res, 404, "Session not found.");
+    if (String(booking.fresher) !== req.user.id) {
+      return fail(res, 403, "You do not have access to this session.");
+    }
+    if (booking.status !== "awaiting_confirmation") {
+      return fail(
+        res,
+        400,
+        "This session is not awaiting confirmation.",
+      );
+    }
+
+    const now = new Date();
+
+    // ---------- YES: session was good → release the mentor's payment ----------
+    if (accepted) {
+      const updated = await Booking.findOneAndUpdate(
+        { _id: booking._id, status: "awaiting_confirmation" },
+        {
+          $set: {
+            status: "completed",
+            completedAt: now,
+            reviewed: false, // fresher still needs to submit a review
+          },
+        },
+        { returnDocument: "after" }
+      ).populate("mentor", POPULATE_MENTOR);
+
+      if (!updated) {
+        return fail(res, 409, "This session is no longer awaiting confirmation.");
+      }
+
+      // Release the mentor's share
+      await Payment.updateOne(
+        { requestGroupId, status: "paid" },
+        { $set: { sessionEndsAt: now, sessionStatus: "completed" } }
+      );
+      if (updated.mentor) {
+        await Mentor.updateOne(
+          { _id: updated.mentor._id },
+          { $inc: { totalSessions: 1 } }
+        );
+
+        notify({
+          user: updated.mentor._id,
+          role: "mentor",
+          title: "Session confirmed",
+          message: "The fresher confirmed the session. Your earnings are now available.",
+          type: "payment",
+          link: "/mentor/earnings",
+        });
+        emitToUser(updated.mentor._id, "wallet:updated", { requestGroupId });
+      }
+
+      emitToUser(updated.fresher, "booking:updated", toClient(updated));
+      return res.json({
+        success: true,
+        status: "completed",
+        booking: toClient(updated),
+      });
+    }
+
+    // ---------- NO: fresher says session was bad → refund ----------
+    const updated = await Booking.findOneAndUpdate(
+      { _id: booking._id, status: "awaiting_confirmation" },
+      { $set: { status: "disputed", completedAt: now } },
+      { returnDocument: "after" }
+    ).populate("mentor", POPULATE_MENTOR);
+
+    if (!updated) {
+      return fail(res, 409, "This session is no longer awaiting confirmation.");
+    }
+
+    const payment = await Payment.findOne({
+      razorpayPaymentId: booking.razorpayPaymentId,
+    });
+    const result = await refundPayment(payment, "Fresher reported session issue");
+
+    await Booking.updateOne(
+      { _id: booking._id },
+      { $set: { refundStatus: result === "refunded" ? "refunded" : "failed" } }
+    );
+
+    notify({
+      user: updated.fresher,
+      role: "fresher",
+      title: "Refund initiated",
+      message: `${rupees(updated.amount)} is being refunded to your payment method.`,
+      type: "payment",
+      link: "/Home/my-bookings",
+    });
+    if (updated.mentor) {
+      notify({
+        user: updated.mentor._id,
+        role: "mentor",
+        title: "Session disputed",
+        message: "The fresher reported an issue. Earnings for this session have been withheld.",
+        type: "warning",
+        link: "/mentor/sessions",
+      });
+    }
+
+    emitToUser(updated.fresher, "booking:updated", toClient(updated));
+    return res.json({
+      success: true,
+      status: "disputed",
+      booking: toClient(updated),
+    });
+  } catch (error) {
+    console.error("confirmCompletion error:", error);
+    return fail(res, 500, "Unable to confirm session.");
+  }
+};
 /* ============================================================
    6. SCHEDULERS + LATE-ONLINE MENTORS
 ============================================================ */
@@ -659,8 +1016,12 @@ const sweep = async (app) => {
   const now = new Date();
 
   // a) nobody accepted before the start time -> refund
-  const stale = await Booking.find({ status: "pending", expiresAt: { $lte: now } }).select("_id");
-  for (const s of stale) await expireBooking(app, s._id, "No employee accepted in time");
+  const stale = await Booking.find({
+    status: "pending",
+    expiresAt: { $lte: now },
+  }).select("_id");
+  for (const s of stale)
+    await expireBooking(app, s._id, "No employee accepted in time");
 
   // b) 5-minute reminders for both people
   const soon = await Booking.find({
@@ -671,7 +1032,10 @@ const sweep = async (app) => {
   }).populate("mentor", POPULATE_MENTOR);
 
   for (const b of soon) {
-    const claimed = await Booking.findOneAndUpdate({ _id: b._id, reminderSent: false }, { $set: { reminderSent: true } });
+    const claimed = await Booking.findOneAndUpdate(
+      { _id: b._id, reminderSent: false },
+      { $set: { reminderSent: true } },
+    );
     if (!claimed) continue;
 
     notify({
@@ -709,12 +1073,17 @@ const sweep = async (app) => {
     const updated = await Booking.findOneAndUpdate(
       { _id: b._id, status: "accepted" },
       { $set: { status: "missed" } },
-      { returnDocument: "after" }
+      { returnDocument: "after" },
     );
     if (!updated) continue;
-    const payment = await Payment.findOne({ razorpayPaymentId: b.razorpayPaymentId });
+    const payment = await Payment.findOne({
+      razorpayPaymentId: b.razorpayPaymentId,
+    });
     const result = await refundPayment(payment, "Session was not held");
-    await Booking.updateOne({ _id: b._id }, { $set: { refundStatus: result === "refunded" ? "refunded" : "failed" } });
+    await Booking.updateOne(
+      { _id: b._id },
+      { $set: { refundStatus: result === "refunded" ? "refunded" : "failed" } },
+    );
     notify({
       user: b.fresher,
       role: "fresher",
@@ -723,7 +1092,10 @@ const sweep = async (app) => {
       type: "payment",
       link: "/Home/my-bookings",
     });
-    emitToUser(b.fresher, "booking:updated", { requestGroupId: b.requestGroupId, status: "missed" });
+    emitToUser(b.fresher, "booking:updated", {
+      requestGroupId: b.requestGroupId,
+      status: "missed",
+    });
   }
 };
 
@@ -758,10 +1130,13 @@ exports.pushPendingToMentor = async (app, mentorId) => {
       console.log(`[push] mentor ${mentorId} not found in DB`);
       return;
     }
-    if (mentor.verificationStatus !== "approved" || mentor.accountStatus !== "active") {
+    if (
+      mentor.verificationStatus !== "approved" ||
+      mentor.accountStatus !== "active"
+    ) {
       console.log(
         `[push] ${mentor.name}: verification="${mentor.verificationStatus}", account="${mentor.accountStatus}" ` +
-          `-> must be approved + active to receive requests`
+          `-> must be approved + active to receive requests`,
       );
       return;
     }
@@ -784,11 +1159,21 @@ exports.pushPendingToMentor = async (app, mentorId) => {
       report.push(`${b.requestGroupId}: ${reason || "SENT"}`);
       if (reason) continue;
 
-      await Booking.updateOne({ _id: b._id }, { $addToSet: { notified: mentor._id } });
-      emitToMentorSockets(app, mentor._id, "session-request", toMentorPayload(b));
+      await Booking.updateOne(
+        { _id: b._id },
+        { $addToSet: { notified: mentor._id } },
+      );
+      emitToMentorSockets(
+        app,
+        mentor._id,
+        "session-request",
+        toMentorPayload(b),
+      );
     }
 
-    console.log(`[push] ${mentor.name} came online, ${open.length} open request(s):\n  ${report.join("\n  ") || "none"}`);
+    console.log(
+      `[push] ${mentor.name} came online, ${open.length} open request(s):\n  ${report.join("\n  ") || "none"}`,
+    );
   } catch (error) {
     console.error("pushPendingToMentor error:", error.message);
   }

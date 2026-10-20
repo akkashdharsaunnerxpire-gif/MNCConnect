@@ -259,3 +259,39 @@ exports.markAllNotificationsRead = async (req, res) => {
     return fail(res, 500, "Unable to update notifications.");
   }
 };
+
+// mentorPanelController.js — add to getWallet or new endpoint
+// ============================================================
+// MENTOR STATS (dashboard counters)
+// ============================================================
+
+exports.getMentorStats = async (req, res) => {
+  try {
+    const now = new Date();
+    const weekAgo = new Date(now.getTime() - 7 * 86400000);
+    const monthAgo = new Date(now.getTime() - 30 * 86400000);
+
+    const [total, week, month, completed] = await Promise.all([
+      Booking.countDocuments({ mentor: req.user.id, status: "accepted" }),
+      Booking.countDocuments({
+        mentor: req.user.id,
+        status: "accepted",
+        startsAt: { $gte: weekAgo },
+      }),
+      Booking.countDocuments({
+        mentor: req.user.id,
+        status: "accepted",
+        startsAt: { $gte: monthAgo },
+      }),
+      Booking.countDocuments({ mentor: req.user.id, status: "completed" }),
+    ]);
+
+    return res.json({
+      success: true,
+      stats: { total, week, month, completed },
+    });
+  } catch (error) {
+    console.error("getMentorStats error:", error.message);
+    return fail(res, 500, "Unable to load stats.");
+  }
+};

@@ -15,7 +15,7 @@ import {
   ShieldCheck,
   GraduationCap,
 } from "lucide-react";
-import { LoadingContext } from "../../App";
+import { LoadingContext } from "../../context/LoadingContext";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 

@@ -24,6 +24,11 @@ if (typeof respond === "function") {
 
 // ---------- fresher bookings ----------
 router.post("/bookings", requireAuth("fresher"), b.createRequest);
+router.patch(
+  "/bookings/:requestGroupId/confirm",
+  requireAuth("fresher"),
+  b.confirmCompletion
+);
 router.get("/bookings/me", requireAuth("fresher"), b.myBookings);
 router.get("/bookings/needs-review", requireAuth("fresher"), b.needsReview);
 router.get("/bookings/mentor/pending", requireAuth("mentor"), b.mentorPending);

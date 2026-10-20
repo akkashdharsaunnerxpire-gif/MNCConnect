@@ -1,20 +1,19 @@
+// server.js
 require("dotenv").config();
 
 const http = require("http");
 const { Server } = require("socket.io");
+const jwt = require("jsonwebtoken");
 
 const app = require("./app");
 const connectDB = require("./config/db");
-
 const { initMeetings } = require("./utils/meeting");
-
 const {
   startSchedulers,
   pushPendingToMentor,
 } = require("./controllers/bookingController");
 
 const PORT = process.env.PORT || 5000;
-
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
 
 console.log("Client URL:", CLIENT_URL);
@@ -25,7 +24,6 @@ const server = http.createServer(app);
 
 // ================= SOCKET.IO =================
 
-// Same origin list as the Express CORS config (set in app.js), plus local dev ports
 const socketOrigins = [
   ...new Set([
     CLIENT_URL,
@@ -40,123 +38,123 @@ const io = new Server(server, {
     origin: socketOrigins,
     credentials: true,
   },
-
   transports: ["websocket", "polling"],
 });
 
 // ================= ONLINE USERS =================
-// Map<userId(string), Set<socketId>>  -> one user can have many tabs/devices.
-// Keys are ALWAYS strings, so controllers must look up with String(id).
+// Map<userId(string), Set<socketId>>
 
-const onlineEmployees = new Map();
-const onlineMentors = new Map();
+const onlineEmployees = new Map(); // freshers
+const onlineMentors = new Map(); // mentors
 
-// Make Socket.IO and online users available inside Express routes
 app.set("io", io);
 app.set("onlineEmployees", onlineEmployees);
 app.set("onlineMentors", onlineMentors);
 
-// Initialize meetings only after Socket.IO is created
+// Initialize meetings (meeting rooms listen for their own events)
 initMeetings(io);
 
 // ================= PRESENCE HELPERS =================
 
 const PRESENCE = {
-  employee: { map: onlineEmployees, field: "employeeId", label: "Employee" },
-  mentor: { map: onlineMentors, field: "mentorId", label: "Mentor" },
+  employee: { map: onlineEmployees, label: "Fresher" },
+  mentor: { map: onlineMentors, label: "Mentor" },
 };
 
-const toKey = (id) => (id === undefined || id === null ? "" : String(id).trim());
+const toKey = (id) =>
+  id === undefined || id === null ? "" : String(id).trim();
 
-const markOffline = (socket, role) => {
-  const { map, field, label } = PRESENCE[role];
-  const id = socket[field];
-
-  if (!id) return;
-
-  const sockets = map.get(id);
-
-  if (sockets) {
-    sockets.delete(socket.id);
-
-    if (sockets.size === 0) {
-      map.delete(id);
-      console.log(`${label} ${id} is OFFLINE`);
-    }
-  }
-
-  delete socket[field];
-};
-
+// Add a socket to a user's set
 const markOnline = (socket, role, rawId) => {
-  const { map, field, label } = PRESENCE[role];
+  const { map, label } = PRESENCE[role];
   const id = toKey(rawId);
-
   if (!id) return null;
 
-  // same socket re-announcing under a different id -> clean the old entry first
-  if (socket[field] && socket[field] !== id) {
+  // If this socket was already tracking a different id under this role, clean up
+  if (socket.data.presence && socket.data.presence[role] && socket.data.presence[role] !== id) {
     markOffline(socket, role);
   }
 
-  if (!map.has(id)) {
-    map.set(id, new Set());
-  }
-
+  if (!map.has(id)) map.set(id, new Set());
   map.get(id).add(socket.id);
-  socket[field] = id;
 
-  console.log(`${label} ${id} is ONLINE`);
+  socket.data.presence = socket.data.presence || {};
+  socket.data.presence[role] = id;
 
+  console.log(`${label} ${id} is ONLINE (${map.get(id).size} socket${map.get(id).size > 1 ? "s" : ""})`);
   return id;
 };
 
+// Remove this socket from a user's set
+const markOffline = (socket, role) => {
+  const { map, label } = PRESENCE[role];
+  const id = socket.data.presence?.[role];
+  if (!id) return;
+
+  const set = map.get(id);
+  if (set) {
+    set.delete(socket.id);
+    if (set.size === 0) {
+      map.delete(id);
+      console.log(`${label} ${id} is OFFLINE`);
+    } else {
+      console.log(`${label} ${id} still has ${set.size} socket(s) online`);
+    }
+  }
+
+  delete socket.data.presence[role];
+};
+
+// ================= JWT HANDSHAKE AUTH =================
+// The client passes the token via socket.handshake.auth.token.
+// The server derives identity from the token — a client can NEVER spoof it.
+
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (!token) return next(new Error("Authentication required"));
+
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    if (!payload?.id || !payload?.role) {
+      return next(new Error("Invalid token payload"));
+    }
+    socket.data.user = {
+      id: String(payload.id),
+      role: String(payload.role),
+    };
+    return next();
+  } catch (err) {
+    console.error("Socket auth failed:", err.message);
+    return next(new Error("Invalid or expired token"));
+  }
+});
+
 // ================= SOCKET CONNECTION =================
-// SECURITY TODO: the client currently tells us who it is (employeeId / mentorId)
-// with no proof. Anyone could emit "mentor-online" with another mentor's id and
-// receive that mentor's pending requests. Verify the JWT in io.use() and take the
-// id from the token instead of from the event payload.
 
 io.on("connection", (socket) => {
-  console.log("Socket connected:", socket.id);
+  const { id, role } = socket.data.user;
+  console.log(`Socket connected: ${socket.id} (${role} ${id})`);
 
-  // ---------------- EMPLOYEE ----------------
-
-  socket.on("employee-online", (employeeId) => {
-    markOnline(socket, "employee", employeeId);
-  });
-
-  // the socket can only take itself offline (the id argument is ignored on purpose)
-  socket.on("employee-offline", () => {
-    markOffline(socket, "employee");
-  });
-
-  // ---------------- MENTOR ----------------
-
-  socket.on("mentor-online", async (mentorId) => {
-    const id = markOnline(socket, "mentor", mentorId);
-
-    if (!id) return;
-
+  // Mark user online based on the trusted role from the token
+  if (role === "mentor") {
+    markOnline(socket, "mentor", id);
     // Send pending booking requests to this mentor
-    try {
-      await pushPendingToMentor(app, id);
-    } catch (error) {
-      console.error("Failed to send pending requests to mentor:", error.message);
-    }
-  });
+    pushPendingToMentor(app, id).catch((err) =>
+      console.error("pushPendingToMentor failed:", err.message)
+    );
+  } else if (role === "fresher") {
+    markOnline(socket, "employee", id);
+  }
 
-  socket.on("mentor-offline", () => {
+  // Client can explicitly go offline (e.g. logout button)
+  socket.on("mentor-offline", () => markOffline(socket, "mentor"));
+  socket.on("employee-offline", () => markOffline(socket, "employee"));
+
+  // Disconnect: clean up BOTH roles in case something weird happened
+  socket.on("disconnect", (reason) => {
+    console.log(`Socket disconnected: ${socket.id} (${reason})`);
     markOffline(socket, "mentor");
-  });
-
-  // ---------------- DISCONNECT ----------------
-
-  socket.on("disconnect", () => {
-    console.log("Socket disconnected:", socket.id);
-
     markOffline(socket, "employee");
-    markOffline(socket, "mentor");
   });
 });
 
@@ -164,16 +162,12 @@ io.on("connection", (socket) => {
 
 const startServer = async () => {
   try {
-    // Connect to MongoDB first
     await connectDB();
-
     console.log("MongoDB connected successfully");
 
-    // Start booking schedulers after database connection
-    // (if you ever run more than one instance, run schedulers on ONE of them only)
+    // Run schedulers on ONE instance only
     startSchedulers(app);
 
-    // Start HTTP and Socket.IO server
     server.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
       console.log(`Socket.IO running on port ${PORT}`);
@@ -181,29 +175,22 @@ const startServer = async () => {
     });
   } catch (error) {
     console.error("Server startup failed:", error);
-
     process.exit(1);
   }
 };
 
 startServer();
 
-// ================= SHUTDOWN / SAFETY NET =================
+// ================= SHUTDOWN =================
 
-// Render sends SIGTERM on every deploy/restart
 const shutdown = (signal) => {
   console.log(`${signal} received, shutting down...`);
-
-  // io.close() also closes the underlying HTTP server
   io.close(() => process.exit(0));
-
-  // don't hang forever if a connection refuses to close
   setTimeout(() => process.exit(1), 10000).unref();
 };
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
-
 process.on("unhandledRejection", (reason) => {
   console.error("Unhandled rejection:", reason);
 });

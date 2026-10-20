@@ -21,6 +21,8 @@ router.post("/reviews", requireAuth("fresher"), panel.createReview);
 router.get("/notifications", requireAuth("mentor"), panel.getNotifications);
 router.patch("/notifications/read-all", requireAuth("mentor"), panel.markAllNotificationsRead);
 router.patch("/notifications/:id/read", requireAuth("mentor"), panel.markNotificationRead);
+// routes/mentorPanelRoutes.js (add this line)
+router.get("/mentor/stats", requireAuth("mentor"), panel.getMentorStats);
 
 // ---------- payment <-> mentor link (optional HTTP version) ----------
 router.post("/payments/assign-to-me", requireAuth("mentor"), payments.assignToMe);

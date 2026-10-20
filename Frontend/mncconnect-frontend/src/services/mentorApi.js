@@ -5,14 +5,15 @@
 export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 export const ENDPOINTS = {
-  wallet: "/wallet/me", // -> { wallet:{available,pending,lifetime,week,month,withdrawn}, payments:[...] }
-  withdraw: "/wallet/withdraw", // POST { amount, upiId }
-  reviews: "/reviews/me", // -> { reviews:[...] }
-  reviewReply: (id) => `/reviews/${id}/reply`, // POST { text }
-  notifications: "/notifications", // -> { notifications:[...], unreadCount }
-  notificationRead: (id) => `/notifications/${id}/read`, // PATCH
+  wallet: "/wallet/me",
+  withdraw: "/wallet/withdraw",
+  reviews: "/reviews/me",
+  reviewReply: (id) => `/reviews/${id}/reply`,
+  notifications: "/notifications",
+  notificationRead: (id) => `/notifications/${id}/read`,
   notificationsReadAll: "/notifications/read-all",
-  assignPayment: "/payments/assign-to-me", // POST { requestGroupId } - set to "" if session controller already assigns // PATCH
+  assignPayment: "/payments/assign-to-me",
+  booking: (id) => `/bookings/${encodeURIComponent(id)}`, // 🆕 ADD THIS
 };
 
 export const EVENTS = {

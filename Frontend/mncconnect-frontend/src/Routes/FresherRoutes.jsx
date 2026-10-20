@@ -1,3 +1,4 @@
+// src/Routes/FresherRoutes.jsx
 import React from "react";
 import { Routes, Route, Navigate, Outlet } from "react-router-dom";
 
@@ -11,7 +12,8 @@ import Header from "../FresherDashboard/Component/Header";
 import BonusWallet from "../FresherDashboard/pages/FresherWallet";
 import MeetingRoom from "../FresherDashboard/pages/Meetingroom";
 
-const isFresherLoggedIn = () => Boolean(localStorage.getItem("fresher_token"));
+const isFresherLoggedIn = () =>
+  Boolean(localStorage.getItem("fresher_token"));
 
 const FresherProtectedRoute = () => {
   if (!isFresherLoggedIn()) {
@@ -36,16 +38,13 @@ const FresherRoutes = () => {
 
         <Route element={<FresherLayout />}>
           <Route index element={<Home />} />
-
           <Route path="sessionboard/:companyName" element={<SessionBoard />} />
           <Route path="bonus-wallet" element={<BonusWallet />} />
           <Route path="my-bookings" element={<MyBookings />} />
           <Route path="notifications" element={<Notifications />} />
           <Route path="profile" element={<FresherProfile />} />
           <Route path="mnc-logos" element={<Mnclogos />} />
-
           <Route path=":companyName" element={<SessionBoard />} />
-
           <Route path="*" element={<Navigate to="/Home" replace />} />
         </Route>
       </Route>

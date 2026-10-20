@@ -245,17 +245,27 @@ const authHeaders = () => {
 export const respondToSessionRequest = async (request, status) => {
   const requestGroupId = request.requestGroupId || request.id;
 
-  const res = await fetch(`${API_URL}/session/session-requests/${requestGroupId}`, {
-    method: "PATCH",
-    headers: authHeaders(),
-    body: JSON.stringify({ status, mentorId: localStorage.getItem("mentorId") }),
-  });
+  const res = await fetch(
+    `${API_URL}/session/session-requests/${requestGroupId}`,
+    {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        status, // "accepted" or "rejected"
+        mentorId: localStorage.getItem("mentorId"),
+      }),
+    }
+  );
 
   const data = await res.json().catch(() => ({}));
-
-  return { ok: res.ok, taken: res.status === 409, status: res.status, data, requestGroupId };
+  return {
+    ok: res.ok,
+    taken: res.status === 409,
+    status: res.status,
+    data,
+    requestGroupId,
+  };
 };
-
 // Best effort: tie the fresher's payment to this mentor so the wallet updates.
 // If bookingController.respondToRequest already assigns the payment, remove
 // `assignPayment` from ENDPOINTS (mentorApi) and this becomes a no-op.

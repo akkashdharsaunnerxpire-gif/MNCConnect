@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useState } from "react";
-
+// src/App.jsx
+import React, { useState } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -16,34 +16,23 @@ import MentorRoutes from "./Routes/MentorRoutes";
 import FresherRoutes from "./Routes/FresherRoutes";
 import FresherResetPassword from "./Authpage/FresherAuth/FresherResetPassword";
 
-export const LoadingContext = createContext(null);
+import { LoadingContext } from "./context/LoadingContext";
 
-export const useLoading = () => {
-  const context = useContext(LoadingContext);
-
-  if (!context) {
-    throw new Error("useLoading must be used within LoadingContext.Provider");
-  }
-
-  return context;
-};
+// ================= AUTH HELPERS =================
 
 const isMentorLoggedIn = () =>
   Boolean(localStorage.getItem("mnc_mentor_token"));
 
-const isFresherLoggedIn = () => Boolean(localStorage.getItem("fresher_token"));
+const isFresherLoggedIn = () =>
+  Boolean(localStorage.getItem("fresher_token"));
 
 const HomeRoute = () => {
-  if (isMentorLoggedIn()) {
-    return <Navigate to="/mentor/home" replace />;
-  }
-
-  if (isFresherLoggedIn()) {
-    return <Navigate to="/Home" replace />;
-  }
-
+  if (isMentorLoggedIn()) return <Navigate to="/mentor/home" replace />;
+  if (isFresherLoggedIn()) return <Navigate to="/Home" replace />;
   return <Landing />;
 };
+
+// ================= APP =================
 
 function App() {
   const [isLoading, setIsLoading] = useState(false);
@@ -75,20 +64,18 @@ function App() {
               path="/reset-password/:token"
               element={<FresherResetPassword />}
             />
-            <Route path="/mentor/*" element={<MentorRoutes />} />
 
+            <Route path="/mentor/*" element={<MentorRoutes />} />
             <Route path="/Home/*" element={<FresherRoutes />} />
 
             <Route
               path="/profile"
               element={<Navigate to="/Home/profile" replace />}
             />
-
             <Route
               path="/Mnclogos"
               element={<Navigate to="/Home/mnc-logos" replace />}
             />
-
             <Route
               path="/employee-profile"
               element={<Navigate to="/mentor/register" replace />}
