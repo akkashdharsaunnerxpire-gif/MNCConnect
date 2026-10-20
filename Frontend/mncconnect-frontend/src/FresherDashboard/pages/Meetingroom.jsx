@@ -202,11 +202,6 @@ export default function MeetingRoom() {
   const currentRemaining = clock.running ? Math.max(0, clock.remainingMs - (Date.now() - clock.at)) : clock.remainingMs;
 
   useEffect(() => {
-    // Only show prompt if:
-    // 1. Fresher
-    // 2. Timer is running
-    // 3. Remaining time is <= 5 minutes (and > 0)
-    // 4. Not shown before
     if (!isMentor && phase === "in" && clock.running && currentRemaining > 0 && currentRemaining <= 5 * 60 * 1000 && !showCompletionPrompt && !completionDone) {
       setShowCompletionPrompt(true);
     }
@@ -282,8 +277,8 @@ export default function MeetingRoom() {
 
   const status = clock.running ? "Session in progress" : otherHere ? "Connecting…" : `Waiting for the ${isMentor ? "fresher" : "employee"} to join.`;
 
-  // ✅ Instructions Gate: User MUST accept to see meeting UI
-  if (phase === "in" && !myInstructionsDone) {
+  // ✅ Hide instructions gate ONLY WHEN clock is running (both accepted)
+  if (phase === "in" && !clock.running && !myInstructionsDone) {
     return <MeetingInstructionsGate bookingId={bookingId} role={isMentor ? "mentor" : "fresher"} peerAccepted={peerInstructionsDone} />;
   }
 
@@ -322,7 +317,6 @@ export default function MeetingRoom() {
         <p className="shrink-0 pb-3 text-center text-[11px] text-slate-500">Once the session starts, the timer runs to zero even if someone leaves.</p>
       </div>
 
-      {/* ✅ Popup only if condition met */}
       {showCompletionPrompt && !isMentor && (
         <SessionCompletionModal booking={booking} variant="prompt" onClose={() => setShowCompletionPrompt(false)} />
       )}
