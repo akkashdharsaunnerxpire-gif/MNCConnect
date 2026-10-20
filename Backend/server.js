@@ -5,8 +5,6 @@ const http = require("http");
 const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
 
-const seedInstructions = require("./scripts/seedInstructions"); 
-
 const app = require("./app");
 const connectDB = require("./config/db");
 const { initMeetings } = require("./utils/meeting");
@@ -168,7 +166,6 @@ const startServer = async () => {
     console.log("MongoDB connected successfully");
 
     // Run schedulers on ONE instance only
-    await seedInstructions(); 
     startSchedulers(app);
 
     server.listen(PORT, () => {

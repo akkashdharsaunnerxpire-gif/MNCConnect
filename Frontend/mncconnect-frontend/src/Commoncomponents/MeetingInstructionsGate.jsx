@@ -1,15 +1,9 @@
 // src/components/MeetingInstructionsGate.jsx
 import React, { useEffect, useState } from "react";
-import {
-  CheckCircle2,
-  Loader2,
-  ChevronDown,
-  AlertTriangle,
-} from "lucide-react";
+import { CheckCircle2, Loader2, ChevronDown, AlertTriangle } from "lucide-react";
 import socket from "../socket";
 
-const API_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 const LANGS = [
   { code: "en", label: "English" },
@@ -20,11 +14,7 @@ const LANGS = [
   { code: "kn", label: "ಕನ್ನಡ" },
 ];
 
-export default function MeetingInstructionsGate({
-  bookingId,
-  role,
-  peerAccepted = false,
-}) {
+export default function MeetingInstructionsGate({ bookingId, role, peerAccepted = false }) {
   const [lang, setLang] = useState("en");
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -32,12 +22,8 @@ export default function MeetingInstructionsGate({
   const [checked, setChecked] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const token =
-    localStorage.getItem("mnc_mentor_token") ||
-    localStorage.getItem("fresher_token") ||
-    "";
+  const token = localStorage.getItem("mnc_mentor_token") || localStorage.getItem("fresher_token") || "";
 
-  // Fetch instructions whenever the language changes
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -52,24 +38,16 @@ export default function MeetingInstructionsGate({
         if (d.success) setItems(d.instructions || []);
         else setError(d.message || "Unable to load instructions.");
       })
-      .catch(() => {
-        if (!cancelled) setError("Unable to load instructions.");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      .catch(() => { if (!cancelled) setError("Unable to load instructions."); })
+      .finally(() => { if (!cancelled) setLoading(false); });
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [lang, token]);
 
   const submit = () => {
     if (!checked || submitting) return;
     setSubmitting(true);
     socket.emit("meeting:instructions-accepted", { bookingId });
-    // The parent hides this gate once instructionsAccepted[role] is true.
-    // Keep submitting=true so the button stays disabled until then.
   };
 
   return (
@@ -78,33 +56,22 @@ export default function MeetingInstructionsGate({
         <div className="border-b border-white/10 bg-gradient-to-r from-blue-600 to-cyan-500 px-6 py-5 text-white">
           <h2 className="text-xl font-bold">Before we start</h2>
           <p className="mt-1 text-sm text-blue-100">
-            Read the {role === "mentor" ? "mentor" : "fresher"} guidelines
-            below. The meeting timer starts only after both of you accept.
+            Read the {role === "mentor" ? "mentor" : "fresher"} guidelines below. The meeting timer starts only after both of you accept.
           </p>
         </div>
 
         <div className="px-6 py-4">
-          {/* Language selector */}
           <div className="mb-4 flex items-center gap-2">
-            <label className="text-sm font-medium text-slate-700">
-              Language:
-            </label>
+            <label className="text-sm font-medium text-slate-700">Language:</label>
             <div className="relative">
               <select
                 value={lang}
                 onChange={(e) => setLang(e.target.value)}
                 className="appearance-none rounded-xl border border-slate-200 bg-white py-2 pl-3 pr-9 text-sm outline-none focus:border-blue-400"
               >
-                {LANGS.map((l) => (
-                  <option key={l.code} value={l.code}>
-                    {l.label}
-                  </option>
-                ))}
+                {LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
               </select>
-              <ChevronDown
-                size={15}
-                className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-slate-400"
-              />
+              <ChevronDown size={15} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" />
             </div>
           </div>
 
@@ -116,23 +83,14 @@ export default function MeetingInstructionsGate({
           )}
 
           {loading ? (
-            <div className="flex justify-center py-10">
-              <Loader2 className="animate-spin text-blue-600" />
-            </div>
+            <div className="flex justify-center py-10"><Loader2 className="animate-spin text-blue-600" /></div>
           ) : items.length === 0 ? (
-            <p className="py-6 text-center text-sm text-slate-500">
-              No instructions available.
-            </p>
+            <p className="py-6 text-center text-sm text-slate-500">No instructions available.</p>
           ) : (
             <ol className="max-h-[320px] space-y-3 overflow-y-auto pr-1">
               {items.map((it, i) => (
-                <li
-                  key={it._id || i}
-                  className="flex gap-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-700"
-                >
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700">
-                    {i + 1}
-                  </span>
+                <li key={it._id || i} className="flex gap-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-700">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700">{i + 1}</span>
                   <span>{it.text}</span>
                 </li>
               ))}
@@ -140,15 +98,8 @@ export default function MeetingInstructionsGate({
           )}
 
           <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white p-3">
-            <input
-              type="checkbox"
-              checked={checked}
-              onChange={(e) => setChecked(e.target.checked)}
-              className="mt-0.5 h-5 w-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-            />
-            <span className="text-sm text-slate-700">
-              I have read and understood all the instructions above.
-            </span>
+            <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} className="mt-0.5 h-5 w-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+            <span className="text-sm text-slate-700">I have read and understood all the instructions above.</span>
           </label>
 
           <button
@@ -156,11 +107,7 @@ export default function MeetingInstructionsGate({
             disabled={!checked || submitting || items.length === 0}
             className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3.5 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {submitting ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <CheckCircle2 size={16} />
-            )}
+            {submitting ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
             {submitting ? "Accepting…" : "Accept & continue"}
           </button>
 
