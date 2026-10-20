@@ -12,7 +12,7 @@ const { optionalAuth } = require("../middleware/panelAuth");
 const { notify, emitToUser, serializeNotification } = require("../utils/realtime");
 const { buildSessionFields, parseSessionStart } = require("../utils/sessionTime");
 const { linkPaymentToRequest, assignMentorToRequest } = require("./paymentController");
-const { sendMail } = require("../utils/mailer"); // Make sure mailer is imported
+const { sendMail } = require("../utils/mailer");
 
 /* ============================================================
    CONFIG
@@ -55,20 +55,31 @@ const loose = (a, b) => {
 
 const MENTOR_FIELDS = "name email profilePic currentCompany designation department gender languages spokenLanguages skills expertise";
 
+// Returns "" when this mentor may receive the request, else the reason.
 const whyNot = (m, b) => {
-  if (b.companyName && !loose(m.currentCompany, b.companyName)) return `company mismatch`;
-  if (!isAny(b.gender) && norm(m.gender) !== norm(b.gender)) return `gender mismatch`;
+  if (b.companyName && !loose(m.currentCompany, b.companyName)) {
+    return `company is "${m.currentCompany}", request needs "${b.companyName}"`;
+  }
+  // exact compare: loose("male", "female") is TRUE because "female" contains "male"
+  if (!isAny(b.gender) && norm(m.gender) !== norm(b.gender)) {
+    return `gender is "${m.gender}", request needs "${b.gender}"`;
+  }
   const spoken = arr(m.spokenLanguages).map(norm).filter(Boolean);
-  if (!isAny(b.language) && spoken.length && !spoken.some((l) => loose(l, b.language))) return `language mismatch`;
+  if (!isAny(b.language) && spoken.length && !spoken.some((l) => loose(l, b.language))) {
+    return `speaks [${spoken.join(", ")}], request needs "${b.language}"`;
+  }
   if (STRICT_MATCH && !isAny(b.role)) {
     const target = norm(b.role) === "other" ? b.otherRole : b.role;
     const values = [m.designation, m.department, ...arr(m.skills), ...arr(m.expertise), ...arr(m.languages)];
-    if (!isAny(target) && !values.some((v) => loose(v, target))) return `role mismatch`;
+    if (!isAny(target) && !values.some((v) => loose(v, target))) {
+      return `role "${target}" not found in profile`;
+    }
   }
   return "";
 };
 
 const mentorMatches = (m, b) => whyNot(m, b) === "";
+
 const socketIdsOf = (app, mentorId) => {
   const map = app.get("onlineMentors");
   const entry = map && map.get(String(mentorId));
@@ -87,8 +98,8 @@ const hasConflict = (mentorId, startsAt, endsAt, excludeId) =>
     mentor: mentorId,
     status: { $in: ["accepted", "in_progress"] },
     requestGroupId: { $ne: excludeId || "" },
-    startsAt: { $lt: new Date(endsAt.getTime() + GAP_MS) },
-    endsAt: { $gt: new Date(startsAt.getTime() - GAP_MS) },
+    startsAt: { $lt: new Date(new Date(endsAt).getTime() + GAP_MS) },
+    endsAt: { $gt: new Date(new Date(startsAt).getTime() - GAP_MS) },
   });
 
 const toMentorPayload = (b) => ({
@@ -168,13 +179,30 @@ const refundPayment = async (payment, reason = "") => {
 };
 
 const broadcastLoop = async (req, mentors, booking, payload, startsAt, endsAt, requestGroupId, notified) => {
+  const report = [];
+
   for (const m of mentors) {
-    const reason = whyNot(m, booking) || (socketIdsOf(req.app, m._id).length === 0 ? "not online" : "") || ((await hasConflict(m._id, startsAt, endsAt, requestGroupId)) ? "conflict" : "");
+    const reason =
+      whyNot(m, booking) ||
+      (socketIdsOf(req.app, m._id).length === 0 ? "not online right now" : "") ||
+      ((await hasConflict(m._id, startsAt, endsAt, requestGroupId)) ? "has another session within 30 minutes" : "");
+
+    report.push(`${m.name || m._id}: ${reason || "SENT"}`);
     if (reason) continue;
+
     notified.push(m._id);
     emitToMentorSockets(req.app, m._id, "session-request", payload);
-    notify({ user: m._id, role: "mentor", title: "New session request", message: `${booking.fresherName} wants a session.`, type: "session", link: "/mentor/home" });
+    notify({
+      user: m._id,
+      role: "mentor",
+      title: "New session request",
+      message: `${booking.fresherName} wants a ${booking.durationMinutes}-minute session on ${booking.date} at ${booking.time}.`,
+      type: "session",
+      link: "/mentor/home",
+    });
   }
+
+  console.log(`[request ${requestGroupId}] ${mentors.length} approved mentor(s):\n  ${report.join("\n  ") || "none"}`);
 };
 
 /* ============================================================
@@ -192,7 +220,7 @@ exports.createRequest = async (req, res) => {
     if (!requestGroupId || !paymentId) return fail(res, 400, "requestGroupId and paymentId required");
 
     const existing = await Booking.findOne({ requestGroupId }).populate("mentor", POPULATE_MENTOR);
-    if (existing) return res.json({ success: true, booking: toClient(existing), notifiedCount: existing.notified.length });
+    if (existing) return res.json({ success: true, booking: toClient(existing), notifiedCount: (existing.notified || []).length });
 
     const payment = await Payment.findOne({ razorpayPaymentId: paymentId, status: "paid" });
     if (!payment) return fail(res, 402, "Payment not verified");
@@ -203,7 +231,7 @@ exports.createRequest = async (req, res) => {
     };
 
     const minutes = Number(sd.duration);
-    if (!Number.isInteger(minutes) || minutes < 30 || minutes > 240) return reject(400, "Invalid duration");
+    if (!Number.isInteger(minutes) || minutes < MIN_MINUTES || minutes > MAX_MINUTES) return reject(400, "Invalid duration");
 
     const startsAt = parseSessionStart(sd.date, sd.time);
     if (!startsAt || startsAt.getTime() < Date.now() + MIN_LEAD_MS) return reject(400, "Invalid date/time");
@@ -258,7 +286,7 @@ exports.updateRequest = async (req, res) => {
     const mentorId = req.user?.role === "mentor" ? req.user.id : req.body?.mentorId;
 
     if (!["accepted", "rejected"].includes(status)) return fail(res, 400, "Status must be accepted/rejected");
-    
+
     const booking = await Booking.findOne({ requestGroupId });
     if (!booking) return fail(res, 404, "Request not found");
 
@@ -279,7 +307,7 @@ exports.updateRequest = async (req, res) => {
 
     await assignMentorToRequest({ requestGroupId, mentorId }).catch(() => {});
 
-    // 5-minute reminder emails
+    // Reminder emails
     try {
       const mentor = await Mentor.findById(mentorId).lean();
       const fresher = await Fresher.findById(accepted.fresher).lean();
@@ -289,7 +317,7 @@ exports.updateRequest = async (req, res) => {
           to: [mentor.email, fresher.email],
           subject: `Session starts soon: ${accepted.companyName}`,
           text: `Your session starts at ${accepted.time}. The room will open at ${openTime}. Please be on time.`,
-          html: `<p>Your session starts at <b>${accepted.time}</b>. The room will open at <b>${openTime}</b>. Please be on time.</p>`
+          html: `<p>Your session starts at <b>${accepted.time}</b>. The room will open at <b>${openTime}</b>. Please be on time.</p>`,
         });
       }
     } catch (e) { console.log("Mail error:", e.message); }
@@ -297,9 +325,13 @@ exports.updateRequest = async (req, res) => {
     emitToUser(accepted.fresher, "booking:updated", toClient(accepted));
     return res.json({ success: true, status: "accepted", booking: toClient(accepted) });
   } catch (error) {
+    console.error("updateRequest error:", error);
     return fail(res, 500, "Failed to update");
   }
 };
+
+// alias so older route files that use respondToRequest keep working
+exports.respondToRequest = exports.updateRequest;
 
 /* ============================================================
    COMPLETION & FRESHER CONFIRMATION
@@ -307,24 +339,24 @@ exports.updateRequest = async (req, res) => {
 
 const completeBooking = async (requestGroupId) => {
   const now = new Date();
-  
-  // Timer over → set to awaiting_confirmation
+
+  // Timer over -> awaiting_confirmation
   const b = await Booking.findOneAndUpdate(
     { requestGroupId, status: { $in: ["accepted", "in_progress"] } },
     { $set: { status: "awaiting_confirmation", "meeting.remainingMs": 0, "meeting.endedAt": now } },
     { returnDocument: "after" }
   ).populate("mentor", POPULATE_MENTOR);
-  
+
   if (!b) return null;
 
   notify({
     user: b.fresher, role: "fresher", title: "Session ended",
     message: "Did the session go well? Please confirm.", type: "session", link: `/Home/meeting/${b.requestGroupId}`,
   });
-  
+
   emitToUser(b.fresher, "booking:updated", toClient(b));
   if (b.mentor) emitToUser(b.mentor._id, "booking:updated", toClient(b));
-  
+
   return b;
 };
 
@@ -347,6 +379,8 @@ exports.confirmCompletion = async (req, res) => {
         { returnDocument: "after" }
       ).populate("mentor", POPULATE_MENTOR);
 
+      if (!updated) return fail(res, 409, "Already confirmed");
+
       await Payment.updateOne({ requestGroupId, status: "paid" }, { $set: { sessionStatus: "completed" } });
       if (updated.mentor) {
         await Mentor.updateOne({ _id: updated.mentor._id }, { $inc: { totalSessions: 1 } });
@@ -362,53 +396,167 @@ exports.confirmCompletion = async (req, res) => {
       { returnDocument: "after" }
     ).populate("mentor", POPULATE_MENTOR);
 
+    if (!updated) return fail(res, 409, "Already confirmed");
+
     const payment = await Payment.findOne({ razorpayPaymentId: booking.razorpayPaymentId });
     await refundPayment(payment, "Fresher reported issue");
 
     emitToUser(updated.fresher, "booking:updated", toClient(updated));
     return res.json({ success: true, status: "disputed", booking: toClient(updated) });
   } catch (error) {
+    console.error("confirmCompletion error:", error);
     return fail(res, 500, "Unable to confirm session");
   }
 };
 
 /* ============================================================
-   OTHER ENDPOINTS (GET, SCHEDULERS etc.)
+   GET ENDPOINTS
 ============================================================ */
 
 exports.getRequestStatus = async (req, res) => {
-  const b = await Booking.findOne({ requestGroupId: String(req.params.requestGroupId || "") }).populate("mentor", POPULATE_MENTOR);
-  if (!b) return fail(res, 404, "Not found");
-  return res.json({ success: true, request: toClient(b), booking: toClient(b) });
+  try {
+    const b = await Booking.findOne({ requestGroupId: String(req.params.requestGroupId || "") }).populate("mentor", POPULATE_MENTOR);
+    if (!b) return fail(res, 404, "Not found");
+    return res.json({ success: true, request: toClient(b), booking: toClient(b) });
+  } catch (error) {
+    return fail(res, 500, "Failed to load request");
+  }
 };
 
 exports.getBooking = async (req, res) => {
-  const b = await Booking.findOne({ requestGroupId: String(req.params.id) }).populate("mentor", POPULATE_MENTOR);
-  if (!b) return fail(res, 404, "Not found");
-  const mine = String(b.fresher) === req.user.id || String(b.mentor?._id || b.mentor) === req.user.id;
-  if (!mine) return fail(res, 403, "Access denied");
-  return res.json({ success: true, booking: toClient(b) });
+  try {
+    const b = await Booking.findOne({ requestGroupId: String(req.params.id) }).populate("mentor", POPULATE_MENTOR);
+    if (!b) return fail(res, 404, "Not found");
+    const mine = String(b.fresher) === req.user.id || String(b.mentor?._id || b.mentor) === req.user.id;
+    if (!mine) return fail(res, 403, "Access denied");
+    return res.json({ success: true, booking: toClient(b) });
+  } catch (error) {
+    return fail(res, 500, "Failed to load booking");
+  }
 };
 
 exports.myBookings = async (req, res) => {
-  const list = await Booking.find({ fresher: req.user.id }).populate("mentor", POPULATE_MENTOR).sort({ startsAt: -1 });
-  return res.json({ success: true, bookings: list.map(toClient) });
+  try {
+    const list = await Booking.find({ fresher: req.user.id }).populate("mentor", POPULATE_MENTOR).sort({ startsAt: -1 });
+    return res.json({ success: true, bookings: list.map(toClient) });
+  } catch (error) {
+    return fail(res, 500, "Failed to load bookings");
+  }
 };
+
+/* ---------- fresher: completed sessions that still need a review ---------- */
+exports.needsReview = async (req, res) => {
+  try {
+    const list = await Booking.find({
+      fresher: req.user.id,
+      status: "completed",
+      reviewed: { $ne: true },
+    })
+      .populate("mentor", POPULATE_MENTOR)
+      .sort({ completedAt: -1 })
+      .limit(10);
+
+    const bookings = list.map(toClient);
+    return res.json({ success: true, bookings, booking: bookings[0] || null, count: bookings.length });
+  } catch (error) {
+    console.error("needsReview error:", error);
+    return fail(res, 500, "Failed to load reviews");
+  }
+};
+
+/* ---------- mentor: pending requests that match this mentor ---------- */
+exports.mentorPending = async (req, res) => {
+  try {
+    const mentor = await Mentor.findById(req.user.id).select(MENTOR_FIELDS).lean();
+    if (!mentor) return fail(res, 404, "Mentor not found");
+
+    const pending = await Booking.find({
+      status: "pending",
+      expiresAt: { $gt: new Date() },
+      declinedBy: { $ne: req.user.id },
+    })
+      .sort({ startsAt: 1 })
+      .limit(50);
+
+    const out = [];
+    for (const b of pending) {
+      if (!mentorMatches(mentor, b)) continue;
+      if (await hasConflict(mentor._id, b.startsAt, b.endsAt, b.requestGroupId)) continue;
+      out.push(toMentorPayload(b));
+    }
+
+    return res.json({ success: true, requests: out, bookings: out, count: out.length });
+  } catch (error) {
+    console.error("mentorPending error:", error);
+    return fail(res, 500, "Failed to load requests");
+  }
+};
+
+/* ============================================================
+   FRESHER NOTIFICATIONS
+   (assumes Notification has: user, role, read:Boolean, createdAt)
+============================================================ */
+
+exports.getFresherNotifications = async (req, res) => {
+  try {
+    const filter = { user: req.user.id, role: "fresher" };
+    const list = await Notification.find(filter).sort({ createdAt: -1 }).limit(50).lean();
+    const unreadCount = await Notification.countDocuments({ ...filter, read: { $ne: true } });
+
+    return res.json({
+      success: true,
+      notifications: list.map((n) => serializeNotification(n)),
+      unreadCount,
+    });
+  } catch (error) {
+    console.error("getFresherNotifications error:", error);
+    return fail(res, 500, "Failed to load notifications");
+  }
+};
+
+exports.markAllFresherNotificationsRead = async (req, res) => {
+  try {
+    await Notification.updateMany(
+      { user: req.user.id, role: "fresher", read: { $ne: true } },
+      { $set: { read: true } },
+    );
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("markAllFresherNotificationsRead error:", error);
+    return fail(res, 500, "Failed to update notifications");
+  }
+};
+
+exports.markFresherNotificationRead = async (req, res) => {
+  try {
+    await Notification.updateOne(
+      { _id: req.params.id, user: req.user.id, role: "fresher" },
+      { $set: { read: true } },
+    );
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("markFresherNotificationRead error:", error);
+    return fail(res, 500, "Failed to update notification");
+  }
+};
+
+/* ============================================================
+   SCHEDULERS
+============================================================ */
 
 exports.startSchedulers = (app) => {
   setInterval(async () => {
     if (mongoose.connection.readyState !== 1) return;
     try {
       const now = new Date();
-      // Pending expire
+      // Expire old pending requests
       await Booking.updateMany({ status: "pending", expiresAt: { $lte: now } }, { $set: { status: "expired" } });
-      
-      // SEND REMINDERS 5 MINS BEFORE
-      const soon = await Booking.find({ status: "accepted", reminderSent: false, startsAt: { $lte: new Date(now.getTime() + 5 * 60000) } }).populate("mentor", POPULATE_MENTOR);
-      for (const b of soon) {
-        await Booking.updateOne({ _id: b._id }, { $set: { reminderSent: true } });
-        // Reminders are sent in acceptRequest itself, so this is just a fallback
-      }
+
+      // Fallback reminder flag (emails are sent in updateRequest)
+      await Booking.updateMany(
+        { status: "accepted", reminderSent: false, startsAt: { $lte: new Date(now.getTime() + 5 * 60000) } },
+        { $set: { reminderSent: true } },
+      );
     } catch (e) { console.error(e); }
   }, 30000);
 };
