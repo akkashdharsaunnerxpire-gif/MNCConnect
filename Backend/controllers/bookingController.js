@@ -10,7 +10,7 @@ const Notification = require("../models/Notification");
 
 const { optionalAuth } = require("../middleware/panelAuth");
 const { notify, emitToUser, serializeNotification } = require("../utils/realtime");
-const { buildSessionFields, parseSessionStart } = require("../utils/sessionTime");
+const { parseSessionStart } = require("../utils/sessionTime");
 const { linkPaymentToRequest, assignMentorToRequest } = require("./paymentController");
 const { sendMail } = require("../utils/mailer");
 
@@ -18,18 +18,13 @@ const { sendMail } = require("../utils/mailer");
    CONFIG
 ============================================================ */
 
-const PRICE_PER_30_MIN = Number(process.env.PRICE_PER_30_MIN || 200);
 const MIN_MINUTES = 30;
 const MAX_MINUTES = 240;
 const MIN_LEAD_MS = 15 * 60 * 1000;
 const GAP_MS = 30 * 60 * 1000;
 const OPEN_BEFORE_MS = 5 * 60 * 1000;
-const DEADLINE_GRACE_MS = 60 * 60 * 1000;
 
 const STRICT_MATCH = process.env.STRICT_MENTOR_MATCH === "true";
-
-const priceFor = (minutes) => (minutes / 30) * PRICE_PER_30_MIN;
-const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
 /* ============================================================
    HELPERS
@@ -313,12 +308,14 @@ exports.updateRequest = async (req, res) => {
       const fresher = await Fresher.findById(accepted.fresher).lean();
       if (mentor?.email && fresher?.email) {
         const openTime = new Date(new Date(accepted.startsAt).getTime() - OPEN_BEFORE_MS).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" });
-        sendMail({
-          to: [mentor.email, fresher.email],
-          subject: `Session starts soon: ${accepted.companyName}`,
-          text: `Your session starts at ${accepted.time}. The room will open at ${openTime}. Please be on time.`,
-          html: `<p>Your session starts at <b>${accepted.time}</b>. The room will open at <b>${openTime}</b>. Please be on time.</p>`,
-        });
+        Promise.resolve(
+          sendMail({
+            to: [mentor.email, fresher.email],
+            subject: `Session starts soon: ${accepted.companyName}`,
+            text: `Your session starts at ${accepted.time}. The room will open at ${openTime}. Please be on time.`,
+            html: `<p>Your session starts at <b>${accepted.time}</b>. The room will open at <b>${openTime}</b>. Please be on time.</p>`,
+          })
+        ).catch((e) => console.log("Mail error:", e.message));
       }
     } catch (e) { console.log("Mail error:", e.message); }
 
@@ -489,6 +486,26 @@ exports.mentorPending = async (req, res) => {
   } catch (error) {
     console.error("mentorPending error:", error);
     return fail(res, 500, "Failed to load requests");
+  }
+};
+
+/* ---------- when a mentor comes online, replay matching pending requests ---------- */
+exports.pushPendingToMentor = async (app, mentorId) => {
+  const mentor = await Mentor.findById(mentorId).select(MENTOR_FIELDS).lean();
+  if (!mentor) return;
+
+  const pending = await Booking.find({
+    status: "pending",
+    expiresAt: { $gt: new Date() },
+    declinedBy: { $ne: mentorId },
+  })
+    .sort({ startsAt: 1 })
+    .limit(20);
+
+  for (const b of pending) {
+    if (!mentorMatches(mentor, b)) continue;
+    if (await hasConflict(mentor._id, b.startsAt, b.endsAt, b.requestGroupId)) continue;
+    emitToMentorSockets(app, mentorId, "session-request", toMentorPayload(b));
   }
 };
 

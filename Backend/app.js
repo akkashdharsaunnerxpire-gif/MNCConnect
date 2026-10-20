@@ -67,7 +67,12 @@ app.use(
       return callback(err);
     }
 
-    callback(null, { origin: true, credentials: true });
+    callback(null, {
+      origin: true,
+      credentials: true,
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    });
   })
 );
 
@@ -86,7 +91,11 @@ try {
   store = (MongoStore.default || MongoStore).create({
     clientPromise: mongoose.connection
       .asPromise()
-      .then((conn) => conn.getClient()),
+      .then((conn) => conn.getClient())
+      .catch((err) => {
+        console.error("Session store Mongo connection failed:", err.message);
+        throw err;
+      }),
     collectionName: "sessions",
   });
 } catch (error) {
@@ -96,7 +105,7 @@ try {
 }
 
 if (isProd && !process.env.SESSION_SECRET) {
-  console.warn("⚠️  SESSION_SECRET is not set - using an insecure default!");
+  console.warn("SESSION_SECRET is not set - using an insecure default!");
 }
 
 app.use(
@@ -171,7 +180,7 @@ if (!isProd) {
   );
   if (!listed.some((l) => l.includes("/session/session-requests/"))) {
     console.warn(
-      "⚠️  PATCH /api/session/session-requests/:requestGroupId is NOT handled by bookingController"
+      "PATCH /api/session/session-requests/:requestGroupId is NOT handled by bookingController"
     );
   }
 }

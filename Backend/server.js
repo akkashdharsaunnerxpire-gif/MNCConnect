@@ -5,6 +5,14 @@ const http = require("http");
 const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
 
+// ---- never let one bad handler kill the whole server ----
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught exception:", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled rejection:", reason);
+});
+
 const app = require("./app");
 const connectDB = require("./config/db");
 const { initMeetings } = require("./utils/meeting");
@@ -64,6 +72,26 @@ const PRESENCE = {
 const toKey = (id) =>
   id === undefined || id === null ? "" : String(id).trim();
 
+// Remove this socket from a user's set
+const markOffline = (socket, role) => {
+  const { map, label } = PRESENCE[role];
+  const id = socket.data.presence?.[role];
+  if (!id) return;
+
+  const set = map.get(id);
+  if (set) {
+    set.delete(socket.id);
+    if (set.size === 0) {
+      map.delete(id);
+      console.log(`${label} ${id} is OFFLINE`);
+    } else {
+      console.log(`${label} ${id} still has ${set.size} socket(s) online`);
+    }
+  }
+
+  delete socket.data.presence[role];
+};
+
 // Add a socket to a user's set
 const markOnline = (socket, role, rawId) => {
   const { map, label } = PRESENCE[role];
@@ -85,29 +113,9 @@ const markOnline = (socket, role, rawId) => {
   return id;
 };
 
-// Remove this socket from a user's set
-const markOffline = (socket, role) => {
-  const { map, label } = PRESENCE[role];
-  const id = socket.data.presence?.[role];
-  if (!id) return;
-
-  const set = map.get(id);
-  if (set) {
-    set.delete(socket.id);
-    if (set.size === 0) {
-      map.delete(id);
-      console.log(`${label} ${id} is OFFLINE`);
-    } else {
-      console.log(`${label} ${id} still has ${set.size} socket(s) online`);
-    }
-  }
-
-  delete socket.data.presence[role];
-};
-
 // ================= JWT HANDSHAKE AUTH =================
 // The client passes the token via socket.handshake.auth.token.
-// The server derives identity from the token — a client can NEVER spoof it.
+// The server derives identity from the token - a client can NEVER spoof it.
 
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token;
@@ -139,9 +147,11 @@ io.on("connection", (socket) => {
   if (role === "mentor") {
     markOnline(socket, "mentor", id);
     // Send pending booking requests to this mentor
-    pushPendingToMentor(app, id).catch((err) =>
-      console.error("pushPendingToMentor failed:", err.message)
-    );
+    if (typeof pushPendingToMentor === "function") {
+      Promise.resolve(pushPendingToMentor(app, id)).catch((err) =>
+        console.error("pushPendingToMentor failed:", err.message)
+      );
+    }
   } else if (role === "fresher") {
     markOnline(socket, "employee", id);
   }
@@ -168,7 +178,7 @@ const startServer = async () => {
     // Run schedulers on ONE instance only
     startSchedulers(app);
 
-    server.listen(PORT, () => {
+    server.listen(PORT, "0.0.0.0", () => {
       console.log(`Server running on port ${PORT}`);
       console.log(`Socket.IO running on port ${PORT}`);
       console.log(`Allowed frontend: ${CLIENT_URL}`);
@@ -191,6 +201,3 @@ const shutdown = (signal) => {
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
-process.on("unhandledRejection", (reason) => {
-  console.error("Unhandled rejection:", reason);
-});
