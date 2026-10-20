@@ -397,3 +397,19 @@ exports.myBookings = async (req, res) => {
   const list = await Booking.find({ fresher: req.user.id }).populate("mentor", POPULATE_MENTOR).sort({ startsAt: -1 });
   return res.json({ success: true, bookings: list.map(toClient) });
 };
+
+// ✅ FIXED: Added missing needsReview export
+exports.needsReview = async (req, res) => {
+  try {
+    const b = await Booking.findOne({
+      fresher: req.user.id,
+      status: "completed",
+      reviewed: false,
+    })
+      .populate("mentor", POPULATE_MENTOR)
+      .sort({ completedAt: 1 });
+    return res.json({ success: true, booking: b ? toClient(b) : null });
+  } catch (error) {
+    return fail(res, 500, "Failed to check reviews");
+  }
+};
