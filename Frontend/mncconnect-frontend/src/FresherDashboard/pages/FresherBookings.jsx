@@ -16,7 +16,6 @@ const MyBookings = () => {
   const [tab, setTab] = useState("upcoming");
   const [dismissedReview, setDismissedReview] = useState(null);
 
-  // requestGroupId -> { remainingMs, running, at }  (live meeting timer)
   const [timers, setTimers] = useState({});
 
   const { data, loading, error, connected, reload } = useLive({
@@ -33,7 +32,6 @@ const MyBookings = () => {
 
   const bookings = data?.bookings || [];
 
-  // take the live timer from every fresh API response
   useEffect(() => {
     const fromApi = {};
     bookings.forEach((b) => {
@@ -45,7 +43,6 @@ const MyBookings = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
-  // server pushes the live timer every ~5s while the meeting runs
   useEffect(() => {
     const onTimer = (p) => {
       const id = p?.requestGroupId || p?.bookingId;
@@ -69,21 +66,44 @@ const MyBookings = () => {
     const starts = new Date(b.startsAt).getTime();
     const ends = new Date(b.endsAt).getTime();
     const opens = starts - 5 * 60000;
+    const left = timerOf(b);
+
+    // ✅ Status handling based on backend
+    if (["completed", "awaiting_confirmation", "disputed"].includes(b.status)) {
+      if (b.reviewed) return { key: "done", label: "Completed", tone: "emerald" };
+      if (b.status === "disputed") return { key: "refunded", label: "Refunded", tone: "slate" };
+      // If it's completed or awaiting confirmation but not reviewed yet
+      return { key: "review", label: "Review required", tone: "red" };
+    }
 
     if (b.status === "pending") return { key: "pending", label: "Waiting for an employee", tone: "amber" };
     if (b.status === "expired" || b.status === "missed") return { key: "refunded", label: "Refunded", tone: "slate" };
-    if (b.status === "completed") return b.reviewed ? { key: "done", label: "Completed", tone: "emerald" } : { key: "review", label: "Review required", tone: "red" };
-    if (timers[b.requestGroupId]?.running) return { key: "open", label: "In progress", tone: "green", opens, starts };
-    if (now >= opens && now < ends + GRACE_MS) return { key: "open", label: now >= starts ? "Meeting open" : "Opens now", tone: "green", opens, starts };
+
+    // ✅ If timer is running (live meeting)
+    if (left !== null && left > 0) {
+      return { key: "open", label: "In progress", tone: "green", opens, starts };
+    }
+
+    // ✅ If meeting time is over but timer didn't start or ended
+    if (now >= ends) {
+      return { key: "ended", label: "Meeting ended", tone: "slate" };
+    }
+
+    if (now >= opens && now < ends) {
+      return { key: "open", label: "Meeting open", tone: "green", opens, starts };
+    }
+
     return { key: "confirmed", label: "Confirmed", tone: "blue", opens, starts };
   };
 
   const decorated = useMemo(() => bookings.map((b) => ({ b, v: view(b) })), [bookings, now, timers]); // eslint-disable-line
-  const upcoming = decorated.filter(({ v }) => ["pending", "confirmed", "open", "review"].includes(v.key));
-  const past = decorated.filter(({ v }) => ["done", "refunded"].includes(v.key));
+  
+  // ✅ Automatically move to past if meeting is over or review is needed
+  const upcoming = decorated.filter(({ v }) => ["pending", "confirmed", "open"].includes(v.key));
+  const past = decorated.filter(({ v }) => ["done", "refunded", "review", "ended"].includes(v.key));
+  
   const list = tab === "upcoming" ? upcoming : past;
 
-  // a finished session MUST be reviewed
   const needsReview = decorated.find(({ v, b }) => v.key === "review" && b.requestGroupId !== dismissedReview)?.b;
 
   const tones = {
@@ -177,15 +197,14 @@ const MyBookings = () => {
                         </button>
                       )}
                       {v.key === "done" && <div className="flex items-center justify-center gap-2 text-sm font-semibold text-emerald-600"><CheckCircle2 className="h-4 w-4" /> Completed</div>}
-                      {v.key === "refunded" && (
+                      {(v.key === "refunded" || v.key === "ended") && (
                         <div className="flex items-center justify-center gap-1 rounded-xl bg-slate-100 px-4 py-3 text-xs font-medium text-slate-600">
-                          <IndianRupee className="h-3.5 w-3.5" /> {inr(b.amount)} {b.refundStatus === "failed" ? "refund processing" : "refunded"}
+                          <IndianRupee className="h-3.5 w-3.5" /> {inr(b.amount)} {b.refundStatus === "failed" ? "refund processing" : b.refundStatus === "refunded" ? "refunded" : "amount held"}
                         </div>
                       )}
                     </div>
                   </div>
 
-                  {/* LIVE TIMER - same time as inside the video call */}
                   {left !== null && (
                     <div className={`mx-5 mb-4 flex items-center justify-between gap-4 rounded-xl border p-3 sm:mx-6 ${warn ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
                       <div>

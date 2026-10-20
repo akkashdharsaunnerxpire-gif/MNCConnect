@@ -35,9 +35,7 @@ const generateToken = (id, role) => {
 // =====================================================
 
 const normalizeEmail = (email) => {
-  return String(email || "")
-    .trim()
-    .toLowerCase();
+  return String(email || "").trim().toLowerCase();
 };
 
 const validatePassword = (password) => {
@@ -46,6 +44,16 @@ const validatePassword = (password) => {
     password.length >= 8 &&
     password.length <= 128
   );
+};
+
+// ✅ Helper to generate random 6-character Referral Code
+const generateReferralCode = () => {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let code = "";
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
 };
 
 // =====================================================
@@ -64,6 +72,11 @@ const sanitizeFresher = (user) => {
     profilePic: user.profilePic || "",
     lastLoginAt: user.lastLoginAt,
     createdAt: user.createdAt,
+    
+    // ✅ Wallet & Referral details sent to frontend
+    walletBalance: user.walletBalance || 0,
+    referralCode: user.referralCode || "",
+    hasUsedReferral: user.hasUsedReferral || false,
   };
 };
 
@@ -100,19 +113,15 @@ const sanitizeMentor = (mentor) => {
 };
 
 // =====================================================
-// 1. FRESHER REGISTER
+// 1. FRESHER REGISTER (With Wallet & Referral Logic)
 // POST /api/auth/fresher/register
 // =====================================================
 
 exports.registerFresher = async (req, res) => {
   try {
-    const { name, email, mobile, countryCode, password } = req.body;
+    const { name, email, mobile, countryCode, password, referralInput } = req.body;
 
     console.log("FRESHER REGISTER BODY:", req.body);
-
-    // =====================================================
-    // STRICT VALIDATIONS - FRESHER
-    // =====================================================
 
     // 1. Check required fields
     if (!name || !email || !mobile || !password) {
@@ -123,11 +132,7 @@ exports.registerFresher = async (req, res) => {
     }
 
     // 2. Validate name
-    if (
-      typeof name !== "string" ||
-      name.trim().length < 2 ||
-      name.trim().length > 50
-    ) {
+    if (typeof name !== "string" || name.trim().length < 2 || name.trim().length > 50) {
       return res.status(400).json({
         success: false,
         message: "Name must be between 2 and 50 characters.",
@@ -151,11 +156,10 @@ exports.registerFresher = async (req, res) => {
       });
     }
 
-    // 5. Validate mobile number - FIXED
+    // 5. Validate mobile number
     const mobileRegex = /^[0-9]{10}$/;
     let cleanMobileForValidation = String(mobile).replace(/[\s\-\(\)]/g, "");
 
-    // Remove country code if present in the mobile string
     if (cleanMobileForValidation.startsWith("+")) {
       const digitsOnly = cleanMobileForValidation.replace(/[^0-9]/g, "");
       if (digitsOnly.length >= 10) {
@@ -163,11 +167,7 @@ exports.registerFresher = async (req, res) => {
       }
     }
 
-    // If it has country code without + (e.g., "918015874936")
-    if (
-      cleanMobileForValidation.length > 10 &&
-      /^\d{11,13}$/.test(cleanMobileForValidation)
-    ) {
+    if (cleanMobileForValidation.length > 10 && /^\d{11,13}$/.test(cleanMobileForValidation)) {
       cleanMobileForValidation = cleanMobileForValidation.slice(-10);
     }
 
@@ -191,65 +191,31 @@ exports.registerFresher = async (req, res) => {
       });
     }
 
-    // Clean and prepare data
     const cleanName = String(name).trim();
     const normalizedEmail = normalizeEmail(email);
     const cleanMobile = cleanCountryCode + cleanMobileForValidation;
 
     console.log("Cleaned mobile:", cleanMobile);
 
-    // =====================================================
-    // UNIQUENESS CHECKS - FRESHER
-    // =====================================================
-
-    // Check email in Fresher collection
-    const existingFresherByEmail = await Fresher.findOne({
-      email: normalizedEmail,
-    });
-
+    // UNIQUENESS CHECKS
+    const existingFresherByEmail = await Fresher.findOne({ email: normalizedEmail });
     if (existingFresherByEmail) {
-      return res.status(409).json({
-        success: false,
-        message: "A fresher account already exists with this email.",
-      });
+      return res.status(409).json({ success: false, message: "A fresher account already exists with this email." });
     }
 
-    // Check email in Mentor collection
-    const existingMentorByEmail = await Mentor.findOne({
-      email: normalizedEmail,
-    });
-
+    const existingMentorByEmail = await Mentor.findOne({ email: normalizedEmail });
     if (existingMentorByEmail) {
-      return res.status(409).json({
-        success: false,
-        message: "This email is already registered as a mentor.",
-      });
+      return res.status(409).json({ success: false, message: "This email is already registered as a mentor." });
     }
 
-    // Check mobile in Fresher collection
-    const existingFresherByMobile = await Fresher.findOne({
-      mobile: cleanMobile,
-    });
-
+    const existingFresherByMobile = await Fresher.findOne({ mobile: cleanMobile });
     if (existingFresherByMobile) {
-      return res.status(409).json({
-        success: false,
-        message:
-          "This mobile number is already registered with a fresher account.",
-      });
+      return res.status(409).json({ success: false, message: "This mobile number is already registered with a fresher account." });
     }
 
-    // Check mobile in Mentor collection
-    const existingMentorByMobile = await Mentor.findOne({
-      mobile: cleanMobile,
-    });
-
+    const existingMentorByMobile = await Mentor.findOne({ mobile: cleanMobile });
     if (existingMentorByMobile) {
-      return res.status(409).json({
-        success: false,
-        message:
-          "This mobile number is already registered with a mentor account.",
-      });
+      return res.status(409).json({ success: false, message: "This mobile number is already registered with a mentor account." });
     }
 
     // =====================================================
@@ -258,6 +224,12 @@ exports.registerFresher = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
+    // ✅ Generate Unique Referral Code
+    let myReferralCode = generateReferralCode();
+    while (await Fresher.exists({ referralCode: myReferralCode })) {
+      myReferralCode = generateReferralCode();
+    }
+
     const fresher = await Fresher.create({
       name: cleanName,
       email: normalizedEmail,
@@ -265,8 +237,24 @@ exports.registerFresher = async (req, res) => {
       countryCode: cleanCountryCode,
       password: hashedPassword,
       profilePic: "",
-      lastLoginAt: null,
+      lastLoginAt: new Date(),
+      referralCode: myReferralCode,
+      walletBalance: 25, // ✅ Welcome Bonus ₹25
+      welcomeBonusClaimed: true,
     });
+
+    // ✅ Apply Referral Code (if entered during registration)
+    if (referralInput) {
+      const referrer = await Fresher.findOne({ referralCode: referralInput.toUpperCase() });
+      if (referrer && referrer._id.toString() !== fresher._id.toString()) {
+        referrer.walletBalance = (referrer.walletBalance || 0) + 10; // ✅ Referral Bonus ₹10
+        await referrer.save();
+
+        fresher.referredBy = referrer._id;
+        fresher.hasUsedReferral = true;
+        await fresher.save();
+      }
+    }
 
     const token = generateToken(fresher._id, "fresher");
 
@@ -276,6 +264,7 @@ exports.registerFresher = async (req, res) => {
       user: sanitizeFresher(fresher),
       token,
     });
+
   } catch (error) {
     console.error("Fresher registration error:", error);
 
@@ -301,10 +290,6 @@ exports.registerFresher = async (req, res) => {
 exports.loginFresher = async (req, res) => {
   try {
     const { email, password } = req.body;
-
-    // =====================================================
-    // STRICT VALIDATIONS - LOGIN
-    // =====================================================
 
     if (!email || !password) {
       return res.status(400).json({
@@ -354,6 +339,7 @@ exports.loginFresher = async (req, res) => {
       user: sanitizeFresher(fresher),
       token,
     });
+
   } catch (error) {
     console.error("Fresher login error:", error);
     return res.status(500).json({
@@ -362,18 +348,6 @@ exports.loginFresher = async (req, res) => {
     });
   }
 };
-
-// =====================================================
-// 3. MENTOR REGISTER
-// POST /api/auth/mentor/register
-// =====================================================
-
-// =====================================================
-// 3. MENTOR REGISTER
-// POST /api/auth/mentor/register
-// =====================================================
-
-// ... (keep all your existing code until registerMentor)
 
 // =====================================================
 // 3. MENTOR REGISTER WITH CLOUDINARY
@@ -385,755 +359,264 @@ exports.registerMentor = async (req, res) => {
 
   try {
     const {
-      name,
-      email,
-      mobile,
-      countryCode,
-      password,
-      company,
-      designation,
-      department,
-      gender,
-      experience,
-      location,
-      linkedin,
-      skills,
-      bio,
-      companyId,
-      confirmationAccepted,
+      name, email, mobile, countryCode, password, company, designation, department,
+      gender, experience, location, linkedin, skills, bio, companyId, confirmationAccepted,
     } = req.body;
-
-    console.log("========================================");
-    console.log("MENTOR REGISTER BODY:", req.body);
-    console.log("FILES RECEIVED:", req.files);
-    console.log("========================================");
-
-    // =====================================================
-    // STRICT VALIDATIONS - MENTOR
-    // =====================================================
 
     // 1. Required fields
     if (!name || !email || !mobile || !password) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Name, email, mobile number and password are required.",
-      });
+      return res.status(400).json({ success: false, message: "Name, email, mobile number and password are required." });
     }
 
     // 2. Validate name
-    if (
-      typeof name !== "string" ||
-      name.trim().length < 2 ||
-      name.trim().length > 50
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Name must be between 2 and 50 characters.",
-      });
+    if (typeof name !== "string" || name.trim().length < 2 || name.trim().length > 50) {
+      return res.status(400).json({ success: false, message: "Name must be between 2 and 50 characters." });
     }
 
     // 3. Validate email
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
     if (!emailRegex.test(email)) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide a valid email address.",
-      });
+      return res.status(400).json({ success: false, message: "Please provide a valid email address." });
     }
 
     // 4. Validate password
     if (!validatePassword(password)) {
-      return res.status(400).json({
-        success: false,
-        message: "Password must be between 8 and 128 characters.",
-      });
+      return res.status(400).json({ success: false, message: "Password must be between 8 and 128 characters." });
     }
 
-    // =====================================================
     // 5. Validate mobile number
-    // =====================================================
-
     const mobileRegex = /^[0-9]{10}$/;
+    let cleanMobileForValidation = String(mobile).replace(/[\s\-\(\)]/g, "");
 
-    let cleanMobileForValidation = String(mobile).replace(
-      /[\s\-\(\)]/g,
-      "",
-    );
-
-    // If mobile starts with +
     if (cleanMobileForValidation.startsWith("+")) {
       const digitsOnly = cleanMobileForValidation.replace(/[^0-9]/g, "");
-
       if (digitsOnly.length >= 10) {
         cleanMobileForValidation = digitsOnly.slice(-10);
       }
     }
 
-    // If country code is included without +
-    if (
-      cleanMobileForValidation.length > 10 &&
-      /^\d{11,13}$/.test(cleanMobileForValidation)
-    ) {
-      cleanMobileForValidation =
-        cleanMobileForValidation.slice(-10);
+    if (cleanMobileForValidation.length > 10 && /^\d{11,13}$/.test(cleanMobileForValidation)) {
+      cleanMobileForValidation = cleanMobileForValidation.slice(-10);
     }
 
     if (!mobileRegex.test(cleanMobileForValidation)) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide a valid 10-digit mobile number.",
-      });
+      return res.status(400).json({ success: false, message: "Please provide a valid 10-digit mobile number." });
     }
 
-    // =====================================================
     // 6. Validate country code
-    // =====================================================
-
     const countryCodeRegex = /^\+\d{1,4}$/;
-
     let cleanCountryCode = String(countryCode || "+91").trim();
-
     if (!cleanCountryCode.startsWith("+")) {
       cleanCountryCode = "+" + cleanCountryCode;
     }
-
     if (!countryCodeRegex.test(cleanCountryCode)) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Please provide a valid country code (e.g., +91).",
-      });
+      return res.status(400).json({ success: false, message: "Please provide a valid country code (e.g., +91)." });
     }
 
-    // =====================================================
     // 7. Validate company
-    // =====================================================
-
-    if (
-      !company ||
-      typeof company !== "string" ||
-      company.trim().length < 2
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Company name is required and must be at least 2 characters.",
-      });
+    if (!company || typeof company !== "string" || company.trim().length < 2) {
+      return res.status(400).json({ success: false, message: "Company name is required and must be at least 2 characters." });
     }
 
-    // =====================================================
     // 8. Validate designation
-    // =====================================================
-
-    if (
-      !designation ||
-      typeof designation !== "string" ||
-      designation.trim().length < 2
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Designation is required and must be at least 2 characters.",
-      });
+    if (!designation || typeof designation !== "string" || designation.trim().length < 2) {
+      return res.status(400).json({ success: false, message: "Designation is required and must be at least 2 characters." });
     }
 
-    // =====================================================
     // 9. Validate department
-    // =====================================================
-
-    if (
-      !department ||
-      typeof department !== "string" ||
-      department.trim().length < 2
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Department is required and must be at least 2 characters.",
-      });
+    if (!department || typeof department !== "string" || department.trim().length < 2) {
+      return res.status(400).json({ success: false, message: "Department is required and must be at least 2 characters." });
     }
 
-    // =====================================================
     // 10. VALIDATE GENDER
-    // =====================================================
-
-    const allowedGenders = [
-      "male",
-      "female",
-      "other",
-    ];
-
-    const cleanGender = String(gender || "")
-      .trim()
-      .toLowerCase();
-
+    const allowedGenders = ["male", "female", "other"];
+    const cleanGender = String(gender || "").trim().toLowerCase();
     if (!cleanGender) {
-      return res.status(400).json({
-        success: false,
-        message: "Gender is required.",
-      });
+      return res.status(400).json({ success: false, message: "Gender is required." });
     }
-
     if (!allowedGenders.includes(cleanGender)) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid gender. Please select Male, Female or Other.",
-      });
+      return res.status(400).json({ success: false, message: "Invalid gender. Please select Male, Female or Other." });
     }
 
-    // =====================================================
     // 11. Validate Employee ID
-    // =====================================================
-
-    if (
-      !companyId ||
-      typeof companyId !== "string" ||
-      companyId.trim().length < 2
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Employee ID is required and must be at least 2 characters.",
-      });
+    if (!companyId || typeof companyId !== "string" || companyId.trim().length < 2) {
+      return res.status(400).json({ success: false, message: "Employee ID is required and must be at least 2 characters." });
     }
 
-    // =====================================================
     // 12. Validate confirmation
-    // =====================================================
-
     if (confirmationAccepted !== "true") {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Please confirm that the submitted information is correct.",
-      });
+      return res.status(400).json({ success: false, message: "Please confirm that the submitted information is correct." });
     }
 
-    // =====================================================
     // 13. Validate experience
-    // =====================================================
-
     const parsedExperience = Number(experience);
-
-    if (
-      Number.isNaN(parsedExperience) ||
-      parsedExperience < 0 ||
-      parsedExperience > 60
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Please provide valid years of experience (0-60 years).",
-      });
+    if (Number.isNaN(parsedExperience) || parsedExperience < 0 || parsedExperience > 60) {
+      return res.status(400).json({ success: false, message: "Please provide valid years of experience (0-60 years)." });
     }
 
-    // =====================================================
     // 14. Validate location
-    // =====================================================
-
-    if (
-      location &&
-      (typeof location !== "string" ||
-        location.trim().length < 2)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Location must be at least 2 characters if provided.",
-      });
+    if (location && (typeof location !== "string" || location.trim().length < 2)) {
+      return res.status(400).json({ success: false, message: "Location must be at least 2 characters if provided." });
     }
 
-    // =====================================================
     // 15. Validate LinkedIn
-    // =====================================================
-
-    if (
-      linkedin &&
-      typeof linkedin === "string" &&
-      linkedin.trim().length > 0
-    ) {
-      const linkedinRegex =
-        /^(https?:\/\/)?(www\.)?linkedin\.com\/in\/[a-zA-Z0-9\-_]+\/?$/;
-
+    if (linkedin && typeof linkedin === "string" && linkedin.trim().length > 0) {
+      const linkedinRegex = /^(https?:\/\/)?(www\.)?linkedin\.com\/in\/[a-zA-Z0-9\-_]+\/?$/;
       if (!linkedinRegex.test(linkedin.trim())) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Please provide a valid LinkedIn profile URL.",
-        });
+        return res.status(400).json({ success: false, message: "Please provide a valid LinkedIn profile URL." });
       }
     }
 
-    // =====================================================
     // 16. Validate bio
-    // =====================================================
-
-    if (
-      bio &&
-      (typeof bio !== "string" || bio.trim().length > 500)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Bio must be less than 500 characters.",
-      });
+    if (bio && (typeof bio !== "string" || bio.trim().length > 500)) {
+      return res.status(400).json({ success: false, message: "Bio must be less than 500 characters." });
     }
 
-    // =====================================================
     // 17. Validate skills
-    // =====================================================
-
-    const languages = String(skills || "")
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-
+    const languages = String(skills || "").split(",").map((item) => item.trim()).filter(Boolean);
     if (languages.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "At least one skill/language is required.",
-      });
+      return res.status(400).json({ success: false, message: "At least one skill/language is required." });
     }
 
-    // =====================================================
     // 18. Validate files
-    // =====================================================
+    const offerLetter = req.files?.offerLetter?.[0];
+    const employeeIdProof = req.files?.employeeIdProof?.[0];
+    const additionalProof = req.files?.additionalProof?.[0];
 
-    const offerLetter =
-      req.files?.offerLetter?.[0];
+    if (!offerLetter) return res.status(400).json({ success: false, message: "Offer letter is required." });
+    if (!employeeIdProof) return res.status(400).json({ success: false, message: "Employee ID proof is required." });
 
-    const employeeIdProof =
-      req.files?.employeeIdProof?.[0];
-
-    const additionalProof =
-      req.files?.additionalProof?.[0];
-
-    if (!offerLetter) {
-      return res.status(400).json({
-        success: false,
-        message: "Offer letter is required.",
-      });
-    }
-
-    if (!employeeIdProof) {
-      return res.status(400).json({
-        success: false,
-        message: "Employee ID proof is required.",
-      });
-    }
-
-    // =====================================================
     // UPLOAD FILES TO CLOUDINARY
-    // =====================================================
-
     const timestamp = Date.now();
-
     const userEmail = normalizeEmail(email);
-
     const folderName = `mentors/${userEmail}`;
 
-    console.log("Uploading files to Cloudinary...");
+    const offerLetterUpload = await uploadFromBuffer(offerLetter.buffer, `${folderName}/documents`, `offer_letter_${timestamp}`);
+    uploadedFiles.push(offerLetterUpload.public_id);
 
-    // Offer Letter
-    const offerLetterUpload =
-      await uploadFromBuffer(
-        offerLetter.buffer,
-        `${folderName}/documents`,
-        `offer_letter_${timestamp}`,
-      );
+    const employeeIdProofUpload = await uploadFromBuffer(employeeIdProof.buffer, `${folderName}/documents`, `employee_id_${timestamp}`);
+    uploadedFiles.push(employeeIdProofUpload.public_id);
 
-    uploadedFiles.push(
-      offerLetterUpload.public_id,
-    );
-
-    // Employee ID
-    const employeeIdProofUpload =
-      await uploadFromBuffer(
-        employeeIdProof.buffer,
-        `${folderName}/documents`,
-        `employee_id_${timestamp}`,
-      );
-
-    uploadedFiles.push(
-      employeeIdProofUpload.public_id,
-    );
-
-    // Additional Proof
     let additionalProofUpload = null;
-
     if (additionalProof) {
-      additionalProofUpload =
-        await uploadFromBuffer(
-          additionalProof.buffer,
-          `${folderName}/documents`,
-          `additional_proof_${timestamp}`,
-        );
-
-      uploadedFiles.push(
-        additionalProofUpload.public_id,
-      );
+      additionalProofUpload = await uploadFromBuffer(additionalProof.buffer, `${folderName}/documents`, `additional_proof_${timestamp}`);
+      uploadedFiles.push(additionalProofUpload.public_id);
     }
 
-    console.log(
-      "All files uploaded to Cloudinary successfully!",
-    );
-
-    // =====================================================
     // CLEAN DATA
-    // =====================================================
+    const cleanName = String(name).trim();
+    const normalizedEmail = normalizeEmail(email);
+    const cleanMobile = cleanCountryCode + cleanMobileForValidation;
+    const cleanCompany = String(company).trim();
+    const cleanDesignation = String(designation).trim();
+    const cleanDepartment = String(department).trim();
+    const cleanEmployeeId = String(companyId).trim();
+    const cleanLocation = location ? String(location).trim() : "";
+    const cleanLinkedin = linkedin ? String(linkedin).trim() : "";
+    const cleanBio = bio ? String(bio).trim() : "";
 
-    const cleanName =
-      String(name).trim();
-
-    const normalizedEmail =
-      normalizeEmail(email);
-
-    const cleanMobile =
-      cleanCountryCode +
-      cleanMobileForValidation;
-
-    const cleanCompany =
-      String(company).trim();
-
-    const cleanDesignation =
-      String(designation).trim();
-
-    const cleanDepartment =
-      String(department).trim();
-
-    const cleanEmployeeId =
-      String(companyId).trim();
-
-    const cleanLocation =
-      location
-        ? String(location).trim()
-        : "";
-
-    const cleanLinkedin =
-      linkedin
-        ? String(linkedin).trim()
-        : "";
-
-    const cleanBio =
-      bio
-        ? String(bio).trim()
-        : "";
-
-    // =====================================================
     // UNIQUENESS CHECKS
-    // =====================================================
-
-    const existingMentorByEmail =
-      await Mentor.findOne({
-        email: normalizedEmail,
-      });
-
+    const existingMentorByEmail = await Mentor.findOne({ email: normalizedEmail });
     if (existingMentorByEmail) {
-      for (const publicId of uploadedFiles) {
-        await deleteFromCloudinary(
-          publicId,
-        ).catch(console.error);
-      }
-
-      return res.status(409).json({
-        success: false,
-        message:
-          "A mentor account already exists with this email.",
-      });
+      for (const publicId of uploadedFiles) await deleteFromCloudinary(publicId).catch(console.error);
+      return res.status(409).json({ success: false, message: "A mentor account already exists with this email." });
     }
 
-    const existingFresherByEmail =
-      await Fresher.findOne({
-        email: normalizedEmail,
-      });
-
+    const existingFresherByEmail = await Fresher.findOne({ email: normalizedEmail });
     if (existingFresherByEmail) {
-      for (const publicId of uploadedFiles) {
-        await deleteFromCloudinary(
-          publicId,
-        ).catch(console.error);
-      }
-
-      return res.status(409).json({
-        success: false,
-        message:
-          "This email is already registered as a fresher.",
-      });
+      for (const publicId of uploadedFiles) await deleteFromCloudinary(publicId).catch(console.error);
+      return res.status(409).json({ success: false, message: "This email is already registered as a fresher." });
     }
 
-    const existingMentorByMobile =
-      await Mentor.findOne({
-        mobile: cleanMobile,
-      });
-
+    const existingMentorByMobile = await Mentor.findOne({ mobile: cleanMobile });
     if (existingMentorByMobile) {
-      for (const publicId of uploadedFiles) {
-        await deleteFromCloudinary(
-          publicId,
-        ).catch(console.error);
-      }
-
-      return res.status(409).json({
-        success: false,
-        message:
-          "This mobile number is already registered with a mentor account.",
-      });
+      for (const publicId of uploadedFiles) await deleteFromCloudinary(publicId).catch(console.error);
+      return res.status(409).json({ success: false, message: "This mobile number is already registered with a mentor account." });
     }
 
-    const existingFresherByMobile =
-      await Fresher.findOne({
-        mobile: cleanMobile,
-      });
-
+    const existingFresherByMobile = await Fresher.findOne({ mobile: cleanMobile });
     if (existingFresherByMobile) {
-      for (const publicId of uploadedFiles) {
-        await deleteFromCloudinary(
-          publicId,
-        ).catch(console.error);
-      }
-
-      return res.status(409).json({
-        success: false,
-        message:
-          "This mobile number is already registered with a fresher account.",
-      });
+      for (const publicId of uploadedFiles) await deleteFromCloudinary(publicId).catch(console.error);
+      return res.status(409).json({ success: false, message: "This mobile number is already registered with a fresher account." });
     }
 
-    const existingMentorByEmployeeId =
-      await Mentor.findOne({
-        employeeId: cleanEmployeeId,
-      });
-
+    const existingMentorByEmployeeId = await Mentor.findOne({ employeeId: cleanEmployeeId });
     if (existingMentorByEmployeeId) {
-      for (const publicId of uploadedFiles) {
-        await deleteFromCloudinary(
-          publicId,
-        ).catch(console.error);
-      }
-
-      return res.status(409).json({
-        success: false,
-        message:
-          "This Employee ID is already registered with another mentor account.",
-      });
+      for (const publicId of uploadedFiles) await deleteFromCloudinary(publicId).catch(console.error);
+      return res.status(409).json({ success: false, message: "This Employee ID is already registered with another mentor account." });
     }
 
-    // =====================================================
     // CREATE MENTOR
-    // =====================================================
-
-    const hashedPassword =
-      await bcrypt.hash(password, 12);
+    const hashedPassword = await bcrypt.hash(password, 12);
 
     const mentorData = {
       name: cleanName,
       email: normalizedEmail,
       mobile: cleanMobile,
       password: hashedPassword,
-
       employeeId: cleanEmployeeId,
       workEmail: normalizedEmail,
-
       linkedinProfile: cleanLinkedin,
-
-      yearsOfExperience:
-        parsedExperience,
-
+      yearsOfExperience: parsedExperience,
       currentCompany: cleanCompany,
       designation: cleanDesignation,
       department: cleanDepartment,
-
-      // ⭐ IMPORTANT
       gender: cleanGender,
-
       officeLocation: cleanLocation,
-
       languages: languages,
-
       hourlyRate: 0,
-
       bio: cleanBio,
-
-      // =====================================================
-      // CLOUDINARY
-      // =====================================================
-
-      offerLetter:
-        offerLetterUpload.secure_url,
-
-      offerLetterPublicId:
-        offerLetterUpload.public_id,
-
-      employeeIdProof:
-        employeeIdProofUpload.secure_url,
-
-      employeeIdProofPublicId:
-        employeeIdProofUpload.public_id,
-
-      additionalProof:
-        additionalProofUpload
-          ? additionalProofUpload.secure_url
-          : "",
-
-      additionalProofPublicId:
-        additionalProofUpload
-          ? additionalProofUpload.public_id
-          : "",
-
-      // =====================================================
-      // VERIFICATION
-      // =====================================================
-
+      offerLetter: offerLetterUpload.secure_url,
+      offerLetterPublicId: offerLetterUpload.public_id,
+      employeeIdProof: employeeIdProofUpload.secure_url,
+      employeeIdProofPublicId: employeeIdProofUpload.public_id,
+      additionalProof: additionalProofUpload ? additionalProofUpload.secure_url : "",
+      additionalProofPublicId: additionalProofUpload ? additionalProofUpload.public_id : "",
       isVerified: false,
-
       verificationStatus: "pending",
-
       verificationMethod: "document",
-
       rejectionReason: "",
-
       accountStatus: "pending",
-
       lastLoginAt: null,
-
       profilePic: "",
     };
 
-    console.log(
-      "FINAL MENTOR DATA:",
-      mentorData,
-    );
-
-    // =====================================================
-    // SAVE TO MONGODB
-    // =====================================================
-
-    const mentor =
-      await Mentor.create(mentorData);
-
-    console.log(
-      "========================================",
-    );
-
-    console.log(
-      "Mentor created successfully:",
-      mentor._id,
-    );
-
-    console.log(
-      "Mentor gender saved:",
-      mentor.gender,
-    );
-
-    console.log(
-      "========================================",
-    );
-
-    // =====================================================
-    // RESPONSE
-    // =====================================================
+    const mentor = await Mentor.create(mentorData);
 
     return res.status(201).json({
       success: true,
-
-      message:
-        "MNC employee profile submitted successfully. Your account is pending admin verification.",
-
+      message: "MNC employee profile submitted successfully. Your account is pending admin verification.",
       user: sanitizeMentor(mentor),
     });
 
   } catch (error) {
-
-    console.error(
-      "Mentor registration error:",
-      error,
-    );
-
-    // =====================================================
-    // DELETE CLOUDINARY FILES IF DB SAVE FAILS
-    // =====================================================
+    console.error("Mentor registration error:", error);
 
     for (const publicId of uploadedFiles) {
       try {
-        await deleteFromCloudinary(
-          publicId,
-        );
-
-        console.log(
-          `Deleted file from Cloudinary: ${publicId}`,
-        );
-
+        await deleteFromCloudinary(publicId);
       } catch (deleteError) {
-
-        console.error(
-          "Unable to delete file from Cloudinary:",
-          deleteError.message,
-        );
+        console.error("Unable to delete file from Cloudinary:", deleteError.message);
       }
     }
 
-    // =====================================================
-    // MONGOOSE VALIDATION ERROR
-    // =====================================================
-
-    if (
-      error.name ===
-      "ValidationError"
-    ) {
+    if (error.name === "ValidationError") {
       return res.status(400).json({
         success: false,
-
-        message:
-          "Validation error: " +
-          Object.values(error.errors)
-            .map((e) => e.message)
-            .join(", "),
+        message: "Validation error: " + Object.values(error.errors).map((e) => e.message).join(", "),
       });
     }
-
-    // =====================================================
-    // DUPLICATE KEY ERROR
-    // =====================================================
 
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
-
-        message:
-          "An account already exists with this email, mobile number, or employee ID.",
+        message: "An account already exists with this email, mobile number, or employee ID.",
       });
     }
-
-    // =====================================================
-    // CLOUDINARY ERROR
-    // =====================================================
-
-    if (
-      error.message &&
-      error.message.includes(
-        "Cloudinary",
-      )
-    ) {
-      return res.status(500).json({
-        success: false,
-
-        message:
-          "File upload failed. Please try again.",
-      });
-    }
-
-    // =====================================================
-    // GENERIC ERROR
-    // =====================================================
 
     return res.status(500).json({
       success: false,
-
-      message:
-        "Unable to submit MNC employee registration. Please try again.",
+      message: "Unable to submit MNC employee registration. Please try again.",
     });
   }
 };
@@ -1147,72 +630,40 @@ exports.loginMentor = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // =====================================================
-    // STRICT VALIDATIONS - LOGIN
-    // =====================================================
-
     if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "Email and password are required.",
-      });
+      return res.status(400).json({ success: false, message: "Email and password are required." });
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide a valid email address.",
-      });
+      return res.status(400).json({ success: false, message: "Please provide a valid email address." });
     }
 
     const normalizedEmail = normalizeEmail(email);
 
-    const mentor = await Mentor.findOne({
-      email: normalizedEmail,
-    }).select("+password");
+    const mentor = await Mentor.findOne({ email: normalizedEmail }).select("+password");
 
     if (!mentor) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid email or password.",
-      });
+      return res.status(401).json({ success: false, message: "Invalid email or password." });
     }
 
     const passwordMatched = await bcrypt.compare(password, mentor.password);
-
     if (!passwordMatched) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid email or password.",
-      });
+      return res.status(401).json({ success: false, message: "Invalid email or password." });
     }
 
-    // Check account status
     if (mentor.accountStatus === "suspended") {
-      return res.status(403).json({
-        success: false,
-        message: "Your account has been suspended. Please contact support.",
-      });
+      return res.status(403).json({ success: false, message: "Your account has been suspended. Please contact support." });
     }
 
     if (mentor.accountStatus === "rejected") {
-      return res.status(403).json({
-        success: false,
-        message: "Your mentor application was rejected.",
-        rejectionReason: mentor.rejectionReason || "",
-      });
+      return res.status(403).json({ success: false, message: "Your mentor application was rejected.", rejectionReason: mentor.rejectionReason || "" });
     }
 
-    if (
-      mentor.accountStatus !== "active" ||
-      mentor.verificationStatus !== "approved" ||
-      !mentor.isVerified
-    ) {
+    if (mentor.accountStatus !== "active" || mentor.verificationStatus !== "approved" || !mentor.isVerified) {
       return res.status(403).json({
         success: false,
-        message:
-          "Your MNC employee profile is still pending admin verification.",
+        message: "Your MNC employee profile is still pending admin verification.",
         verificationStatus: mentor.verificationStatus || "pending",
         accountStatus: mentor.accountStatus,
       });
@@ -1239,12 +690,10 @@ exports.loginMentor = async (req, res) => {
         accountStatus: mentor.accountStatus,
       },
     });
+
   } catch (error) {
     console.error("Mentor login error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Unable to login. Please try again.",
-    });
+    return res.status(500).json({ success: false, message: "Unable to login. Please try again." });
   }
 };
 
@@ -1256,65 +705,26 @@ exports.loginMentor = async (req, res) => {
 exports.getMe = async (req, res) => {
   try {
     if (!req.user || !req.user.id) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication required.",
-      });
+      return res.status(401).json({ success: false, message: "Authentication required." });
     }
 
     if (req.user.role === "mentor") {
-      const mentor = await Mentor.findById(
-        req.user.id
-      ).select("-password");
-
-      if (!mentor) {
-        return res.status(404).json({
-          success: false,
-          message: "Mentor account not found.",
-        });
-      }
-
-      return res.status(200).json({
-        success: true,
-        message: "Mentor data fetched successfully.",
-        user: sanitizeMentor(mentor),
-      });
+      const mentor = await Mentor.findById(req.user.id).select("-password");
+      if (!mentor) return res.status(404).json({ success: false, message: "Mentor account not found." });
+      return res.status(200).json({ success: true, message: "Mentor data fetched successfully.", user: sanitizeMentor(mentor) });
     }
 
     if (req.user.role === "fresher") {
-      const fresher = await Fresher.findById(
-        req.user.id
-      ).select("-password");
-
-      if (!fresher) {
-        return res.status(404).json({
-          success: false,
-          message: "Fresher account not found.",
-        });
-      }
-
-      return res.status(200).json({
-        success: true,
-        message: "Fresher data fetched successfully.",
-        user: sanitizeFresher(fresher),
-      });
+      const fresher = await Fresher.findById(req.user.id).select("-password");
+      if (!fresher) return res.status(404).json({ success: false, message: "Fresher account not found." });
+      return res.status(200).json({ success: true, message: "Fresher data fetched successfully.", user: sanitizeFresher(fresher) });
     }
 
-    return res.status(403).json({
-      success: false,
-      message: "Invalid user role.",
-    });
+    return res.status(403).json({ success: false, message: "Invalid user role." });
 
   } catch (error) {
-    console.error(
-      "Get current user error:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: "Unable to fetch user information.",
-    });
+    console.error("Get current user error:", error);
+    return res.status(500).json({ success: false, message: "Unable to fetch user information." });
   }
 };
 
@@ -1327,53 +737,28 @@ exports.updateMentorVerification = async (req, res) => {
   try {
     const { status, rejectionReason } = req.body;
 
-    // =====================================================
-    // STRICT VALIDATIONS - ADMIN
-    // =====================================================
-
     if (!status) {
-      return res.status(400).json({
-        success: false,
-        message: "Status is required.",
-      });
+      return res.status(400).json({ success: false, message: "Status is required." });
     }
 
     if (!["approved", "rejected"].includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: "Status must be either 'approved' or 'rejected'.",
-      });
+      return res.status(400).json({ success: false, message: "Status must be either 'approved' or 'rejected'." });
     }
 
     if (status === "rejected") {
-      if (
-        !rejectionReason ||
-        typeof rejectionReason !== "string" ||
-        rejectionReason.trim().length < 5
-      ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Rejection reason is required and must be at least 5 characters.",
-        });
+      if (!rejectionReason || typeof rejectionReason !== "string" || rejectionReason.trim().length < 5) {
+        return res.status(400).json({ success: false, message: "Rejection reason is required and must be at least 5 characters." });
       }
     }
 
     const mentor = await Mentor.findById(req.params.id);
 
     if (!mentor) {
-      return res.status(404).json({
-        success: false,
-        message: "Mentor account not found.",
-      });
+      return res.status(404).json({ success: false, message: "Mentor account not found." });
     }
 
-    // Prevent re-approving already approved mentors
     if (status === "approved" && mentor.verificationStatus === "approved") {
-      return res.status(400).json({
-        success: false,
-        message: "This mentor is already approved.",
-      });
+      return res.status(400).json({ success: false, message: "This mentor is already approved." });
     }
 
     if (status === "approved") {
@@ -1394,17 +779,12 @@ exports.updateMentorVerification = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message:
-        status === "approved"
-          ? "Mentor approved successfully."
-          : "Mentor verification rejected.",
+      message: status === "approved" ? "Mentor approved successfully." : "Mentor verification rejected.",
       user: sanitizeMentor(mentor),
     });
+
   } catch (error) {
     console.error("Mentor verification error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Unable to update mentor verification.",
-    });
+    return res.status(500).json({ success: false, message: "Unable to update mentor verification." });
   }
 };

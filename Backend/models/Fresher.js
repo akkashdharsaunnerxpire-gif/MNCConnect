@@ -46,24 +46,46 @@ const fresherSchema = new mongoose.Schema(
       default: null,
     },
     passwordResetToken: {
-  type: String,
-  default: undefined,
-  select: false,
-},
+      type: String,
+      default: undefined,
+      select: false,
+    },
 
-passwordResetExpires: {
-  type: Date,
-  default: undefined,
-  select: false,
-},
+    passwordResetExpires: {
+      type: Date,
+      default: undefined,
+      select: false,
+    },
+    walletBalance: {
+      type: Number,
+      default: 0, // Amount available to use for bookings
+    },
+    referralCode: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    referredBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Fresher",
+      default: null,
+    },
+    welcomeBonusClaimed: {
+      type: Boolean,
+      default: false,
+    },
+    hasUsedReferral: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // Add a virtual for full mobile number
-fresherSchema.virtual('fullMobile').get(function() {
+fresherSchema.virtual("fullMobile").get(function () {
   return this.countryCode + this.mobile;
 });
 
