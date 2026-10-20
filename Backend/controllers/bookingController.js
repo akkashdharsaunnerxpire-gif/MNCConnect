@@ -57,6 +57,11 @@ const whyNot = (m, b) => {
   if (!isAny(b.gender) && norm(m.gender) !== norm(b.gender)) return `gender mismatch`;
   const spoken = arr(m.spokenLanguages).map(norm).filter(Boolean);
   if (!isAny(b.language) && spoken.length && !spoken.some((l) => loose(l, b.language))) return `language mismatch`;
+  if (STRICT_MATCH && !isAny(b.role)) {
+    const target = norm(b.role) === "other" ? b.otherRole : b.role;
+    const values = [m.designation, m.department, ...arr(m.skills), ...arr(m.expertise), ...arr(m.languages)];
+    if (!isAny(target) && !values.some((v) => loose(v, target))) return `role mismatch`;
+  }
   return "";
 };
 
@@ -277,6 +282,81 @@ exports.updateRequest = async (req, res) => {
   }
 };
 
+exports.respondToRequest = exports.updateRequest;
+
+/* ============================================================
+   READ ENDPOINTS
+============================================================ */
+
+exports.getRequestStatus = async (req, res) => {
+  const b = await Booking.findOne({ requestGroupId: String(req.params.requestGroupId || "") }).populate("mentor", POPULATE_MENTOR);
+  if (!b) return fail(res, 404, "Not found");
+  return res.json({ success: true, request: toClient(b), booking: toClient(b) });
+};
+
+exports.getAcceptedBookings = async (req, res) => {
+  try {
+    const email = norm(req.query.email);
+    if (!email) return fail(res, 400, "Email is required");
+    const list = await Booking.find({
+      fresherEmail: email,
+      status: { $in: ["accepted", "completed"] },
+    })
+      .populate("mentor", POPULATE_MENTOR)
+      .sort({ startsAt: -1 });
+    const bookings = list.map((b) => ({
+      ...toClient(b),
+      bookingId: b.requestGroupId,
+      mentorName: b.mentor?.name || "Mentor",
+    }));
+    return res.json({ success: true, bookings, count: bookings.length });
+  } catch (error) {
+    return fail(res, 500, "Failed to fetch bookings");
+  }
+};
+
+exports.myBookings = async (req, res) => {
+  const list = await Booking.find({ fresher: req.user.id }).populate("mentor", POPULATE_MENTOR).sort({ startsAt: -1 });
+  return res.json({ success: true, bookings: list.map(toClient) });
+};
+
+exports.needsReview = async (req, res) => {
+  try {
+    const b = await Booking.findOne({
+      fresher: req.user.id,
+      status: "completed",
+      reviewed: false,
+    })
+      .populate("mentor", POPULATE_MENTOR)
+      .sort({ completedAt: 1 });
+    return res.json({ success: true, booking: b ? toClient(b) : null });
+  } catch (error) {
+    return fail(res, 500, "Failed to check reviews");
+  }
+};
+
+exports.getBooking = async (req, res) => {
+  const b = await Booking.findOne({ requestGroupId: String(req.params.id) }).populate("mentor", POPULATE_MENTOR);
+  if (!b) return fail(res, 404, "Not found");
+  const mine = String(b.fresher) === req.user.id || String(b.mentor?._id || b.mentor) === req.user.id;
+  if (!mine) return fail(res, 403, "Access denied");
+  return res.json({ success: true, booking: toClient(b) });
+};
+
+exports.mentorPending = async (req, res) => {
+  try {
+    const list = await Booking.find({
+      status: "pending",
+      expiresAt: { $gt: new Date() },
+      notified: req.user.id,
+      declinedBy: { $ne: req.user.id },
+    }).sort({ createdAt: -1 });
+    return res.json({ success: true, requests: list.map(toMentorPayload) });
+  } catch (error) {
+    return fail(res, 500, "Failed to load requests");
+  }
+};
+
 /* ============================================================
    COMPLETION & FRESHER CONFIRMATION
 ============================================================ */
@@ -314,7 +394,6 @@ exports.confirmCompletion = async (req, res) => {
     if (!booking) return fail(res, 404, "Session not found");
     if (String(booking.fresher) !== req.user.id) return fail(res, 403, "Access denied");
 
-    // ✅ FIX: Prevent Double Click Error (Return success if already processed)
     if (booking.status === "completed") {
       return res.json({ success: true, status: "completed", booking: toClient(booking) });
     }
@@ -333,7 +412,6 @@ exports.confirmCompletion = async (req, res) => {
         { returnDocument: "after" }
       ).populate("mentor", POPULATE_MENTOR);
 
-      // 💰 75% Mentor / 25% Platform Split
       const amount = Number(booking.amount || 0);
       const mentorShare = amount * 0.75;
       const platformShare = amount * 0.25;
@@ -358,7 +436,6 @@ exports.confirmCompletion = async (req, res) => {
       return res.json({ success: true, status: "completed", booking: toClient(updated) });
     }
 
-    // If "No" clicked (Refund)
     const updated = await Booking.findOneAndUpdate(
       { _id: booking._id, status: "awaiting_confirmation" },
       { $set: { status: "disputed", completedAt: new Date() } },
@@ -376,40 +453,96 @@ exports.confirmCompletion = async (req, res) => {
 };
 
 /* ============================================================
-   OTHER ENDPOINTS (GET, etc)
+   FRESHER NOTIFICATIONS
 ============================================================ */
 
-exports.getRequestStatus = async (req, res) => {
-  const b = await Booking.findOne({ requestGroupId: String(req.params.requestGroupId || "") }).populate("mentor", POPULATE_MENTOR);
-  if (!b) return fail(res, 404, "Not found");
-  return res.json({ success: true, request: toClient(b), booking: toClient(b) });
-};
-
-exports.getBooking = async (req, res) => {
-  const b = await Booking.findOne({ requestGroupId: String(req.params.id) }).populate("mentor", POPULATE_MENTOR);
-  if (!b) return fail(res, 404, "Not found");
-  const mine = String(b.fresher) === req.user.id || String(b.mentor?._id || b.mentor) === req.user.id;
-  if (!mine) return fail(res, 403, "Access denied");
-  return res.json({ success: true, booking: toClient(b) });
-};
-
-exports.myBookings = async (req, res) => {
-  const list = await Booking.find({ fresher: req.user.id }).populate("mentor", POPULATE_MENTOR).sort({ startsAt: -1 });
-  return res.json({ success: true, bookings: list.map(toClient) });
-};
-
-// ✅ FIXED: Added missing needsReview export
-exports.needsReview = async (req, res) => {
+exports.getFresherNotifications = async (req, res) => {
   try {
-    const b = await Booking.findOne({
-      fresher: req.user.id,
-      status: "completed",
-      reviewed: false,
-    })
-      .populate("mentor", POPULATE_MENTOR)
-      .sort({ completedAt: 1 });
-    return res.json({ success: true, booking: b ? toClient(b) : null });
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
+    const filter = { user: req.user.id, role: "fresher" };
+    const [items, unreadCount] = await Promise.all([
+      Notification.find(filter).sort({ createdAt: -1 }).limit(limit),
+      Notification.countDocuments({ ...filter, read: false }),
+    ]);
+    return res.json({
+      success: true,
+      notifications: items.map(serializeNotification),
+      unreadCount,
+    });
   } catch (error) {
-    return fail(res, 500, "Failed to check reviews");
+    return fail(res, 500, "Unable to load notifications.");
   }
 };
+
+exports.markFresherNotificationRead = async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id))
+      return fail(res, 400, "Invalid id.");
+    await Notification.updateOne(
+      { _id: req.params.id, user: req.user.id },
+      { $set: { read: true, readAt: new Date() } },
+    );
+    return res.json({ success: true });
+  } catch (error) {
+    return fail(res, 500, "Unable to update notification.");
+  }
+};
+
+exports.markAllFresherNotificationsRead = async (req, res) => {
+  try {
+    await Notification.updateMany(
+      { user: req.user.id, role: "fresher", read: false },
+      { $set: { read: true, readAt: new Date() } },
+    );
+    return res.json({ success: true });
+  } catch (error) {
+    return fail(res, 500, "Unable to update notifications.");
+  }
+};
+
+/* ============================================================
+   SCHEDULERS (Run in server.js)
+============================================================ */
+
+exports.startSchedulers = (app) => {
+  setInterval(async () => {
+    if (mongoose.connection.readyState !== 1) return;
+    try {
+      const now = new Date();
+      await Booking.updateMany({ status: "pending", expiresAt: { $lte: now } }, { $set: { status: "expired" } });
+      
+      const soon = await Booking.find({ status: "accepted", reminderSent: false, startsAt: { $lte: new Date(now.getTime() + 5 * 60000) } }).populate("mentor", POPULATE_MENTOR);
+      for (const b of soon) {
+        await Booking.updateOne({ _id: b._id }, { $set: { reminderSent: true } });
+        // Reminders logic (if any)
+      }
+    } catch (e) { console.error(e); }
+  }, 30000);
+};
+
+exports.pushPendingToMentor = async (app, mentorId) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(mentorId)) return;
+    
+    const mentor = await Mentor.findById(mentorId).select(`${MENTOR_FIELDS} verificationStatus accountStatus`).lean();
+    if (!mentor || mentor.verificationStatus !== "approved" || mentor.accountStatus !== "active") return;
+
+    const open = await Booking.find({
+      status: "pending",
+      expiresAt: { $gt: new Date() },
+      declinedBy: { $ne: mentor._id },
+    });
+
+    for (const b of open) {
+      const reason = whyNot(mentor, b) || ((await hasConflict(mentor._id, b.startsAt, b.endsAt, b.requestGroupId)) ? "has another session within 30 minutes" : "");
+      if (reason) continue;
+
+      await Booking.updateOne({ _id: b._id }, { $addToSet: { notified: mentor._id } });
+      emitToMentorSockets(app, mentor._id, "session-request", toMentorPayload(b));
+    }
+  } catch (error) {
+    console.error("pushPendingToMentor error:", error.message);
+  }
+};
+
+exports.whyNot = whyNot;
