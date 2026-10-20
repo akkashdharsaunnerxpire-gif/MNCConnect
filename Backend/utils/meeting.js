@@ -1,7 +1,7 @@
 // utils/meeting.js
 const jwt = require("jsonwebtoken");
 const Booking = require("../models/Booking");
-const { completeBooking } = require("../controllers/bookingController");
+// NOTE: completeBooking is required lazily inside finish() to avoid circular require.
 
 const OPEN_BEFORE_MS = 5 * 60 * 1000;
 const STATE_BROADCAST_EVERY_TICKS = 5;
@@ -48,7 +48,10 @@ const save = (r) =>
     {
       $set: {
         "meeting.remainingMs": Math.max(0, Math.round(r.remainingMs)),
-        "meeting.instructionsAccepted": { mentor: Boolean(r.instructionsAccepted.mentor), fresher: Boolean(r.instructionsAccepted.fresher) },
+        "meeting.instructionsAccepted": {
+          mentor: Boolean(r.instructionsAccepted.mentor),
+          fresher: Boolean(r.instructionsAccepted.fresher),
+        },
       },
     },
   ).catch(() => {});
@@ -58,7 +61,7 @@ const markStarted = (r) => {
   r.startedMarked = true;
   Booking.updateOne(
     { requestGroupId: r.id },
-    { $set: { "meeting.startedAt": new Date(), status: "in_progress" } }, // Set status to in_progress
+    { $set: { "meeting.startedAt": new Date(), status: "in_progress" } },
   ).catch(() => {});
 };
 
@@ -69,11 +72,17 @@ const refresh = (io, r) => {
 
   // Start timer ONLY when both inside & accepted
   if (!r.startedOnce && bothInside && bothAccepted) {
+    console.log(`[meeting ${r.id}] timer STARTED`);
     r.running = true;
     r.startedOnce = true;
     r.lastTick = Date.now();
     markStarted(r);
     save(r);
+  } else if (!r.startedOnce) {
+    console.log(
+      `[meeting ${r.id}] waiting -> inside: M=${r.mentor.size} F=${r.fresher.size}, accepted:`,
+      r.instructionsAccepted,
+    );
   }
 
   io.to(channel(r.id)).emit("meeting:state", stateOf(r));
@@ -97,9 +106,10 @@ const leave = (io, socket) => {
 
   refresh(io, r);
 
+  // Keep a RUNNING room alive even if both left, so the timer reaches zero
   if (r.mentor.size === 0 && r.fresher.size === 0) {
     save(r);
-    rooms.delete(m.id);
+    if (!r.running) rooms.delete(m.id);
   }
 };
 
@@ -107,6 +117,7 @@ const finish = async (io, r) => {
   rooms.delete(r.id);
   r.running = false;
   try {
+    const { completeBooking } = require("../controllers/bookingController");
     await completeBooking(r.id);
   } catch (e) {
     console.error("completeBooking failed:", e.message);
@@ -133,8 +144,7 @@ exports.initMeetings = (io) => {
         if (["completed", "awaiting_confirmation", "disputed"].includes(b.status)) {
           return ack({ ok: false, code: "ENDED", message: "This session has ended." });
         }
-        
-        // Allow join if status is accepted OR in_progress
+
         if (!["accepted", "in_progress"].includes(b.status)) {
           return ack({ ok: false, code: "NOT_ACTIVE" });
         }
@@ -148,29 +158,29 @@ exports.initMeetings = (io) => {
         if (!r) {
           const total = Number(b.durationMinutes) * 60000;
           const saved = b.meeting || {};
+          const started = Boolean(saved.startedAt);
           r = {
             id: b.requestGroupId,
             totalMs: total,
             remainingMs: typeof saved.remainingMs === "number" ? Math.max(0, saved.remainingMs) : total,
             mentor: new Set(),
             fresher: new Set(),
-            running: false,
-            startedOnce: Boolean(saved.startedAt),
-            startedMarked: Boolean(saved.startedAt),
+            running: started, // already started once -> keep running
+            startedOnce: started,
+            startedMarked: started,
             lastTick: Date.now(),
             lastSave: Date.now(),
             lastActivity: Date.now(),
             ticks: 0,
-            instructionsAccepted: {
-              mentor: Boolean(saved.instructionsAccepted?.mentor),
-              fresher: Boolean(saved.instructionsAccepted?.fresher),
-            },
+            // if session already started, both must have accepted before
+            instructionsAccepted: started
+              ? { mentor: true, fresher: true }
+              : {
+                  mentor: Boolean(saved.instructionsAccepted?.mentor),
+                  fresher: Boolean(saved.instructionsAccepted?.fresher),
+                },
           };
           rooms.set(r.id, r);
-
-          if (r.startedOnce && r.instructionsAccepted.mentor && r.instructionsAccepted.fresher) {
-            r.running = true;
-          }
         }
 
         r[role].add(socket.id);
@@ -183,13 +193,14 @@ exports.initMeetings = (io) => {
 
         return ack({ ok: true, role, state: stateOf(r) });
       } catch (error) {
+        console.error("meeting:join error:", error);
         return ack({ ok: false, code: "ERROR" });
       }
     });
 
-    socket.on("meeting:instructions-accepted", ({ bookingId } = {}) => {
+    socket.on("meeting:instructions-accepted", () => {
       const m = socket.data.meeting;
-      if (!m || m.id !== bookingId) return;
+      if (!m) return;
       const r = rooms.get(m.id);
       if (!r) return;
 
@@ -210,7 +221,7 @@ exports.initMeetings = (io) => {
 
   setInterval(() => {
     const now = Date.now();
-    for (const r of rooms.values()) {
+    for (const r of [...rooms.values()]) {
       if (r.running) {
         advance(r);
         r.ticks += 1;

@@ -140,16 +140,24 @@ export default function MeetingRoom() {
     const onReconnect = () => joined.current && join();
 
     (async () => {
+      let stream = null;
       for (const constraints of [{ video: true, audio: true }, { video: false, audio: true }]) {
         try {
-          localStream.current = await navigator.mediaDevices.getUserMedia(constraints);
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
           if (!constraints.video) setMediaNote("Camera not available. Joined with audio only.");
           break;
         } catch { /* try next */ }
       }
-      if (!localStream.current) setMediaNote("Camera and mic blocked.");
-      if (cancelled) return;
-      if (localVideo.current && localStream.current) localVideo.current.srcObject = localStream.current;
+
+      // Effect was cleaned up while waiting for permission -> stop the stream (no camera leak)
+      if (cancelled) {
+        stream?.getTracks().forEach((t) => t.stop());
+        return;
+      }
+
+      localStream.current = stream;
+      if (!stream) setMediaNote("Camera and mic blocked.");
+      if (localVideo.current && stream) localVideo.current.srcObject = stream;
 
       socket.on("meeting:state", onState);
       socket.on("meeting:instructions-state", onInstructionsState);
@@ -166,6 +174,7 @@ export default function MeetingRoom() {
     return () => {
       cancelled = true;
       clearTimeout(retryTimer.current);
+      joined.current = false;
       socket.emit("meeting:leave");
       socket.off("meeting:state", onState);
       socket.off("meeting:instructions-state", onInstructionsState);
@@ -178,6 +187,7 @@ export default function MeetingRoom() {
       localStream.current?.getTracks().forEach((t) => t.stop());
       localStream.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookingId]);
 
   useEffect(() => {
@@ -198,7 +208,7 @@ export default function MeetingRoom() {
       .catch(() => {});
   }, [bookingId, token, phase]);
 
-  // ✅ 5-min popup logic - ONLY SHOW FOR FRESHER AND ONLY WHEN < 5 MIN LEFT
+  // 5-min popup: only for fresher and only when < 5 min left
   const currentRemaining = clock.running ? Math.max(0, clock.remainingMs - (Date.now() - clock.at)) : clock.remainingMs;
 
   useEffect(() => {
@@ -277,7 +287,7 @@ export default function MeetingRoom() {
 
   const status = clock.running ? "Session in progress" : otherHere ? "Connecting…" : `Waiting for the ${isMentor ? "fresher" : "employee"} to join.`;
 
-  // ✅ Hide instructions gate ONLY WHEN clock is running (both accepted)
+  // Show instructions gate until I have accepted (or timer already running)
   if (phase === "in" && !clock.running && !myInstructionsDone) {
     return <MeetingInstructionsGate bookingId={bookingId} role={isMentor ? "mentor" : "fresher"} peerAccepted={peerInstructionsDone} />;
   }
@@ -318,7 +328,7 @@ export default function MeetingRoom() {
       </div>
 
       {showCompletionPrompt && !isMentor && (
-        <SessionCompletionModal booking={booking} variant="prompt" onClose={() => setShowCompletionPrompt(false)} />
+        <SessionCompletionModal booking={booking} variant="prompt" onClose={() => { setShowCompletionPrompt(false); setCompletionDone(true); }} />
       )}
     </>
   );
