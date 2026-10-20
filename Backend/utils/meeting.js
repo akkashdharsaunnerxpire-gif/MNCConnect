@@ -1,7 +1,7 @@
 // utils/meeting.js
 const jwt = require("jsonwebtoken");
 const Booking = require("../models/Booking");
-// NOTE: completeBooking is required lazily inside finish() to avoid circular require.
+const { completeBooking } = require("../controllers/bookingController");
 
 const OPEN_BEFORE_MS = 5 * 60 * 1000;
 const STATE_BROADCAST_EVERY_TICKS = 5;
@@ -10,7 +10,6 @@ const ORPHAN_ROOM_TTL_MS = 30 * 60 * 1000;
 const MAX_TICK_DRIFT_MS = 60 * 1000;
 
 const rooms = new Map();
-
 const channel = (id) => `meeting:${id}`;
 
 const verify = (token) => {
@@ -34,32 +33,6 @@ const stateOf = (r) => ({
   serverNow: Date.now(),
 });
 
-// ---- live timer for pages OUTSIDE the meeting (sessions list, my bookings) ----
-const timerPayload = (r) => ({
-  bookingId: r.id,
-  requestGroupId: r.id,
-  running: Boolean(r.running),
-  remainingMs: Math.max(0, Math.round(r.remainingMs)),
-  serverNow: Date.now(),
-});
-
-const pushTimer = (r) => {
-  try {
-    const { emitToUser } = require("./realtime");
-    const payload = timerPayload(r);
-    if (r.mentorId) emitToUser(r.mentorId, "meeting:timer", payload);
-    if (r.fresherId) emitToUser(r.fresherId, "meeting:timer", payload);
-  } catch (_) {
-    /* never break the meeting because of a UI push */
-  }
-};
-
-// used by bookingController.toClient so every API response has the LIVE remaining time
-exports.getRoomState = (id) => {
-  const r = rooms.get(String(id));
-  return r ? timerPayload(r) : null;
-};
-
 const advance = (r) => {
   if (!r.running) return;
   const now = Date.now();
@@ -74,10 +47,7 @@ const save = (r) =>
     {
       $set: {
         "meeting.remainingMs": Math.max(0, Math.round(r.remainingMs)),
-        "meeting.instructionsAccepted": {
-          mentor: Boolean(r.instructionsAccepted.mentor),
-          fresher: Boolean(r.instructionsAccepted.fresher),
-        },
+        "meeting.instructionsAccepted": { mentor: Boolean(r.instructionsAccepted.mentor), fresher: Boolean(r.instructionsAccepted.fresher) },
       },
     },
   ).catch(() => {});
@@ -96,23 +66,15 @@ const refresh = (io, r) => {
   const bothInside = r.mentor.size > 0 && r.fresher.size > 0;
   const bothAccepted = r.instructionsAccepted.mentor && r.instructionsAccepted.fresher;
 
-  // Start timer ONLY when both inside & accepted
   if (!r.startedOnce && bothInside && bothAccepted) {
-    console.log(`[meeting ${r.id}] timer STARTED`);
     r.running = true;
     r.startedOnce = true;
     r.lastTick = Date.now();
     markStarted(r);
     save(r);
-  } else if (!r.startedOnce) {
-    console.log(
-      `[meeting ${r.id}] waiting -> inside: M=${r.mentor.size} F=${r.fresher.size}, accepted:`,
-      r.instructionsAccepted,
-    );
   }
 
   io.to(channel(r.id)).emit("meeting:state", stateOf(r));
-  pushTimer(r);
 };
 
 const leave = (io, socket) => {
@@ -133,10 +95,9 @@ const leave = (io, socket) => {
 
   refresh(io, r);
 
-  // Keep a RUNNING room alive even if both left, so the timer reaches zero
   if (r.mentor.size === 0 && r.fresher.size === 0) {
     save(r);
-    if (!r.running) rooms.delete(m.id);
+    rooms.delete(m.id);
   }
 };
 
@@ -144,7 +105,6 @@ const finish = async (io, r) => {
   rooms.delete(r.id);
   r.running = false;
   try {
-    const { completeBooking } = require("../controllers/bookingController");
     await completeBooking(r.id);
   } catch (e) {
     console.error("completeBooking failed:", e.message);
@@ -171,7 +131,7 @@ exports.initMeetings = (io) => {
         if (["completed", "awaiting_confirmation", "disputed"].includes(b.status)) {
           return ack({ ok: false, code: "ENDED", message: "This session has ended." });
         }
-
+        
         if (!["accepted", "in_progress"].includes(b.status)) {
           return ack({ ok: false, code: "NOT_ACTIVE" });
         }
@@ -185,31 +145,29 @@ exports.initMeetings = (io) => {
         if (!r) {
           const total = Number(b.durationMinutes) * 60000;
           const saved = b.meeting || {};
-          const started = Boolean(saved.startedAt);
           r = {
             id: b.requestGroupId,
-            mentorId: b.mentor ? String(b.mentor) : "",
-            fresherId: b.fresher ? String(b.fresher) : "",
             totalMs: total,
             remainingMs: typeof saved.remainingMs === "number" ? Math.max(0, saved.remainingMs) : total,
             mentor: new Set(),
             fresher: new Set(),
-            running: started, // already started once -> keep running
-            startedOnce: started,
-            startedMarked: started,
+            running: false,
+            startedOnce: Boolean(saved.startedAt),
+            startedMarked: Boolean(saved.startedAt),
             lastTick: Date.now(),
             lastSave: Date.now(),
             lastActivity: Date.now(),
             ticks: 0,
-            // if session already started, both must have accepted before
-            instructionsAccepted: started
-              ? { mentor: true, fresher: true }
-              : {
-                  mentor: Boolean(saved.instructionsAccepted?.mentor),
-                  fresher: Boolean(saved.instructionsAccepted?.fresher),
-                },
+            instructionsAccepted: {
+              mentor: Boolean(saved.instructionsAccepted?.mentor),
+              fresher: Boolean(saved.instructionsAccepted?.fresher),
+            },
           };
           rooms.set(r.id, r);
+
+          if (r.startedOnce && r.instructionsAccepted.mentor && r.instructionsAccepted.fresher) {
+            r.running = true;
+          }
         }
 
         r[role].add(socket.id);
@@ -222,14 +180,13 @@ exports.initMeetings = (io) => {
 
         return ack({ ok: true, role, state: stateOf(r) });
       } catch (error) {
-        console.error("meeting:join error:", error);
         return ack({ ok: false, code: "ERROR" });
       }
     });
 
-    socket.on("meeting:instructions-accepted", () => {
+    socket.on("meeting:instructions-accepted", ({ bookingId } = {}) => {
       const m = socket.data.meeting;
-      if (!m) return;
+      if (!m || m.id !== bookingId) return;
       const r = rooms.get(m.id);
       if (!r) return;
 
@@ -237,6 +194,22 @@ exports.initMeetings = (io) => {
       io.to(channel(m.id)).emit("meeting:instructions-state", r.instructionsAccepted);
       save(r);
       refresh(io, r);
+    });
+
+    // ✅ MENTOR MANUALLY ENDS MEETING SUCCESSFULLY
+    socket.on("meeting:force-end", ({ bookingId } = {}) => {
+      const m = socket.data.meeting;
+      if (!m || m.id !== bookingId || m.role !== "mentor") return;
+      
+      const r = rooms.get(m.id);
+      if (!r) return;
+
+      // Stop timer immediately and trigger complete
+      r.remainingMs = 0;
+      r.running = false;
+      r.lastTick = Date.now();
+      
+      finish(io, r).catch(console.error);
     });
 
     socket.on("meeting:signal", (payload = {}) => {
@@ -250,7 +223,7 @@ exports.initMeetings = (io) => {
 
   setInterval(() => {
     const now = Date.now();
-    for (const r of [...rooms.values()]) {
+    for (const r of rooms.values()) {
       if (r.running) {
         advance(r);
         r.ticks += 1;
@@ -267,7 +240,6 @@ exports.initMeetings = (io) => {
 
         if (r.ticks % STATE_BROADCAST_EVERY_TICKS === 0) {
           io.to(channel(r.id)).emit("meeting:state", stateOf(r));
-          pushTimer(r);
         }
       }
 

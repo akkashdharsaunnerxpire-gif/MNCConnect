@@ -1,7 +1,7 @@
 // src/components/MeetingRoom.jsx
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { Camera, CameraOff, Loader2, Mic, MicOff, PhoneOff, Clock3, UserRound } from "lucide-react";
+import { Camera, CameraOff, Loader2, Mic, MicOff, PhoneOff, Clock3, UserRound, CheckCircle } from "lucide-react";
 import socket from "../../socket";
 import ReviewModal from "../pages/Reviewmodal";
 import MeetingInstructionsGate from "../../Commoncomponents/MeetingInstructionsGate";
@@ -34,6 +34,7 @@ export default function MeetingRoom() {
 
   const [showCompletionPrompt, setShowCompletionPrompt] = useState(false);
   const [completionDone, setCompletionDone] = useState(false);
+  const [showSuccessBtn, setShowSuccessBtn] = useState(false);
 
   const [instructionsAccepted, setInstructionsAccepted] = useState({ mentor: false, fresher: false });
 
@@ -149,7 +150,6 @@ export default function MeetingRoom() {
         } catch { /* try next */ }
       }
 
-      // Effect was cleaned up while waiting for permission -> stop the stream (no camera leak)
       if (cancelled) {
         stream?.getTracks().forEach((t) => t.stop());
         return;
@@ -187,7 +187,6 @@ export default function MeetingRoom() {
       localStream.current?.getTracks().forEach((t) => t.stop());
       localStream.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookingId]);
 
   useEffect(() => {
@@ -208,14 +207,28 @@ export default function MeetingRoom() {
       .catch(() => {});
   }, [bookingId, token, phase]);
 
-  // 5-min popup: only for fresher and only when < 5 min left
   const currentRemaining = clock.running ? Math.max(0, clock.remainingMs - (Date.now() - clock.at)) : clock.remainingMs;
-
+  
+  // ✅ 5-min popup for Fresher
   useEffect(() => {
     if (!isMentor && phase === "in" && clock.running && currentRemaining > 0 && currentRemaining <= 5 * 60 * 1000 && !showCompletionPrompt && !completionDone) {
       setShowCompletionPrompt(true);
     }
   }, [currentRemaining, phase, isMentor, showCompletionPrompt, completionDone, clock.running]);
+
+  // ✅ 3-min "Meeting Success" button for Mentor
+  useEffect(() => {
+    if (isMentor && phase === "in" && clock.running && currentRemaining > 0 && currentRemaining <= 3 * 60 * 1000) {
+      setShowSuccessBtn(true);
+    } else {
+      setShowSuccessBtn(false);
+    }
+  }, [currentRemaining, phase, isMentor, clock.running]);
+
+  const handleForceSuccess = () => {
+    if (!confirm("Are you sure you want to end the meeting as SUCCESS? The fresher will be asked to confirm.")) return;
+    socket.emit("meeting:force-end", { bookingId });
+  };
 
   const toggle = (kind) => {
     const tracks = kind === "mic" ? localStream.current?.getAudioTracks() : localStream.current?.getVideoTracks();
@@ -287,7 +300,6 @@ export default function MeetingRoom() {
 
   const status = clock.running ? "Session in progress" : otherHere ? "Connecting…" : `Waiting for the ${isMentor ? "fresher" : "employee"} to join.`;
 
-  // Show instructions gate until I have accepted (or timer already running)
   if (phase === "in" && !clock.running && !myInstructionsDone) {
     return <MeetingInstructionsGate bookingId={bookingId} role={isMentor ? "mentor" : "fresher"} peerAccepted={peerInstructionsDone} />;
   }
@@ -325,9 +337,18 @@ export default function MeetingRoom() {
         </div>
 
         <div className="flex shrink-0 items-center justify-center gap-3 pb-3">
+          {showSuccessBtn && isMentor && (
+            <button onClick={handleForceSuccess} className="flex h-12 items-center gap-2 rounded-full bg-emerald-600 px-6 text-sm font-bold hover:bg-emerald-700 animate-pulse">
+              <CheckCircle size={18} /> Meeting Success
+            </button>
+          )}
+          
           <button onClick={() => toggle("mic")} className={`flex h-12 w-12 items-center justify-center rounded-full ${micOn ? "bg-slate-700" : "bg-red-600"}`}>{micOn ? <Mic size={20} /> : <MicOff size={20} />}</button>
           <button onClick={() => toggle("cam")} className={`flex h-12 w-12 items-center justify-center rounded-full ${camOn ? "bg-slate-700" : "bg-red-600"}`}>{camOn ? <Camera size={20} /> : <CameraOff size={20} />}</button>
-          <button onClick={leaveRoom} className="flex h-12 items-center gap-2 rounded-full bg-red-600 px-6 text-sm font-bold"><PhoneOff size={18} /> Leave</button>
+          
+          <button onClick={leaveRoom} className="flex h-12 items-center gap-2 rounded-full bg-red-600 px-6 text-sm font-bold">
+            <PhoneOff size={18} /> Leave
+          </button>
         </div>
         <p className="shrink-0 pb-3 text-center text-[11px] text-slate-500">Once the session starts, the timer runs to zero even if someone leaves.</p>
       </div>

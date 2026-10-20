@@ -1,5 +1,5 @@
-// routes/bookingRoutes.js
-// Mount in app.js:   app.use("/api", require("./routes/bookingRoutes"));
+// routes/fresherBookingRoutes.js
+// Mount in app.js:   app.use("/api", require("./routes/fresherBookingRoutes"));
 
 const express = require("express");
 const { requireAuth } = require("../middleware/panelAuth");

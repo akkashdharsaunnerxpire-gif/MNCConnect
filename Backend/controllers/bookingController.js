@@ -18,13 +18,15 @@ const { sendMail } = require("../utils/mailer");
    CONFIG
 ============================================================ */
 
-const MIN_MINUTES = 30;
-const MAX_MINUTES = 240;
+const PRICE_PER_30_MIN = Number(process.env.PRICE_PER_30_MIN || 200);
 const MIN_LEAD_MS = 15 * 60 * 1000;
 const GAP_MS = 30 * 60 * 1000;
 const OPEN_BEFORE_MS = 5 * 60 * 1000;
 
 const STRICT_MATCH = process.env.STRICT_MENTOR_MATCH === "true";
+
+const priceFor = (minutes) => (minutes / 30) * PRICE_PER_30_MIN;
+const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
 /* ============================================================
    HELPERS
@@ -34,7 +36,7 @@ let razorpay = null;
 const getRazorpay = () => {
   if (razorpay) return razorpay;
   const { RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET } = process.env;
-  if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) throw new Error("Razorpay keys are not configured");
+  if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) throw new Error("Razorpay keys not set");
   razorpay = new Razorpay({ key_id: RAZORPAY_KEY_ID, key_secret: RAZORPAY_KEY_SECRET });
   return razorpay;
 };
@@ -50,30 +52,13 @@ const loose = (a, b) => {
 
 const MENTOR_FIELDS = "name email profilePic currentCompany designation department gender languages spokenLanguages skills expertise";
 
-// Returns "" when this mentor may receive the request, else the reason.
 const whyNot = (m, b) => {
-  if (b.companyName && !loose(m.currentCompany, b.companyName)) {
-    return `company is "${m.currentCompany}", request needs "${b.companyName}"`;
-  }
-  // exact compare: loose("male", "female") is TRUE because "female" contains "male"
-  if (!isAny(b.gender) && norm(m.gender) !== norm(b.gender)) {
-    return `gender is "${m.gender}", request needs "${b.gender}"`;
-  }
+  if (b.companyName && !loose(m.currentCompany, b.companyName)) return `company mismatch`;
+  if (!isAny(b.gender) && norm(m.gender) !== norm(b.gender)) return `gender mismatch`;
   const spoken = arr(m.spokenLanguages).map(norm).filter(Boolean);
-  if (!isAny(b.language) && spoken.length && !spoken.some((l) => loose(l, b.language))) {
-    return `speaks [${spoken.join(", ")}], request needs "${b.language}"`;
-  }
-  if (STRICT_MATCH && !isAny(b.role)) {
-    const target = norm(b.role) === "other" ? b.otherRole : b.role;
-    const values = [m.designation, m.department, ...arr(m.skills), ...arr(m.expertise), ...arr(m.languages)];
-    if (!isAny(target) && !values.some((v) => loose(v, target))) {
-      return `role "${target}" not found in profile`;
-    }
-  }
+  if (!isAny(b.language) && spoken.length && !spoken.some((l) => loose(l, b.language))) return `language mismatch`;
   return "";
 };
-
-const mentorMatches = (m, b) => whyNot(m, b) === "";
 
 const socketIdsOf = (app, mentorId) => {
   const map = app.get("onlineMentors");
@@ -93,8 +78,8 @@ const hasConflict = (mentorId, startsAt, endsAt, excludeId) =>
     mentor: mentorId,
     status: { $in: ["accepted", "in_progress"] },
     requestGroupId: { $ne: excludeId || "" },
-    startsAt: { $lt: new Date(new Date(endsAt).getTime() + GAP_MS) },
-    endsAt: { $gt: new Date(new Date(startsAt).getTime() - GAP_MS) },
+    startsAt: { $lt: new Date(endsAt.getTime() + GAP_MS) },
+    endsAt: { $gt: new Date(startsAt.getTime() - GAP_MS) },
   });
 
 const toMentorPayload = (b) => ({
@@ -125,15 +110,6 @@ const mentorCard = (m) =>
     ? { id: String(m._id), name: m.name, designation: m.designation || "", company: m.currentCompany || "", image: m.profilePic || "", email: m.email || "" }
     : null;
 
-// live timer of a meeting room that is currently in memory (lazy require = no circular import)
-const liveTimer = (id) => {
-  try {
-    return require("../utils/meeting").getRoomState(id);
-  } catch (_) {
-    return null;
-  }
-};
-
 const toClient = (b) => ({
   id: b.requestGroupId,
   requestGroupId: b.requestGroupId,
@@ -155,8 +131,7 @@ const toClient = (b) => ({
   mentor: mentorCard(b.mentor),
   reviewed: Boolean(b.reviewed),
   refundStatus: b.refundStatus || "",
-  remainingMs: liveTimer(b.requestGroupId)?.remainingMs ?? b.meeting?.remainingMs ?? null,
-  timerRunning: Boolean(liveTimer(b.requestGroupId)?.running),
+  remainingMs: b.meeting?.remainingMs ?? null,
 });
 
 const POPULATE_MENTOR = "name email profilePic currentCompany designation";
@@ -184,30 +159,13 @@ const refundPayment = async (payment, reason = "") => {
 };
 
 const broadcastLoop = async (req, mentors, booking, payload, startsAt, endsAt, requestGroupId, notified) => {
-  const report = [];
-
   for (const m of mentors) {
-    const reason =
-      whyNot(m, booking) ||
-      (socketIdsOf(req.app, m._id).length === 0 ? "not online right now" : "") ||
-      ((await hasConflict(m._id, startsAt, endsAt, requestGroupId)) ? "has another session within 30 minutes" : "");
-
-    report.push(`${m.name || m._id}: ${reason || "SENT"}`);
+    const reason = whyNot(m, booking) || (socketIdsOf(req.app, m._id).length === 0 ? "not online" : "") || ((await hasConflict(m._id, startsAt, endsAt, requestGroupId)) ? "conflict" : "");
     if (reason) continue;
-
     notified.push(m._id);
     emitToMentorSockets(req.app, m._id, "session-request", payload);
-    notify({
-      user: m._id,
-      role: "mentor",
-      title: "New session request",
-      message: `${booking.fresherName} wants a ${booking.durationMinutes}-minute session on ${booking.date} at ${booking.time}.`,
-      type: "session",
-      link: "/mentor/home",
-    });
+    notify({ user: m._id, role: "mentor", title: "New session request", message: `${booking.fresherName} wants a session.`, type: "session", link: "/mentor/home" });
   }
-
-  console.log(`[request ${requestGroupId}] ${mentors.length} approved mentor(s):\n  ${report.join("\n  ") || "none"}`);
 };
 
 /* ============================================================
@@ -225,7 +183,7 @@ exports.createRequest = async (req, res) => {
     if (!requestGroupId || !paymentId) return fail(res, 400, "requestGroupId and paymentId required");
 
     const existing = await Booking.findOne({ requestGroupId }).populate("mentor", POPULATE_MENTOR);
-    if (existing) return res.json({ success: true, booking: toClient(existing), notifiedCount: (existing.notified || []).length });
+    if (existing) return res.json({ success: true, booking: toClient(existing), notifiedCount: existing.notified.length });
 
     const payment = await Payment.findOne({ razorpayPaymentId: paymentId, status: "paid" });
     if (!payment) return fail(res, 402, "Payment not verified");
@@ -236,7 +194,7 @@ exports.createRequest = async (req, res) => {
     };
 
     const minutes = Number(sd.duration);
-    if (!Number.isInteger(minutes) || minutes < MIN_MINUTES || minutes > MAX_MINUTES) return reject(400, "Invalid duration");
+    if (!Number.isInteger(minutes) || minutes < 30 || minutes > 240) return reject(400, "Invalid duration");
 
     const startsAt = parseSessionStart(sd.date, sd.time);
     if (!startsAt || startsAt.getTime() < Date.now() + MIN_LEAD_MS) return reject(400, "Invalid date/time");
@@ -291,7 +249,7 @@ exports.updateRequest = async (req, res) => {
     const mentorId = req.user?.role === "mentor" ? req.user.id : req.body?.mentorId;
 
     if (!["accepted", "rejected"].includes(status)) return fail(res, 400, "Status must be accepted/rejected");
-
+    
     const booking = await Booking.findOne({ requestGroupId });
     if (!booking) return fail(res, 404, "Request not found");
 
@@ -312,33 +270,12 @@ exports.updateRequest = async (req, res) => {
 
     await assignMentorToRequest({ requestGroupId, mentorId }).catch(() => {});
 
-    // Reminder emails
-    try {
-      const mentor = await Mentor.findById(mentorId).lean();
-      const fresher = await Fresher.findById(accepted.fresher).lean();
-      if (mentor?.email && fresher?.email) {
-        const openTime = new Date(new Date(accepted.startsAt).getTime() - OPEN_BEFORE_MS).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" });
-        Promise.resolve(
-          sendMail({
-            to: [mentor.email, fresher.email],
-            subject: `Session starts soon: ${accepted.companyName}`,
-            text: `Your session starts at ${accepted.time}. The room will open at ${openTime}. Please be on time.`,
-            html: `<p>Your session starts at <b>${accepted.time}</b>. The room will open at <b>${openTime}</b>. Please be on time.</p>`,
-          })
-        ).catch((e) => console.log("Mail error:", e.message));
-      }
-    } catch (e) { console.log("Mail error:", e.message); }
-
     emitToUser(accepted.fresher, "booking:updated", toClient(accepted));
     return res.json({ success: true, status: "accepted", booking: toClient(accepted) });
   } catch (error) {
-    console.error("updateRequest error:", error);
     return fail(res, 500, "Failed to update");
   }
 };
-
-// alias so older route files that use respondToRequest keep working
-exports.respondToRequest = exports.updateRequest;
 
 /* ============================================================
    COMPLETION & FRESHER CONFIRMATION
@@ -346,24 +283,23 @@ exports.respondToRequest = exports.updateRequest;
 
 const completeBooking = async (requestGroupId) => {
   const now = new Date();
-
-  // Timer over -> awaiting_confirmation
+  
   const b = await Booking.findOneAndUpdate(
     { requestGroupId, status: { $in: ["accepted", "in_progress"] } },
     { $set: { status: "awaiting_confirmation", "meeting.remainingMs": 0, "meeting.endedAt": now } },
     { returnDocument: "after" }
   ).populate("mentor", POPULATE_MENTOR);
-
+  
   if (!b) return null;
 
   notify({
     user: b.fresher, role: "fresher", title: "Session ended",
-    message: "Did the session go well? Please confirm.", type: "session", link: `/Home/meeting/${b.requestGroupId}`,
+    message: "Did the session go well? Please confirm to release payment.", type: "session", link: `/Home/meeting/${b.requestGroupId}`,
   });
-
+  
   emitToUser(b.fresher, "booking:updated", toClient(b));
   if (b.mentor) emitToUser(b.mentor._id, "booking:updated", toClient(b));
-
+  
   return b;
 };
 
@@ -377,7 +313,18 @@ exports.confirmCompletion = async (req, res) => {
     const booking = await Booking.findOne({ requestGroupId }).populate("mentor", POPULATE_MENTOR);
     if (!booking) return fail(res, 404, "Session not found");
     if (String(booking.fresher) !== req.user.id) return fail(res, 403, "Access denied");
-    if (booking.status !== "awaiting_confirmation") return fail(res, 400, "Not awaiting confirmation");
+
+    // ✅ FIX: Prevent Double Click Error (Return success if already processed)
+    if (booking.status === "completed") {
+      return res.json({ success: true, status: "completed", booking: toClient(booking) });
+    }
+    if (booking.status === "disputed") {
+      return res.json({ success: true, status: "disputed", booking: toClient(booking) });
+    }
+
+    if (booking.status !== "awaiting_confirmation") {
+      return fail(res, 400, "This session is not awaiting confirmation.");
+    }
 
     if (accepted) {
       const updated = await Booking.findOneAndUpdate(
@@ -386,24 +333,37 @@ exports.confirmCompletion = async (req, res) => {
         { returnDocument: "after" }
       ).populate("mentor", POPULATE_MENTOR);
 
-      if (!updated) return fail(res, 409, "Already confirmed");
+      // 💰 75% Mentor / 25% Platform Split
+      const amount = Number(booking.amount || 0);
+      const mentorShare = amount * 0.75;
+      const platformShare = amount * 0.25;
 
-      await Payment.updateOne({ requestGroupId, status: "paid" }, { $set: { sessionStatus: "completed" } });
+      await Payment.updateOne(
+        { requestGroupId, status: "paid" }, 
+        { $set: { sessionStatus: "completed", mentorEarning: mentorShare, platformFee: platformShare } }
+      );
+
       if (updated.mentor) {
         await Mentor.updateOne({ _id: updated.mentor._id }, { $inc: { totalSessions: 1 } });
-        notify({ user: updated.mentor._id, role: "mentor", title: "Session confirmed", message: "Earnings released.", type: "payment", link: "/mentor/earnings" });
+        
+        notify({ 
+          user: updated.mentor._id, role: "mentor", title: "Session confirmed & Paid", 
+          message: `Fresher confirmed the session. ₹${mentorShare} added to your wallet.`, 
+          type: "payment", link: "/mentor/earnings" 
+        });
+        emitToUser(updated.mentor._id, "wallet:updated", { requestGroupId });
       }
+
       emitToUser(updated.fresher, "booking:updated", toClient(updated));
       return res.json({ success: true, status: "completed", booking: toClient(updated) });
     }
 
+    // If "No" clicked (Refund)
     const updated = await Booking.findOneAndUpdate(
       { _id: booking._id, status: "awaiting_confirmation" },
       { $set: { status: "disputed", completedAt: new Date() } },
       { returnDocument: "after" }
     ).populate("mentor", POPULATE_MENTOR);
-
-    if (!updated) return fail(res, 409, "Already confirmed");
 
     const payment = await Payment.findOne({ razorpayPaymentId: booking.razorpayPaymentId });
     await refundPayment(payment, "Fresher reported issue");
@@ -411,179 +371,29 @@ exports.confirmCompletion = async (req, res) => {
     emitToUser(updated.fresher, "booking:updated", toClient(updated));
     return res.json({ success: true, status: "disputed", booking: toClient(updated) });
   } catch (error) {
-    console.error("confirmCompletion error:", error);
     return fail(res, 500, "Unable to confirm session");
   }
 };
 
 /* ============================================================
-   GET ENDPOINTS
+   OTHER ENDPOINTS (GET, etc)
 ============================================================ */
 
 exports.getRequestStatus = async (req, res) => {
-  try {
-    const b = await Booking.findOne({ requestGroupId: String(req.params.requestGroupId || "") }).populate("mentor", POPULATE_MENTOR);
-    if (!b) return fail(res, 404, "Not found");
-    return res.json({ success: true, request: toClient(b), booking: toClient(b) });
-  } catch (error) {
-    return fail(res, 500, "Failed to load request");
-  }
+  const b = await Booking.findOne({ requestGroupId: String(req.params.requestGroupId || "") }).populate("mentor", POPULATE_MENTOR);
+  if (!b) return fail(res, 404, "Not found");
+  return res.json({ success: true, request: toClient(b), booking: toClient(b) });
 };
 
 exports.getBooking = async (req, res) => {
-  try {
-    const b = await Booking.findOne({ requestGroupId: String(req.params.id) }).populate("mentor", POPULATE_MENTOR);
-    if (!b) return fail(res, 404, "Not found");
-    const mine = String(b.fresher) === req.user.id || String(b.mentor?._id || b.mentor) === req.user.id;
-    if (!mine) return fail(res, 403, "Access denied");
-    return res.json({ success: true, booking: toClient(b) });
-  } catch (error) {
-    return fail(res, 500, "Failed to load booking");
-  }
+  const b = await Booking.findOne({ requestGroupId: String(req.params.id) }).populate("mentor", POPULATE_MENTOR);
+  if (!b) return fail(res, 404, "Not found");
+  const mine = String(b.fresher) === req.user.id || String(b.mentor?._id || b.mentor) === req.user.id;
+  if (!mine) return fail(res, 403, "Access denied");
+  return res.json({ success: true, booking: toClient(b) });
 };
 
 exports.myBookings = async (req, res) => {
-  try {
-    const list = await Booking.find({ fresher: req.user.id }).populate("mentor", POPULATE_MENTOR).sort({ startsAt: -1 });
-    return res.json({ success: true, bookings: list.map(toClient) });
-  } catch (error) {
-    return fail(res, 500, "Failed to load bookings");
-  }
-};
-
-/* ---------- fresher: completed sessions that still need a review ---------- */
-exports.needsReview = async (req, res) => {
-  try {
-    const list = await Booking.find({
-      fresher: req.user.id,
-      status: "completed",
-      reviewed: { $ne: true },
-    })
-      .populate("mentor", POPULATE_MENTOR)
-      .sort({ completedAt: -1 })
-      .limit(10);
-
-    const bookings = list.map(toClient);
-    return res.json({ success: true, bookings, booking: bookings[0] || null, count: bookings.length });
-  } catch (error) {
-    console.error("needsReview error:", error);
-    return fail(res, 500, "Failed to load reviews");
-  }
-};
-
-/* ---------- mentor: pending requests that match this mentor ---------- */
-exports.mentorPending = async (req, res) => {
-  try {
-    const mentor = await Mentor.findById(req.user.id).select(MENTOR_FIELDS).lean();
-    if (!mentor) return fail(res, 404, "Mentor not found");
-
-    const pending = await Booking.find({
-      status: "pending",
-      expiresAt: { $gt: new Date() },
-      declinedBy: { $ne: req.user.id },
-    })
-      .sort({ startsAt: 1 })
-      .limit(50);
-
-    const out = [];
-    for (const b of pending) {
-      if (!mentorMatches(mentor, b)) continue;
-      if (await hasConflict(mentor._id, b.startsAt, b.endsAt, b.requestGroupId)) continue;
-      out.push(toMentorPayload(b));
-    }
-
-    return res.json({ success: true, requests: out, bookings: out, count: out.length });
-  } catch (error) {
-    console.error("mentorPending error:", error);
-    return fail(res, 500, "Failed to load requests");
-  }
-};
-
-/* ---------- when a mentor comes online, replay matching pending requests ---------- */
-exports.pushPendingToMentor = async (app, mentorId) => {
-  const mentor = await Mentor.findById(mentorId).select(MENTOR_FIELDS).lean();
-  if (!mentor) return;
-
-  const pending = await Booking.find({
-    status: "pending",
-    expiresAt: { $gt: new Date() },
-    declinedBy: { $ne: mentorId },
-  })
-    .sort({ startsAt: 1 })
-    .limit(20);
-
-  for (const b of pending) {
-    if (!mentorMatches(mentor, b)) continue;
-    if (await hasConflict(mentor._id, b.startsAt, b.endsAt, b.requestGroupId)) continue;
-    emitToMentorSockets(app, mentorId, "session-request", toMentorPayload(b));
-  }
-};
-
-/* ============================================================
-   FRESHER NOTIFICATIONS
-   (assumes Notification has: user, role, read:Boolean, createdAt)
-============================================================ */
-
-exports.getFresherNotifications = async (req, res) => {
-  try {
-    const filter = { user: req.user.id, role: "fresher" };
-    const list = await Notification.find(filter).sort({ createdAt: -1 }).limit(50).lean();
-    const unreadCount = await Notification.countDocuments({ ...filter, read: { $ne: true } });
-
-    return res.json({
-      success: true,
-      notifications: list.map((n) => serializeNotification(n)),
-      unreadCount,
-    });
-  } catch (error) {
-    console.error("getFresherNotifications error:", error);
-    return fail(res, 500, "Failed to load notifications");
-  }
-};
-
-exports.markAllFresherNotificationsRead = async (req, res) => {
-  try {
-    await Notification.updateMany(
-      { user: req.user.id, role: "fresher", read: { $ne: true } },
-      { $set: { read: true } },
-    );
-    return res.json({ success: true });
-  } catch (error) {
-    console.error("markAllFresherNotificationsRead error:", error);
-    return fail(res, 500, "Failed to update notifications");
-  }
-};
-
-exports.markFresherNotificationRead = async (req, res) => {
-  try {
-    await Notification.updateOne(
-      { _id: req.params.id, user: req.user.id, role: "fresher" },
-      { $set: { read: true } },
-    );
-    return res.json({ success: true });
-  } catch (error) {
-    console.error("markFresherNotificationRead error:", error);
-    return fail(res, 500, "Failed to update notification");
-  }
-};
-
-/* ============================================================
-   SCHEDULERS
-============================================================ */
-
-exports.startSchedulers = (app) => {
-  setInterval(async () => {
-    if (mongoose.connection.readyState !== 1) return;
-    try {
-      const now = new Date();
-      // Expire old pending requests
-      await Booking.updateMany({ status: "pending", expiresAt: { $lte: now } }, { $set: { status: "expired" } });
-
-      // Fallback reminder flag (emails are sent in updateRequest)
-      await Booking.updateMany(
-        { status: "accepted", reminderSent: false, startsAt: { $lte: new Date(now.getTime() + 5 * 60000) } },
-        { $set: { reminderSent: true } },
-      );
-    } catch (e) { console.error(e); }
-  }, 30000);
+  const list = await Booking.find({ fresher: req.user.id }).populate("mentor", POPULATE_MENTOR).sort({ startsAt: -1 });
+  return res.json({ success: true, bookings: list.map(toClient) });
 };
