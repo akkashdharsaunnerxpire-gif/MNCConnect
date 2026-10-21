@@ -12,6 +12,9 @@ const router = express.Router();
 router.get("/wallet/me", requireAuth("mentor"), panel.getWallet);
 router.post("/wallet/withdraw", requireAuth("mentor"), panel.requestWithdrawal);
 
+// ✅ Mentor profile stats (Fixed)
+router.get("/mentor/profile/stats", requireAuth("mentor"), panel.getProfileStats);
+
 // ---------- reviews ----------
 router.get("/reviews/me", requireAuth("mentor"), panel.getMyReviews);
 router.post("/reviews/:id/reply", requireAuth("mentor"), panel.replyToReview);
@@ -21,7 +24,8 @@ router.post("/reviews", requireAuth("fresher"), panel.createReview);
 router.get("/notifications", requireAuth("mentor"), panel.getNotifications);
 router.patch("/notifications/read-all", requireAuth("mentor"), panel.markAllNotificationsRead);
 router.patch("/notifications/:id/read", requireAuth("mentor"), panel.markNotificationRead);
-// routes/mentorPanelRoutes.js (add this line)
+
+// ---------- dashboard stats ----------
 router.get("/mentor/stats", requireAuth("mentor"), panel.getMentorStats);
 
 // ---------- payment <-> mentor link (optional HTTP version) ----------

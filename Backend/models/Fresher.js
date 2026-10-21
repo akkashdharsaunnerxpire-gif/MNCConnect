@@ -18,6 +18,18 @@ const fresherSchema = new mongoose.Schema(
       trim: true,
       index: true,
     },
+    isEmailVerified: {
+      type: Boolean,
+      default: false,
+    },
+    emailOtp: {
+      type: String,
+      default: null,
+    },
+    emailOtpExpiresAt: {
+      type: Date,
+      default: null,
+    },
 
     mobile: {
       type: String,

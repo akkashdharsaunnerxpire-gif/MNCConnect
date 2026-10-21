@@ -1,7 +1,4 @@
 // src/services/mentorApi.js
-// Single place for API URLs, socket event names and small helpers.
-// If your backend routes differ, change ONLY ENDPOINTS / EVENTS below.
-
 export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 export const ENDPOINTS = {
@@ -13,7 +10,10 @@ export const ENDPOINTS = {
   notificationRead: (id) => `/notifications/${id}/read`,
   notificationsReadAll: "/notifications/read-all",
   assignPayment: "/payments/assign-to-me",
-  booking: (id) => `/bookings/${encodeURIComponent(id)}`, // 🆕 ADD THIS
+  booking: (id) => `/bookings/${encodeURIComponent(id)}`,
+  
+  // ✅ ADD THIS
+  profileStats: "/mentor/profile/stats", 
 };
 
 export const EVENTS = {

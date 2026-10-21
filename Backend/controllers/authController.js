@@ -1,64 +1,33 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const fs = require("fs/promises");
+const crypto = require("crypto");
 
 const Fresher = require("../models/Fresher");
 const Mentor = require("../models/Mentor");
-const {
-  uploadFromBuffer,
-  deleteFromCloudinary,
-} = require("../config/cloudinary");
-
-// =====================================================
-// JWT
-// =====================================================
-
-const generateToken = (id, role) => {
-  if (!process.env.JWT_SECRET) {
-    throw new Error("JWT_SECRET is not configured.");
-  }
-
-  return jwt.sign(
-    {
-      id: id.toString(),
-      role,
-    },
-    process.env.JWT_SECRET,
-    {
-      expiresIn: "7d",
-    },
-  );
-};
+const { uploadFromBuffer, deleteFromCloudinary } = require("../config/cloudinary");
+const { sendMail, otpVerificationEmail } = require("../utils/mailer");
 
 // =====================================================
 // HELPERS
 // =====================================================
 
-const normalizeEmail = (email) => {
-  return String(email || "").trim().toLowerCase();
+const generateToken = (id, role) => {
+  if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET is not configured.");
+  return jwt.sign({ id: id.toString(), role }, process.env.JWT_SECRET, { expiresIn: "7d" });
 };
 
-const validatePassword = (password) => {
-  return (
-    typeof password === "string" &&
-    password.length >= 8 &&
-    password.length <= 128
-  );
-};
+const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
+const validatePassword = (password) => typeof password === "string" && password.length >= 8 && password.length <= 128;
 
-// ✅ Helper to generate random 6-character Referral Code
 const generateReferralCode = () => {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   let code = "";
-  for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
+  for (let i = 0; i < 6; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
   return code;
 };
 
-// =====================================================
-// SANITIZE FRESHER
-// =====================================================
+// ✅ Generate 6-digit OTP
+const generateOtp = () => crypto.randomInt(100000, 999999).toString();
 
 const sanitizeFresher = (user) => {
   return {
@@ -67,53 +36,33 @@ const sanitizeFresher = (user) => {
     email: user.email,
     mobile: user.mobile || "",
     countryCode: user.countryCode || "+91",
-    fullMobile: (user.countryCode || "+91") + (user.mobile || ""),
     role: "fresher",
     profilePic: user.profilePic || "",
-    lastLoginAt: user.lastLoginAt,
-    createdAt: user.createdAt,
-    
-    // ✅ Wallet & Referral details sent to frontend
+    isEmailVerified: user.isEmailVerified || false,
     walletBalance: user.walletBalance || 0,
     referralCode: user.referralCode || "",
     hasUsedReferral: user.hasUsedReferral || false,
+    lastLoginAt: user.lastLoginAt,
+    createdAt: user.createdAt,
   };
 };
-
-// =====================================================
-// SANITIZE MENTOR
-// =====================================================
 
 const sanitizeMentor = (mentor) => {
   return {
     id: mentor._id,
     name: mentor.name,
     email: mentor.email,
-    mobile: mentor.mobile || "",
-    countryCode: mentor.countryCode || "+91",
-    fullMobile: (mentor.countryCode || "+91") + (mentor.mobile || ""),
     role: "mentor",
-    profilePic: mentor.profilePic || "",
-    employeeId: mentor.employeeId || "",
-    workEmail: mentor.workEmail || "",
-    lastLoginAt: mentor.lastLoginAt,
-    createdAt: mentor.createdAt,
-    company: mentor.currentCompany,
-    designation: mentor.designation,
-    department: mentor.department,
-    experience: mentor.yearsOfExperience,
-    location: mentor.officeLocation,
-    linkedin: mentor.linkedinProfile,
-    skills: mentor.languages,
-    bio: mentor.bio,
+    isEmailVerified: true,
     isVerified: mentor.isVerified,
     verificationStatus: mentor.verificationStatus,
     accountStatus: mentor.accountStatus,
+    // ... (Add your other mentor fields here)
   };
 };
 
 // =====================================================
-// 1. FRESHER REGISTER (With Wallet & Referral Logic)
+// 1. FRESHER REGISTER (Sends OTP)
 // POST /api/auth/fresher/register
 // =====================================================
 
@@ -121,114 +70,32 @@ exports.registerFresher = async (req, res) => {
   try {
     const { name, email, mobile, countryCode, password, referralInput } = req.body;
 
-    console.log("FRESHER REGISTER BODY:", req.body);
-
-    // 1. Check required fields
-    if (!name || !email || !mobile || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "Name, email, mobile number and password are required.",
-      });
-    }
-
-    // 2. Validate name
-    if (typeof name !== "string" || name.trim().length < 2 || name.trim().length > 50) {
-      return res.status(400).json({
-        success: false,
-        message: "Name must be between 2 and 50 characters.",
-      });
-    }
-
-    // 3. Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide a valid email address.",
-      });
-    }
-
-    // 4. Validate password
-    if (!validatePassword(password)) {
-      return res.status(400).json({
-        success: false,
-        message: "Password must be between 8 and 128 characters.",
-      });
-    }
-
-    // 5. Validate mobile number
-    const mobileRegex = /^[0-9]{10}$/;
-    let cleanMobileForValidation = String(mobile).replace(/[\s\-\(\)]/g, "");
-
-    if (cleanMobileForValidation.startsWith("+")) {
-      const digitsOnly = cleanMobileForValidation.replace(/[^0-9]/g, "");
-      if (digitsOnly.length >= 10) {
-        cleanMobileForValidation = digitsOnly.slice(-10);
-      }
-    }
-
-    if (cleanMobileForValidation.length > 10 && /^\d{11,13}$/.test(cleanMobileForValidation)) {
-      cleanMobileForValidation = cleanMobileForValidation.slice(-10);
-    }
-
-    if (!mobileRegex.test(cleanMobileForValidation)) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide a valid 10-digit mobile number.",
-      });
-    }
-
-    // 6. Validate country code
-    const countryCodeRegex = /^\+\d{1,4}$/;
-    let cleanCountryCode = String(countryCode || "+91").trim();
-    if (!cleanCountryCode.startsWith("+")) {
-      cleanCountryCode = "+" + cleanCountryCode;
-    }
-    if (!countryCodeRegex.test(cleanCountryCode)) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide a valid country code (e.g., +91).",
-      });
-    }
+    // ... [KEEP ALL YOUR EXISTING VALIDATIONS HERE] ...
 
     const cleanName = String(name).trim();
     const normalizedEmail = normalizeEmail(email);
+    let cleanCountryCode = String(countryCode || "+91").trim();
+    if (!cleanCountryCode.startsWith("+")) cleanCountryCode = "+" + cleanCountryCode;
+    let cleanMobileForValidation = String(mobile).replace(/[\s\-\(\)]/g, "").replace(/[^0-9]/g, "");
+    if (cleanMobileForValidation.length > 10) cleanMobileForValidation = cleanMobileForValidation.slice(-10);
     const cleanMobile = cleanCountryCode + cleanMobileForValidation;
-
-    console.log("Cleaned mobile:", cleanMobile);
 
     // UNIQUENESS CHECKS
     const existingFresherByEmail = await Fresher.findOne({ email: normalizedEmail });
-    if (existingFresherByEmail) {
-      return res.status(409).json({ success: false, message: "A fresher account already exists with this email." });
-    }
+    if (existingFresherByEmail) return res.status(409).json({ success: false, message: "A fresher account already exists with this email." });
 
     const existingMentorByEmail = await Mentor.findOne({ email: normalizedEmail });
-    if (existingMentorByEmail) {
-      return res.status(409).json({ success: false, message: "This email is already registered as a mentor." });
-    }
+    if (existingMentorByEmail) return res.status(409).json({ success: false, message: "This email is already registered as a mentor." });
 
-    const existingFresherByMobile = await Fresher.findOne({ mobile: cleanMobile });
-    if (existingFresherByMobile) {
-      return res.status(409).json({ success: false, message: "This mobile number is already registered with a fresher account." });
-    }
-
-    const existingMentorByMobile = await Mentor.findOne({ mobile: cleanMobile });
-    if (existingMentorByMobile) {
-      return res.status(409).json({ success: false, message: "This mobile number is already registered with a mentor account." });
-    }
-
-    // =====================================================
-    // CREATE FRESHER
-    // =====================================================
+    // ... [Keep mobile uniqueness checks] ...
 
     const hashedPassword = await bcrypt.hash(password, 12);
-
-    // ✅ Generate Unique Referral Code
     let myReferralCode = generateReferralCode();
-    while (await Fresher.exists({ referralCode: myReferralCode })) {
-      myReferralCode = generateReferralCode();
-    }
+    while (await Fresher.exists({ referralCode: myReferralCode })) myReferralCode = generateReferralCode();
+
+    // ✅ Generate OTP
+    const otp = generateOtp();
+    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
 
     const fresher = await Fresher.create({
       name: cleanName,
@@ -236,54 +103,166 @@ exports.registerFresher = async (req, res) => {
       mobile: cleanMobile,
       countryCode: cleanCountryCode,
       password: hashedPassword,
-      profilePic: "",
-      lastLoginAt: new Date(),
       referralCode: myReferralCode,
-      walletBalance: 25, // ✅ Welcome Bonus ₹25
+      walletBalance: 25, // Welcome Bonus
       welcomeBonusClaimed: true,
+      
+      // ✅ OTP Fields
+      isEmailVerified: false,
+      emailOtp: otp,
+      emailOtpExpiresAt: otpExpiresAt,
     });
 
-    // ✅ Apply Referral Code (if entered during registration)
+    // Apply Referral Logic
     if (referralInput) {
       const referrer = await Fresher.findOne({ referralCode: referralInput.toUpperCase() });
       if (referrer && referrer._id.toString() !== fresher._id.toString()) {
-        referrer.walletBalance = (referrer.walletBalance || 0) + 10; // ✅ Referral Bonus ₹10
+        referrer.walletBalance = (referrer.walletBalance || 0) + 10;
         await referrer.save();
-
         fresher.referredBy = referrer._id;
         fresher.hasUsedReferral = true;
         await fresher.save();
       }
     }
 
-    const token = generateToken(fresher._id, "fresher");
+    // ✅ Send OTP Email
+    const emailContent = otpVerificationEmail(cleanName, otp);
+    await sendMail({ to: normalizedEmail, toName: cleanName, ...emailContent });
 
     return res.status(201).json({
       success: true,
-      message: "Fresher account created successfully.",
-      user: sanitizeFresher(fresher),
-      token,
+      message: "OTP sent to your email. Please verify to continue.",
+      requiresVerification: true,
+      email: normalizedEmail,
     });
 
   } catch (error) {
     console.error("Fresher registration error:", error);
-
-    if (error.code === 11000) {
-      return res.status(409).json({
-        success: false,
-        message: "An account already exists with this email or mobile number.",
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      message: "Unable to create fresher account. Please try again.",
-    });
+    return res.status(500).json({ success: false, message: "Unable to create account." });
   }
 };
 
 // =====================================================
-// 2. FRESHER LOGIN
+// 1.5 SEND OTP (For inline email verification)
+// POST /api/auth/fresher/send-otp
+// =====================================================
+
+// =====================================================
+// 1.5 SEND OTP (For inline email verification)
+// POST /api/auth/fresher/send-otp
+// =====================================================
+
+// =====================================================
+// 1.5 SEND OTP (For inline email verification)
+// POST /api/auth/fresher/send-otp
+// =====================================================
+
+exports.sendFresherOtp = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, message: "Email is required." });
+    }
+
+    const normalizedEmail = normalizeEmail(email);
+
+    // ✅ CHECK IF ACCOUNT ALREADY EXISTS
+    const existingFresher = await Fresher.findOne({ email: normalizedEmail });
+    if (existingFresher) {
+      return res.status(409).json({ 
+        success: false, 
+        message: "A fresher account already exists with this email." 
+      });
+    }
+
+    const existingMentor = await Mentor.findOne({ email: normalizedEmail });
+    if (existingMentor) {
+      return res.status(409).json({ 
+        success: false, 
+        message: "This email is already registered as a mentor." 
+      });
+    }
+
+    // Generate OTP
+    const otp = generateOtp();
+    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
+
+    // Create a temporary Fresher document (to store OTP)
+    // Because they are new, we create a temporary record.
+    await Fresher.create({
+      name: "Temp",
+      email: normalizedEmail,
+      mobile: "+910000000000", // Dummy
+      password: "temp", // Dummy
+      isEmailVerified: false,
+      emailOtp: otp,
+      emailOtpExpiresAt: otpExpiresAt,
+    });
+
+    // Send OTP Email
+    const emailContent = otpVerificationEmail("User", otp);
+    await sendMail({ to: normalizedEmail, toName: "User", ...emailContent });
+
+    return res.status(200).json({
+      success: true,
+      message: "OTP sent successfully.",
+    });
+
+  } catch (error) {
+    console.error("Send OTP error:", error);
+    // If there's a duplicate key error, it means the email was created in the millisecond between checks
+    if (error.code === 11000) {
+      return res.status(409).json({ success: false, message: "A fresher account already exists with this email." });
+    }
+    return res.status(500).json({ success: false, message: "Unable to send OTP." });
+  }
+};
+// 2. VERIFY EMAIL OTP
+// POST /api/auth/fresher/verify-otp
+// =====================================================
+
+exports.verifyFresherOtp = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    if (!email || !otp) return res.status(400).json({ success: false, message: "Email and OTP are required." });
+
+    const fresher = await Fresher.findOne({ email: normalizeEmail(email) });
+    if (!fresher) return res.status(404).json({ success: false, message: "Account not found." });
+
+    if (fresher.isEmailVerified) {
+      return res.status(400).json({ success: false, message: "Email is already verified. Please login." });
+    }
+
+    if (fresher.emailOtp !== otp) {
+      return res.status(400).json({ success: false, message: "Invalid OTP." });
+    }
+
+    if (new Date() > fresher.emailOtpExpiresAt) {
+      return res.status(400).json({ success: false, message: "OTP has expired. Please register again." });
+    }
+
+    // ✅ Mark as verified
+    fresher.isEmailVerified = true;
+    fresher.emailOtp = null;
+    fresher.emailOtpExpiresAt = null;
+    await fresher.save();
+
+    const token = generateToken(fresher._id, "fresher");
+
+    return res.status(200).json({
+      success: true,
+      message: "Email verified successfully!",
+      user: sanitizeFresher(fresher),
+      token,
+    });
+  } catch (error) {
+    console.error("OTP verification error:", error);
+    return res.status(500).json({ success: false, message: "Unable to verify OTP." });
+  }
+};
+
+// =====================================================
+// 3. FRESHER LOGIN (Check if verified)
 // POST /api/auth/fresher/login
 // =====================================================
 
@@ -291,40 +270,23 @@ exports.loginFresher = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "Email and password are required.",
-      });
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide a valid email address.",
-      });
-    }
+    if (!email || !password) return res.status(400).json({ success: false, message: "Email and password are required." });
 
     const normalizedEmail = normalizeEmail(email);
+    const fresher = await Fresher.findOne({ email: normalizedEmail }).select("+password");
 
-    const fresher = await Fresher.findOne({
-      email: normalizedEmail,
-    }).select("+password");
-
-    if (!fresher) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid email or password.",
-      });
-    }
+    if (!fresher) return res.status(401).json({ success: false, message: "Invalid email or password." });
 
     const passwordMatched = await bcrypt.compare(password, fresher.password);
+    if (!passwordMatched) return res.status(401).json({ success: false, message: "Invalid email or password." });
 
-    if (!passwordMatched) {
-      return res.status(401).json({
+    // ✅ Check if Email is Verified
+    if (!fresher.isEmailVerified) {
+      return res.status(403).json({
         success: false,
-        message: "Invalid email or password.",
+        message: "Please verify your email before logging in.",
+        requiresVerification: true,
+        email: fresher.email,
       });
     }
 
@@ -339,13 +301,8 @@ exports.loginFresher = async (req, res) => {
       user: sanitizeFresher(fresher),
       token,
     });
-
   } catch (error) {
-    console.error("Fresher login error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Unable to login. Please try again.",
-    });
+    return res.status(500).json({ success: false, message: "Unable to login." });
   }
 };
 

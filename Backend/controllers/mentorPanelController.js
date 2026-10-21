@@ -295,3 +295,29 @@ exports.getMentorStats = async (req, res) => {
     return fail(res, 500, "Unable to load stats.");
   }
 };
+// ============================================================
+// GET /api/mentor/profile/stats (Real-time Stats for Profile)
+// ============================================================
+
+exports.getProfileStats = async (req, res) => {
+  try {
+    const mentorId = req.user.id;
+
+    // Fetch mentor document
+    const mentor = await Mentor.findById(mentorId).select("rating totalReviews totalSessions").lean();
+    
+    if (!mentor) {
+      return fail(res, 404, "Mentor not found.");
+    }
+
+    return res.json({
+      success: true,
+      averageRating: mentor.rating || 0,
+      totalReviews: mentor.totalReviews || 0,
+      totalSessions: mentor.totalSessions || 0,
+    });
+  } catch (error) {
+    console.error("getProfileStats error:", error.message);
+    return fail(res, 500, "Unable to load stats.");
+  }
+};

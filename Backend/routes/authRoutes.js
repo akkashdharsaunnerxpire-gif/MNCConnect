@@ -9,6 +9,8 @@ const {
   loginMentor,
   getMe,
   updateMentorVerification,
+  verifyFresherOtp,
+  sendFresherOtp,
 } = require("../controllers/authController");
 
 const {
@@ -29,6 +31,10 @@ const {
 } = require("../middleware/uploadMiddleware");
 
 router.post("/fresher/register", registerFresher);
+router.post("/fresher/send-otp", sendFresherOtp); 
+
+router.post("/fresher/verify-otp", verifyFresherOtp); 
+
 
 router.post("/fresher/login", loginFresher);
 

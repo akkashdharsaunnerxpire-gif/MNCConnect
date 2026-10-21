@@ -329,6 +329,35 @@ const passwordChangedEmail = (mentor) => {
 
   return { subject, text, html };
 };
+// ============================================================
+// OTP VERIFICATION EMAIL
+// ============================================================
+const otpVerificationEmail = (name, otp) => {
+  const subject = "Verify your MNCConnect account";
+  const text = `Hi ${name},\n\nYour OTP for MNCConnect verification is: ${otp}\n\nThis OTP is valid for 10 minutes. Do not share this with anyone.\n\nTeam MNCConnect`;
+  
+  const html = layout({
+    preheader: "Your MNCConnect verification code is inside.",
+    heading: `Verify your email, ${escapeHtml(name)}`,
+    paragraphsHtml: `
+      <p style="margin:0 0 14px;font-size:15px;line-height:1.7;color:#334155;">
+        Thank you for signing up with MNCConnect. Please use the following OTP to verify your email address.
+      </p>
+      <div style="margin:24px 0;text-align:center;">
+        <span style="display:inline-block;padding:12px 32px;font-size:32px;font-weight:800;letter-spacing:8px;color:#1d4ed8;background:#eff6ff;border-radius:12px;border:1px dashed #93c5fd;">
+          ${otp}
+        </span>
+      </div>
+      <p style="margin:0 0 14px;font-size:15px;line-height:1.7;color:#334155;">
+        This OTP is valid for <b>10 minutes</b>. If you didn't create this account, ignore this email.
+      </p>
+    `,
+    listItems: [],
+    footerNote: "This is an automated message, please do not reply.",
+  });
+
+  return { subject, text, html };
+};
 
 module.exports = {
   sendMail,
@@ -336,4 +365,5 @@ module.exports = {
   rejectionEmail,
   resetPasswordEmail,
   passwordChangedEmail,
+  otpVerificationEmail, // ✅ Export this
 };

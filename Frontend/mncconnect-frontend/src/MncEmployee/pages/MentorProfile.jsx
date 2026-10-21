@@ -8,9 +8,8 @@ import {
 } from "lucide-react";
 import { FaLinkedin } from "react-icons/fa";
 
-// ✅ Import your real-time hook and services
 import useLive from "../../hooks/useLive";
-import { api, EVENTS, getUserId } from "../../services/mentorApi"; // Adjust path if needed
+import { api, EVENTS, ENDPOINTS } from "../../services/mentorApi"; 
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
@@ -34,14 +33,12 @@ const MentorProfile = () => {
     toastTimerRef.current = window.setTimeout(() => setToast(null), 3000);
   };
 
-  // ✅ USE LIVE HOOK for real-time updates on stats & reviews
-  const { data: liveData, reload: reloadLive } = useLive({
-    fetcher: () => api(`/mentor/profile/stats`), // Update this endpoint in backend to return mentor details + stats
+  // ✅ Real-time updates on stats & reviews
+  const { data: liveData } = useLive({
+    fetcher: () => api(ENDPOINTS.profileStats), 
     events: [EVENTS.notification, "review:new", "wallet:updated", "booking:updated"],
-    userId: getUserId(),
   });
 
-  // Fetch profile initially
   const fetchMentorProfile = async () => {
     try {
       setLoading(true);
@@ -64,7 +61,7 @@ const MentorProfile = () => {
     fetchMentorProfile();
   }, [mentorEmail]);
 
-  // ✅ Merge live stats from useLive into the local mentor state
+  // ✅ Merge live stats
   useEffect(() => {
     if (liveData && mentor) {
       setMentor((prev) => ({
@@ -76,9 +73,6 @@ const MentorProfile = () => {
     }
   }, [liveData]);
 
-  /* =======================================================================
-     UPDATE / SAVE
-  ======================================================================= */
   const apiUpdateMentor = async (email, formValues) => {
     const { offerLetterFile, employeeIdProofFile, additionalProofFile, languages, ...rest } = formValues;
     const hasFiles = offerLetterFile || employeeIdProofFile || additionalProofFile;
@@ -121,7 +115,6 @@ const MentorProfile = () => {
     }
   };
 
-  // Map the raw API document into the exact fields the UI needs.
   const profile = useMemo(() => {
     if (!mentor) return null;
     return {
@@ -186,7 +179,6 @@ const MentorProfile = () => {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Mobile menu button */}
       <div className="lg:hidden fixed top-4 left-4 z-50">
         <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 bg-white rounded-lg shadow-lg" aria-label="Toggle menu">
           <Menu size={22} />
@@ -195,7 +187,6 @@ const MentorProfile = () => {
       {sidebarOpen && <div onClick={() => setSidebarOpen(false)} className="fixed inset-0 z-40 bg-black/30 lg:hidden" />}
 
       <div className="flex">
-        {/* Sidebar */}
         <aside className={`fixed lg:static top-0 left-0 z-50 w-64 shrink-0 h-screen bg-white border-r border-slate-100 px-5 py-6 flex flex-col transition-transform duration-300 lg:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
           <div className="flex items-center gap-2 px-1 mb-6">
             <div className="w-8 h-8 rounded-lg bg-orange-500 flex items-center justify-center">
@@ -242,9 +233,7 @@ const MentorProfile = () => {
           </div>
         </aside>
 
-        {/* Main column */}
         <main className="flex-1 px-5 sm:px-8 py-6 max-w-6xl">
-          {/* Breadcrumb + actions */}
           <div className="flex items-center justify-between mb-6">
             <div className="text-sm text-slate-400">
               <span>Mentor</span>
@@ -259,7 +248,6 @@ const MentorProfile = () => {
             </div>
           </div>
 
-          {/* Summary card */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 mb-6">
             <div className="flex flex-col md:flex-row md:items-center gap-6">
               <div className="flex items-center gap-4">
@@ -274,7 +262,6 @@ const MentorProfile = () => {
                 </div>
               </div>
 
-              {/* ✅ Real-time Stats here */}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-8 gap-y-4 md:ml-auto">
                 <Field label="Location" value={profile.location} />
                 <Field label="Experience" value={`${profile.experience} yrs`} />
@@ -291,7 +278,6 @@ const MentorProfile = () => {
             </div>
           </div>
 
-          {/* Tabbed section content */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
             {activeTab === "personal" && (
               <div>
@@ -348,7 +334,6 @@ const MentorProfile = () => {
             )}
           </div>
 
-          {/* Stats row */}
           <div className="grid grid-cols-3 gap-4 mt-6">
             <StatCard label="Sessions" value={profile.totalSessions || 0} icon={BriefcaseBusiness} />
             <StatCard label="Rating" value={profile.rating || "0.0"} icon={Star} iconClass="text-yellow-400 fill-yellow-400" />
@@ -379,7 +364,7 @@ const MentorProfile = () => {
 };
 
 /* =========================================================================
-   EDIT MODAL (Unchanged)
+   EDIT MODAL
 ========================================================================= */
 
 const EDITABLE_FIELDS = [
