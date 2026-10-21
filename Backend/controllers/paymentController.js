@@ -1,8 +1,8 @@
 // controllers/paymentController.js
 //
-// Replaces the old controller. createOrder / verifyPayment keep the SAME
-// request and response shape, so the fresher checkout code does not change.
-// The difference: every order and payment is now saved in MongoDB.
+// Razorpay createOrder / verifyPayment keep the SAME request and response shape.
+// NEW: payWithWallet  -> pay a session fully from the fresher's wallet balance.
+//      If the balance is less than the amount, it throws an "insufficient balance" error.
 //
 // Extra exports used by other controllers:
 //   linkPaymentToRequest(...)   call when a session request is created
@@ -146,12 +146,10 @@ exports.verifyPayment = async (req, res) => {
   }
 
   // ---------- valid: the money is real, so ALWAYS answer success ----------
-  // Bookkeeping problems are logged but never shown as a failed payment.
   try {
     let payment = await Payment.findOne({ razorpayOrderId: razorpay_order_id });
 
     if (!payment) {
-      // Order was created before this controller existed: rebuild from Razorpay
       const order = await getRazorpay().orders.fetch(razorpay_order_id);
       const amount = Number(order.amount) / 100;
       const { fee, earning } = splitAmount(amount, PLATFORM_FEE_PERCENT);
@@ -181,7 +179,6 @@ exports.verifyPayment = async (req, res) => {
         payment.fresherEmail = fresher.email;
       }
 
-      // Best effort: payment method / contact from Razorpay
       try {
         const details = await getRazorpay().payments.fetch(razorpay_payment_id);
         payment.method = details.method || "";
@@ -209,8 +206,103 @@ exports.verifyPayment = async (req, res) => {
 };
 
 // ============================================================
+// 2b. PAY WITH WALLET   POST /api/payments/pay-with-wallet   (fresher)
+//     { amount, topic, requestGroupId, date, time, duration }
+//
+//     - enough balance  -> amount is deducted, payment saved as "paid"
+//     - not enough      -> 400 INSUFFICIENT_WALLET, nothing is deducted
+//
+//     The deduction is ONE atomic query (walletBalance >= amount), so two
+//     quick clicks / two tabs can never spend the same money twice.
+// ============================================================
+
+exports.payWithWallet = async (req, res) => {
+  try {
+    const body = req.body || {};
+    const amount = Math.round(Number(body.amount) * 100) / 100;
+
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) {
+      return res.status(400).json({ success: false, message: "Invalid amount" });
+    }
+
+    const fresherId = req.user.id;
+
+    // atomic: only deducts if the balance covers the full amount
+    const fresher = await Fresher.findOneAndUpdate(
+      { _id: fresherId, walletBalance: { $gte: amount } },
+      { $inc: { walletBalance: -amount } },
+      { new: true }
+    ).select("name email walletBalance");
+
+    if (!fresher) {
+      const current = await Fresher.findById(fresherId).select("walletBalance").lean();
+      const balance = Number(current?.walletBalance) || 0;
+
+      return res.status(400).json({
+        success: false,
+        code: "INSUFFICIENT_WALLET",
+        message: `Insufficient wallet balance. You have ${rupees(balance)} but this session needs ${rupees(amount)}.`,
+        balance,
+        required: amount,
+        shortBy: Math.max(amount - balance, 0),
+      });
+    }
+
+    const ref = `${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+    const { fee, earning } = splitAmount(amount, PLATFORM_FEE_PERCENT);
+
+    let payment;
+    try {
+      payment = await Payment.create({
+        razorpayOrderId: `wallet_order_${ref}`,
+        razorpayPaymentId: `wallet_pay_${ref}`,
+        receipt: `wallet_${ref}`,
+        amount,
+        currency: "INR",
+        platformFeePercent: PLATFORM_FEE_PERCENT,
+        platformFee: fee,
+        mentorEarning: earning,
+        status: "paid",
+        method: "wallet",
+        paidAt: new Date(),
+        fresher: fresher._id,
+        fresherName: fresher.name || "",
+        fresherEmail: fresher.email || "",
+        topic: body.topic ? String(body.topic).slice(0, 120) : "",
+        requestGroupId: body.requestGroupId ? String(body.requestGroupId) : "",
+        ...(body.requestGroupId
+          ? buildSessionFields({ date: body.date, time: body.time, duration: body.duration })
+          : {}),
+      });
+    } catch (dbError) {
+      // could not save the payment -> give the money back
+      console.error("Wallet payment not saved, refunding wallet:", dbError.message);
+      await Fresher.updateOne({ _id: fresherId }, { $inc: { walletBalance: amount } });
+      return res.status(500).json({ success: false, message: "Unable to complete wallet payment." });
+    }
+
+    notify({
+      user: fresher._id,
+      role: "fresher",
+      title: "Paid from wallet",
+      message: `${rupees(amount)} was paid from your wallet. Balance: ${rupees(fresher.walletBalance)}.`,
+      type: "payment",
+    });
+    emitToUser(String(fresher._id), "wallet:updated", { balance: fresher.walletBalance });
+
+    return res.json({
+      success: true,
+      paymentId: payment.razorpayPaymentId,
+      balance: fresher.walletBalance,
+    });
+  } catch (error) {
+    console.error("payWithWallet error:", error.message);
+    return res.status(500).json({ success: false, message: "Unable to pay from wallet." });
+  }
+};
+
+// ============================================================
 // 3. MARK FAILED   POST /api/payments/failed  { razorpay_order_id, reason }
-//    Call from Razorpay's "payment.failed" callback in the checkout.
 // ============================================================
 
 exports.markFailed = async (req, res) => {
@@ -234,7 +326,6 @@ exports.markFailed = async (req, res) => {
 
 // ============================================================
 // 4. LINK PAYMENT TO A SESSION REQUEST
-//    Server hook: call this where the session request is created.
 // ============================================================
 
 const linkPaymentToRequest = async ({
@@ -267,7 +358,6 @@ const linkPaymentToRequest = async ({
 
 exports.linkPaymentToRequest = linkPaymentToRequest;
 
-// HTTP version (fresher app can call it after creating the request)
 exports.linkPayment = async (req, res) => {
   try {
     const { razorpay_payment_id, requestGroupId, topic, date, time, duration } = req.body || {};
@@ -304,7 +394,6 @@ exports.linkPayment = async (req, res) => {
 
 // ============================================================
 // 5. ASSIGN THE ACCEPTING MENTOR TO THE PAYMENT
-//    First mentor wins. Safe to call more than once.
 // ============================================================
 
 const assignMentorToRequest = async ({ requestGroupId, mentorId }) => {
@@ -338,14 +427,12 @@ const assignMentorToRequest = async ({ requestGroupId, mentorId }) => {
     return { assigned: true };
   }
 
-  // Already mine (second call), or taken by another mentor, or never linked
   const mine = await Payment.exists({ requestGroupId: String(requestGroupId), mentor: mentorId });
   return mine ? { assigned: true } : { assigned: false, reason: "not available" };
 };
 
 exports.assignMentorToRequest = assignMentorToRequest;
 
-// HTTP version (mentor app calls it right after accepting a request)
 exports.assignToMe = async (req, res) => {
   try {
     const { requestGroupId } = req.body || {};

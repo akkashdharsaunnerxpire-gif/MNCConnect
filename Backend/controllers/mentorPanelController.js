@@ -1,7 +1,4 @@
 // controllers/mentorPanelController.js
-// Wallet, withdrawals, reviews and notifications for the mentor panel.
-// Every mentor endpoint reads the mentor id from the JWT (req.user.id).
-
 const mongoose = require("mongoose");
 
 const Payment = require("../models/Payment");
@@ -19,9 +16,6 @@ const MIN_WITHDRAWAL = 500;
 const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 const fail = (res, status, message) => res.status(status).json({ success: false, message });
 
-/* ============================================================
-   WALLET
-============================================================ */
 
 const loadWallet = async (mentorId) => {
   const payments = await Payment.find({ mentor: mentorId, status: "paid" })
@@ -31,6 +25,12 @@ const loadWallet = async (mentorId) => {
 
   const active = payments.filter((p) => p.sessionStatus !== "cancelled");
 
+  const withdrawals = await Withdrawal.find({ mentor: mentorId })
+    .sort({ createdAt: -1 })
+    .limit(30)
+    .lean();
+
+  // requested + paid are locked; rejected goes back to available automatically
   const agg = await Withdrawal.aggregate([
     {
       $match: {
@@ -42,21 +42,21 @@ const loadWallet = async (mentorId) => {
   ]);
 
   const reserved = agg[0]?.total || 0;
-  return { payments, wallet: computeWallet(active, reserved) };
+  return { payments, withdrawals, wallet: computeWallet(active, reserved) };
 };
 
 // GET /api/wallet/me
 exports.getWallet = async (req, res) => {
   try {
-    const { payments, wallet } = await loadWallet(req.user.id);
-    return res.json({ success: true, wallet, payments });
+    const { payments, withdrawals, wallet } = await loadWallet(req.user.id);
+    return res.json({ success: true, wallet, payments, withdrawals });
   } catch (error) {
     console.error("getWallet error:", error.message);
     return fail(res, 500, "Unable to load wallet.");
   }
 };
 
-// POST /api/wallet/withdraw  { amount, upiId }
+// POST /api/wallet/withdraw  { amount, upiId }   (mentor)
 exports.requestWithdrawal = async (req, res) => {
   try {
     const amount = Number(req.body?.amount);
@@ -67,6 +67,12 @@ exports.requestWithdrawal = async (req, res) => {
     }
     if (!/^[\w.\-]{2,}@[\w.\-]{2,}$/.test(upiId)) {
       return fail(res, 400, "Enter a valid UPI ID.");
+    }
+
+    // one pending request at a time (stops double-click / two-tab abuse)
+    const pending = await Withdrawal.exists({ mentor: req.user.id, status: "requested" });
+    if (pending) {
+      return fail(res, 409, "You already have a withdrawal request being processed.");
     }
 
     const { wallet } = await loadWallet(req.user.id);
@@ -88,12 +94,53 @@ exports.requestWithdrawal = async (req, res) => {
       type: "payment",
       link: "/mentor/earnings",
     });
-    emitToUser(req.user.id, "wallet:updated", { withdrawalId: withdrawal._id });
+    emitToUser(String(req.user.id), "wallet:updated", {
+      withdrawalId: withdrawal._id,
+      status: "requested",
+    });
 
     return res.status(201).json({ success: true, withdrawal });
   } catch (error) {
     console.error("requestWithdrawal error:", error.message);
     return fail(res, 500, "Unable to request withdrawal.");
+  }
+};
+
+// PATCH /api/wallet/withdrawals/:id  { status: "paid" | "rejected", note }   (admin)
+exports.updateWithdrawalStatus = async (req, res) => {
+  try {
+    const { status, note } = req.body || {};
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) return fail(res, 400, "Invalid id.");
+    if (!["paid", "rejected"].includes(status)) {
+      return fail(res, 400, "Status must be paid or rejected.");
+    }
+
+    // only a still-"requested" one can be processed (prevents double processing)
+    const w = await Withdrawal.findOneAndUpdate(
+      { _id: req.params.id, status: "requested" },
+      { $set: { status, note: String(note || "").slice(0, 300), processedAt: new Date() } },
+      { new: true }
+    );
+    if (!w) return fail(res, 404, "Request not found or already processed.");
+
+    notify({
+      user: w.mentor,
+      role: "mentor",
+      title: status === "paid" ? "Withdrawal paid" : "Withdrawal rejected",
+      message:
+        status === "paid"
+          ? `${rupees(w.amount)} has been sent to ${w.upiId}.`
+          : `Your request for ${rupees(w.amount)} was rejected.${w.note ? " " + w.note : ""}`,
+      type: "payment",
+      link: "/mentor/earnings",
+    });
+    emitToUser(String(w.mentor), "wallet:updated", { withdrawalId: w._id, status });
+
+    return res.json({ success: true, withdrawal: w });
+  } catch (error) {
+    console.error("updateWithdrawalStatus error:", error.message);
+    return fail(res, 500, "Unable to update withdrawal.");
   }
 };
 
@@ -260,7 +307,6 @@ exports.markAllNotificationsRead = async (req, res) => {
   }
 };
 
-// mentorPanelController.js — add to getWallet or new endpoint
 // ============================================================
 // MENTOR STATS (dashboard counters)
 // ============================================================
@@ -295,6 +341,7 @@ exports.getMentorStats = async (req, res) => {
     return fail(res, 500, "Unable to load stats.");
   }
 };
+
 // ============================================================
 // GET /api/mentor/profile/stats (Real-time Stats for Profile)
 // ============================================================
@@ -303,9 +350,8 @@ exports.getProfileStats = async (req, res) => {
   try {
     const mentorId = req.user.id;
 
-    // Fetch mentor document
     const mentor = await Mentor.findById(mentorId).select("rating totalReviews totalSessions").lean();
-    
+
     if (!mentor) {
       return fail(res, 404, "Mentor not found.");
     }

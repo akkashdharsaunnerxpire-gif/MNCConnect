@@ -1,13 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useAnimationControls } from "framer-motion";
 import {
   ArrowLeft, Bell, CalendarDays, CheckCheck, ChevronDown, ChevronRight, Clock3, GraduationCap,
-  Home, IndianRupee, Loader2, Menu, MessageSquare, Star, User, Video, Wallet, WifiOff, X,
+  Home, IndianRupee, Loader2, Menu, Star, User, Video, Wallet, WifiOff, X,
 } from "lucide-react";
 import useLive from "../../hooks/useLive";
 import useUserEvents from "../../hooks/useUserEvents";
 import { api, ENDPOINTS, EVENTS, NOTIFICATIONS_CHANGED, getToken, getUserId, timeAgo } from "../../services/fresherApi";
+// !! fix this path if Welcomebonus.jsx lives somewhere else
+import WelcomeBonus from "../pages/Welcomebonus";
 
 /* ------------------------------------------------------------------
    Edit these two lists to add / remove menu items.
@@ -65,6 +67,35 @@ const Badge = ({ count, tone = "indigo" }) =>
     </span>
   ) : null;
 
+/* Wallet number: counts up when it changes. `instant` = jump without animating
+   (used while the welcome bonus is being held back). */
+const CountUp = ({ value, instant = false }) => {
+  const [shown, setShown] = useState(value);
+  const from = useRef(value);
+
+  useEffect(() => {
+    const a = from.current;
+    if (instant || a === value) {
+      from.current = value;
+      setShown(value);
+      return undefined;
+    }
+    const t0 = performance.now();
+    let raf;
+    const tick = (t) => {
+      const p = Math.min((t - t0) / 800, 1);
+      const v = p === 1 ? value : Math.round(a + (value - a) * (1 - Math.pow(1 - p, 3)));
+      from.current = v;
+      setShown(v);
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value, instant]);
+
+  return <span className="tabular-nums">₹{shown}</span>;
+};
+
 const Header = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -75,7 +106,6 @@ const Header = () => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [filter, setFilter] = useState("all");
-  const [balance, setBalance] = useState(0);
   const [reminder, setReminder] = useState(null);
   const [dismissedId, setDismissedId] = useState(null);
   const [now, setNow] = useState(Date.now());
@@ -86,6 +116,39 @@ const Header = () => {
   const menuRef = useRef(null);
   const seenIds = useRef(null); // ids we have already shown, so only NEW notifications pop up
   const timers = useRef([]);
+
+  // where the welcome-bonus coin lands
+  const walletBtnRef = useRef(null); // desktop wallet button
+  const menuBtnRef = useRef(null); // mobile hamburger (fallback when wallet button is hidden)
+  const walletCtl = useAnimationControls();
+
+  /* ---------- wallet balance: SAME source as the wallet page (/auth/me -> walletBalance) ---------- */
+  const { data: meData } = useLive({
+    fetcher: () => (getToken() ? api("/auth/me") : Promise.resolve(null)),
+    events: [EVENTS.notification, "wallet:updated"],
+    userId,
+  });
+
+  const me = meData?.user || meData || null;
+  const realBalance = Number(me?.walletBalance) || 0;
+
+  // while the welcome animation plays, the nav shows the balance WITHOUT the bonus
+  // (Welcomebonus calls onHold(base) at the start and onHold(null) when the coin lands)
+  const [hold, setHold] = useState(null);
+  const balance = hold ?? realBalance;
+  const showWelcome = /^\/Home\/?$/i.test(location.pathname); // plays when the fresher lands on Home
+
+  const bumpWallet = () => {
+    walletCtl.start({
+      scale: [1, 1.25, 0.96, 1],
+      boxShadow: [
+        "0 0 0 0 rgba(99,102,241,0)",
+        "0 0 0 10px rgba(99,102,241,.35)",
+        "0 0 0 0 rgba(99,102,241,0)",
+      ],
+      transition: { duration: 0.7 },
+    });
+  };
 
   /* ---------- live notifications from the server ---------- */
   const { data, reload, setData, connected } = useLive({
@@ -232,22 +295,6 @@ const Header = () => {
       .then(() => window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED)))
       .catch(reload);
   };
-
-  /* ---------- bonus wallet (local for now) ---------- */
-  const loadBalance = () => {
-    const saved = localStorage.getItem("fresherCoins");
-    setBalance(saved ? Number(saved) : 0);
-  };
-
-  useEffect(() => {
-    loadBalance();
-    window.addEventListener("fresherCoinsUpdated", loadBalance);
-    window.addEventListener("storage", loadBalance);
-    return () => {
-      window.removeEventListener("fresherCoinsUpdated", loadBalance);
-      window.removeEventListener("storage", loadBalance);
-    };
-  }, []);
 
   /* ---------- close things ---------- */
   useEffect(() => {
@@ -408,9 +455,19 @@ const Header = () => {
               <span className="absolute -right-0.5 -top-0.5"><Badge count={unreadCount} /></span>
             </button>
 
-            <button type="button" onClick={() => go("/Home/bonus-wallet")} className="flex items-center gap-2 rounded-xl bg-indigo-50 px-3 py-2 transition hover:bg-indigo-100">
-              <Wallet size={18} className="text-indigo-600" /><span className="font-bold text-indigo-700">₹{balance}</span>
-            </button>
+            {/* wallet button: the welcome-bonus coin lands here */}
+            <motion.button
+              ref={walletBtnRef}
+              animate={walletCtl}
+              type="button"
+              onClick={() => go("/Home/bonus-wallet")}
+              className="flex items-center gap-2 rounded-xl bg-indigo-50 px-3 py-2 transition hover:bg-indigo-100"
+            >
+              <Wallet size={18} className="text-indigo-600" />
+              <span className="font-bold text-indigo-700">
+                {me ? <CountUp value={balance} instant={hold !== null} /> : "₹–"}
+              </span>
+            </motion.button>
 
             {/* profile menu */}
             <div className="relative" ref={menuRef}>
@@ -461,7 +518,8 @@ const Header = () => {
               </motion.span>
               <span className="absolute -right-0.5 -top-0.5"><Badge count={unreadCount} /></span>
             </button>
-            <button type="button" onClick={() => setMobileMenu((p) => !p)} aria-label="Menu" aria-expanded={mobileMenu} className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-700 hover:bg-slate-100">
+            {/* mobile: coin lands on the menu button (wallet button is inside the menu) */}
+            <button ref={menuBtnRef} type="button" onClick={() => setMobileMenu((p) => !p)} aria-label="Menu" aria-expanded={mobileMenu} className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-700 hover:bg-slate-100">
               {mobileMenu ? <X size={22} /> : <Menu size={22} />}
             </button>
           </div>
@@ -632,6 +690,17 @@ const Header = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* welcome bonus: plays once on Home, coin flies into the wallet button above */}
+      {showWelcome && me && (
+        <WelcomeBonus
+          user={me}
+          targetRef={walletBtnRef}
+          fallbackRef={menuBtnRef}
+          onHold={setHold}
+          onLand={bumpWallet}
+        />
+      )}
     </>
   );
 };

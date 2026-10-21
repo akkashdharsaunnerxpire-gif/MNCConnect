@@ -1,6 +1,4 @@
 // routes/mentorPanelRoutes.js
-// Mount in server.js / app.js:   app.use("/api", require("./routes/mentorPanelRoutes"));
-
 const express = require("express");
 const { requireAuth } = require("../middleware/panelAuth");
 const panel = require("../controllers/mentorPanelController");
@@ -12,7 +10,11 @@ const router = express.Router();
 router.get("/wallet/me", requireAuth("mentor"), panel.getWallet);
 router.post("/wallet/withdraw", requireAuth("mentor"), panel.requestWithdrawal);
 
-// ✅ Mentor profile stats (Fixed)
+// admin marks a withdrawal paid / rejected -> mentor sees it live
+// NOTE: make sure requireAuth supports the "admin" role in middleware/panelAuth.js
+router.patch("/wallet/withdrawals/:id", requireAuth("admin"), panel.updateWithdrawalStatus);
+
+// ---------- mentor profile stats ----------
 router.get("/mentor/profile/stats", requireAuth("mentor"), panel.getProfileStats);
 
 // ---------- reviews ----------
@@ -28,7 +30,7 @@ router.patch("/notifications/:id/read", requireAuth("mentor"), panel.markNotific
 // ---------- dashboard stats ----------
 router.get("/mentor/stats", requireAuth("mentor"), panel.getMentorStats);
 
-// ---------- payment <-> mentor link (optional HTTP version) ----------
+// ---------- payment <-> mentor link ----------
 router.post("/payments/assign-to-me", requireAuth("mentor"), payments.assignToMe);
 
 module.exports = router;

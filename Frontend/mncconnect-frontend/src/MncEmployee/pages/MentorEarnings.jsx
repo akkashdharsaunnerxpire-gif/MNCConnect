@@ -35,6 +35,9 @@ const MentorEarnings = () => {
 
   const wallet = { available: 0, pending: 0, lifetime: 0, week: 0, month: 0, withdrawn: 0, ...(data?.wallet || {}) };
 
+  const withdrawals = data?.withdrawals || [];
+  const hasPendingWithdrawal = withdrawals.some((w) => w.status === "requested");
+
   const transactions = useMemo(() => {
     const list = data?.payments || data?.transactions || [];
     return list.map((p) => {
@@ -63,13 +66,15 @@ const MentorEarnings = () => {
 
   const monthName = new Date().toLocaleDateString("en-IN", { month: "long", year: "numeric" });
 
-  if (loading) {
+  if (loading && !data) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
         <Loader2 className="animate-spin text-blue-600" />
       </div>
     );
   }
+
+  const withdrawDisabled = wallet.available < MIN_WITHDRAWAL || hasPendingWithdrawal;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-white via-sky-50 to-blue-100 text-slate-800">
@@ -121,13 +126,17 @@ const MentorEarnings = () => {
               <button
                 type="button"
                 onClick={() => setWithdrawOpen(true)}
-                disabled={wallet.available < MIN_WITHDRAWAL}
+                disabled={withdrawDisabled}
                 className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <ArrowDownToLine size={17} /> Withdraw Earnings
               </button>
-              {wallet.available < MIN_WITHDRAWAL && (
-                <span className="text-xs text-slate-500">Minimum withdrawal is {inr(MIN_WITHDRAWAL)}</span>
+              {hasPendingWithdrawal ? (
+                <span className="text-xs text-amber-600">A withdrawal request is being processed</span>
+              ) : (
+                wallet.available < MIN_WITHDRAWAL && (
+                  <span className="text-xs text-slate-500">Minimum withdrawal is {inr(MIN_WITHDRAWAL)}</span>
+                )
               )}
             </div>
           </div>
@@ -151,6 +160,7 @@ const MentorEarnings = () => {
           </div>
         </div>
 
+        {/* ---------------- Transaction history ---------------- */}
         <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-200 p-5 sm:p-6">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -199,6 +209,21 @@ const MentorEarnings = () => {
           )}
         </div>
 
+        {/* ---------------- Withdrawal requests (live) ---------------- */}
+        <div className="mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 p-5 sm:p-6">
+            <h3 className="text-lg font-semibold text-slate-900">Withdrawal Requests</h3>
+            <p className="mt-1 text-xs text-slate-500">Status updates live when we process your payout</p>
+          </div>
+          {withdrawals.length === 0 ? (
+            <p className="py-10 text-center text-xs text-slate-500">No withdrawal requests yet.</p>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {withdrawals.map((w) => <WithdrawalRow key={w._id} w={w} />)}
+            </div>
+          )}
+        </div>
+
         <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <MiniSummary label="Completed Transactions" value={transactions.filter((t) => t.status === "Completed").length} />
           <MiniSummary label="Completed Earnings" value={inr(wallet.lifetime)} />
@@ -237,6 +262,7 @@ const WithdrawModal = ({ available, onClose, onDone }) => {
 
   const submit = async (e) => {
     e.preventDefault();
+    if (busy) return;
     const value = Number(amount);
     if (!Number.isFinite(value) || value < MIN_WITHDRAWAL) return setErr(`Minimum withdrawal is ${inr(MIN_WITHDRAWAL)}.`);
     if (value > available) return setErr("Amount is more than your available balance.");
@@ -322,6 +348,36 @@ const TransactionRow = ({ transaction }) => {
     </div>
   );
 };
+
+const WITHDRAW_STYLE = {
+  requested: "border-amber-100 bg-amber-50 text-amber-600",
+  paid: "border-emerald-100 bg-emerald-50 text-emerald-600",
+  rejected: "border-red-100 bg-red-50 text-red-600",
+};
+
+const WITHDRAW_LABEL = {
+  requested: "Processing",
+  paid: "Paid",
+  rejected: "Rejected",
+};
+
+const WithdrawalRow = ({ w }) => (
+  <div className="flex flex-col gap-3 p-5 transition hover:bg-blue-50/40 sm:flex-row sm:items-center sm:justify-between">
+    <div>
+      <p className="text-sm font-semibold text-slate-900">{w.upiId}</p>
+      <p className="mt-1 text-xs text-slate-500">
+        {new Date(w.createdAt).toLocaleString("en-IN", {
+          day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+        })}
+        {w.note ? ` · ${w.note}` : ""}
+      </p>
+    </div>
+    <span className={`w-fit rounded-full border px-3 py-1.5 text-[11px] font-semibold ${WITHDRAW_STYLE[w.status] || WITHDRAW_STYLE.requested}`}>
+      {WITHDRAW_LABEL[w.status] || w.status}
+    </span>
+    <span className="text-sm font-bold text-slate-900 sm:min-w-[100px] sm:text-right">{inr(w.amount)}</span>
+  </div>
+);
 
 const MiniSummary = ({ label, value }) => (
   <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
