@@ -3,13 +3,14 @@ import { Link } from "react-router-dom";
 import axios from "axios";
 import {
   User, Mail, Phone, MapPin, BriefcaseBusiness, Code2, Award, Star, Edit3,
-  Share2, FileText, Building, ShieldCheck, Menu, Stethoscope, Download, X, 
+  Share2, FileText, Building, ShieldCheck, Menu, Stethoscope, Download, X,
   Plus, Loader2, Check, AlertTriangle
 } from "lucide-react";
 import { FaLinkedin } from "react-icons/fa";
 
 import useLive from "../../hooks/useLive";
-import { api, EVENTS, ENDPOINTS } from "../../services/mentorApi"; 
+import useMentorSessions from "../../hooks/useMentorSessions";
+import { api, EVENTS, ENDPOINTS } from "../../services/mentorApi";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
@@ -33,17 +34,42 @@ const MentorProfile = () => {
     toastTimerRef.current = window.setTimeout(() => setToast(null), 3000);
   };
 
-  // ✅ Real-time updates on stats & reviews
-  const { data: liveData } = useLive({
-    fetcher: () => api(ENDPOINTS.profileStats), 
-    events: [EVENTS.notification, "review:new", "wallet:updated", "booking:updated"],
+  useEffect(() => () => window.clearTimeout(toastTimerRef.current), []);
+
+  /* ---------- SAME data sources as Home page ---------- */
+
+  // Reviews (rating + review count) - live
+  const { data: reviewData } = useLive({
+    fetcher: () => api(ENDPOINTS.reviews),
+    events: [EVENTS.reviewNew, EVENTS.reviewUpdated],
   });
+
+  // Sessions - live
+  const { sessions } = useMentorSessions();
+
+  const reviewStats = useMemo(() => {
+    const list = reviewData?.reviews || [];
+    if (!list.length) return null;
+    const avg =
+      list.reduce((s, r) => s + (Number(r.rating) || 0), 0) / list.length;
+    return { avg: avg.toFixed(1), count: list.length };
+  }, [reviewData]);
+
+  const completedSessions = useMemo(
+    () => (sessions || []).filter((s) => s.status === "Completed").length,
+    [sessions]
+  );
+
+  /* ---------- mentor profile ---------- */
 
   const fetchMentorProfile = async () => {
     try {
       setLoading(true);
       setError("");
-      const response = await axios.get(`${API_URL}/mentor/${encodeURIComponent(mentorEmail)}`, { withCredentials: true });
+      const response = await axios.get(
+        `${API_URL}/mentor/${encodeURIComponent(mentorEmail)}`,
+        { withCredentials: true }
+      );
       if (response.data?.success) {
         setMentor(response.data.mentor);
       } else {
@@ -61,24 +87,12 @@ const MentorProfile = () => {
     fetchMentorProfile();
   }, [mentorEmail]);
 
-  // ✅ Merge live stats
-  useEffect(() => {
-    if (liveData && mentor) {
-      setMentor((prev) => ({
-        ...prev,
-        rating: liveData.averageRating || prev.rating,
-        totalReviews: liveData.totalReviews || prev.totalReviews,
-        totalSessions: liveData.totalSessions || prev.totalSessions,
-      }));
-    }
-  }, [liveData]);
-
   const apiUpdateMentor = async (email, formValues) => {
     const { offerLetterFile, employeeIdProofFile, additionalProofFile, languages, ...rest } = formValues;
     const hasFiles = offerLetterFile || employeeIdProofFile || additionalProofFile;
 
     let body;
-    let headers = { withCredentials: true };
+    const config = { withCredentials: true };
 
     if (hasFiles) {
       body = new FormData();
@@ -91,7 +105,7 @@ const MentorProfile = () => {
       body = { ...rest, languages };
     }
 
-    const res = await axios.put(`${API_URL}/mentor/${encodeURIComponent(email)}`, body, headers);
+    const res = await axios.put(`${API_URL}/mentor/${encodeURIComponent(email)}`, body, config);
     return res.data;
   };
 
@@ -100,10 +114,10 @@ const MentorProfile = () => {
     try {
       const data = await apiUpdateMentor(mentorEmail, formValues);
       if (data?.success === false) throw new Error(data?.message || "Failed to save changes");
-      
+
       const { offerLetterFile, employeeIdProofFile, additionalProofFile, ...plainValues } = formValues;
       const updatedMentor = data?.mentor || { ...mentor, ...plainValues };
-      
+
       setMentor(updatedMentor);
       setEditOpen(false);
       showToast("success", "Profile updated successfully!");
@@ -117,6 +131,14 @@ const MentorProfile = () => {
 
   const profile = useMemo(() => {
     if (!mentor) return null;
+
+    // Live values win; fall back to values saved on the mentor document
+    const rating =
+      reviewStats?.avg ??
+      (mentor.rating ? Number(mentor.rating).toFixed(1) : "0.0");
+    const totalReviews = reviewStats?.count ?? mentor.totalReviews ?? 0;
+    const totalSessions = completedSessions || mentor.totalSessions || 0;
+
     return {
       id: mentor._id,
       name: mentor.name || "Mentor",
@@ -139,13 +161,15 @@ const MentorProfile = () => {
       isVerified: mentor.isVerified || false,
       verificationStatus: mentor.verificationStatus || "pending",
       accountStatus: mentor.accountStatus || "pending",
-      avatar: mentor.profilePic || `https://ui-avatars.com/api/?name=${encodeURIComponent(mentor.name || "Mentor")}&background=eff6ff&color=2563eb`,
-      rating: mentor.rating || 0,
-      totalReviews: mentor.totalReviews || 0,
-      totalSessions: mentor.totalSessions || 0,
+      avatar:
+        mentor.profilePic ||
+        `https://ui-avatars.com/api/?name=${encodeURIComponent(mentor.name || "Mentor")}&background=eff6ff&color=2563eb`,
+      rating,
+      totalReviews,
+      totalSessions,
       createdAt: mentor.createdAt,
     };
-  }, [mentor]);
+  }, [mentor, reviewStats, completedSessions]);
 
   const NAV_ITEMS = [
     { key: "personal", label: "Personal Info", icon: User },
@@ -271,7 +295,7 @@ const MentorProfile = () => {
                     {profile.verificationStatus}
                   </span>
                 } />
-                <Field label="Rating" value={profile.rating || "0.0"} />
+                <Field label="Rating" value={profile.rating} />
                 <Field label="Sessions" value={profile.totalSessions} />
                 <Field label="Reviews" value={profile.totalReviews} />
               </div>
@@ -335,9 +359,9 @@ const MentorProfile = () => {
           </div>
 
           <div className="grid grid-cols-3 gap-4 mt-6">
-            <StatCard label="Sessions" value={profile.totalSessions || 0} icon={BriefcaseBusiness} />
-            <StatCard label="Rating" value={profile.rating || "0.0"} icon={Star} iconClass="text-yellow-400 fill-yellow-400" />
-            <StatCard label="Reviews" value={profile.totalReviews || 0} icon={FileText} />
+            <StatCard label="Sessions" value={profile.totalSessions} icon={BriefcaseBusiness} />
+            <StatCard label="Rating" value={profile.rating} icon={Star} iconClass="text-yellow-400 fill-yellow-400" />
+            <StatCard label="Reviews" value={profile.totalReviews} icon={FileText} />
           </div>
         </main>
       </div>
