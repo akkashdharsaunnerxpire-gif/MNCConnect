@@ -22,23 +22,67 @@ const ICE = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
+    // Mobile data / strict WiFi la HD connect aaga TURN add pannunga:
+    // { urls: "turn:YOUR_TURN_HOST:3478", username: "USER", credential: "PASS" },
   ],
 };
 
-// camera + mic edukka. Video fail aana audio mattum try pannum
+/* ---------- HD camera + mic ---------- */
+const HD_VIDEO = {
+  width: { ideal: 1920, min: 1280 },
+  height: { ideal: 1080, min: 720 },
+  frameRate: { ideal: 30, max: 30 },
+  facingMode: "user",
+};
+const HD_AUDIO = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+  sampleRate: 48000,
+  channelCount: 1,
+};
+
+// HD try pannum, fail aana step by step kuraiyum, kadaisila audio mattum
 const getMedia = async () => {
-  for (const constraints of [
-    { video: true, audio: true },
-    { video: false, audio: true },
-  ]) {
+  const attempts = [
+    { video: HD_VIDEO, audio: HD_AUDIO, audioOnly: false },
+    { video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: HD_AUDIO, audioOnly: false },
+    { video: true, audio: true, audioOnly: false },
+    { video: false, audio: HD_AUDIO, audioOnly: true },
+  ];
+  for (const { audioOnly, ...constraints } of attempts) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      return { stream, audioOnly: !constraints.video };
+      stream.getVideoTracks().forEach((t) => {
+        if ("contentHint" in t) t.contentHint = "motion";
+      });
+      return { stream, audioOnly };
     } catch {
       /* next */
     }
   }
   return { stream: null, audioOnly: false };
+};
+
+// high bitrate so the video stays sharp
+const tuneSenders = async (peer) => {
+  for (const sender of peer.getSenders()) {
+    if (!sender.track) continue;
+    try {
+      const params = sender.getParameters();
+      if (!params.encodings || !params.encodings.length) params.encodings = [{}];
+      if (sender.track.kind === "video") {
+        params.encodings[0].maxBitrate = 2_500_000; // 2.5 Mbps
+        params.encodings[0].maxFramerate = 30;
+        params.degradationPreference = "maintain-resolution";
+      } else {
+        params.encodings[0].maxBitrate = 64_000;
+      }
+      await sender.setParameters(params);
+    } catch {
+      /* browser may not support */
+    }
+  }
 };
 
 const sendSignal = (data) => socket.emit("meeting:signal", { data });
@@ -88,7 +132,6 @@ export default function MeetingRoom() {
   const joined = useRef(false);
   const unmounted = useRef(false);
 
-  // camera / WebRTC sync flags
   const mediaStarted = useRef(false);
   const localReadyRef = useRef(false);
   const peerReadyRef = useRef(false);
@@ -102,27 +145,27 @@ export default function MeetingRoom() {
     if (remoteVideo.current) remoteVideo.current.srcObject = null;
   }, []);
 
-  // peer poche: ICE buffer-um clear
   const closePeer = useCallback(() => {
     dropPeer();
     pendingIce.current = [];
   }, [dropPeer]);
 
   const makePeer = useCallback(() => {
-    dropPeer(); // pendingIce-a clear panna koodathu
+    dropPeer();
     const peer = new RTCPeerConnection(ICE);
 
     const tracks = localStream.current?.getTracks() || [];
     if (tracks.length) {
       tracks.forEach((t) => peer.addTrack(t, localStream.current));
     }
-    // camera illanalum remote video paaka
     if (!tracks.some((t) => t.kind === "video")) {
       peer.addTransceiver("video", { direction: "recvonly" });
     }
     if (!tracks.some((t) => t.kind === "audio")) {
       peer.addTransceiver("audio", { direction: "recvonly" });
     }
+
+    tuneSenders(peer); // HD bitrate
 
     peer.ontrack = (e) => {
       remoteStream.current = e.streams[0];
@@ -144,7 +187,6 @@ export default function MeetingRoom() {
     sendSignal({ description: peer.localDescription });
   }, [makePeer]);
 
-  // Mentor mattum offer pannum, rendu side camera ready aana apram
   const maybeCall = useCallback(() => {
     if (!isMentor || calledRef.current) return;
     if (!localReadyRef.current || !peerReadyRef.current) return;
@@ -180,7 +222,6 @@ export default function MeetingRoom() {
           maybeCall();
         } else if (data?.description) {
           if (data.description.type === "offer") {
-            // namma camera ready aagala na wait pannu
             if (!localReadyRef.current) {
               pendingOffer.current = data.description;
               return;
@@ -202,7 +243,7 @@ export default function MeetingRoom() {
     [maybeCall, handleOffer, flushIce],
   );
 
-  /* ---------- join + socket listeners (camera illa) ---------- */
+  /* ---------- join + socket listeners ---------- */
   const join = useCallback(() => {
     socket.emit("meeting:join", { bookingId, token }, (res) => {
       if (!res?.ok) {
@@ -242,7 +283,6 @@ export default function MeetingRoom() {
     const onInstructionsState = (state) => setInstructionsAccepted(state);
 
     const onPeerJoined = () => {
-      // pudhu peer: connection reset, namma camera ready na thirumba sollu
       closePeer();
       peerReadyRef.current = false;
       calledRef.current = false;
@@ -294,7 +334,7 @@ export default function MeetingRoom() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookingId]);
 
-  /* ---------- camera ON: rendu perum accept panna apram mattum ---------- */
+  /* ---------- camera ON after both accepted ---------- */
   const bothAccepted =
     instructionsAccepted.mentor && instructionsAccepted.fresher;
   const mediaAllowed = bothAccepted || clock.running;
@@ -322,10 +362,8 @@ export default function MeetingRoom() {
       localReadyRef.current = true;
       setLocalReady(true);
 
-      // peer-kku "en camera ready" nu sollu
       sendSignal({ mediaReady: true });
 
-      // offer already vandhu irundha ippo answer pannu
       if (pendingOffer.current) {
         const offer = pendingOffer.current;
         pendingOffer.current = null;
@@ -496,7 +534,6 @@ export default function MeetingRoom() {
               Please confirm and leave a review. This is done right here in the meeting.
             </p>
             {booking ? (
-              // Yes click -> review step ULLE varum. Review submit aana apram thaan onDone(true)
               <SessionCompletionModal
                 booking={booking}
                 onDone={() => leaveRoom()}
@@ -535,8 +572,7 @@ export default function MeetingRoom() {
     );
   }
 
-  /* ---------- instructions gate: camera OFF ---------- */
-  // Rendu perum accept panra varaikum gate irukkum, camera start aagadhu
+  /* ---------- instructions gate ---------- */
   if (phase === "in" && !clock.running && !bothAccepted) {
     return (
       <MeetingInstructionsGate
@@ -605,7 +641,7 @@ export default function MeetingRoom() {
                 display: "block",
                 width: "100%",
                 height: "100%",
-                objectFit: "cover",
+                objectFit: "contain", // full HD frame, face crop aagadhu
                 backgroundColor: "#000",
               }}
             />

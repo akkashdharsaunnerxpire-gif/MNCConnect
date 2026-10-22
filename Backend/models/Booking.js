@@ -1,13 +1,4 @@
 // models/Booking.js
-// One document per fresher session request. requestGroupId is the public id
-// used by both apps (fresher + mentor), the socket events and the meeting room.
-//
-//  pending   -> paid, waiting for an online employee to accept
-//  accepted  -> an employee accepted, session is scheduled
-//  completed -> meeting timer finished (mentor money is released)
-//  expired   -> nobody accepted before the start time  -> refunded
-//  missed    -> accepted but the meeting never really started -> refunded
-
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
 
@@ -15,12 +6,7 @@ const bookingSchema = new Schema(
   {
     requestGroupId: { type: String, required: true, unique: true },
 
-    fresher: {
-      type: Schema.Types.ObjectId,
-      ref: "Fresher",
-      default: null,
-      index: true,
-    },
+    fresher: { type: Schema.Types.ObjectId, ref: "Fresher", default: null, index: true },
     fresherName: { type: String, default: "Fresher" },
     fresherEmail: { type: String, default: "", lowercase: true, trim: true },
     fresherImage: { type: String, default: "" },
@@ -36,24 +22,29 @@ const bookingSchema = new Schema(
     durationMinutes: { type: Number, required: true },
     amount: { type: Number, required: true },
 
-    date: { type: String, default: "" }, // "October 20, 2026"
-    time: { type: String, default: "" }, // "3:30 PM"  (India time)
+    date: { type: String, default: "" },
+    time: { type: String, default: "" },
     startsAt: { type: Date, required: true },
     endsAt: { type: Date, required: true },
 
     status: {
       type: String,
-      enum: ["pending", "accepted", "completed", "expired", "missed"],
+      enum: [
+        "pending",
+        "accepted",
+        "in_progress",
+        "awaiting_confirmation",
+        "completed",
+        "disputed",
+        "expired",
+        "missed",
+        "cancelled",
+      ],
       default: "pending",
       index: true,
     },
 
-    mentor: {
-      type: Schema.Types.ObjectId,
-      ref: "Mentor",
-      default: null,
-      index: true,
-    },
+    mentor: { type: Schema.Types.ObjectId, ref: "Mentor", default: null, index: true },
     notified: [{ type: Schema.Types.ObjectId }],
     declinedBy: [{ type: Schema.Types.ObjectId }],
 
@@ -62,11 +53,7 @@ const bookingSchema = new Schema(
     completedAt: { type: Date, default: null },
 
     razorpayPaymentId: { type: String, default: "" },
-    refundStatus: {
-      type: String,
-      enum: ["", "refunded", "failed"],
-      default: "",
-    },
+    refundStatus: { type: String, enum: ["", "refunded", "failed"], default: "" },
 
     reminderSent: { type: Boolean, default: false },
     reviewed: { type: Boolean, default: false },
@@ -74,29 +61,19 @@ const bookingSchema = new Schema(
     meeting: {
       remainingMs: { type: Number, default: null },
       startedAt: { type: Date, default: null },
+      timerEndsAt: { type: Date, default: null },
       endedAt: { type: Date, default: null },
-    },
-    // models/Booking.js
-    status: {
-      type: String,
-      enum: [
-        "pending",
-        "accepted",
-        "completed",
-        "expired",
-        "missed",
-        "cancelled",
-        "awaiting_confirmation", // 🆕
-        "disputed", // 🆕
-      ],
-      default: "pending",
-      index: true,
+      instructionsAccepted: {
+        mentor: { type: Boolean, default: false },
+        fresher: { type: Boolean, default: false },
+      },
     },
   },
-  { timestamps: true },
+  { timestamps: true }
 );
 
 bookingSchema.index({ status: 1, expiresAt: 1 });
 bookingSchema.index({ mentor: 1, status: 1, startsAt: 1 });
+bookingSchema.index({ status: 1, "meeting.timerEndsAt": 1 });
 
 module.exports = mongoose.model("Booking", bookingSchema);
