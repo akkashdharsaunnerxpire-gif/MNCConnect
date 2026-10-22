@@ -29,6 +29,15 @@ const MENTOR_REGISTERED_KEY = "mnc_mentor_registration_complete";
 const MENTOR_VERIFICATION_KEY = "mnc_mentor_verification_status";
 const MENTOR_EMAIL_KEY = "mnc_mentor_registered_email";
 
+// Server-side statuses that must NOT be allowed to log in.
+const BLOCKED_STATUSES = [
+  "pending",
+  "rejected",
+  "blocked",
+  "suspended",
+  "under_review",
+];
+
 // ============================================================================
 // CONSTANTS & CONFIG
 // ============================================================================
@@ -83,7 +92,7 @@ const REQUIRED_STEP_1_FIELDS = [
   ["company", "Current MNC / Company is required."],
   ["designation", "Designation is required."],
   ["department", "Department / Team is required."],
-  ["gender", "Gender is required."], // ADD
+  ["gender", "Gender is required."],
   ["experience", "Years of experience is required."],
   ["location", "Current location is required."],
   ["skills", "Skills / Expertise is required."],
@@ -109,7 +118,7 @@ function Toast({ message, type = "success", onClose, duration = 4000 }) {
   const iconColor = type === "success" ? "text-emerald-600" : "text-red-600";
 
   return (
-    <div className="fixed top-4 right-4 z-[100000] max-w-sm w-full animate-slideInRight">
+    <div className="w-full animate-slideInRight">
       <div
         className={`rounded-xl border ${borderColor} bg-white shadow-[0_20px_60px_rgba(0,0,0,.12)] overflow-hidden`}
       >
@@ -223,6 +232,16 @@ export default function MncEmployeeProfile() {
         5000,
       );
       // Clear the state to prevent showing again on refresh
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
+    // Email already registered (409) on another device -> sent here to login
+    if (location.state?.alreadyRegistered) {
+      showToast(
+        "This email is already registered. Please login with your password.",
+        "error",
+        5000,
+      );
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
@@ -527,13 +546,22 @@ export default function MncEmployeeProfile() {
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
+        // Already registered (maybe from another browser / device):
+        // do NOT trap the user here, send them to login with email prefilled.
+        if (response.status === 409) {
+          navigate("/mentor/login", {
+            replace: true,
+            state: {
+              email: profile.email.trim(),
+              alreadyRegistered: true,
+            },
+          });
+          return;
+        }
+
         let errorMessage =
           data.message || "Registration failed. Please try again.";
-        if (response.status === 409) {
-          errorMessage =
-            data.message ||
-            "An account already exists with this email, mobile, or employee ID.";
-        } else if (response.status === 400) {
+        if (response.status === 400) {
           errorMessage =
             data.message || "Please check all fields and try again.";
         } else if (response.status === 500) {
@@ -887,11 +915,6 @@ function MobileAuthNav({
           className={`relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] ${isVerified ? "bg-blue-600 text-white" : isRegistered ? "bg-amber-400 text-slate-950" : isRegisterRoute ? "bg-amber-400 text-slate-950" : "bg-slate-100 text-slate-500"}`}
         >
           1
-          {isLoginRoute && !isRegistered && (
-            <span className="absolute -right-2 -top-2 flex h-4 w-4 items-center justify-center rounded-full border border-white bg-slate-800 text-white">
-              <LockKeyhole className="h-2.5 w-2.5" />
-            </span>
-          )}
         </span>
         <span className="truncate">Register</span>
         {isRegistered &&
@@ -901,6 +924,8 @@ function MobileAuthNav({
             <LockKeyhole className="h-3.5 w-3.5 text-slate-400" />
           ))}
       </button>
+
+      {/* Login is ALWAYS available, on every device / browser */}
       <button
         type="button"
         onClick={() => navigate("/mentor/login")}
@@ -910,11 +935,6 @@ function MobileAuthNav({
           className={`relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] ${isLoginRoute ? "bg-amber-400 text-slate-950" : "bg-slate-100 text-slate-500"}`}
         >
           2
-          {isRegisterRoute && (
-            <span className="absolute -right-2 -top-2 flex h-4 w-4 items-center justify-center rounded-full border border-white bg-slate-800 text-white">
-              <LockKeyhole className="h-2.5 w-2.5" />
-            </span>
-          )}
         </span>
         <span className="truncate">Mentor Login</span>
       </button>
@@ -1001,22 +1021,13 @@ function AuthSidebar({
             >
               <span className="relative z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-amber-500 bg-amber-400 text-xs font-bold text-slate-950 shadow-[0_6px_18px_rgba(251,191,36,.22)]">
                 1
-                {isLoginRoute && (
-                  <span className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-slate-800 text-white">
-                    <LockKeyhole className="h-3 w-3" />
-                  </span>
-                )}
               </span>
               <span>
                 <span className="block text-sm font-bold text-slate-950">
                   Register
                 </span>
-                <span
-                  className={`mt-0.5 block text-[10px] font-semibold ${isLoginRoute ? "text-slate-400" : "text-slate-400"}`}
-                >
-                  {isLoginRoute
-                    ? "Locked while signed-in flow is active"
-                    : "Create mentor profile"}
+                <span className="mt-0.5 block text-[10px] font-semibold text-slate-400">
+                  Create mentor profile
                 </span>
               </span>
               {isRegisterRoute && (
@@ -1025,49 +1036,26 @@ function AuthSidebar({
             </button>
           )}
 
-          {/* BUTTON 2 — MENTOR LOGIN */}
+          {/* BUTTON 2 — MENTOR LOGIN (always open, any device) */}
           <button
             type="button"
-            disabled={!isRegistered}
-            onClick={() => {
-              if (isRegistered) {
-                navigate("/mentor/login");
-              }
-            }}
-            className={`${itemClass(isLoginRoute)} mt-4 ${
-              !isRegistered ? "cursor-not-allowed opacity-60" : ""
-            }`}
+            onClick={() => navigate("/mentor/login")}
+            className={`${itemClass(isLoginRoute)} mt-4`}
           >
             <span
               className={`relative z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-xs font-bold ${
                 isLoginRoute
                   ? "border-amber-500 bg-amber-400 text-slate-950 shadow-[0_6px_18px_rgba(251,191,36,.22)]"
-                  : isRegistered
-                    ? "border-slate-200 bg-white text-slate-400"
-                    : "border-slate-200 bg-slate-100 text-slate-300"
+                  : "border-slate-200 bg-white text-slate-400"
               }`}
             >
               2
-              {!isRegistered && (
-                <span className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-slate-800 text-white">
-                  <LockKeyhole className="h-3 w-3" />
-                </span>
-              )}
-              {isRegisterRoute && isRegistered && (
-                <span className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-slate-800 text-white">
-                  <LockKeyhole className="h-3 w-3" />
-                </span>
-              )}
             </span>
 
             <span>
               <span
                 className={`block text-sm font-bold ${
-                  isLoginRoute
-                    ? "text-slate-950"
-                    : isRegistered
-                      ? "text-slate-700"
-                      : "text-slate-400"
+                  isLoginRoute ? "text-slate-950" : "text-slate-700"
                 }`}
               >
                 Mentor Login
@@ -1075,16 +1063,10 @@ function AuthSidebar({
 
               <span
                 className={`mt-0.5 flex items-center gap-1 text-[10px] font-semibold ${
-                  isLoginRoute
-                    ? "text-amber-600"
-                    : isRegistered
-                      ? "text-slate-400"
-                      : "text-slate-300"
+                  isLoginRoute ? "text-amber-600" : "text-slate-400"
                 }`}
               >
-                {!isRegistered && <LockKeyhole className="h-3 w-3" />}
-
-                {isRegistered ? "Secure access" : "Register first"}
+                Secure access
               </span>
             </span>
 
@@ -1114,15 +1096,15 @@ function AuthSidebar({
               ? "Verification completed"
               : isRegistered
                 ? "Registration submitted and locked"
-                : "Registration required"}
+                : "New or existing mentor?"}
           </p>
 
           <p className="mt-1 text-[11px] leading-5 text-slate-600">
             {isVerified
               ? "Your mentor account is verified. You can now login securely."
               : isRegistered
-                ? "Your registration details are locked. You cannot register again. Please wait for admin verification. Once your account is approved, you can login securely."
-                : "Please complete your mentor registration first. Once submitted, your registration details cannot be changed or submitted again."}
+                ? "Your registration details are locked. Once your account is approved by admin, you can login securely."
+                : "Already registered? Use Mentor Login with your email and password, on any device. New here? Complete the registration first."}
           </p>
         </div>
       </div>
@@ -1145,6 +1127,9 @@ function MentorLogin({ showToast }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState(() => {
+    if (location.state?.alreadyRegistered) {
+      return "This email is already registered. Please login with your password.";
+    }
     if (!location.state?.registered) return "";
     if (location.state?.registrationSuccess) {
       return "🎉 Registration successful! Your account is pending verification.";
@@ -1155,7 +1140,7 @@ function MentorLogin({ showToast }) {
   });
 
   useEffect(() => {
-    if (location.state?.registered) {
+    if (location.state?.registered || location.state?.alreadyRegistered) {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, [location.state]);
@@ -1183,36 +1168,25 @@ function MentorLogin({ showToast }) {
         throw new Error(data.message || "Invalid email or password.");
       }
 
-      const verificationStatus = String(
-        data?.verificationStatus || data?.mentor?.verificationStatus || "",
+      // Block ONLY when the server explicitly says the account is not approved.
+      // (Strict "=== approved" check removed: it broke logins when the backend
+      // sent "verified" / "active" or no status field.)
+      const status = String(
+        data?.verificationStatus ||
+          data?.verification?.status ||
+          data?.mentor?.verificationStatus ||
+          data?.mentor?.status ||
+          "",
       ).toLowerCase();
 
-      if (verificationStatus !== "approved") {
+      if (BLOCKED_STATUSES.includes(status)) {
         throw new Error(
           data?.message || "Your account is waiting for admin verification.",
         );
       }
+
       const token = data.token || data.accessToken;
       if (token) window.localStorage.setItem("mnc_mentor_token", token);
-      window.localStorage.setItem(MENTOR_EMAIL_KEY, email.trim());
-
-      const backendVerificationStatus = String(
-        data?.verificationStatus ||
-          data?.verification?.status ||
-          data?.mentor?.verificationStatus ||
-          "",
-      ).toLowerCase();
-      if (
-        ["verified", "approved", "success", "active"].includes(
-          backendVerificationStatus,
-        )
-      ) {
-        window.localStorage.setItem(MENTOR_VERIFICATION_KEY, "verified");
-      }
-
-      // Show login success toast
-      showToast("✅ Login successful! Welcome back, Mentor.", "success", 4000);
-      window.localStorage.setItem(MENTOR_EMAIL_KEY, email.trim());
 
       const mentorId =
         data?.mentor?.id || data?.mentor?._id || data?.id || data?._id;
@@ -1222,21 +1196,20 @@ function MentorLogin({ showToast }) {
       }
 
       window.localStorage.setItem("mentorId", String(mentorId));
+      window.localStorage.setItem(MENTOR_EMAIL_KEY, email.trim());
+      // Login worked, so mark THIS device/browser as registered + verified.
+      window.localStorage.setItem(MENTOR_REGISTERED_KEY, "true");
+      window.localStorage.setItem(MENTOR_VERIFICATION_KEY, "verified");
 
       showToast("✅ Login successful! Welcome back, Mentor.", "success", 4000);
-
       navigate(MENTOR_DASHBOARD_PATH, { replace: true });
     } catch (loginError) {
-      setError(
+      const msg =
         loginError?.message === "Failed to fetch"
           ? "Cannot connect to the server. Please check the backend."
-          : loginError?.message || "Login failed. Please try again.",
-      );
-      showToast(
-        loginError?.message || "Login failed. Please try again.",
-        "error",
-        4000,
-      );
+          : loginError?.message || "Login failed. Please try again.";
+      setError(msg);
+      showToast(msg, "error", 4000);
     } finally {
       setIsSubmitting(false);
     }
@@ -1271,7 +1244,7 @@ function MentorLogin({ showToast }) {
               </div>
               <div className="min-w-0">
                 <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-600">
-                  Completed
+                  Notice
                 </p>
                 <p className="mt-1 text-sm font-bold text-slate-950">
                   {notice}
@@ -2008,6 +1981,7 @@ function StepThree({
 
 // ----- ACTION BAR -----
 function ActionBar({ step, goBack, goNext, isSubmitting = false }) {
+  const navigate = useNavigate();
   const isLast = step === 3;
 
   const handlePrimary = () => {
@@ -2060,6 +2034,19 @@ function ActionBar({ step, goBack, goNext, isSubmitting = false }) {
             ? "Your documents are shared only for admin verification."
             : "Required fields appear only after you press Continue."}
         </p>
+
+        {step === 1 && (
+          <p className="mt-2 text-center text-xs font-medium text-slate-500">
+            Already registered?{" "}
+            <button
+              type="button"
+              onClick={() => navigate("/mentor/login")}
+              className="font-bold text-blue-600 hover:text-blue-700 hover:underline"
+            >
+              Login here
+            </button>
+          </p>
+        )}
       </div>
     </div>
   );
