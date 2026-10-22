@@ -21,7 +21,8 @@ import socket from "../../socket";
 
 const INDIA_TIMEZONE = "Asia/Kolkata";
 const JOIN_WINDOW_MINUTES = 5;
-const FINAL_WARNING_MS = 5 * 60 * 1000; // 5 min before end
+const FINAL_WARNING_MS = 5 * 60 * 1000;
+const TIMER_POLL_MS = 3000;
 const TABS = ["Upcoming", "Awaiting Confirmation", "Completed", "Cancelled"];
 
 const fmtDateTime = (d) =>
@@ -90,69 +91,85 @@ const MentorSessions = () => {
 
   const { sessions, loading, error, connected, reload } = useMentorSessions();
 
-  // id -> { remainingMs, running, at }   (live meeting timer, synced from the server)
+  // id -> { remainingMs, running, at }
   const [timers, setTimers] = useState({});
 
   const [activeTab, setActiveTab] = useState("Upcoming");
   const [search, setSearch] = useState("");
   const [nowMs, setNowMs] = useState(Date.now());
 
-  // 1-second clock for countdowns + smooth timer ticking
+  // 1-second clock
   useEffect(() => {
     const t = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  // Poll active sessions (backup in case a socket event is missed)
-  useEffect(() => {
-    const active = sessions.filter((s) =>
-      ["Upcoming", "Awaiting Confirmation"].includes(s.status)
-    );
-    if (!active.length) return undefined;
+  // ids of sessions that can have a live meeting
+  const activeIds = useMemo(
+    () =>
+      sessions
+        .filter((s) => ["Upcoming", "Awaiting Confirmation"].includes(s.status))
+        .map((s) => s.id)
+        .join(","),
+    [sessions]
+  );
 
+  // Poll the same booking data the meeting room uses
+  useEffect(() => {
+    if (!activeIds) return undefined;
+    const ids = activeIds.split(",");
     let cancelled = false;
+
     const fetchTimers = async () => {
       const results = {};
+      let finished = false;
       await Promise.all(
-        active.map(async (s) => {
+        ids.map(async (id) => {
           try {
-            const d = await api(ENDPOINTS.booking(s.id));
+            const d = await api(ENDPOINTS.booking(id));
             if (d?.booking) {
-              results[s.id] = {
+              results[id] = {
                 remainingMs: d.booking.remainingMs,
                 running: Boolean(d.booking.timerRunning),
                 at: Date.now(),
               };
+              if (["awaiting_confirmation", "completed"].includes(d.booking.status)) finished = true;
             }
           } catch {
-            /* ignore single-failure */
+            /* ignore single failure */
           }
         })
       );
-      if (!cancelled) setTimers((prev) => ({ ...prev, ...results }));
+      if (cancelled) return;
+      setTimers((prev) => ({ ...prev, ...results }));
+      if (finished) reload();
     };
 
     fetchTimers();
-    const t = setInterval(fetchTimers, 10000);
+    const t = setInterval(fetchTimers, TIMER_POLL_MS);
     return () => {
       cancelled = true;
       clearInterval(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessions.length]);
+  }, [activeIds]);
 
-  // Server pushes the live meeting timer every ~5s (and on every join/leave)
+  // Socket updates (instant when server sends them to this user)
   useEffect(() => {
     const onTimer = (p) => {
       const id = p?.requestGroupId || p?.bookingId;
-      if (!id) return;
+      if (!id || typeof p.remainingMs !== "number") return;
       setTimers((prev) => ({
         ...prev,
         [id]: { remainingMs: p.remainingMs, running: Boolean(p.running), at: Date.now() },
       }));
     };
     socket.on("meeting:timer", onTimer);
-    return () => socket.off("meeting:timer", onTimer);
+    socket.on("meeting:state", onTimer);
+    return () => {
+      socket.off("meeting:timer", onTimer);
+      socket.off("meeting:state", onTimer);
+    };
   }, []);
 
   // booking updated -> refresh list
@@ -168,8 +185,7 @@ const MentorSessions = () => {
         TABS.map((t) => [
           t,
           sessions.filter((s) => {
-            if (t === "Awaiting Confirmation")
-              return s.status === "awaiting_confirmation";
+            if (t === "Awaiting Confirmation") return s.status === "awaiting_confirmation";
             return s.status === t;
           }).length,
         ])
@@ -180,22 +196,15 @@ const MentorSessions = () => {
   const filtered = useMemo(() => {
     const kw = search.toLowerCase().trim();
     const targetStatus =
-      activeTab === "Awaiting Confirmation"
-        ? "awaiting_confirmation"
-        : activeTab;
+      activeTab === "Awaiting Confirmation" ? "awaiting_confirmation" : activeTab;
 
     const list = sessions.filter(
       (s) =>
         s.status === targetStatus &&
-        (!kw ||
-          `${s.name} ${s.role} ${s.topic} ${s.type}`
-            .toLowerCase()
-            .includes(kw))
+        (!kw || `${s.name} ${s.role} ${s.topic} ${s.type}`.toLowerCase().includes(kw))
     );
     const dir = activeTab === "Upcoming" ? 1 : -1;
-    return list.sort(
-      (a, b) => dir * ((a.startsAt || 0) - (b.startsAt || 0))
-    );
+    return list.sort((a, b) => dir * ((a.startsAt || 0) - (b.startsAt || 0)));
   }, [sessions, activeTab, search]);
 
   const handleJoin = (session) =>
@@ -302,6 +311,12 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
   const c = countdownParts(base.msUntilStart);
   const pad = (n) => String(n).padStart(2, "0");
 
+  // start -> end range shown on the card
+  const timeRange =
+    session.startsAt && session.endsAt
+      ? `${fmtTime(new Date(session.startsAt))} → ${fmtTime(new Date(session.endsAt))}`
+      : session.time;
+
   // ---- LIVE MEETING TIMER (same value as inside the video call) ----
   const timerRunning = isUpcoming && Boolean(timer?.running);
   const baseRemaining =
@@ -312,7 +327,6 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
       : 0;
   const isFinalWarning = timerRunning && remaining <= FINAL_WARNING_MS;
 
-  // if the timer is running the session is live, even if the clock window passed
   const isLive = base.isLive || timerRunning;
   const isJoinWindow = base.isJoinWindow && !timerRunning;
   const hasEnded = base.hasEnded && !timerRunning;
@@ -371,15 +385,15 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:w-[500px]">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:w-[560px]">
           <SessionInfo icon={<CalendarDays size={15} />} label="Date" value={session.date} />
-          <SessionInfo icon={<Clock3 size={15} />} label="Time" value={session.time} />
+          <SessionInfo icon={<Clock3 size={15} />} label="Start → End" value={timeRange} />
           <SessionInfo icon={<Video size={15} />} label="Duration" value={session.duration} />
           <SessionInfo icon={<Star size={15} />} label="You earn" value={inr(session.earning ?? 0)} />
         </div>
       </div>
 
-      {/* LIVE TIMER BAR - shows the running meeting time outside the video */}
+      {/* LIVE TIMER BAR */}
       {timerRunning && (
         <div
           className={`mt-4 flex items-center justify-between gap-4 rounded-xl border p-3 ${
@@ -404,7 +418,7 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
               <p className={`text-[10px] ${isFinalWarning ? "text-amber-700" : "text-emerald-600"}`}>
                 {isFinalWarning
                   ? "Ask the fresher to confirm the session went well"
-                  : "Time left in the meeting"}
+                  : `Time left in the meeting · ${timeRange}`}
               </p>
             </div>
           </div>

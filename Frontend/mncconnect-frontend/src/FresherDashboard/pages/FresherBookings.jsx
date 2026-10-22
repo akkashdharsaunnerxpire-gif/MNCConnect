@@ -6,8 +6,16 @@ import ReviewModal from "../pages/Reviewmodal";
 import socket from "../../socket";
 import { api, ENDPOINTS, EVENTS, getUserId, durationLabel, fmtClock, inr } from "../../services/fresherApi";
 
-const GRACE_MS = 60 * 60 * 1000;
 const FINAL_WARNING_MS = 5 * 60 * 1000;
+const TIMER_POLL_MS = 3000;
+const IST = "Asia/Kolkata";
+
+const fmtTimeIST = (ms) =>
+  Number.isFinite(ms)
+    ? new Date(ms).toLocaleTimeString("en-IN", { timeZone: IST, hour: "numeric", minute: "2-digit", hour12: true })
+    : "";
+
+const NO_TIMER_STATUSES = ["completed", "awaiting_confirmation", "disputed", "pending", "expired", "missed", "cancelled"];
 
 const MyBookings = () => {
   const navigate = useNavigate();
@@ -16,15 +24,17 @@ const MyBookings = () => {
   const [tab, setTab] = useState("upcoming");
   const [dismissedReview, setDismissedReview] = useState(null);
 
+  // requestGroupId -> { remainingMs, running, at }
   const [timers, setTimers] = useState({});
 
   const { data, loading, error, connected, reload } = useLive({
     fetcher: () => api(ENDPOINTS.myBookings),
     events: [EVENTS.booking, EVENTS.reminder],
-    pollMs: 15000,
+    pollMs: 10000,
     userId,
   });
 
+  // 1s clock
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
@@ -32,28 +42,86 @@ const MyBookings = () => {
 
   const bookings = data?.bookings || [];
 
+  // Timer values that come with the list (if backend sends them)
   useEffect(() => {
-    const fromApi = {};
+    const fromList = {};
     bookings.forEach((b) => {
-      if (b.timerRunning && typeof b.remainingMs === "number") {
-        fromApi[b.requestGroupId] = { remainingMs: b.remainingMs, running: true, at: Date.now() };
+      if (typeof b.remainingMs === "number") {
+        fromList[b.requestGroupId] = {
+          remainingMs: b.remainingMs,
+          running: Boolean(b.timerRunning),
+          at: Date.now(),
+        };
       }
     });
-    if (Object.keys(fromApi).length) setTimers((prev) => ({ ...prev, ...fromApi }));
+    if (Object.keys(fromList).length) setTimers((prev) => ({ ...prev, ...fromList }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
+  // ids of bookings that can have a live meeting
+  const activeIds = useMemo(
+    () =>
+      bookings
+        .filter((b) => !NO_TIMER_STATUSES.includes(b.status))
+        .map((b) => b.requestGroupId)
+        .join(","),
+    [bookings]
+  );
+
+  // Poll each active booking -> same timer as inside the meeting room
+  useEffect(() => {
+    if (!activeIds) return undefined;
+    const ids = activeIds.split(",");
+    let cancelled = false;
+
+    const fetchTimers = async () => {
+      const results = {};
+      await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const d = await api(ENDPOINTS.booking(id));
+            if (d?.booking) {
+              results[id] = {
+                remainingMs: d.booking.remainingMs,
+                running: Boolean(d.booking.timerRunning),
+                at: Date.now(),
+              };
+              // meeting finished on the server -> refresh the list
+              if (["awaiting_confirmation", "completed"].includes(d.booking.status)) reload();
+            }
+          } catch {
+            /* ignore single failure */
+          }
+        })
+      );
+      if (!cancelled) setTimers((prev) => ({ ...prev, ...results }));
+    };
+
+    fetchTimers();
+    const t = setInterval(fetchTimers, TIMER_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeIds]);
+
+  // Socket (works when the server sends it to the user's room)
   useEffect(() => {
     const onTimer = (p) => {
       const id = p?.requestGroupId || p?.bookingId;
-      if (!id) return;
+      if (!id || typeof p.remainingMs !== "number") return;
       setTimers((prev) => ({
         ...prev,
         [id]: { remainingMs: p.remainingMs, running: Boolean(p.running), at: Date.now() },
       }));
     };
     socket.on("meeting:timer", onTimer);
-    return () => socket.off("meeting:timer", onTimer);
+    socket.on("meeting:state", onTimer);
+    return () => {
+      socket.off("meeting:timer", onTimer);
+      socket.off("meeting:state", onTimer);
+    };
   }, []);
 
   const timerOf = (b) => {
@@ -68,40 +136,31 @@ const MyBookings = () => {
     const opens = starts - 5 * 60000;
     const left = timerOf(b);
 
-    // ✅ Status handling based on backend
     if (["completed", "awaiting_confirmation", "disputed"].includes(b.status)) {
       if (b.reviewed) return { key: "done", label: "Completed", tone: "emerald" };
       if (b.status === "disputed") return { key: "refunded", label: "Refunded", tone: "slate" };
-      // If it's completed or awaiting confirmation but not reviewed yet
       return { key: "review", label: "Review required", tone: "red" };
     }
 
     if (b.status === "pending") return { key: "pending", label: "Waiting for an employee", tone: "amber" };
     if (b.status === "expired" || b.status === "missed") return { key: "refunded", label: "Refunded", tone: "slate" };
 
-    // ✅ If timer is running (live meeting)
-    if (left !== null && left > 0) {
-      return { key: "open", label: "In progress", tone: "green", opens, starts };
-    }
+    // live meeting timer running
+    if (left !== null && left > 0) return { key: "open", label: "In progress", tone: "green", opens, starts };
 
-    // ✅ If meeting time is over but timer didn't start or ended
-    if (now >= ends) {
-      return { key: "ended", label: "Meeting ended", tone: "slate" };
-    }
+    // timer reached 0 -> server is moving it to confirmation, keep it in upcoming until status changes
+    if (left !== null && left <= 0) return { key: "open", label: "Finishing…", tone: "amber", opens, starts };
 
-    if (now >= opens && now < ends) {
-      return { key: "open", label: "Meeting open", tone: "green", opens, starts };
-    }
+    if (now >= ends) return { key: "ended", label: "Meeting ended", tone: "slate" };
+    if (now >= opens && now < ends) return { key: "open", label: "Meeting open", tone: "green", opens, starts };
 
     return { key: "confirmed", label: "Confirmed", tone: "blue", opens, starts };
   };
 
   const decorated = useMemo(() => bookings.map((b) => ({ b, v: view(b) })), [bookings, now, timers]); // eslint-disable-line
-  
-  // ✅ Automatically move to past if meeting is over or review is needed
+
   const upcoming = decorated.filter(({ v }) => ["pending", "confirmed", "open"].includes(v.key));
   const past = decorated.filter(({ v }) => ["done", "refunded", "review", "ended"].includes(v.key));
-  
   const list = tab === "upcoming" ? upcoming : past;
 
   const needsReview = decorated.find(({ v, b }) => v.key === "review" && b.requestGroupId !== dismissedReview)?.b;
@@ -155,6 +214,12 @@ const MyBookings = () => {
             {list.map(({ b, v }) => {
               const left = timerOf(b);
               const warn = left !== null && left <= FINAL_WARNING_MS;
+              const startMs = new Date(b.startsAt).getTime();
+              const endMs = new Date(b.endsAt).getTime();
+              const range = Number.isFinite(startMs) && Number.isFinite(endMs)
+                ? `${fmtTimeIST(startMs)} → ${fmtTimeIST(endMs)}`
+                : b.time;
+
               return (
                 <div key={b.requestGroupId} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md">
                   <div className="flex flex-col gap-5 p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between">
@@ -169,7 +234,7 @@ const MyBookings = () => {
                           <span className="flex items-center gap-2"><Building2 className="h-4 w-4 text-slate-400" />{b.companyName}</span>
                           <span className="flex items-center gap-2"><UserRound className="h-4 w-4 text-slate-400" />{b.mentor?.name || "Waiting for an employee"}</span>
                           <span className="flex items-center gap-2"><CalendarDays className="h-4 w-4 text-slate-400" />{b.date}</span>
-                          <span className="flex items-center gap-2"><Clock3 className="h-4 w-4 text-slate-400" />{b.time} · {durationLabel(b.durationMinutes)}</span>
+                          <span className="flex items-center gap-2"><Clock3 className="h-4 w-4 text-slate-400" />{range} · {durationLabel(b.durationMinutes)}</span>
                         </div>
                         {b.reason && <p className="mt-3 line-clamp-2 text-sm text-slate-500">"{b.reason}"</p>}
                       </div>
@@ -205,13 +270,16 @@ const MyBookings = () => {
                     </div>
                   </div>
 
+                  {/* LIVE TIMER - same value as inside the meeting room */}
                   {left !== null && (
                     <div className={`mx-5 mb-4 flex items-center justify-between gap-4 rounded-xl border p-3 sm:mx-6 ${warn ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
                       <div>
                         <p className={`text-xs font-semibold ${warn ? "text-amber-800" : "text-emerald-800"}`}>
                           {warn ? "Final 5 minutes" : "Session in progress"}
                         </p>
-                        <p className={`text-[11px] ${warn ? "text-amber-700" : "text-emerald-600"}`}>Time left in the meeting</p>
+                        <p className={`text-[11px] ${warn ? "text-amber-700" : "text-emerald-600"}`}>
+                          Time left · {range}
+                        </p>
                       </div>
                       <div className={`rounded-lg px-3 py-1.5 font-mono text-xl font-bold tabular-nums ${warn ? "bg-amber-200 text-amber-900" : "bg-emerald-200 text-emerald-900"}`}>
                         {fmtClock(left)}
