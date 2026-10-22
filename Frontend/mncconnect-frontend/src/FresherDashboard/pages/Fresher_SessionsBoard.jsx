@@ -1,11 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
-  CalendarDays, CheckCircle2, ChevronRight, Clock3, IndianRupee, Loader2, MessageSquare,
+  CalendarDays, CheckCircle2, ChevronRight, IndianRupee, Loader2,
   ShieldCheck, Send, UserRound, Briefcase, Mail, TimerReset, AlertTriangle,
 } from "lucide-react";
 import useUserEvents from "../../hooks/useUserEvents";
-import ReviewModal from "../pages/Reviewmodal";
 import {
   api, ENDPOINTS, EVENTS, DURATIONS, durationLabel, priceFor, getUser, getUserId,
   toApiDate, toApiTime, startFrom, inr,
@@ -34,6 +33,11 @@ const todayISO = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
+const EMPTY_FORM = {
+  sessionType: SESSION_TYPES[0].value, reason: "", date: "", time: "",
+  role: "", otherRole: "", gender: "", language: "", minutes: 60,
+};
+
 const inputCls =
   "h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
 
@@ -50,17 +54,13 @@ export default function SessionBoard() {
   const user = useMemo(() => getUser(), []);
   const userId = useMemo(() => getUserId(), []);
 
-  const [f, setF] = useState({
-    sessionType: SESSION_TYPES[0].value, reason: "", date: "", time: "",
-    role: "", otherRole: "", gender: "", language: "", minutes: 60,
-  });
+  const [f, setF] = useState(EMPTY_FORM);
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
   const [stage, setStage] = useState(null); // paying | sending | waiting | accepted | expired | error
   const [booking, setBooking] = useState(null);
   const [notifiedCount, setNotifiedCount] = useState(0);
   const [error, setError] = useState("");
-  const [reviewBooking, setReviewBooking] = useState(null);
 
   const reqIdRef = useRef(null);
   const paymentIdRef = useRef(null);
@@ -142,15 +142,10 @@ export default function SessionBoard() {
     setError("");
 
     try {
-      const pending = await api(ENDPOINTS.needsReview).catch(() => null);
-      if (pending?.booking) {
-        setReviewBooking(pending.booking);
-        return;
-      }
-
       if (!window.Razorpay) throw new Error("Payment gateway failed to load. Please refresh the page.");
 
-      reqIdRef.current = makeRequestId();
+      reqIdRef.current = makeRequestId(); // ovvoru booking-kum pudhu id, so rebook pannalaam
+      paymentIdRef.current = null;
       setStage("paying");
 
       const order = await api(ENDPOINTS.createOrder, { method: "POST", body: { amount: price } });
@@ -196,6 +191,14 @@ export default function SessionBoard() {
     reqIdRef.current = null;
     paymentIdRef.current = null;
     setError("");
+  };
+
+  // Already book pannina apram vera session book panna: form + state full reset
+  const bookAnother = () => {
+    closeAll();
+    setF(EMPTY_FORM);
+    setNotifiedCount(0);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const mentor = booking?.mentor;
@@ -318,8 +321,9 @@ export default function SessionBoard() {
                   <h3 className="text-sm font-bold text-slate-900">How it works</h3>
                   <p><b className="text-slate-900">1.</b> Pay. Your request goes to every matching employee who is online.</p>
                   <p><b className="text-slate-900">2.</b> The first employee to accept gets your session.</p>
-                  <p><b className="text-slate-900">3.</b> You both get an alert 5 minutes before. The timer starts only when both of you are in the meeting.</p>
+                  <p><b className="text-slate-900">3.</b> You both get an alert 5 minutes before. Read the instructions first. Your camera turns on and the timer starts only after both of you accept.</p>
                   <p><b className="text-slate-900">4.</b> If nobody accepts before your start time, you are refunded automatically.</p>
+                  <p><b className="text-slate-900">5.</b> After the session, confirm and leave your review inside the meeting.</p>
                 </div>
               </div>
             </div>
@@ -425,6 +429,9 @@ export default function SessionBoard() {
           <button type="button" onClick={() => navigate("/Home/my-bookings")} className="mt-6 w-full rounded-xl bg-slate-950 py-3.5 text-sm font-bold text-white hover:bg-slate-800">
             Go to My Bookings
           </button>
+          <button type="button" onClick={bookAnother} className="mt-2 w-full rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+            Book another session
+          </button>
         </Overlay>
       )}
 
@@ -455,8 +462,6 @@ export default function SessionBoard() {
           )}
         </Overlay>
       )}
-
-      {reviewBooking && <ReviewModal booking={reviewBooking} onDone={() => { setReviewBooking(null); }} />}
     </div>
   );
 }

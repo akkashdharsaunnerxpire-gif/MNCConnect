@@ -181,6 +181,10 @@ const buildCompanyData = (apiData) => {
   });
 };
 
+// "View" ALWAYS booking page-ku mattum. Meeting room-ku direct link kidayadhu.
+// Already book pannina company-um thirumba book panna idhu thaan vazhi.
+const sessionLink = (company) => `/Home/sessionboard/${encodeURIComponent(company.companyName || "")}`;
+
 // ============================================================
 // MAIN COMPONENT
 // ============================================================
@@ -731,8 +735,6 @@ const RatingText = ({ company }) => {
   );
 };
 
-const sessionLink = (company) => `/Home/sessionboard/${encodeURIComponent(company.companyName || "")}`;
-
 // ============================================================
 // GRID CARD
 // ============================================================
@@ -743,7 +745,7 @@ const CompanyCard = ({ company, index }) => {
   return (
     <Link
       to={sessionLink(company)}
-      aria-label={`View ${name} employees`}
+      aria-label={`Book a session with ${name}`}
       className="mc-rise group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:border-violet-300 hover:shadow-xl hover:shadow-violet-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2"
       style={{ animationDelay: `${Math.min(index, 12) * 40}ms` }}
     >
@@ -808,7 +810,7 @@ const CompanyRow = ({ company, index }) => {
   return (
     <Link
       to={sessionLink(company)}
-      aria-label={`View ${name} employees`}
+      aria-label={`Book a session with ${name}`}
       className="mc-rise group flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition duration-200 hover:border-violet-300 hover:shadow-lg hover:shadow-violet-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 sm:flex-row sm:items-center"
       style={{ animationDelay: `${Math.min(index, 12) * 30}ms` }}
     >

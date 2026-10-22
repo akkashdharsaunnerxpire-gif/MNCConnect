@@ -10,7 +10,7 @@ import SessionBoard from "../FresherDashboard/pages/Fresher_SessionsBoard";
 import Notifications from "../FresherDashboard/pages/FresherNotifications";
 import Header from "../FresherDashboard/Component/Header";
 import BonusWallet from "../FresherDashboard/pages/FresherWallet";
-import MeetingRoom from "../FresherDashboard/pages/Meetingroom";
+import MeetingRoom from "../Commoncomponents/Meetingroom";
 
 const isFresherLoggedIn = () =>
   Boolean(localStorage.getItem("fresher_token"));

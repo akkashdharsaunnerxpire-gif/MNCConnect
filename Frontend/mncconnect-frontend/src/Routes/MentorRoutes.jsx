@@ -13,7 +13,7 @@ import MentorReviews from "../MncEmployee/pages/MentorReviews";
 import MentorSettings from "../MncEmployee/pages/MentorSettings";
 import MentorHeader from "../MncEmployee/Components/MentorHeader";
 import ResetPassword from "../Authpage/MncEmployeeAuth/ResetPassword";
-import MeetingRoom from "../FresherDashboard/pages/Meetingroom";
+import MeetingRoom from "../Commoncomponents/Meetingroom";
 
 const isMentorLoggedIn = () =>
   Boolean(localStorage.getItem("mnc_mentor_token"));
