@@ -401,13 +401,67 @@ exports.mentorPending = async (req, res) => {
 
 /* ============================ COMPLETION ============================ */
 
+/* ============================ COMPLETION ============================ */
+
+const pushTimerOff = (b) => {
+  const payload = { requestGroupId: b.requestGroupId, running: false, remainingMs: 0 };
+  emitToUser(b.fresher, "meeting:timer", payload);
+  if (b.mentor) emitToUser(b.mentor._id || b.mentor, "meeting:timer", payload);
+};
+
+// fresher said YES -> money released to mentor, session "completed"
+const settleCompleted = async (booking) => {
+  const now = new Date();
+  const updated = await Booking.findOneAndUpdate(
+    { _id: booking._id, status: { $in: ["awaiting_confirmation", "in_progress", "accepted"] } },
+    { $set: { status: "completed", completedAt: now, "meeting.remainingMs": 0, "meeting.endedAt": now } },
+    { returnDocument: "after" }
+  ).populate("mentor", POPULATE_MENTOR);
+  if (!updated) return null;
+
+  const amount = Number(updated.amount || 0);
+  const mentorShare = amount * 0.75;
+  const platformShare = amount * 0.25;
+
+  await Payment.updateOne(
+    { requestGroupId: updated.requestGroupId, status: "paid" },
+    { $set: { sessionStatus: "completed", mentorEarning: mentorShare, platformFee: platformShare } }
+  );
+
+  if (updated.mentor) {
+    await Mentor.updateOne({ _id: updated.mentor._id }, { $inc: { totalSessions: 1 } });
+    notify({
+      user: updated.mentor._id,
+      role: "mentor",
+      title: "Session confirmed & Paid",
+      message: `Fresher confirmed the session. ₹${mentorShare} added to your wallet.`,
+      type: "payment",
+      link: "/mentor/earnings",
+    });
+    emitToUser(updated.mentor._id, "wallet:updated", { requestGroupId: updated.requestGroupId });
+    emitToUser(updated.mentor._id, "booking:updated", toClient(updated));
+  }
+  emitToUser(updated.fresher, "booking:updated", toClient(updated));
+  pushTimerOff(updated);
+  return updated;
+};
+
+// called when the timer reaches zero
 const completeBooking = async (requestGroupId) => {
+  const pre = await Booking.findOne({
+    requestGroupId,
+    status: { $in: ["accepted", "in_progress"] },
+  });
+  if (!pre) return null;
+
+  // fresher already said YES during the meeting -> finish completely
+  if (pre.meeting?.fresherConfirmed) return settleCompleted(pre);
+
   const b = await Booking.findOneAndUpdate(
     { requestGroupId, status: { $in: ["accepted", "in_progress"] } },
     { $set: { status: "awaiting_confirmation", "meeting.remainingMs": 0, "meeting.endedAt": new Date() } },
     { returnDocument: "after" }
   ).populate("mentor", POPULATE_MENTOR);
-
   if (!b) return null;
 
   notify({
@@ -420,12 +474,8 @@ const completeBooking = async (requestGroupId) => {
   });
 
   emitToUser(b.fresher, "booking:updated", toClient(b));
-  emitToUser(b.fresher, "meeting:timer", { requestGroupId: b.requestGroupId, running: false, remainingMs: 0 });
-  if (b.mentor) {
-    emitToUser(b.mentor._id, "booking:updated", toClient(b));
-    emitToUser(b.mentor._id, "meeting:timer", { requestGroupId: b.requestGroupId, running: false, remainingMs: 0 });
-  }
-
+  if (b.mentor) emitToUser(b.mentor._id, "booking:updated", toClient(b));
+  pushTimerOff(b);
   return b;
 };
 
@@ -445,40 +495,11 @@ exports.confirmCompletion = async (req, res) => {
     if (booking.status !== "awaiting_confirmation") return fail(res, 400, "This session is not awaiting confirmation.");
 
     if (accepted) {
-      const updated = await Booking.findOneAndUpdate(
-        { _id: booking._id, status: "awaiting_confirmation" },
-        { $set: { status: "completed", completedAt: new Date(), reviewed: false } },
-        { returnDocument: "after" }
-      ).populate("mentor", POPULATE_MENTOR);
-
-      const amount = Number(booking.amount || 0);
-      const mentorShare = amount * 0.75;
-      const platformShare = amount * 0.25;
-
-      await Payment.updateOne(
-        { requestGroupId, status: "paid" },
-        { $set: { sessionStatus: "completed", mentorEarning: mentorShare, platformFee: platformShare } }
-      );
-
-      if (updated.mentor) {
-        await Mentor.updateOne({ _id: updated.mentor._id }, { $inc: { totalSessions: 1 } });
-        notify({
-          user: updated.mentor._id,
-          role: "mentor",
-          title: "Session confirmed & Paid",
-          message: `Fresher confirmed the session. ₹${mentorShare} added to your wallet.`,
-          type: "payment",
-          link: "/mentor/earnings",
-        });
-        emitToUser(updated.mentor._id, "wallet:updated", { requestGroupId });
-        emitToUser(updated.mentor._id, "booking:updated", toClient(updated));
-      }
-
-      emitToUser(updated.fresher, "booking:updated", toClient(updated));
+      const updated = await settleCompleted(booking);
+      if (!updated) return fail(res, 409, "Session already updated");
       return res.json({ success: true, status: "completed", booking: toClient(updated) });
     }
 
-    // "No" -> disputed -> refund to wallet
     const updated = await Booking.findOneAndUpdate(
       { _id: booking._id, status: "awaiting_confirmation" },
       { $set: { status: "disputed", completedAt: new Date() } },
@@ -497,7 +518,6 @@ exports.confirmCompletion = async (req, res) => {
     return fail(res, 500, "Unable to confirm session");
   }
 };
-
 /* ============================ FRESHER NOTIFICATIONS ============================ */
 
 exports.getFresherNotifications = async (req, res) => {

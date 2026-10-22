@@ -6,7 +6,12 @@ const bookingSchema = new Schema(
   {
     requestGroupId: { type: String, required: true, unique: true },
 
-    fresher: { type: Schema.Types.ObjectId, ref: "Fresher", default: null, index: true },
+    fresher: {
+      type: Schema.Types.ObjectId,
+      ref: "Fresher",
+      default: null,
+      index: true,
+    },
     fresherName: { type: String, default: "Fresher" },
     fresherEmail: { type: String, default: "", lowercase: true, trim: true },
     fresherImage: { type: String, default: "" },
@@ -44,7 +49,12 @@ const bookingSchema = new Schema(
       index: true,
     },
 
-    mentor: { type: Schema.Types.ObjectId, ref: "Mentor", default: null, index: true },
+    mentor: {
+      type: Schema.Types.ObjectId,
+      ref: "Mentor",
+      default: null,
+      index: true,
+    },
     notified: [{ type: Schema.Types.ObjectId }],
     declinedBy: [{ type: Schema.Types.ObjectId }],
 
@@ -53,7 +63,11 @@ const bookingSchema = new Schema(
     completedAt: { type: Date, default: null },
 
     razorpayPaymentId: { type: String, default: "" },
-    refundStatus: { type: String, enum: ["", "refunded", "failed"], default: "" },
+    refundStatus: {
+      type: String,
+      enum: ["", "refunded", "failed"],
+      default: "",
+    },
 
     reminderSent: { type: Boolean, default: false },
     reviewed: { type: Boolean, default: false },
@@ -63,13 +77,15 @@ const bookingSchema = new Schema(
       startedAt: { type: Date, default: null },
       timerEndsAt: { type: Date, default: null },
       endedAt: { type: Date, default: null },
+      successRequested: { type: Boolean, default: false },
+      fresherConfirmed: { type: Boolean, default: false },
       instructionsAccepted: {
         mentor: { type: Boolean, default: false },
         fresher: { type: Boolean, default: false },
       },
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 bookingSchema.index({ status: 1, expiresAt: 1 });

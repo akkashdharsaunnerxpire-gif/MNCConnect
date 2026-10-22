@@ -15,7 +15,7 @@ const { notify, emitToUser, serializeNotification } = require("../utils/realtime
 const MIN_WITHDRAWAL = 500;
 const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 const fail = (res, status, message) => res.status(status).json({ success: false, message });
-
+  
 
 const loadWallet = async (mentorId) => {
   const payments = await Payment.find({ mentor: mentorId, status: "paid" })
@@ -182,72 +182,71 @@ exports.replyToReview = async (req, res) => {
 };
 
 // POST /api/reviews   { mentorId, requestGroupId, rating, comment }   (fresher)
+// POST /api/reviews   { requestGroupId, rating, comment }   (fresher)
 exports.createReview = async (req, res) => {
   try {
-    const { mentorId, requestGroupId, comment } = req.body || {};
+    const requestGroupId = String(req.body?.requestGroupId || "").trim();
+    const comment = String(req.body?.comment || "").trim().slice(0, 1000);
     const rating = Number(req.body?.rating);
 
-    if (!mongoose.Types.ObjectId.isValid(mentorId) || !requestGroupId) {
-      return fail(res, 400, "mentorId and requestGroupId are required.");
-    }
+    if (!requestGroupId) return fail(res, 400, "requestGroupId is required.");
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
       return fail(res, 400, "Rating must be between 1 and 5.");
     }
+    if (comment.length < 3) return fail(res, 400, "Please write your feedback.");
 
-    // only a fresher who paid for a finished session with this mentor can review
-    const payment = await Payment.findOne({
-      fresher: req.user.id,
-      mentor: mentorId,
-      requestGroupId: String(requestGroupId),
-      status: "paid",
-    }).lean();
-
-    if (!payment) return fail(res, 404, "No paid session found for this mentor.");
-    if (!payment.sessionEndsAt || new Date(payment.sessionEndsAt) > new Date()) {
-      return fail(res, 400, "You can review once the session has ended.");
+    const booking = await Booking.findOne({ requestGroupId, fresher: req.user.id });
+    if (!booking || !booking.mentor) return fail(res, 404, "Session not found.");
+    if (!["in_progress", "awaiting_confirmation", "completed"].includes(booking.status)) {
+      return fail(res, 400, "You can review once the session has started.");
     }
 
+    const mentorId = booking.mentor;
     const fresher = await Fresher.findById(req.user.id).select("name").lean();
 
     let review;
+    let created = true;
     try {
       review = await Review.create({
         mentor: mentorId,
         fresher: req.user.id,
-        fresherName: fresher?.name || payment.fresherName || "Fresher",
-        sessionKey: String(requestGroupId),
-        session: payment.topic || "Mentoring session",
+        fresherName: fresher?.name || booking.fresherName || "Fresher",
+        sessionKey: requestGroupId,
+        session: booking.sessionType || booking.companyName || "Mentoring session",
         rating,
-        comment: String(comment || "").trim().slice(0, 1000),
+        comment,
       });
     } catch (e) {
-      if (e.code === 11000) return fail(res, 409, "You already reviewed this session.");
-      throw e;
+      if (e.code !== 11000) throw e;
+      created = false; // already reviewed -> treat as success
+      review = await Review.findOne({ mentor: mentorId, fresher: req.user.id, sessionKey: requestGroupId });
     }
 
-    // keep the mentor's profile numbers in sync
-    const agg = await Review.aggregate([
-      { $match: { mentor: new mongoose.Types.ObjectId(String(mentorId)) } },
-      { $group: { _id: null, avg: { $avg: "$rating" }, count: { $sum: 1 } } },
-    ]);
-    if (agg[0]) {
-      await Mentor.updateOne(
-        { _id: mentorId },
-        { $set: { rating: Math.round(agg[0].avg * 10) / 10, totalReviews: agg[0].count } }
-      );
+    await Booking.updateOne({ _id: booking._id }, { $set: { reviewed: true } });
+
+    if (created) {
+      const agg = await Review.aggregate([
+        { $match: { mentor: new mongoose.Types.ObjectId(String(mentorId)) } },
+        { $group: { _id: null, avg: { $avg: "$rating" }, count: { $sum: 1 } } },
+      ]);
+      if (agg[0]) {
+        await Mentor.updateOne(
+          { _id: mentorId },
+          { $set: { rating: Math.round(agg[0].avg * 10) / 10, totalReviews: agg[0].count } }
+        );
+      }
+      notify({
+        user: mentorId,
+        role: "mentor",
+        title: "New review",
+        message: `${review.fresherName} rated your session ${rating}/5.`,
+        type: "review",
+        link: "/mentor/reviews",
+      });
+      emitToUser(mentorId, "review:new", { reviewId: review._id });
     }
 
-    notify({
-      user: mentorId,
-      role: "mentor",
-      title: "New review",
-      message: `${review.fresherName} rated your session ${rating}/5.`,
-      type: "review",
-      link: "/mentor/reviews",
-    });
-    emitToUser(mentorId, "review:new", { reviewId: review._id });
-
-    return res.status(201).json({ success: true, review });
+    return res.status(created ? 201 : 200).json({ success: true, review, already: !created });
   } catch (error) {
     console.error("createReview error:", error.message);
     return fail(res, 500, "Unable to save review.");

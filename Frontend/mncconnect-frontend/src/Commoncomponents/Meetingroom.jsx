@@ -11,6 +11,7 @@ import {
   Clock3,
   UserRound,
   CheckCircle,
+  Star,
 } from "lucide-react";
 import socket from "../socket";
 import ReviewModal from "../FresherDashboard/pages/Reviewmodal";
@@ -22,10 +23,12 @@ const ICE = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
-    // Mobile data / strict WiFi la HD connect aaga TURN add pannunga:
     // { urls: "turn:YOUR_TURN_HOST:3478", username: "USER", credential: "PASS" },
   ],
 };
+
+const FIVE_MIN = 5 * 60 * 1000;
+const THREE_MIN = 3 * 60 * 1000;
 
 /* ---------- HD camera + mic ---------- */
 const HD_VIDEO = {
@@ -42,7 +45,6 @@ const HD_AUDIO = {
   channelCount: 1,
 };
 
-// HD try pannum, fail aana step by step kuraiyum, kadaisila audio mattum
 const getMedia = async () => {
   const attempts = [
     { video: HD_VIDEO, audio: HD_AUDIO, audioOnly: false },
@@ -64,7 +66,6 @@ const getMedia = async () => {
   return { stream: null, audioOnly: false };
 };
 
-// high bitrate so the video stays sharp
 const tuneSenders = async (peer) => {
   for (const sender of peer.getSenders()) {
     if (!sender.track) continue;
@@ -72,7 +73,7 @@ const tuneSenders = async (peer) => {
       const params = sender.getParameters();
       if (!params.encodings || !params.encodings.length) params.encodings = [{}];
       if (sender.track.kind === "video") {
-        params.encodings[0].maxBitrate = 2_500_000; // 2.5 Mbps
+        params.encodings[0].maxBitrate = 2_500_000;
         params.encodings[0].maxFramerate = 30;
         params.degradationPreference = "maintain-resolution";
       } else {
@@ -80,12 +81,123 @@ const tuneSenders = async (peer) => {
       }
       await sender.setParameters(params);
     } catch {
-      /* browser may not support */
+      /* not supported */
     }
   }
 };
 
 const sendSignal = (data) => socket.emit("meeting:signal", { data });
+
+/* ---------- Fresher: last 5 minutes, stars + feedback REQUIRED ---------- */
+const ReviewGate = ({ booking, token, onDone }) => {
+  const [rating, setRating] = useState(0);
+  const [hover, setHover] = useState(0);
+  const [comment, setComment] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const canSubmit = rating >= 1 && comment.trim().length >= 10 && !busy;
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setBusy(true);
+    setErr("");
+    try {
+      const res = await fetch(`${API_URL}/reviews`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          requestGroupId: booking.requestGroupId,
+          rating,
+          comment: comment.trim(),
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.success) onDone();
+      else setErr(d.message || "Could not submit. Try again.");
+    } catch {
+      setErr("Network error. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 text-slate-900 shadow-2xl">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-blue-600">
+          Required · last 5 minutes
+        </p>
+        <h3 className="mt-1 text-xl font-bold">How is your session going?</h3>
+        <p className="mt-1 text-xs text-slate-500">
+          Give a star rating and your feedback. The meeting continues until the timer ends.
+        </p>
+
+        <div className="mt-4 flex justify-center gap-1">
+          {[1, 2, 3, 4, 5].map((n) => (
+            <button
+              key={n}
+              type="button"
+              onMouseEnter={() => setHover(n)}
+              onMouseLeave={() => setHover(0)}
+              onClick={() => setRating(n)}
+            >
+              <Star
+                size={34}
+                className={(hover || rating) >= n ? "fill-yellow-400 text-yellow-400" : "text-slate-300"}
+              />
+            </button>
+          ))}
+        </div>
+
+        <textarea
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          rows={4}
+          placeholder="Write your feedback / review (min 10 characters)"
+          className="mt-4 w-full rounded-xl border border-slate-200 p-3 text-sm outline-none focus:border-blue-400"
+        />
+
+        {err && <p className="mt-2 text-xs text-red-600">{err}</p>}
+
+        <button
+          type="button"
+          disabled={!canSubmit}
+          onClick={submit}
+          className="mt-4 w-full rounded-xl bg-slate-900 py-3 text-sm font-bold text-white disabled:opacity-40"
+        >
+          {busy ? "Submitting…" : "Submit review"}
+        </button>
+        <p className="mt-2 text-center text-[11px] text-slate-400">
+          Stars and feedback are both required to continue.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+/* ---------- Fresher: mentor asked "did the session go well?" ---------- */
+const SuccessConfirmModal = ({ onYes, onNo }) => (
+  <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 px-4">
+    <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center text-slate-900 shadow-2xl">
+      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100">
+        <CheckCircle className="text-emerald-600" size={30} />
+      </div>
+      <h3 className="mt-4 text-lg font-bold">Did the session go well?</h3>
+      <p className="mt-1 text-sm text-slate-500">
+        The employee marked this session as successful. Please confirm. The meeting continues until the timer ends.
+      </p>
+      <div className="mt-5 flex gap-3">
+        <button onClick={onNo} className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600">
+          No
+        </button>
+        <button onClick={onYes} className="flex-1 rounded-xl bg-emerald-600 py-3 text-sm font-bold text-white hover:bg-emerald-700">
+          Yes
+        </button>
+      </div>
+    </div>
+  </div>
+);
 
 export default function MeetingRoom() {
   const { bookingId } = useParams();
@@ -103,6 +215,9 @@ export default function MeetingRoom() {
     at: Date.now(),
     mentorPresent: false,
     fresherPresent: false,
+    successRequested: false,
+    fresherConfirmed: false,
+    fresherDeclined: false,
   });
   const [, forceTick] = useState(0);
   const [micOn, setMicOn] = useState(true);
@@ -111,9 +226,8 @@ export default function MeetingRoom() {
   const [localReady, setLocalReady] = useState(false);
   const [booking, setBooking] = useState(null);
   const [needsReview, setNeedsReview] = useState(false);
-
-  const [showCompletionPrompt, setShowCompletionPrompt] = useState(false);
-  const [completionDone, setCompletionDone] = useState(false);
+  const [endedConfirmed, setEndedConfirmed] = useState(false);
+  const [reviewDone, setReviewDone] = useState(false);
   const [showSuccessBtn, setShowSuccessBtn] = useState(false);
 
   const [instructionsAccepted, setInstructionsAccepted] = useState({
@@ -155,17 +269,11 @@ export default function MeetingRoom() {
     const peer = new RTCPeerConnection(ICE);
 
     const tracks = localStream.current?.getTracks() || [];
-    if (tracks.length) {
-      tracks.forEach((t) => peer.addTrack(t, localStream.current));
-    }
-    if (!tracks.some((t) => t.kind === "video")) {
-      peer.addTransceiver("video", { direction: "recvonly" });
-    }
-    if (!tracks.some((t) => t.kind === "audio")) {
-      peer.addTransceiver("audio", { direction: "recvonly" });
-    }
+    if (tracks.length) tracks.forEach((t) => peer.addTrack(t, localStream.current));
+    if (!tracks.some((t) => t.kind === "video")) peer.addTransceiver("video", { direction: "recvonly" });
+    if (!tracks.some((t) => t.kind === "audio")) peer.addTransceiver("audio", { direction: "recvonly" });
 
-    tuneSenders(peer); // HD bitrate
+    tuneSenders(peer);
 
     peer.ontrack = (e) => {
       remoteStream.current = e.streams[0];
@@ -174,8 +282,7 @@ export default function MeetingRoom() {
         remoteVideo.current.play?.().catch(() => {});
       }
     };
-    peer.onicecandidate = (e) =>
-      e.candidate && sendSignal({ candidate: e.candidate });
+    peer.onicecandidate = (e) => e.candidate && sendSignal({ candidate: e.candidate });
     pc.current = peer;
     return peer;
   }, [dropPeer]);
@@ -257,7 +364,7 @@ export default function MeetingRoom() {
           );
         } else if (res?.code === "ENDED") {
           setPhase("ended");
-          setNeedsReview(!isMentor);
+          setNeedsReview(false);
         } else {
           setMessage(res?.message || "Could not join.");
           setPhase("error");
@@ -267,9 +374,7 @@ export default function MeetingRoom() {
       joined.current = true;
       setPhase("in");
       setClock({ ...res.state, at: Date.now() });
-      setInstructionsAccepted(
-        res.state.instructions || { mentor: false, fresher: false },
-      );
+      setInstructionsAccepted(res.state.instructions || { mentor: false, fresher: false });
     });
   }, [bookingId, token, isMentor]);
 
@@ -295,10 +400,15 @@ export default function MeetingRoom() {
       calledRef.current = false;
       pendingOffer.current = null;
     };
-    const onEnded = () => {
-      setPhase("awaiting_confirmation");
-      setNeedsReview(!isMentor);
+    // timer reached zero
+    const onEnded = (p) => {
       closePeer();
+      if (p?.confirmed) {
+        setEndedConfirmed(true);
+        setPhase("ended"); // fresher already said YES -> completed
+      } else {
+        setPhase("awaiting_confirmation");
+      }
     };
     const onReconnect = () => joined.current && join();
 
@@ -335,8 +445,7 @@ export default function MeetingRoom() {
   }, [bookingId]);
 
   /* ---------- camera ON after both accepted ---------- */
-  const bothAccepted =
-    instructionsAccepted.mentor && instructionsAccepted.fresher;
+  const bothAccepted = instructionsAccepted.mentor && instructionsAccepted.fresher;
   const mediaAllowed = bothAccepted || clock.running;
 
   useEffect(() => {
@@ -353,15 +462,13 @@ export default function MeetingRoom() {
 
       localStream.current = stream;
       if (!stream) setMediaNote("Camera and mic blocked.");
-      else if (audioOnly)
-        setMediaNote("Camera not available. Joined with audio only.");
+      else if (audioOnly) setMediaNote("Camera not available. Joined with audio only.");
       else setMediaNote("");
 
       if (localVideo.current && stream) localVideo.current.srcObject = stream;
 
       localReadyRef.current = true;
       setLocalReady(true);
-
       sendSignal({ mediaReady: true });
 
       if (pendingOffer.current) {
@@ -392,52 +499,26 @@ export default function MeetingRoom() {
     ? Math.max(0, clock.remainingMs - (Date.now() - clock.at))
     : clock.remainingMs;
 
-  // 5-min popup for Fresher
+  // Mentor: "Meeting Success" button in the last 3 min
   useEffect(() => {
-    if (
-      !isMentor &&
-      phase === "in" &&
-      clock.running &&
-      currentRemaining > 0 &&
-      currentRemaining <= 5 * 60 * 1000 &&
-      !showCompletionPrompt &&
-      !completionDone
-    ) {
-      setShowCompletionPrompt(true);
-    }
-  }, [
-    currentRemaining,
-    phase,
-    isMentor,
-    showCompletionPrompt,
-    completionDone,
-    clock.running,
-  ]);
-
-  // 3-min "Meeting Success" button for Mentor
-  useEffect(() => {
-    if (
-      isMentor &&
-      phase === "in" &&
-      clock.running &&
-      currentRemaining > 0 &&
-      currentRemaining <= 3 * 60 * 1000
-    ) {
-      setShowSuccessBtn(true);
-    } else {
-      setShowSuccessBtn(false);
-    }
+    setShowSuccessBtn(
+      isMentor && phase === "in" && clock.running &&
+        currentRemaining > 0 && currentRemaining <= THREE_MIN,
+    );
   }, [currentRemaining, phase, isMentor, clock.running]);
 
-  const handleForceSuccess = () => {
-    if (
-      !confirm(
-        "Are you sure you want to end the meeting as SUCCESS? The fresher will be asked to confirm.",
-      )
-    )
-      return;
-    socket.emit("meeting:force-end", { bookingId });
-  };
+  const sendSuccessRequest = () => socket.emit("meeting:success-request", { bookingId });
+  const answerSuccess = (accepted) => socket.emit("meeting:success-confirm", { bookingId, accepted });
+
+  // Fresher: mandatory review popup in the last 5 min
+  const alreadyReviewed = reviewDone || Boolean(booking?.reviewed);
+  const showReviewGate =
+    !isMentor && phase === "in" && Boolean(booking) && clock.running &&
+    currentRemaining > 0 && currentRemaining <= FIVE_MIN && !alreadyReviewed;
+
+  // Fresher: mentor asked "did it go well?"
+  const showSuccessConfirm =
+    !isMentor && phase === "in" && clock.successRequested && !clock.fresherConfirmed && !showReviewGate;
 
   const toggle = (kind) => {
     const tracks =
@@ -450,16 +531,11 @@ export default function MeetingRoom() {
     kind === "mic" ? setMicOn(next) : setCamOn(next);
   };
 
-  const leaveRoom = () =>
-    navigate(isMentor ? "/mentor/sessions" : "/Home/my-bookings");
+  const leaveRoom = () => navigate(isMentor ? "/mentor/sessions" : "/Home/my-bookings");
   const otherHere = isMentor ? clock.fresherPresent : clock.mentorPresent;
 
-  const myInstructionsDone = isMentor
-    ? instructionsAccepted.mentor
-    : instructionsAccepted.fresher;
-  const peerInstructionsDone = isMentor
-    ? instructionsAccepted.fresher
-    : instructionsAccepted.mentor;
+  const myInstructionsDone = isMentor ? instructionsAccepted.mentor : instructionsAccepted.fresher;
+  const peerInstructionsDone = isMentor ? instructionsAccepted.fresher : instructionsAccepted.mentor;
 
   /* ---------- screens ---------- */
   if (phase === "joining") {
@@ -475,19 +551,10 @@ export default function MeetingRoom() {
     return (
       <Center>
         <Clock3 size={36} className="text-blue-400" />
-        <h2 className="mt-4 text-xl font-bold">
-          The meeting room opens 5 minutes before the session
-        </h2>
-        <p className="mt-2 font-mono text-3xl">
-          {fmtClock((opensAt || Date.now()) - Date.now())}
-        </p>
-        <p className="mt-2 text-sm text-slate-400">
-          We'll let you in automatically.
-        </p>
-        <button
-          onClick={leaveRoom}
-          className="mt-6 rounded-xl border border-slate-600 px-5 py-2.5 text-sm font-semibold"
-        >
+        <h2 className="mt-4 text-xl font-bold">The meeting room opens 5 minutes before the session</h2>
+        <p className="mt-2 font-mono text-3xl">{fmtClock((opensAt || Date.now()) - Date.now())}</p>
+        <p className="mt-2 text-sm text-slate-400">We'll let you in automatically.</p>
+        <button onClick={leaveRoom} className="mt-6 rounded-xl border border-slate-600 px-5 py-2.5 text-sm font-semibold">
           Back
         </button>
       </Center>
@@ -499,16 +566,14 @@ export default function MeetingRoom() {
       <Center>
         <h2 className="text-xl font-bold">Can't open this meeting</h2>
         <p className="mt-2 text-sm text-slate-400">{message}</p>
-        <button
-          onClick={leaveRoom}
-          className="mt-6 rounded-xl bg-white px-5 py-2.5 text-sm font-bold text-slate-900"
-        >
+        <button onClick={leaveRoom} className="mt-6 rounded-xl bg-white px-5 py-2.5 text-sm font-bold text-slate-900">
           Back
         </button>
       </Center>
     );
   }
 
+  // timer ended and fresher has NOT confirmed yet
   if (phase === "awaiting_confirmation") {
     return (
       <Center>
@@ -517,27 +582,18 @@ export default function MeetingRoom() {
             <Clock3 size={44} className="text-amber-400" />
             <h2 className="mt-4 text-2xl font-bold">Session time completed</h2>
             <p className="mt-2 max-w-md text-sm text-slate-400">
-              Waiting for the fresher to confirm the session. Once confirmed,
-              your earnings will be released.
+              Waiting for the fresher to confirm the session. Once confirmed, your earnings will be released.
             </p>
-            <button
-              onClick={leaveRoom}
-              className="mt-6 rounded-xl bg-white px-5 py-2.5 text-sm font-bold text-slate-900"
-            >
+            <button onClick={leaveRoom} className="mt-6 rounded-xl bg-white px-5 py-2.5 text-sm font-bold text-slate-900">
               Back to sessions
             </button>
           </>
         ) : (
           <>
             <h2 className="text-2xl font-bold">How was the session?</h2>
-            <p className="mt-2 text-sm text-slate-400">
-              Please confirm and leave a review. This is done right here in the meeting.
-            </p>
+            <p className="mt-2 text-sm text-slate-400">Please confirm the session.</p>
             {booking ? (
-              <SessionCompletionModal
-                booking={booking}
-                onDone={() => leaveRoom()}
-              />
+              <SessionCompletionModal booking={booking} onDone={() => leaveRoom()} />
             ) : (
               <Loader2 className="mt-6 animate-spin" />
             )}
@@ -547,27 +603,23 @@ export default function MeetingRoom() {
     );
   }
 
+  // timer ended and fresher already said YES -> everything completed
   if (phase === "ended") {
     return (
       <Center>
-        <h2 className="text-2xl font-bold">Session completed</h2>
+        <CheckCircle size={46} className="text-emerald-400" />
+        <h2 className="mt-4 text-2xl font-bold">Session completed</h2>
         <p className="mt-2 text-sm text-slate-400">
           {isMentor
-            ? "Your earnings are now available."
-            : "Please share a quick review to finish."}
+            ? "The fresher confirmed the session. Your earnings are now available."
+            : "Thanks for your feedback. Your session is confirmed."}
         </p>
-        {isMentor && (
-          <button
-            onClick={leaveRoom}
-            className="mt-6 rounded-xl bg-white px-5 py-2.5 text-sm font-bold text-slate-900"
-          >
-            Back to sessions
-          </button>
-        )}
-        {needsReview && booking && !isMentor && (
+        <button onClick={leaveRoom} className="mt-6 rounded-xl bg-white px-5 py-2.5 text-sm font-bold text-slate-900">
+          {isMentor ? "Back to sessions" : "Back to my bookings"}
+        </button>
+        {needsReview && booking && !isMentor && !endedConfirmed && (
           <ReviewModal booking={booking} onDone={leaveRoom} />
         )}
-        {needsReview && !booking && <Loader2 className="mt-6 animate-spin" />}
       </Center>
     );
   }
@@ -597,14 +649,8 @@ export default function MeetingRoom() {
       <div className="fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-slate-950 text-white">
         <div className="flex shrink-0 items-center justify-between px-5 py-3">
           <div>
-            <p className="text-sm font-semibold">
-              {booking?.companyName || "MNCConnect session"}
-            </p>
-            <p
-              className={`text-xs ${clock.running ? "text-emerald-400" : "text-amber-300"}`}
-            >
-              {status}
-            </p>
+            <p className="text-sm font-semibold">{booking?.companyName || "MNCConnect session"}</p>
+            <p className={`text-xs ${clock.running ? "text-emerald-400" : "text-amber-300"}`}>{status}</p>
           </div>
           <div
             className={`rounded-xl px-4 py-2 font-mono text-xl font-bold ${clock.running ? "bg-emerald-500/15 text-emerald-300" : "bg-amber-500/15 text-amber-300"}`}
@@ -613,10 +659,7 @@ export default function MeetingRoom() {
           </div>
         </div>
 
-        <div
-          className="relative min-h-0 flex-1 px-4 pb-4"
-          style={{ minHeight: 0 }}
-        >
+        <div className="relative min-h-0 flex-1 px-4 pb-4" style={{ minHeight: 0 }}>
           <div
             className="relative h-full w-full overflow-hidden rounded-2xl bg-black"
             style={{ width: "100%", height: "100%", minHeight: 0 }}
@@ -624,11 +667,7 @@ export default function MeetingRoom() {
             <video
               ref={(el) => {
                 remoteVideo.current = el;
-                if (
-                  el &&
-                  remoteStream.current &&
-                  el.srcObject !== remoteStream.current
-                ) {
+                if (el && remoteStream.current && el.srcObject !== remoteStream.current) {
                   el.srcObject = remoteStream.current;
                   el.play?.().catch(() => {});
                 }
@@ -641,7 +680,7 @@ export default function MeetingRoom() {
                 display: "block",
                 width: "100%",
                 height: "100%",
-                objectFit: "contain", // full HD frame, face crop aagadhu
+                objectFit: "contain",
                 backgroundColor: "#000",
               }}
             />
@@ -650,19 +689,13 @@ export default function MeetingRoom() {
                 <div className="flex h-20 w-20 items-center justify-center rounded-full bg-slate-800">
                   <UserRound size={36} />
                 </div>
-                <p className="mt-4 text-sm">
-                  Waiting for the {isMentor ? "fresher" : "employee"}…
-                </p>
+                <p className="mt-4 text-sm">Waiting for the {isMentor ? "fresher" : "employee"}…</p>
               </div>
             )}
             <video
               ref={(el) => {
                 localVideo.current = el;
-                if (
-                  el &&
-                  localStream.current &&
-                  el.srcObject !== localStream.current
-                )
+                if (el && localStream.current && el.srcObject !== localStream.current)
                   el.srcObject = localStream.current;
               }}
               autoPlay
@@ -682,28 +715,45 @@ export default function MeetingRoom() {
               }}
             />
           </div>
-          {clock.running &&
-            currentRemaining > 0 &&
-            currentRemaining <= 5 * 60 * 1000 && (
-              <p className="absolute right-8 top-4 z-20 rounded-lg bg-amber-500/95 px-3 py-1.5 text-xs font-semibold text-slate-950 shadow-lg">
-                ⏱ Last 5 minutes. Please start wrapping up.
-              </p>
-            )}
+
+          {clock.running && currentRemaining > 0 && currentRemaining <= FIVE_MIN && (
+            <p className="absolute right-8 top-4 z-20 rounded-lg bg-amber-500/95 px-3 py-1.5 text-xs font-semibold text-slate-950 shadow-lg">
+              ⏱ Last 5 minutes. Please start wrapping up.
+            </p>
+          )}
           {mediaNote && (
             <p className="absolute left-8 top-4 rounded-lg bg-amber-500/90 px-3 py-1.5 text-xs font-medium text-slate-950">
               {mediaNote}
             </p>
           )}
+
+          {/* MENTOR: green alert when the fresher said YES */}
+          {isMentor && clock.fresherConfirmed && (
+            <div className="absolute left-1/2 top-4 z-30 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white shadow-xl">
+              <CheckCircle size={18} />
+              The fresher confirmed: the meeting went well ✅
+            </div>
+          )}
+          {isMentor && clock.fresherDeclined && !clock.successRequested && !clock.fresherConfirmed && (
+            <div className="absolute left-1/2 top-4 z-30 -translate-x-1/2 rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-xl">
+              The fresher said the session is not complete yet. You can ask again.
+            </div>
+          )}
         </div>
 
-        <div className="flex shrink-0 items-center justify-center gap-3 pb-3">
-          {showSuccessBtn && isMentor && (
+        <div className="flex shrink-0 flex-wrap items-center justify-center gap-3 pb-3">
+          {isMentor && showSuccessBtn && !clock.successRequested && !clock.fresherConfirmed && (
             <button
-              onClick={handleForceSuccess}
-              className="flex h-12 items-center gap-2 rounded-full bg-emerald-600 px-6 text-sm font-bold hover:bg-emerald-700 animate-pulse"
+              onClick={sendSuccessRequest}
+              className="flex h-12 animate-pulse items-center gap-2 rounded-full bg-emerald-600 px-6 text-sm font-bold hover:bg-emerald-700"
             >
               <CheckCircle size={18} /> Meeting Success
             </button>
+          )}
+          {isMentor && clock.successRequested && !clock.fresherConfirmed && (
+            <span className="flex h-12 items-center gap-2 rounded-full bg-slate-800 px-5 text-xs font-semibold text-amber-300">
+              <Loader2 size={14} className="animate-spin" /> Waiting for the fresher to confirm…
+            </span>
           )}
 
           <button
@@ -727,20 +777,15 @@ export default function MeetingRoom() {
           </button>
         </div>
         <p className="shrink-0 pb-3 text-center text-[11px] text-slate-500">
-          Once the session starts, the timer runs to zero even if someone
-          leaves.
+          Once the session starts, the timer runs to zero even if someone leaves.
         </p>
       </div>
 
-      {showCompletionPrompt && !isMentor && (
-        <SessionCompletionModal
-          booking={booking}
-          variant="prompt"
-          onClose={() => {
-            setShowCompletionPrompt(false);
-            setCompletionDone(true);
-          }}
-        />
+      {showReviewGate && (
+        <ReviewGate booking={booking} token={token} onDone={() => setReviewDone(true)} />
+      )}
+      {showSuccessConfirm && (
+        <SuccessConfirmModal onYes={() => answerSuccess(true)} onNo={() => answerSuccess(false)} />
       )}
     </>
   );

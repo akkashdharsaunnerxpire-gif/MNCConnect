@@ -5,6 +5,7 @@ const { completeBooking } = require("../controllers/bookingController");
 const { emitToUser } = require("./realtime");
 
 const OPEN_BEFORE_MS = 5 * 60 * 1000;
+const SUCCESS_WINDOW_MS = 3 * 60 * 1000; // mentor can send "success" in the last 3 min
 const BROADCAST_EVERY_TICKS = 5;
 const SAVE_EVERY_MS = 10 * 1000;
 const ORPHAN_ROOM_TTL_MS = 30 * 60 * 1000;
@@ -21,9 +22,6 @@ const verify = (token) => {
   }
 };
 
-/* ---------- room helpers ---------- */
-
-// running -> always computed from the absolute end time (never drifts, never resets)
 const remainingOf = (r) =>
   r.running && r.endsAtMs ? Math.max(0, r.endsAtMs - Date.now()) : r.remainingMs;
 
@@ -36,16 +34,14 @@ const stateOf = (r) => ({
   fresherPresent: r.fresher.size > 0,
   instructions: { ...r.instructionsAccepted },
   startedOnce: Boolean(r.startedOnce),
+  successRequested: Boolean(r.successRequested),
+  fresherConfirmed: Boolean(r.fresherConfirmed),
+  fresherDeclined: Boolean(r.fresherDeclined),
   serverNow: Date.now(),
 });
 
-// push timer to both users' personal rooms -> My Bookings / Sessions cards update live
 const pushToUsers = (r) => {
-  const payload = {
-    requestGroupId: r.id,
-    running: r.running,
-    remainingMs: Math.round(remainingOf(r)),
-  };
+  const payload = { requestGroupId: r.id, running: r.running, remainingMs: Math.round(remainingOf(r)) };
   if (r.fresherId) emitToUser(r.fresherId, "meeting:timer", payload);
   if (r.mentorId) emitToUser(r.mentorId, "meeting:timer", payload);
 };
@@ -64,9 +60,12 @@ const makeRoom = (b) => {
     scheduledEndMs: new Date(b.endsAt).getTime(),
     endsAtMs: resumed ? new Date(saved.timerEndsAt).getTime() : null,
     remainingMs: typeof saved.remainingMs === "number" ? Math.max(0, saved.remainingMs) : total,
-    running: Boolean(resumed), // already started once -> keeps running
+    running: Boolean(resumed),
     startedOnce: Boolean(saved.startedAt || resumed),
     finishing: false,
+    successRequested: Boolean(saved.successRequested),
+    fresherConfirmed: Boolean(saved.fresherConfirmed),
+    fresherDeclined: false,
     mentor: new Set(),
     fresher: new Set(),
     lastSave: Date.now(),
@@ -85,6 +84,8 @@ const save = (r) =>
     {
       $set: {
         "meeting.remainingMs": Math.round(remainingOf(r)),
+        "meeting.successRequested": Boolean(r.successRequested),
+        "meeting.fresherConfirmed": Boolean(r.fresherConfirmed),
         "meeting.instructionsAccepted": {
           mentor: Boolean(r.instructionsAccepted.mentor),
           fresher: Boolean(r.instructionsAccepted.fresher),
@@ -93,12 +94,11 @@ const save = (r) =>
     }
   ).catch(() => {});
 
-// Starts ONCE. After this the timer only stops at zero (or mentor force-end)
+// Starts ONCE. Afterwards it only stops at zero.
 const startTimer = (r) => {
   const now = Date.now();
   r.startedOnce = true;
   r.running = true;
-  // joined before session time -> full duration, joined late -> till scheduled end
   r.endsAtMs = now < r.startsAtMs ? now + r.totalMs : r.scheduledEndMs;
   r.remainingMs = Math.max(0, r.endsAtMs - now);
   r.lastSave = now;
@@ -122,25 +122,25 @@ const refresh = (io, r) => {
   r.lastActivity = Date.now();
   const bothInside = r.mentor.size > 0 && r.fresher.size > 0;
   const bothAccepted = r.instructionsAccepted.mentor && r.instructionsAccepted.fresher;
-
-  // first time both inside (and instructions accepted) -> start. Never again.
   if (!r.startedOnce && bothInside && bothAccepted) startTimer(r);
-
   io.to(channel(r.id)).emit("meeting:state", stateOf(r));
 };
 
+// ONLY called when the timer reaches zero (no early end any more)
 const finish = async (io, r) => {
   if (r.finishing) return;
   r.finishing = true;
   rooms.delete(r.id);
   r.running = false;
   r.remainingMs = 0;
+  const confirmed = Boolean(r.fresherConfirmed);
   try {
-    await completeBooking(r.id); // -> awaiting_confirmation + notifies both users
+    await save(r);
+    await completeBooking(r.id); // fresherConfirmed -> "completed" directly, else "awaiting_confirmation"
   } catch (e) {
     console.error("completeBooking failed:", e.message);
   }
-  io.to(channel(r.id)).emit("meeting:ended", { bookingId: r.id });
+  io.to(channel(r.id)).emit("meeting:ended", { bookingId: r.id, confirmed });
 };
 
 const leave = (io, socket) => {
@@ -161,14 +161,12 @@ const leave = (io, socket) => {
 
   refresh(io, r);
 
-  // a running timer keeps its room even when nobody is inside
   if (r.mentor.size === 0 && r.fresher.size === 0 && !r.running) {
     save(r);
     rooms.delete(m.id);
   }
 };
 
-// server restart: bring back rooms whose timer was running
 const recoverRooms = async () => {
   try {
     const list = await Booking.find({ status: "in_progress" }).lean();
@@ -179,8 +177,6 @@ const recoverRooms = async () => {
     console.error("recoverRooms:", e.message);
   }
 };
-
-/* ---------- socket handlers ---------- */
 
 exports.initMeetings = (io) => {
   recoverRooms();
@@ -238,20 +234,40 @@ exports.initMeetings = (io) => {
       if (!m || m.id !== bookingId) return;
       const r = rooms.get(m.id);
       if (!r) return;
-
       r.instructionsAccepted[m.role] = true;
       io.to(channel(m.id)).emit("meeting:instructions-state", r.instructionsAccepted);
       save(r);
       refresh(io, r);
     });
 
-    // mentor "Meeting Success" button
-    socket.on("meeting:force-end", ({ bookingId } = {}) => {
+    // MENTOR: "Meeting Success" -> asks the fresher to confirm. Meeting does NOT end.
+    socket.on("meeting:success-request", ({ bookingId } = {}) => {
       const m = socket.data.meeting;
       if (!m || m.id !== bookingId || m.role !== "mentor") return;
       const r = rooms.get(m.id);
-      if (!r) return;
-      finish(io, r).catch(console.error);
+      if (!r || !r.running || r.fresherConfirmed) return;
+      if (remainingOf(r) > SUCCESS_WINDOW_MS) return; // only in the last 3 minutes
+      r.successRequested = true;
+      r.fresherDeclined = false;
+      save(r);
+      refresh(io, r);
+    });
+
+    // FRESHER: Yes / No
+    socket.on("meeting:success-confirm", ({ bookingId, accepted } = {}) => {
+      const m = socket.data.meeting;
+      if (!m || m.id !== bookingId || m.role !== "fresher") return;
+      const r = rooms.get(m.id);
+      if (!r || !r.successRequested) return;
+      if (accepted) {
+        r.fresherConfirmed = true;
+        r.fresherDeclined = false;
+      } else {
+        r.successRequested = false; // mentor can ask again
+        r.fresherDeclined = true;
+      }
+      save(r);
+      refresh(io, r);
     });
 
     socket.on("meeting:signal", (payload = {}) => {
@@ -273,19 +289,16 @@ exports.initMeetings = (io) => {
           finish(io, r).catch(console.error);
           continue;
         }
-
         if (now - r.lastSave > SAVE_EVERY_MS) {
           r.lastSave = now;
           save(r);
         }
-
         if (r.ticks % BROADCAST_EVERY_TICKS === 0) {
           io.to(channel(r.id)).emit("meeting:state", stateOf(r));
           pushToUsers(r);
         }
         continue;
       }
-
       const empty = r.mentor.size === 0 && r.fresher.size === 0;
       if (empty && now - r.lastActivity > ORPHAN_ROOM_TTL_MS) rooms.delete(r.id);
     }
