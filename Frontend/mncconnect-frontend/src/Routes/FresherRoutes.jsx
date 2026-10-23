@@ -1,6 +1,13 @@
 // src/Routes/FresherRoutes.jsx
 import React from "react";
-import { Routes, Route, Navigate, Outlet } from "react-router-dom";
+import {
+  Routes,
+  Route,
+  Navigate,
+  Outlet,
+  useLocation,
+  useParams,
+} from "react-router-dom";
 
 import Home from "../FresherDashboard/pages/Home";
 import FresherProfile from "../FresherDashboard/pages/FresherProfile";
@@ -29,6 +36,37 @@ const FresherLayout = () => (
   </div>
 );
 
+/**
+ * Wraps SessionBoard so that:
+ *  - "Book again" (location.state.rebook) always opens the form directly
+ *  - company names that contain "/" still match (splat route)
+ *  - the page remounts on every new navigation (fresh rebook state)
+ */
+const SessionBoardRoute = () => {
+  const location = useLocation();
+  const params = useParams();
+
+  // works for both  sessionboard/:companyName  and  sessionboard/*
+  const company = params.companyName || params["*"] || "";
+
+  if (!company && !location.state?.rebook?.companyName) {
+    return <Navigate to="/Home" replace />;
+  }
+
+  return <SessionBoard key={location.key} />;
+};
+
+// Shows which path failed to match, then goes Home
+const UnknownRoute = () => {
+  const location = useLocation();
+  console.warn(
+    "[FresherRoutes] No route matched:",
+    location.pathname,
+    "-> redirecting to /Home",
+  );
+  return <Navigate to="/Home" replace />;
+};
+
 const FresherRoutes = () => {
   return (
     <Routes>
@@ -38,14 +76,21 @@ const FresherRoutes = () => {
 
         <Route element={<FresherLayout />}>
           <Route index element={<Home />} />
-          <Route path="sessionboard/:companyName" element={<SessionBoard />} />
+
+          {/* Book session + Book again (same mentor) */}
+          <Route
+            path="sessionboard/:companyName"
+            element={<SessionBoardRoute />}
+          />
+          <Route path="sessionboard/*" element={<SessionBoardRoute />} />
+
           <Route path="bonus-wallet" element={<BonusWallet />} />
           <Route path="my-bookings" element={<MyBookings />} />
           <Route path="notifications" element={<Notifications />} />
           <Route path="profile" element={<FresherProfile />} />
           <Route path="mnc-logos" element={<Mnclogos />} />
-          <Route path=":companyName" element={<SessionBoard />} />
-          <Route path="*" element={<Navigate to="/Home" replace />} />
+          <Route path=":companyName" element={<SessionBoardRoute />} />
+          <Route path="*" element={<UnknownRoute />} />
         </Route>
       </Route>
     </Routes>
