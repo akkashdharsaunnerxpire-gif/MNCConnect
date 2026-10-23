@@ -58,6 +58,12 @@ export default function SessionBoard() {
   // "Book again" from My Bookings -> { mentorId, mentorName, companyName }
   const [rebook, setRebook] = useState(location.state?.rebook || null);
 
+  // Keep rebook in sync if we arrive here again with different navigation state
+  // (e.g. Book again with another mentor while this page is already mounted).
+  useEffect(() => {
+    setRebook(location.state?.rebook || null);
+  }, [location.state]);
+
   const [f, setF] = useState(EMPTY_FORM);
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 

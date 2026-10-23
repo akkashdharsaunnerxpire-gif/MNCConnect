@@ -20,6 +20,11 @@ const GAP_MS = 30 * 60 * 1000;
 const OPEN_BEFORE_MS = 5 * 60 * 1000;
 const STRICT_MATCH = process.env.STRICT_MENTOR_MATCH === "true";
 
+// Must match priceFor() in the frontend (fresherApi.js): ₹400 per hour.
+// If your priceFor() uses a different formula, change expectedPrice() below.
+const RATE_PER_HOUR = Number(process.env.SESSION_RATE_PER_HOUR) || 400;
+const expectedPrice = (minutes) => Math.round((RATE_PER_HOUR * minutes) / 60);
+
 /* ============================ HELPERS ============================ */
 
 let razorpay = null;
@@ -142,7 +147,9 @@ const toClient = (b) => ({
   endsAt: b.endsAt,
   expiresAt: b.expiresAt,
   opensAt: new Date(new Date(b.startsAt).getTime() - OPEN_BEFORE_MS),
-  mentor: mentorCard(b.mentor),
+  // accepted mentor, or (while a direct request is still pending) the mentor the fresher chose
+  // (preferredMentor is only a card when it was populated; a bare ObjectId gives null)
+  mentor: mentorCard(b.mentor) || (b.status === "pending" ? mentorCard(b.preferredMentor) : null),
   direct: Boolean(b.preferredMentor),
   reviewed: Boolean(b.reviewed),
   refundStatus: b.refundStatus || "",
@@ -219,19 +226,38 @@ const expireAndRefund = async (bookingId, reason) => {
 };
 
 const broadcastLoop = async (req, mentors, booking, payload, startsAt, endsAt, requestGroupId, notified) => {
+  const direct = Boolean(booking.preferredMentor);
+
   for (const m of mentors) {
-    // direct request (book again): fresher chose this mentor, so skip company/gender/language filters
+    const online = socketIdsOf(req.app, m._id).length > 0;
+
+    // direct request (book again) and the mentor is offline:
+    // still leave a notification, and pushPendingToMentor delivers the request when they connect
+    if (direct && !online) {
+      notify({
+        user: m._id,
+        role: "mentor",
+        title: "A fresher requested you again",
+        message: `${booking.fresherName} wants a session.`,
+        type: "session",
+        link: "/mentor/home",
+      });
+      continue;
+    }
+
+    // direct request: fresher chose this mentor, so skip company/gender/language filters
     const reason =
-      (booking.preferredMentor ? "" : whyNot(m, booking)) ||
-      (socketIdsOf(req.app, m._id).length === 0 ? "not online" : "") ||
+      (direct ? "" : whyNot(m, booking)) ||
+      (!online ? "not online" : "") ||
       ((await hasConflict(m._id, startsAt, endsAt, requestGroupId)) ? "conflict" : "");
     if (reason) continue;
+
     notified.push(m._id);
     emitToMentorSockets(req.app, m._id, "session-request", payload);
     notify({
       user: m._id,
       role: "mentor",
-      title: booking.preferredMentor ? "A fresher requested you again" : "New session request",
+      title: direct ? "A fresher requested you again" : "New session request",
       message: `${booking.fresherName} wants a session.`,
       type: "session",
       link: "/mentor/home",
@@ -260,6 +286,11 @@ exports.createRequest = async (req, res) => {
     const payment = await Payment.findOne({ razorpayPaymentId: paymentId, status: "paid" });
     if (!payment) return fail(res, 402, "Payment not verified");
 
+    // one payment = one booking (do NOT refund here: that payment already belongs to another booking)
+    if (await Booking.exists({ razorpayPaymentId: paymentId })) {
+      return fail(res, 409, "This payment is already used for another booking");
+    }
+
     const reject = async (status, message) => {
       const result = await refundPayment(payment, message);
       return fail(res, status, `${message}${result === "refunded" ? " Refunded." : ""}`);
@@ -268,8 +299,14 @@ exports.createRequest = async (req, res) => {
     const minutes = Number(sd.duration);
     if (!Number.isInteger(minutes) || minutes < 30 || minutes > 240) return reject(400, "Invalid duration");
 
+    // amount paid must match the price of the chosen duration
+    if (Number(payment.amount) !== expectedPrice(minutes)) {
+      return reject(400, "Payment amount does not match the session price.");
+    }
+
     const startsAt = parseSessionStart(sd.date, sd.time);
     if (!startsAt || startsAt.getTime() < Date.now() + MIN_LEAD_MS) return reject(400, "Invalid date/time");
+    const endsAt = new Date(startsAt.getTime() + minutes * 60000);
 
     // book again: the chosen mentor must still be approved + active (checked BEFORE the booking is created)
     let preferredMentor = null;
@@ -282,6 +319,11 @@ exports.createRequest = async (req, res) => {
         .select(MENTOR_FIELDS)
         .lean();
       if (!preferredMentor) return reject(400, "Selected mentor is not available.");
+
+      // chosen mentor already has a session around this time -> fail now instead of making the fresher wait
+      if (await hasConflict(preferredMentor._id, startsAt, endsAt, requestGroupId)) {
+        return reject(409, "This mentor has another session around that time. Please pick another time.");
+      }
     }
 
     const fresherId = req.user?.role === "fresher" ? req.user.id : payment.fresher ? String(payment.fresher) : null;
@@ -292,17 +334,21 @@ exports.createRequest = async (req, res) => {
       fresher: fresherId || null,
       fresherName: fresherDoc?.name || body.requester?.fullName || "Fresher",
       fresherEmail: fresherDoc?.email || body.requester?.email || "",
-      companyName: String(body.companyName || preferredMentor?.currentCompany || "").trim(),
+      fresherImage: String(body.requester?.image || ""),
+      // direct booking: the mentor's own company wins, so company can never mismatch the mentor
+      companyName: String(preferredMentor?.currentCompany || body.companyName || "").trim(),
       sessionType: String(sd.sessionType || "").slice(0, 60),
       reason: String(sd.reason || "").slice(0, 1000),
       role: String(sd.role || ""),
+      otherRole: String(sd.otherRole || "").slice(0, 100),
+      gender: String(sd.gender || ""),
       language: String(sd.language || ""),
       durationMinutes: minutes,
       amount: Number(payment.amount),
       date: String(sd.date),
       time: String(sd.time),
       startsAt,
-      endsAt: new Date(startsAt.getTime() + minutes * 60000),
+      endsAt,
       expiresAt: startsAt,
       razorpayPaymentId: paymentId,
       preferredMentor: preferredMentor ? preferredMentor._id : null,
@@ -325,8 +371,15 @@ exports.createRequest = async (req, res) => {
     await broadcastLoop(req, mentors, booking, toMentorPayload(booking), startsAt, booking.endsAt, requestGroupId, notified);
     if (notified.length) await Booking.updateOne({ _id: booking._id }, { $set: { notified } });
 
-    return res.status(201).json({ success: true, booking: toClient(booking), notifiedCount: notified.length });
+    // return the chosen mentor's card too, so a pending direct request shows the mentor name
+    const out = await Booking.findById(booking._id)
+      .populate("mentor", POPULATE_MENTOR)
+      .populate("preferredMentor", POPULATE_MENTOR);
+
+    return res.status(201).json({ success: true, booking: toClient(out || booking), notifiedCount: notified.length });
   } catch (error) {
+    // duplicate payment id (unique index) = two requests raced with the same payment
+    if (error?.code === 11000) return fail(res, 409, "This payment is already used for another booking");
     console.error("createRequest error:", error);
     return fail(res, 500, "Failed to create request");
   }
@@ -339,7 +392,10 @@ exports.updateRequest = async (req, res) => {
     optionalAuth(req, null, () => {});
     const requestGroupId = String(req.params.requestGroupId || req.params.id || "").trim();
     const status = String(req.body?.status || "").trim().toLowerCase();
-    const mentorId = req.user?.role === "mentor" ? req.user.id : req.body?.mentorId;
+
+    // only a logged-in mentor can answer; never trust mentorId from the body
+    if (req.user?.role !== "mentor") return fail(res, 401, "Mentor login required");
+    const mentorId = req.user.id;
 
     if (!["accepted", "rejected"].includes(status)) return fail(res, 400, "Status must be accepted/rejected");
 
@@ -352,6 +408,11 @@ exports.updateRequest = async (req, res) => {
       return fail(res, 403, "This request is for another mentor");
     }
 
+    // normal request: only a mentor who was actually sent this request may answer it
+    if (!isDirect && !(booking.notified || []).map(String).includes(String(mentorId))) {
+      return fail(res, 403, "This request was not sent to you");
+    }
+
     if (status === "rejected") {
       await Booking.updateOne({ _id: booking._id }, { $addToSet: { declinedBy: mentorId } });
       // the only mentor who could take it said no -> expire now and refund (don't make the fresher wait)
@@ -362,6 +423,10 @@ exports.updateRequest = async (req, res) => {
     }
 
     if (booking.status !== "pending" || booking.expiresAt <= new Date()) return fail(res, 409, "Request unavailable");
+
+    if (await hasConflict(mentorId, booking.startsAt, booking.endsAt, requestGroupId)) {
+      return fail(res, 409, "You have another session near this time");
+    }
 
     const accepted = await Booking.findOneAndUpdate(
       { requestGroupId, status: "pending" },
@@ -386,7 +451,9 @@ exports.respondToRequest = exports.updateRequest;
 
 exports.getRequestStatus = async (req, res) => {
   try {
-    const b = await Booking.findOne({ requestGroupId: String(req.params.requestGroupId || "") }).populate("mentor", POPULATE_MENTOR);
+    const b = await Booking.findOne({ requestGroupId: String(req.params.requestGroupId || "") })
+      .populate("mentor", POPULATE_MENTOR)
+      .populate("preferredMentor", POPULATE_MENTOR);
     if (!b) return fail(res, 404, "Not found");
     return res.json({ success: true, request: toClient(b), booking: toClient(b) });
   } catch (error) {
@@ -417,7 +484,10 @@ exports.getAcceptedBookings = async (req, res) => {
 
 exports.myBookings = async (req, res) => {
   try {
-    const list = await Booking.find({ fresher: req.user.id }).populate("mentor", POPULATE_MENTOR).sort({ startsAt: -1 });
+    const list = await Booking.find({ fresher: req.user.id })
+      .populate("mentor", POPULATE_MENTOR)
+      .populate("preferredMentor", POPULATE_MENTOR)
+      .sort({ startsAt: -1 });
     return res.json({ success: true, bookings: list.map(toClient) });
   } catch (error) {
     return fail(res, 500, "Failed to load bookings");
@@ -437,7 +507,9 @@ exports.needsReview = async (req, res) => {
 
 exports.getBooking = async (req, res) => {
   try {
-    const b = await Booking.findOne({ requestGroupId: String(req.params.id) }).populate("mentor", POPULATE_MENTOR);
+    const b = await Booking.findOne({ requestGroupId: String(req.params.id) })
+      .populate("mentor", POPULATE_MENTOR)
+      .populate("preferredMentor", POPULATE_MENTOR);
     if (!b) return fail(res, 404, "Not found");
     const mine = String(b.fresher) === req.user.id || String(b.mentor?._id || b.mentor) === req.user.id;
     if (!mine) return fail(res, 403, "Access denied");
@@ -452,8 +524,9 @@ exports.mentorPending = async (req, res) => {
     const list = await Booking.find({
       status: "pending",
       expiresAt: { $gt: new Date() },
-      notified: req.user.id,
       declinedBy: { $ne: req.user.id },
+      // normal requests this mentor was sent + direct (book again) requests addressed to them
+      $or: [{ notified: req.user.id }, { preferredMentor: req.user.id }],
     }).sort({ createdAt: -1 });
     return res.json({ success: true, requests: list.map(toMentorPayload) });
   } catch (error) {

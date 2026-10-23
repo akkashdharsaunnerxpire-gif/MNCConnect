@@ -301,17 +301,22 @@ const MyBookings = () => {
     blue: "bg-blue-50 text-blue-700",
   };
 
-  // Book again -> goes to the booking flow with the same mentor locked in
-  const bookAgain = (b) =>
-    navigate("/Home", {
+  // Book again -> straight to the booking form (SessionBoard) with the same mentor locked in.
+  // Route: /Home/sessionboard/:companyName  (SessionBoard reads location.state.rebook)
+  const bookAgain = (b) => {
+    const company = b.companyName || b.mentor?.company;
+    if (!company || !b.mentor?.id) return;
+
+    navigate(`/Home/sessionboard/${encodeURIComponent(company)}`, {
       state: {
         rebook: {
           mentorId: b.mentor.id,
           mentorName: b.mentor.name,
-          companyName: b.companyName || b.mentor.company,
+          companyName: company,
         },
       },
     });
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-6 sm:px-6 lg:px-8">
@@ -498,7 +503,7 @@ const MyBookings = () => {
                         </div>
                       )}
 
-                      {/* BOOK AGAIN with the same mentor */}
+                      {/* BOOK AGAIN with the same mentor -> opens the booking form directly */}
                       {canRebook && (
                         <button
                           type="button"
