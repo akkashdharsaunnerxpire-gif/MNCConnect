@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { LayoutDashboard, UserPlus, CalendarDays, Wallet, Star, Bell, UserCircle, LogOut } from "lucide-react";
 import socket from "../../socket";
 import { api, ENDPOINTS, EVENTS, NOTIFICATIONS_CHANGED } from "../../services/mentorApi";
+import useMentorSessions from "../../hooks/useMentorSessions";
 
 const navItems = [
   { name: "Home", path: "/mentor/home", icon: LayoutDashboard },
@@ -18,6 +19,13 @@ const MentorHeader = () => {
 
   const [connected, setConnected] = useState(socket.connected);
   const [unread, setUnread] = useState(0);
+
+  /* Sessions count: only Upcoming (finished / cancelled / awaiting are NOT counted) */
+  const { sessions } = useMentorSessions();
+  const upcomingCount = useMemo(
+    () => (sessions || []).filter((s) => s.status === "Upcoming").length,
+    [sessions],
+  );
 
   /* online / reconnecting pill */
   useEffect(() => {
@@ -63,6 +71,9 @@ const MentorHeader = () => {
 
   const isActive = (path) => location.pathname.toLowerCase() === path;
 
+  // badge number for each nav item (only Sessions has one)
+  const badgeFor = (path) => (path === "/mentor/sessions" ? upcomingCount : 0);
+
   const handleLogout = () => {
     const mentorId = localStorage.getItem("mentorId");
     if (mentorId && socket.connected) socket.emit("mentor-offline", mentorId);
@@ -76,6 +87,18 @@ const MentorHeader = () => {
     `relative flex h-10 w-10 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
       active ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
     }`;
+
+  const CountBadge = ({ count, active }) =>
+    count > 0 ? (
+      <span
+        aria-label={`${count} upcoming`}
+        className={`flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold ${
+          active ? "bg-blue-600 text-white" : "bg-blue-100 text-blue-700"
+        }`}
+      >
+        {count > 99 ? "99+" : count}
+      </span>
+    ) : null;
 
   return (
     <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur">
@@ -104,6 +127,7 @@ const MentorHeader = () => {
               >
                 <Icon size={17} />
                 <span>{name}</span>
+                <CountBadge count={badgeFor(path)} active={active} />
                 {active && <span className="absolute bottom-0 left-1/2 h-0.5 w-5 -translate-x-1/2 rounded-full bg-blue-600" />}
               </Link>
             );
@@ -164,6 +188,7 @@ const MentorHeader = () => {
               >
                 <Icon size={15} />
                 {name}
+                <CountBadge count={badgeFor(path)} active={active} />
               </Link>
             );
           })}

@@ -1,14 +1,17 @@
-import React, { useContext, useEffect, useState } from "react";
+import React, { useContext, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowRight, ArrowLeft, LockKeyhole, Mail, CheckCircle2, Wallet,
-  AlertCircle, Eye, EyeOff, UserRound, Sparkles, ShieldCheck, 
+  AlertCircle, Eye, EyeOff, UserRound, Sparkles, ShieldCheck,
   GraduationCap, KeyRound, Loader2, Check, Globe
 } from "lucide-react";
 import { LoadingContext } from "../../context/LoadingContext";
 import { COUNTRY_CODES } from "../../data/countryCodes";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+
+const INTRO_MS = 1300;
+const INTRO_KEY = "mnc_intro_seen";
 
 const initialForm = {
   name: "",
@@ -20,6 +23,15 @@ const initialForm = {
   otp: "",
 };
 
+// show the intro only once per browser session
+const shouldShowIntro = () => {
+  try {
+    return !sessionStorage.getItem(INTRO_KEY);
+  } catch {
+    return true;
+  }
+};
+
 export default function LoginRegister() {
   const navigate = useNavigate();
   const loadingContext = useContext(LoadingContext);
@@ -29,13 +41,13 @@ export default function LoginRegister() {
   const [form, setForm] = useState(initialForm);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  
+
   const [showReward, setShowReward] = useState(false);
   const [walletAmount, setWalletAmount] = useState(25);
-  
+
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [showIntro, setShowIntro] = useState(true);
+  const [showIntro, setShowIntro] = useState(shouldShowIntro);
 
   const [showOtpBox, setShowOtpBox] = useState(false);
   const [otp, setOtp] = useState("");
@@ -44,10 +56,29 @@ export default function LoginRegister() {
   const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [otpError, setOtpError] = useState("");
 
+  const isRegister = mode === "register";
+
+  // country list is static, so build the <option>s only once
+  const countryOptions = useMemo(
+    () =>
+      COUNTRY_CODES.map((c) => (
+        <option key={c.name} value={c.code}>
+          {c.label}
+        </option>
+      )),
+    [],
+  );
+
   useEffect(() => {
-    const timer = window.setTimeout(() => setShowIntro(false), 2650);
+    if (!showIntro) return undefined;
+    try {
+      sessionStorage.setItem(INTRO_KEY, "1");
+    } catch {
+      /* ignore */
+    }
+    const timer = window.setTimeout(() => setShowIntro(false), INTRO_MS);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [showIntro]);
 
   const updateForm = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -65,7 +96,7 @@ export default function LoginRegister() {
     setOtpError("");
   };
 
-  // ✅ FIXED SEND OTP
+  // SEND OTP (register only)
   const handleSendOtp = async () => {
     if (!form.email.trim()) {
       setOtpError("Please enter your email first.");
@@ -80,22 +111,20 @@ export default function LoginRegister() {
         body: JSON.stringify({ email: form.email.trim() }),
       });
       const data = await response.json();
-      
-      // ✅ If error (e.g., 409 already exists), show error and STOP
+
       if (!response.ok) {
         throw new Error(data.message || "Failed to send OTP");
       }
-      
+
       setShowOtpBox(true);
     } catch (err) {
-      // ✅ Show error, don't mock OTP box
       setOtpError(err.message);
     } finally {
       setSendingOtp(false);
     }
   };
 
-  // ✅ FIXED VERIFY OTP
+  // VERIFY OTP (register only)
   const handleVerifyOtp = async () => {
     if (otp.length !== 6) {
       setOtpError("OTP must be 6 digits.");
@@ -130,13 +159,14 @@ export default function LoginRegister() {
       return;
     }
 
-    if (mode === "register") {
+    if (isRegister) {
       if (!form.name.trim()) return setError("Please enter your full name.");
       if (!form.mobileNumber.trim()) return setError("Please enter your mobile number.");
       if (!/^[0-9]{10}$/.test(form.mobileNumber.trim())) return setError("Please enter a valid 10-digit mobile number.");
       if (form.password.length < 8) return setError("Password must contain at least 8 characters.");
       if (form.password !== form.confirmPassword) return setError("Passwords do not match.");
-      
+
+      // email verification is needed ONLY while registering
       if (!isEmailVerified) {
         return setError("Please verify your email address before creating an account.");
       }
@@ -145,11 +175,11 @@ export default function LoginRegister() {
     setIsLoading(true);
 
     try {
-      const endpoint = mode === "register" 
-        ? `${API_URL}/auth/fresher/register` 
+      const endpoint = isRegister
+        ? `${API_URL}/auth/fresher/register`
         : `${API_URL}/auth/fresher/login`;
 
-      const body = mode === "register"
+      const body = isRegister
         ? {
             name: form.name.trim(),
             email: form.email.trim(),
@@ -168,22 +198,18 @@ export default function LoginRegister() {
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        if (data.requiresVerification) {
-          setError("Please verify your email first.");
-          return;
-        }
         throw new Error(data.message || "Something went wrong.");
       }
 
-      if (mode === "register" && data.success) {
+      if (isRegister && data.success) {
         setSuccess("Account created successfully!");
-        setWalletAmount(data.user.walletBalance || 25);
-        
+        setWalletAmount(data.user?.walletBalance || 25);
+
         if (data.token) {
           localStorage.setItem("fresher_token", data.token);
           localStorage.setItem("user", JSON.stringify(data.user));
         }
-        
+
         setTimeout(() => setShowReward(true), 500);
         return;
       }
@@ -192,9 +218,8 @@ export default function LoginRegister() {
         localStorage.setItem("fresher_token", data.token);
         localStorage.setItem("user", JSON.stringify(data.user));
         setSuccess("Login successful!");
-        window.setTimeout(() => navigate("/Home"), 900);
+        window.setTimeout(() => navigate("/Home"), 600);
       }
-
     } catch (authError) {
       console.error("Authentication error:", authError);
       setError(authError.message || "Unable to connect to the server.");
@@ -208,14 +233,21 @@ export default function LoginRegister() {
     navigate("/Home");
   };
 
-  const inputClass = "w-full rounded-2xl border border-slate-200 bg-white py-3.5 pl-11 pr-4 text-sm text-slate-900 outline-none transition duration-300 placeholder:text-slate-400 focus:border-cyan-500 focus:ring-4 focus:ring-cyan-500/10 disabled:opacity-60";
+  const inputClass =
+    "w-full rounded-2xl border border-slate-200 bg-white py-3.5 pl-11 pr-4 text-sm text-slate-900 outline-none transition duration-300 placeholder:text-slate-400 focus:border-cyan-500 focus:ring-4 focus:ring-cyan-500/10 disabled:opacity-60";
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-white text-slate-900 selection:bg-cyan-100 selection:text-slate-900">
-      {/* Background Elements */}
+      {/* Background (radial gradients instead of heavy blur filters = fast paint) */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute -left-40 -top-36 h-[28rem] w-[28rem] rounded-full bg-blue-600/20 blur-[100px]" />
-        <div className="absolute -bottom-48 -right-32 h-[34rem] w-[34rem] rounded-full bg-cyan-500/15 blur-[110px]" />
+        <div
+          className="absolute -left-40 -top-36 h-[28rem] w-[28rem] rounded-full"
+          style={{ background: "radial-gradient(circle, rgba(37,99,235,0.20) 0%, rgba(37,99,235,0) 70%)" }}
+        />
+        <div
+          className="absolute -bottom-48 -right-32 h-[34rem] w-[34rem] rounded-full"
+          style={{ background: "radial-gradient(circle, rgba(6,182,212,0.18) 0%, rgba(6,182,212,0) 70%)" }}
+        />
         <div className="absolute inset-0 opacity-[0.12] [background-image:linear-gradient(rgba(148,163,184,.2)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,.2)_1px,transparent_1px)] [background-size:48px_48px]" />
       </div>
 
@@ -260,9 +292,9 @@ export default function LoginRegister() {
           </div>
         </section>
 
-        <section className="mx-auto w-full max-w-[490px] animate-[cardEnter_.7s_cubic-bezier(.2,.8,.2,1)_both]">
+        <section className="mx-auto w-full max-w-[490px]" style={{ animation: "mncCardEnter .45s cubic-bezier(.2,.8,.2,1) both" }}>
           <div className="rounded-[30px] border border-slate-200 bg-white p-5 shadow-[0_20px_60px_rgba(15,23,42,0.10)] sm:p-8">
-            
+
             <div className="hidden lg:block">
               <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-cyan-700">Fresher portal</p>
               <h2 className="mt-2 text-3xl font-black tracking-tight">
@@ -282,8 +314,8 @@ export default function LoginRegister() {
             {success && <div className="mt-5 flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />{success}</div>}
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-              
-              {mode === "register" && (
+
+              {isRegister && (
                 <label className="block">
                   <span className="mb-2 block text-xs font-semibold text-slate-700">Full name</span>
                   <div className="relative">
@@ -297,29 +329,30 @@ export default function LoginRegister() {
                 <span className="mb-2 block text-xs font-semibold text-slate-700">Email address</span>
                 <div className="relative flex items-center">
                   <Mail className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                  <input 
-                    required 
-                    type="email" 
-                    value={form.email} 
+                  <input
+                    required
+                    type="email"
+                    value={form.email}
                     onChange={(e) => {
                       updateForm("email", e.target.value);
                       setIsEmailVerified(false);
-                    }} 
-                    placeholder="you@example.com" 
-                    className={`${inputClass} pr-24`} 
-                    disabled={isEmailVerified}
+                    }}
+                    placeholder="you@example.com"
+                    className={`${inputClass} ${isRegister ? "pr-24" : ""}`}
+                    disabled={isRegister && isEmailVerified}
                   />
-                  
-                  {mode === "register" && (
+
+                  {/* Verify button: REGISTER only */}
+                  {isRegister && (
                     <div className="absolute right-2 top-1/2 -translate-y-1/2">
                       {isEmailVerified ? (
                         <span className="flex h-8 items-center justify-center gap-1 rounded-lg bg-emerald-50 px-2 text-xs font-bold text-emerald-600">
                           <Check size={14} /> Verified
                         </span>
                       ) : (
-                        <button 
-                          type="button" 
-                          onClick={handleSendOtp} 
+                        <button
+                          type="button"
+                          onClick={handleSendOtp}
                           disabled={sendingOtp}
                           className="rounded-lg bg-cyan-50 px-3 py-1.5 text-xs font-bold text-cyan-700 transition hover:bg-cyan-100 disabled:opacity-50"
                         >
@@ -330,11 +363,12 @@ export default function LoginRegister() {
                   )}
                 </div>
 
-                {mode === "register" && showOtpBox && !isEmailVerified && (
+                {isRegister && showOtpBox && !isEmailVerified && (
                   <div className="mt-2 flex items-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 p-2">
-                    <KeyRound size={16} className="text-cyan-600 ml-1" />
+                    <KeyRound size={16} className="ml-1 text-cyan-600" />
                     <input
                       type="text"
+                      inputMode="numeric"
                       maxLength={6}
                       value={otp}
                       onChange={(e) => {
@@ -354,10 +388,10 @@ export default function LoginRegister() {
                     </button>
                   </div>
                 )}
-                {otpError && <p className="mt-1 text-xs text-red-600">{otpError}</p>}
+                {isRegister && otpError && <p className="mt-1 text-xs text-red-600">{otpError}</p>}
               </label>
 
-              {mode === "register" && (
+              {isRegister && (
                 <label className="block">
                   <span className="mb-2 block text-xs font-semibold text-slate-700">Mobile number</span>
                   <div className="flex gap-2">
@@ -367,15 +401,14 @@ export default function LoginRegister() {
                         onChange={(e) => updateForm("countryCode", e.target.value)}
                         className="w-32 appearance-none rounded-2xl border border-slate-200 bg-white py-3.5 pl-9 pr-6 text-sm font-medium text-slate-900 outline-none transition duration-300 focus:border-cyan-500 focus:ring-4 focus:ring-cyan-500/10"
                       >
-                        {COUNTRY_CODES.map((c) => (
-                          <option key={c.name} value={c.code}>{c.label}</option>
-                        ))}
+                        {countryOptions}
                       </select>
                       <Globe className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                     </div>
                     <input
                       required
                       type="tel"
+                      inputMode="numeric"
                       maxLength={10}
                       value={form.mobileNumber}
                       onChange={(e) => updateForm("mobileNumber", e.target.value.replace(/\D/g, "").slice(0, 10))}
@@ -390,14 +423,14 @@ export default function LoginRegister() {
                 <span className="mb-2 block text-xs font-semibold text-slate-700">Password</span>
                 <div className="relative">
                   <LockKeyhole className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                  <input required type={showPassword ? "text" : "password"} value={form.password} onChange={(e) => updateForm("password", e.target.value)} placeholder={mode === "register" ? "At least 8 characters" : "Enter password"} className={`${inputClass} pr-12`} />
+                  <input required type={showPassword ? "text" : "password"} value={form.password} onChange={(e) => updateForm("password", e.target.value)} placeholder={isRegister ? "At least 8 characters" : "Enter password"} className={`${inputClass} pr-12`} />
                   <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100">
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
               </label>
 
-              {mode === "register" && (
+              {isRegister && (
                 <label className="block">
                   <span className="mb-2 block text-xs font-semibold text-slate-700">Confirm password</span>
                   <div className="relative">
@@ -429,7 +462,7 @@ export default function LoginRegister() {
       </main>
 
       {showReward && (
-        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-900/35 px-5 backdrop-blur-md">
+        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-900/50 px-5">
           <div className="w-full max-w-md rounded-[30px] border border-slate-200 bg-white p-8 text-center shadow-2xl">
             <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-emerald-50">
               <Wallet className="h-10 w-10 text-emerald-500" />
@@ -446,20 +479,27 @@ export default function LoginRegister() {
       )}
 
       {showIntro && (
-        <div className="fixed inset-0 z-[10000] overflow-hidden">
-          <div className="absolute inset-0 bg-white" style={{ animation: "mncCurtain 2.65s cubic-bezier(.77,0,.18,1) forwards" }} />
-          <div className="absolute inset-0 flex items-center justify-center" style={{ animation: "mncFadeLayer 2.65s forwards" }}>
-            <div className="relative" style={{ animation: "mncZoomFull 2.65s cubic-bezier(.77,0,.18,1) forwards" }}>
+        <div className="pointer-events-none fixed inset-0 z-[10000] overflow-hidden">
+          <div
+            className="absolute inset-0 bg-white"
+            style={{ animation: `mncCurtain ${INTRO_MS}ms ease-out forwards`, willChange: "opacity" }}
+          />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div
+              style={{ animation: `mncZoom ${INTRO_MS}ms cubic-bezier(.4,0,.2,1) forwards`, willChange: "transform, opacity" }}
+            >
               <div className="bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 bg-clip-text text-[clamp(30px,10vw,120px)] font-black leading-none tracking-[-0.12em] text-transparent">MNC</div>
             </div>
           </div>
-          <style>{`
-            @keyframes mncZoomFull { 0% { transform: scale(.72); opacity: 0; filter: blur(7px); } 16% { transform: scale(1); opacity: 1; filter: blur(0); } 48% { transform: scale(1.04); opacity: 1; } 100% { transform: scale(18); opacity: 0; } }
-            @keyframes mncCurtain { 0%, 54% { opacity: 1; } 74% { opacity: .98; } 100% { opacity: 0; } }
-            @keyframes mncFadeLayer { 0% { opacity: 1; } 72% { opacity: 1; } 100% { opacity: 0; } }
-          `}</style>
         </div>
       )}
+
+      {/* all keyframes in one place */}
+      <style>{`
+        @keyframes mncZoom { 0% { transform: scale(.85); opacity: 0; } 25% { transform: scale(1); opacity: 1; } 60% { transform: scale(1.05); opacity: 1; } 100% { transform: scale(4); opacity: 0; } }
+        @keyframes mncCurtain { 0%, 55% { opacity: 1; } 100% { opacity: 0; } }
+        @keyframes mncCardEnter { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+      `}</style>
     </div>
   );
 }
