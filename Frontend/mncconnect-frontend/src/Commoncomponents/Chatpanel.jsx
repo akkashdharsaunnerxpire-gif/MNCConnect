@@ -20,6 +20,70 @@ import socket from "../socket";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
+/* ---------------- sounds (no mp3 needed) ---------------- */
+let audioCtx = null;
+
+const getAudioCtx = () => {
+  if (typeof window === "undefined") return null;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  if (!audioCtx) audioCtx = new AC();
+  return audioCtx;
+};
+
+// browsers block audio until the user interacts with the page once
+const unlockAudio = () => {
+  const ctx = getAudioCtx();
+  if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
+};
+
+const tone = (ctx, { freq, endFreq, start = 0, duration, volume = 0.15, type = "sine" }) => {
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  const t0 = ctx.currentTime + start;
+
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, t0);
+  if (endFreq) {
+    osc.frequency.exponentialRampToValueAtTime(endFreq, t0 + duration);
+  }
+
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(volume, t0 + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + duration + 0.05);
+};
+
+// short "tick" when I send a message
+const playSendSound = () => {
+  try {
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+    unlockAudio();
+    tone(ctx, { freq: 1300, endFreq: 800, duration: 0.07, volume: 0.12, type: "triangle" });
+  } catch {
+    /* ignore audio errors */
+  }
+};
+
+// WhatsApp-like "pop-pop" when a message arrives
+const playReceiveSound = () => {
+  try {
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+    unlockAudio();
+    tone(ctx, { freq: 880, duration: 0.12, volume: 0.18 });
+    tone(ctx, { freq: 1175, start: 0.1, duration: 0.2, volume: 0.18 });
+  } catch {
+    /* ignore audio errors */
+  }
+};
+
+/* ---------------- helpers ---------------- */
 const fmtTime = (d) =>
   d
     ? new Date(d).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
@@ -129,6 +193,7 @@ export default function ChatPanel({
   const textareaRef = useRef(null);
   const sendingRef = useRef(false);
   const readSentRef = useRef(new Set());
+  const soundedRef = useRef(new Set()); // message ids we already played sound for
   const incomingRef = useRef(onIncoming);
   incomingRef.current = onIncoming;
 
@@ -144,6 +209,17 @@ export default function ChatPanel({
     );
   }, []);
 
+  /* ---------------- unlock audio on first user interaction ---------------- */
+  useEffect(() => {
+    const events = ["pointerdown", "keydown", "touchstart"];
+    const handler = () => {
+      unlockAudio();
+      events.forEach((ev) => window.removeEventListener(ev, handler));
+    };
+    events.forEach((ev) => window.addEventListener(ev, handler));
+    return () => events.forEach((ev) => window.removeEventListener(ev, handler));
+  }, []);
+
   /* ---------------- data + socket ---------------- */
   useEffect(() => {
     if (!bookingId) return undefined;
@@ -156,6 +232,7 @@ export default function ChatPanel({
     stickToBottom.current = true;
     prevLength.current = 0;
     readSentRef.current = new Set();
+    soundedRef.current = new Set();
 
     // does this event belong to this chat? (server sends both ids)
     const matches = (m) =>
@@ -197,6 +274,12 @@ export default function ChatPanel({
       addMessage(m);
 
       if (m.senderRole !== role) {
+        // 🔔 play "what-shap" sound once per incoming message
+        const id = String(m._id);
+        if (!soundedRef.current.has(id)) {
+          soundedRef.current.add(id);
+          playReceiveSound();
+        }
         incomingRef.current?.(m);
       }
     };
@@ -350,6 +433,8 @@ export default function ChatPanel({
 
     if (!t || sendingRef.current || !socket.connected) return;
 
+    unlockAudio(); // send click/enter is a user gesture, so audio is allowed
+
     sendingRef.current = true;
     setSending(true);
     setErr("");
@@ -359,6 +444,7 @@ export default function ChatPanel({
       setSending(false);
 
       if (res?.ok) {
+        playSendSound(); // ✓ tick sound after message is sent
         forceScroll.current = true; // always follow my own message
         setText("");
         if (res.message) addMessage(res.message);
