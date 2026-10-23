@@ -46,21 +46,41 @@ const dayLabel = (d) => {
   });
 };
 
+// my user id from the JWT (used to decide which messages are mine)
+const getMyId = (token) => {
+  try {
+    const payload = token.split(".")[1];
+    const json = JSON.parse(
+      atob(payload.replace(/-/g, "+").replace(/_/g, "/")),
+    );
+    return String(json.id || json._id || json.userId || "");
+  } catch {
+    return "";
+  }
+};
+
 /**
- * ✓   grey  = sent
- * ✓✓  grey  = delivered
- * ✓✓  blue  = read
+ * WhatsApp style ticks
+ * ✓   grey = sent
+ * ✓✓  grey = delivered
+ * ✓✓  blue = read
  */
 const Ticks = ({ message }) => {
   if (message.readAt) {
-    return <CheckCheck size={14} className="text-sky-300" aria-label="Read" />;
+    return (
+      <CheckCheck size={16} className="text-[#53bdeb]" aria-label="Read" />
+    );
   }
   if (message.deliveredAt) {
     return (
-      <CheckCheck size={14} className="text-blue-200" aria-label="Delivered" />
+      <CheckCheck
+        size={16}
+        className="text-slate-400"
+        aria-label="Delivered"
+      />
     );
   }
-  return <Check size={14} className="text-blue-200" aria-label="Sent" />;
+  return <Check size={16} className="text-slate-400" aria-label="Sent" />;
 };
 
 const initialsOf = (title = "") => {
@@ -88,6 +108,13 @@ export default function ChatPanel({
   onIncoming,
 }) {
   const peerRole = role === "mentor" ? "fresher" : "mentor";
+  const myId = useMemo(() => getMyId(token), [token]);
+
+  // true = I sent it (right side), false = other person (left side)
+  const isMine = useCallback(
+    (m) => (myId ? String(m.senderId) === myId : m.senderRole === role),
+    [myId, role],
+  );
 
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
@@ -287,9 +314,7 @@ export default function ChatPanel({
     const unread = messages
       .filter(
         (m) =>
-          m.senderRole !== role &&
-          !m.readAt &&
-          !readSentRef.current.has(String(m._id)),
+          !isMine(m) && !m.readAt && !readSentRef.current.has(String(m._id)),
       )
       .map((m) => String(m._id));
 
@@ -302,7 +327,7 @@ export default function ChatPanel({
         unread.forEach((id) => readSentRef.current.delete(id));
       }
     });
-  }, [messages, open, joined, role, bookingId]);
+  }, [messages, open, joined, isMine, bookingId]);
 
   /* ---------------- modal: Esc to close ---------------- */
   useEffect(() => {
@@ -358,35 +383,38 @@ export default function ChatPanel({
   const rows = useMemo(() => {
     const out = [];
     let lastDay = "";
-    let lastSender = "";
+    let lastSide = "";
 
     messages.forEach((m, i) => {
       const dk = dayKey(m.createdAt);
+      const side = isMine(m) ? "me" : "peer";
+
       if (dk !== lastDay) {
         out.push({ type: "day", key: `day-${dk}`, label: dayLabel(m.createdAt) });
         lastDay = dk;
-        lastSender = "";
+        lastSide = "";
       }
 
       const next = messages[i + 1];
-      const firstInGroup = m.senderRole !== lastSender;
+      const firstInGroup = side !== lastSide;
       const lastInGroup =
         !next ||
-        next.senderRole !== m.senderRole ||
+        (isMine(next) ? "me" : "peer") !== side ||
         dayKey(next.createdAt) !== dk;
 
       out.push({
         type: "msg",
         key: String(m._id),
         m,
+        mine: side === "me",
         firstInGroup,
         lastInGroup,
       });
-      lastSender = m.senderRole;
+      lastSide = side;
     });
 
     return out;
-  }, [messages]);
+  }, [messages, isMine]);
 
   /* ---------------- UI ---------------- */
   const statusText = !joined ? "Connecting…" : peerOnline ? "Online" : "Offline";
@@ -441,7 +469,7 @@ export default function ChatPanel({
         <div
           ref={scrollRef}
           onScroll={onScroll}
-          className="h-full overflow-y-auto bg-slate-50 px-4 py-4"
+          className="h-full overflow-y-auto bg-[#efeae2] px-4 py-4"
           style={{ overscrollBehavior: "contain" }}
         >
           {loading ? (
@@ -450,13 +478,13 @@ export default function ChatPanel({
             </div>
           ) : messages.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center text-center">
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-50">
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white/70">
                 <MessageSquare size={24} className="text-blue-500" />
               </div>
               <p className="mt-3 text-sm font-medium text-slate-700">
                 No messages yet
               </p>
-              <p className="mt-1 text-xs text-slate-400">
+              <p className="mt-1 text-xs text-slate-500">
                 Send a message to start the conversation.
               </p>
             </div>
@@ -465,34 +493,33 @@ export default function ChatPanel({
               if (row.type === "day") {
                 return (
                   <div key={row.key} className="my-3 flex justify-center">
-                    <span className="rounded-full bg-white px-3 py-1 text-[11px] font-medium text-slate-500 shadow-sm ring-1 ring-slate-200">
+                    <span className="rounded-full bg-white px-3 py-1 text-[11px] font-medium text-slate-500 shadow-sm">
                       {row.label}
                     </span>
                   </div>
                 );
               }
 
-              const { m, firstInGroup, lastInGroup } = row;
-              const mine = m.senderRole === role;
+              const { m, mine, firstInGroup, lastInGroup } = row;
 
               return (
                 <div
                   key={row.key}
-                  className={`flex ${mine ? "justify-end" : "justify-start"} ${
-                    firstInGroup ? "mt-3" : "mt-0.5"
-                  }`}
+                  className={`flex w-full ${
+                    mine ? "justify-end" : "justify-start"
+                  } ${firstInGroup ? "mt-3" : "mt-0.5"}`}
                 >
                   <div
-                    className={`max-w-[80%] px-3.5 py-2 text-sm shadow-sm ${
+                    className={`max-w-[80%] px-3 py-1.5 text-sm text-slate-900 shadow-sm ${
                       mine
-                        ? `bg-blue-600 text-white ${
+                        ? `bg-[#d9fdd3] ${
                             lastInGroup
-                              ? "rounded-2xl rounded-br-md"
+                              ? "rounded-2xl rounded-tr-md"
                               : "rounded-2xl"
                           }`
-                        : `border border-slate-200 bg-white text-slate-800 ${
+                        : `bg-white ${
                             lastInGroup
-                              ? "rounded-2xl rounded-bl-md"
+                              ? "rounded-2xl rounded-tl-md"
                               : "rounded-2xl"
                           }`
                     }`}
@@ -500,12 +527,8 @@ export default function ChatPanel({
                     <p className="whitespace-pre-wrap break-words leading-relaxed">
                       {m.text}
                     </p>
-                    <div className="mt-1 flex items-center justify-end gap-1">
-                      <span
-                        className={`text-[10px] ${
-                          mine ? "text-blue-100" : "text-slate-400"
-                        }`}
-                      >
+                    <div className="mt-0.5 flex items-center justify-end gap-1">
+                      <span className="text-[10px] text-slate-500">
                         {fmtTime(m.createdAt)}
                       </span>
                       {mine && <Ticks message={m} />}
