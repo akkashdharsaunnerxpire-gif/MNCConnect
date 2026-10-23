@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   CalendarDays, CheckCircle2, ChevronRight, IndianRupee, Loader2,
-  ShieldCheck, Send, UserRound, Briefcase, Mail, TimerReset, AlertTriangle,
+  ShieldCheck, Send, UserRound, Briefcase, Mail, TimerReset, AlertTriangle, RotateCcw, X,
 } from "lucide-react";
 import useUserEvents from "../../hooks/useUserEvents";
 import {
@@ -46,6 +46,7 @@ const Label = ({ children }) => <label className="mb-2 block text-sm font-medium
 export default function SessionBoard() {
   const navigate = useNavigate();
   const params = useParams();
+  const location = useLocation();
   const company = params.companyName || params.company;
   const companyName = useMemo(() => {
     try { return decodeURIComponent(company || ""); } catch { return company || ""; }
@@ -53,6 +54,9 @@ export default function SessionBoard() {
 
   const user = useMemo(() => getUser(), []);
   const userId = useMemo(() => getUserId(), []);
+
+  // "Book again" from My Bookings -> { mentorId, mentorName, companyName }
+  const [rebook, setRebook] = useState(location.state?.rebook || null);
 
   const [f, setF] = useState(EMPTY_FORM);
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
@@ -75,11 +79,14 @@ export default function SessionBoard() {
     if (!f.date || !f.time) p.push("Choose a date and time");
     else if (startFrom(f.date, f.time).getTime() < Date.now() + MIN_LEAD_MIN * 60000)
       p.push(`Choose a time at least ${MIN_LEAD_MIN} minutes from now`);
-    if (!f.role) p.push("Select a role");
-    if (f.role === "Other" && !f.otherRole.trim()) p.push("Enter your role");
-    if (!f.language) p.push("Select your language before paying");
+    // role / language / gender only matter when the request goes to everyone
+    if (!rebook) {
+      if (!f.role) p.push("Select a role");
+      if (f.role === "Other" && !f.otherRole.trim()) p.push("Enter your role");
+      if (!f.language) p.push("Select your language before paying");
+    }
     return p;
-  }, [f]);
+  }, [f, rebook]);
 
   /* ---------- live booking updates ---------- */
   const applyBooking = useCallback((b) => {
@@ -110,6 +117,7 @@ export default function SessionBoard() {
           requestGroupId: reqIdRef.current,
           razorpayPaymentId: paymentIdRef.current,
           companyName,
+          preferredMentorId: rebook?.mentorId || undefined, // book again -> only this mentor gets it
           requester: { fullName: user.fullName || user.name || "Fresher", email: user.email || "", image: user.image || user.avatar || "" },
           sessionDetails: {
             sessionType: type.label,
@@ -134,7 +142,7 @@ export default function SessionBoard() {
       setStage("error");
       paymentIdRef.current = e.status && e.status !== 402 ? null : paymentIdRef.current; // 4xx = server refunded
     }
-  }, [companyName, user, type, f, price]);
+  }, [companyName, user, type, f, price, rebook]);
 
   /* ---------- pay ---------- */
   const startPayment = async () => {
@@ -204,6 +212,19 @@ export default function SessionBoard() {
   const mentor = booking?.mentor;
   const when = f.date && f.time ? `${toApiDate(f.date)} at ${toApiTime(f.time)}` : "Not selected";
 
+  const summaryRows = [
+    ["Company", companyName],
+    ["Purpose", type.label],
+    ["When", when],
+    ["Duration", durationLabel(f.minutes)],
+    ...(rebook
+      ? [["Mentor", rebook.mentorName || "Selected mentor"]]
+      : [
+          ["Role", f.role === "Other" ? f.otherRole || "Other" : f.role || "Not selected"],
+          ["Language", f.language || "Not selected"],
+        ]),
+  ];
+
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="mx-auto max-w-7xl px-5 py-8 lg:px-8">
@@ -215,12 +236,34 @@ export default function SessionBoard() {
           <span className="font-semibold text-slate-900">Book a session</span>
         </div>
 
+        {/* BOOK AGAIN BANNER */}
+        {rebook && (
+          <div className="mb-7 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white"><RotateCcw size={18} /></div>
+              <div>
+                <p className="text-sm font-bold text-blue-900">Booking again with {rebook.mentorName || "your mentor"}</p>
+                <p className="text-xs text-blue-700">Your request goes only to this mentor. If they can't take it, you are refunded.</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRebook(null)}
+              className="flex items-center gap-1 rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+            >
+              <X size={14} /> Book with anyone instead
+            </button>
+          </div>
+        )}
+
         <div className="grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_340px]">
           <div className="space-y-7">
             {/* PURPOSE */}
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <h2 className="text-xl font-bold text-slate-950">Why do you want to attend?</h2>
-              <p className="mt-1 text-sm text-slate-500">An employee from {companyName} will guide you.</p>
+              <p className="mt-1 text-sm text-slate-500">
+                {rebook ? `${rebook.mentorName || "Your mentor"} from ${companyName} will guide you.` : `An employee from ${companyName} will guide you.`}
+              </p>
 
               <div className="mt-5 flex flex-wrap gap-2">
                 {SESSION_TYPES.map((t) => (
@@ -279,39 +322,41 @@ export default function SessionBoard() {
               </div>
             </div>
 
-            {/* PREFERENCES */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="text-xl font-bold text-slate-950">Who should guide you?</h2>
-              <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                <div>
-                  <Label>Role you want guidance for</Label>
-                  <select value={f.role} onChange={(e) => set("role", e.target.value)} className={inputCls}>
-                    <option value="">Select role</option>
-                    {ROLE_OPTIONS.map((r) => <option key={r}>{r}</option>)}
-                  </select>
-                </div>
-                {f.role === "Other" && (
+            {/* PREFERENCES (hidden for book again: the mentor is already chosen) */}
+            {!rebook && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <h2 className="text-xl font-bold text-slate-950">Who should guide you?</h2>
+                <div className="mt-5 grid gap-4 sm:grid-cols-2">
                   <div>
-                    <Label>Enter your role</Label>
-                    <input value={f.otherRole} onChange={(e) => set("otherRole", e.target.value)} className={inputCls} placeholder="Role" />
+                    <Label>Role you want guidance for</Label>
+                    <select value={f.role} onChange={(e) => set("role", e.target.value)} className={inputCls}>
+                      <option value="">Select role</option>
+                      {ROLE_OPTIONS.map((r) => <option key={r}>{r}</option>)}
+                    </select>
                   </div>
-                )}
-                <div>
-                  <Label>Preferred language</Label>
-                  <select value={f.language} onChange={(e) => set("language", e.target.value)} className={inputCls}>
-                    <option value="">Select language</option>
-                    {LANGUAGE_OPTIONS.map((l) => <option key={l}>{l}</option>)}
-                  </select>
-                  <p className="mt-1.5 text-xs text-slate-400">Only employees who speak this language get your request.</p>
-                </div>
-                <div>
-                  <Label>Gender preference</Label>
-                  <select value={f.gender} onChange={(e) => set("gender", e.target.value)} className={inputCls}>
-                    {GENDER_OPTIONS.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
-                  </select>
+                  {f.role === "Other" && (
+                    <div>
+                      <Label>Enter your role</Label>
+                      <input value={f.otherRole} onChange={(e) => set("otherRole", e.target.value)} className={inputCls} placeholder="Role" />
+                    </div>
+                  )}
+                  <div>
+                    <Label>Preferred language</Label>
+                    <select value={f.language} onChange={(e) => set("language", e.target.value)} className={inputCls}>
+                      <option value="">Select language</option>
+                      {LANGUAGE_OPTIONS.map((l) => <option key={l}>{l}</option>)}
+                    </select>
+                    <p className="mt-1.5 text-xs text-slate-400">Only employees who speak this language get your request.</p>
+                  </div>
+                  <div>
+                    <Label>Gender preference</Label>
+                    <select value={f.gender} onChange={(e) => set("gender", e.target.value)} className={inputCls}>
+                      {GENDER_OPTIONS.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
+                    </select>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
             {/* HOW IT WORKS */}
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -319,8 +364,17 @@ export default function SessionBoard() {
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600"><ShieldCheck size={20} /></div>
                 <div className="space-y-2 text-sm text-slate-500">
                   <h3 className="text-sm font-bold text-slate-900">How it works</h3>
-                  <p><b className="text-slate-900">1.</b> Pay. Your request goes to every matching employee who is online.</p>
-                  <p><b className="text-slate-900">2.</b> The first employee to accept gets your session.</p>
+                  {rebook ? (
+                    <>
+                      <p><b className="text-slate-900">1.</b> Pay. Your request goes only to {rebook.mentorName || "your mentor"}.</p>
+                      <p><b className="text-slate-900">2.</b> When they accept, your session is confirmed.</p>
+                    </>
+                  ) : (
+                    <>
+                      <p><b className="text-slate-900">1.</b> Pay. Your request goes to every matching employee who is online.</p>
+                      <p><b className="text-slate-900">2.</b> The first employee to accept gets your session.</p>
+                    </>
+                  )}
                   <p><b className="text-slate-900">3.</b> You both get an alert 5 minutes before. Read the instructions first. Your camera turns on and the timer starts only after both of you accept.</p>
                   <p><b className="text-slate-900">4.</b> If nobody accepts before your start time, you are refunded automatically.</p>
                   <p><b className="text-slate-900">5.</b> After the session, confirm and leave your review inside the meeting.</p>
@@ -334,14 +388,7 @@ export default function SessionBoard() {
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <h2 className="text-lg font-bold text-slate-950">Summary</h2>
               <dl className="mt-5 space-y-3 text-sm">
-                {[
-                  ["Company", companyName],
-                  ["Purpose", type.label],
-                  ["When", when],
-                  ["Duration", durationLabel(f.minutes)],
-                  ["Role", f.role === "Other" ? f.otherRole || "Other" : f.role || "Not selected"],
-                  ["Language", f.language || "Not selected"],
-                ].map(([k, v]) => (
+                {summaryRows.map(([k, v]) => (
                   <div key={k} className="flex justify-between gap-4">
                     <dt className="text-slate-500">{k}</dt>
                     <dd className="text-right font-semibold text-slate-900">{v}</dd>
@@ -391,12 +438,16 @@ export default function SessionBoard() {
           </div>
           <h2 className="mt-6 text-2xl font-bold text-slate-900">Request sent</h2>
           <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-slate-500">
-            {notifiedCount > 0
-              ? `Sent to ${notifiedCount} online ${companyName} employee${notifiedCount > 1 ? "s" : ""}. The first one to accept gets your session.`
-              : `No ${companyName} employee is online right now. We'll offer it to anyone who comes online before your start time.`}
+            {rebook
+              ? notifiedCount > 0
+                ? `Sent to ${rebook.mentorName || "your mentor"}. Your session is confirmed as soon as they accept.`
+                : `${rebook.mentorName || "Your mentor"} is not online right now. They will see your request when they come online, before your start time.`
+              : notifiedCount > 0
+                ? `Sent to ${notifiedCount} online ${companyName} employee${notifiedCount > 1 ? "s" : ""}. The first one to accept gets your session.`
+                : `No ${companyName} employee is online right now. We'll offer it to anyone who comes online before your start time.`}
           </p>
           <div className="mt-5 flex items-center justify-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm font-semibold text-blue-700">
-            <Loader2 size={16} className="animate-spin" /> Waiting for an employee to accept…
+            <Loader2 size={16} className="animate-spin" /> {rebook ? `Waiting for ${rebook.mentorName || "your mentor"} to accept…` : "Waiting for an employee to accept…"}
           </div>
           <p className="mt-4 flex items-center justify-center gap-2 text-xs text-slate-400">
             <TimerReset size={14} /> Not accepted before {toApiTime(f.time)}? You're refunded automatically.
@@ -440,7 +491,8 @@ export default function SessionBoard() {
           <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-amber-50"><IndianRupee size={34} className="text-amber-600" /></div>
           <h2 className="mt-5 text-2xl font-bold text-slate-900">Amount refunded</h2>
           <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-slate-500">
-            Nobody accepted your request in time. {inr(booking?.amount || price)} is being refunded to your payment method.
+            {rebook ? `${rebook.mentorName || "Your mentor"} could not take this session.` : "Nobody accepted your request in time."}{" "}
+            {inr(booking?.amount || price)} is being refunded to your payment method.
           </p>
           <button type="button" onClick={closeAll} className="mt-6 w-full rounded-xl bg-slate-950 py-3.5 text-sm font-bold text-white hover:bg-slate-800">OK</button>
         </Overlay>
