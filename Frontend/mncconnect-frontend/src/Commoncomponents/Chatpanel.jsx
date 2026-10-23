@@ -37,7 +37,10 @@ const unlockAudio = () => {
   if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
 };
 
-const tone = (ctx, { freq, endFreq, start = 0, duration, volume = 0.15, type = "sine" }) => {
+const tone = (
+  ctx,
+  { freq, endFreq, start = 0, duration, volume = 0.15, type = "sine" },
+) => {
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   const t0 = ctx.currentTime + start;
@@ -58,13 +61,28 @@ const tone = (ctx, { freq, endFreq, start = 0, duration, volume = 0.15, type = "
   osc.stop(t0 + duration + 0.05);
 };
 
-// short "tick" when I send a message
+// short "tick" when I send a message (louder)
 const playSendSound = () => {
   try {
     const ctx = getAudioCtx();
     if (!ctx) return;
     unlockAudio();
-    tone(ctx, { freq: 1300, endFreq: 800, duration: 0.07, volume: 0.12, type: "triangle" });
+
+    // 2 tones layer panni sound clear ah, loud ah kekum
+    tone(ctx, {
+      freq: 1500,
+      endFreq: 900,
+      duration: 0.09,
+      volume: 0.5,
+      type: "triangle",
+    });
+    tone(ctx, {
+      freq: 750,
+      endFreq: 450,
+      duration: 0.09,
+      volume: 0.35,
+      type: "sine",
+    });
   } catch {
     /* ignore audio errors */
   }
@@ -137,11 +155,7 @@ const Ticks = ({ message }) => {
   }
   if (message.deliveredAt) {
     return (
-      <CheckCheck
-        size={16}
-        className="text-slate-400"
-        aria-label="Delivered"
-      />
+      <CheckCheck size={16} className="text-slate-400" aria-label="Delivered" />
     );
   }
   return <Check size={16} className="text-slate-400" aria-label="Sent" />;
@@ -217,7 +231,8 @@ export default function ChatPanel({
       events.forEach((ev) => window.removeEventListener(ev, handler));
     };
     events.forEach((ev) => window.addEventListener(ev, handler));
-    return () => events.forEach((ev) => window.removeEventListener(ev, handler));
+    return () =>
+      events.forEach((ev) => window.removeEventListener(ev, handler));
   }, []);
 
   /* ---------------- data + socket ---------------- */
@@ -476,7 +491,11 @@ export default function ChatPanel({
       const side = isMine(m) ? "me" : "peer";
 
       if (dk !== lastDay) {
-        out.push({ type: "day", key: `day-${dk}`, label: dayLabel(m.createdAt) });
+        out.push({
+          type: "day",
+          key: `day-${dk}`,
+          label: dayLabel(m.createdAt),
+        });
         lastDay = dk;
         lastSide = "";
       }
@@ -503,7 +522,11 @@ export default function ChatPanel({
   }, [messages, isMine]);
 
   /* ---------------- UI ---------------- */
-  const statusText = !joined ? "Connecting…" : peerOnline ? "Online" : "Offline";
+  const statusText = !joined
+    ? "Connecting…"
+    : peerOnline
+      ? "Online"
+      : "Offline";
 
   const body = (
     <>
