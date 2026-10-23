@@ -12,11 +12,13 @@ import {
   UserRound,
   CheckCircle,
   Star,
+  MessageSquare,
 } from "lucide-react";
 import socket from "../socket";
 import ReviewModal from "../FresherDashboard/pages/Reviewmodal";
 import MeetingInstructionsGate from "../Commoncomponents/MeetingInstructionsGate";
 import SessionCompletionModal from "../Commoncomponents/SessionCompletionModal";
+import ChatPanel from "../Commoncomponents/Chatpanel";
 import { API_URL, ENDPOINTS, fmtClock } from "../services/fresherApi";
 
 const ICE = {
@@ -205,6 +207,21 @@ export default function MeetingRoom() {
   const isMentor = useLocation().pathname.startsWith("/mentor");
   const token =
     localStorage.getItem(isMentor ? "mnc_mentor_token" : "fresher_token") || "";
+
+  /* ---------- chat ---------- */
+  const [chatOpen, setChatOpen] = useState(false);
+  const [unread, setUnread] = useState(0);
+  const chatOpenRef = useRef(false);
+  const toggleChat = () => {
+    const next = !chatOpenRef.current;
+    chatOpenRef.current = next;
+    setChatOpen(next);
+    if (next) setUnread(0);
+  };
+  const closeChat = () => {
+    chatOpenRef.current = false;
+    setChatOpen(false);
+  };
 
   const [phase, setPhase] = useState("joining");
   const [message, setMessage] = useState("");
@@ -768,7 +785,17 @@ export default function MeetingRoom() {
           >
             {camOn ? <Camera size={20} /> : <CameraOff size={20} />}
           </button>
-
+          <button
+            onClick={toggleChat}
+            className={`relative flex h-12 w-12 items-center justify-center rounded-full ${chatOpen ? "bg-blue-600" : "bg-slate-700"}`}
+          >
+            <MessageSquare size={20} />
+            {unread > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold">
+                {unread}
+              </span>
+            )}
+          </button>
           <button
             onClick={leaveRoom}
             className="flex h-12 items-center gap-2 rounded-full bg-red-600 px-6 text-sm font-bold"
@@ -780,6 +807,20 @@ export default function MeetingRoom() {
           Once the session starts, the timer runs to zero even if someone leaves.
         </p>
       </div>
+
+      {/* Always mounted while in the room, so messages arrive even when closed */}
+      <ChatPanel
+        variant="panel"
+        open={chatOpen}
+        bookingId={bookingId}
+        token={token}
+        role={isMentor ? "mentor" : "fresher"}
+        title={isMentor ? "Chat with fresher" : "Chat with employee"}
+        onClose={closeChat}
+        onIncoming={() => {
+          if (!chatOpenRef.current) setUnread((n) => n + 1);
+        }}
+      />
 
       {showReviewGate && (
         <ReviewGate booking={booking} token={token} onDone={() => setReviewDone(true)} />

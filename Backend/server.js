@@ -5,6 +5,9 @@ const http = require("http");
 const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
 
+const { registerChat } = require("./models/ChatMessage");
+
+// After creating your Socket.IO instance:
 // ---- never let one bad handler kill the whole server ----
 process.on("uncaughtException", (err) => {
   console.error("Uncaught exception:", err);
@@ -51,6 +54,7 @@ const io = new Server(server, {
 
 // ================= ONLINE USERS =================
 // Map<userId(string), Set<socketId>>
+registerChat(io);
 
 const onlineEmployees = new Map(); // freshers
 const onlineMentors = new Map(); // mentors
@@ -99,7 +103,11 @@ const markOnline = (socket, role, rawId) => {
   if (!id) return null;
 
   // If this socket was already tracking a different id under this role, clean up
-  if (socket.data.presence && socket.data.presence[role] && socket.data.presence[role] !== id) {
+  if (
+    socket.data.presence &&
+    socket.data.presence[role] &&
+    socket.data.presence[role] !== id
+  ) {
     markOffline(socket, role);
   }
 
@@ -109,7 +117,9 @@ const markOnline = (socket, role, rawId) => {
   socket.data.presence = socket.data.presence || {};
   socket.data.presence[role] = id;
 
-  console.log(`${label} ${id} is ONLINE (${map.get(id).size} socket${map.get(id).size > 1 ? "s" : ""})`);
+  console.log(
+    `${label} ${id} is ONLINE (${map.get(id).size} socket${map.get(id).size > 1 ? "s" : ""})`,
+  );
   return id;
 };
 
@@ -149,7 +159,7 @@ io.on("connection", (socket) => {
     // Send pending booking requests to this mentor
     if (typeof pushPendingToMentor === "function") {
       Promise.resolve(pushPendingToMentor(app, id)).catch((err) =>
-        console.error("pushPendingToMentor failed:", err.message)
+        console.error("pushPendingToMentor failed:", err.message),
       );
     }
   } else if (role === "fresher") {

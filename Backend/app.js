@@ -15,6 +15,8 @@ const adminRoutes = require("./routes/adminRoutes");
 const mentorPanelRoutes = require("./routes/mentorPanelRoutes");
 const fresherBookingRoutes = require("./routes/fresherBookingRoutes");
 const instructionRoutes = require("./routes/instructionRoutes");
+const chatRoutes = require("./routes/chatRoutes");
+
 
 const app = express();
 
@@ -53,20 +55,20 @@ app.use(
   cors((req, callback) => {
     const origin = req.header("Origin");
     const sameOrigin = origin === `${req.protocol}://${req.get("host")}`;
-
+    
     const allowed =
-      !origin ||
-      origin === "null" ||
-      sameOrigin ||
-      allowedOrigins.includes(origin);
-
+    !origin ||
+    origin === "null" ||
+    sameOrigin ||
+    allowedOrigins.includes(origin);
+    
     if (!allowed) {
       console.log("CORS blocked origin:", origin);
       const err = new Error(`CORS blocked for origin: ${origin}`);
       err.status = 403;
       return callback(err);
     }
-
+    
     callback(null, {
       origin: true,
       credentials: true,
@@ -90,12 +92,12 @@ try {
   const MongoStore = require("connect-mongo");
   store = (MongoStore.default || MongoStore).create({
     clientPromise: mongoose.connection
-      .asPromise()
-      .then((conn) => conn.getClient())
-      .catch((err) => {
-        console.error("Session store Mongo connection failed:", err.message);
-        throw err;
-      }),
+    .asPromise()
+    .then((conn) => conn.getClient())
+    .catch((err) => {
+      console.error("Session store Mongo connection failed:", err.message);
+      throw err;
+    }),
     collectionName: "sessions",
   });
 } catch (error) {
@@ -147,6 +149,7 @@ app.get("/health", (req, res) => {
 // ORDER MATTERS.
 
 app.use("/api/auth", authRoutes);
+app.use("/api/chat", chatRoutes);
 
 // Booking router FIRST so it owns PATCH /api/session/session-requests/:id
 app.use("/api", fresherBookingRoutes);

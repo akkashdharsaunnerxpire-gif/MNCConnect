@@ -18,6 +18,8 @@ import {
 import useMentorSessions from "../../hooks/useMentorSessions";
 import { inr, api, ENDPOINTS, EVENTS } from "../../services/mentorApi";
 import socket from "../../socket";
+import ChatPanel from "../../Commoncomponents/Chatpanel";
+import SessionDetailsModal from "../../Commoncomponents/SessionDetailsModal";
 
 const INDIA_TIMEZONE = "Asia/Kolkata";
 const JOIN_WINDOW_MINUTES = 5;
@@ -111,7 +113,7 @@ const MentorSessions = () => {
         .filter((s) => ["Upcoming", "Awaiting Confirmation"].includes(s.status))
         .map((s) => s.id)
         .join(","),
-    [sessions]
+    [sessions],
   );
 
   // Poll the same booking data the meeting room uses
@@ -133,12 +135,17 @@ const MentorSessions = () => {
                 running: Boolean(d.booking.timerRunning),
                 at: Date.now(),
               };
-              if (["awaiting_confirmation", "completed"].includes(d.booking.status)) finished = true;
+              if (
+                ["awaiting_confirmation", "completed"].includes(
+                  d.booking.status,
+                )
+              )
+                finished = true;
             }
           } catch {
             /* ignore single failure */
           }
-        })
+        }),
       );
       if (cancelled) return;
       setTimers((prev) => ({ ...prev, ...results }));
@@ -161,7 +168,11 @@ const MentorSessions = () => {
       if (!id || typeof p.remainingMs !== "number") return;
       setTimers((prev) => ({
         ...prev,
-        [id]: { remainingMs: p.remainingMs, running: Boolean(p.running), at: Date.now() },
+        [id]: {
+          remainingMs: p.remainingMs,
+          running: Boolean(p.running),
+          at: Date.now(),
+        },
       }));
     };
     socket.on("meeting:timer", onTimer);
@@ -185,23 +196,29 @@ const MentorSessions = () => {
         TABS.map((t) => [
           t,
           sessions.filter((s) => {
-            if (t === "Awaiting Confirmation") return s.status === "awaiting_confirmation";
+            if (t === "Awaiting Confirmation")
+              return s.status === "awaiting_confirmation";
             return s.status === t;
           }).length,
-        ])
+        ]),
       ),
-    [sessions]
+    [sessions],
   );
 
   const filtered = useMemo(() => {
     const kw = search.toLowerCase().trim();
     const targetStatus =
-      activeTab === "Awaiting Confirmation" ? "awaiting_confirmation" : activeTab;
+      activeTab === "Awaiting Confirmation"
+        ? "awaiting_confirmation"
+        : activeTab;
 
     const list = sessions.filter(
       (s) =>
         s.status === targetStatus &&
-        (!kw || `${s.name} ${s.role} ${s.topic} ${s.type}`.toLowerCase().includes(kw))
+        (!kw ||
+          `${s.name} ${s.role} ${s.topic} ${s.type}`
+            .toLowerCase()
+            .includes(kw)),
     );
     const dir = activeTab === "Upcoming" ? 1 : -1;
     return list.sort((a, b) => dir * ((a.startsAt || 0) - (b.startsAt || 0)));
@@ -302,6 +319,51 @@ const MentorSessions = () => {
 };
 
 const SessionCard = ({ session, nowMs, timer, onJoin }) => {
+  // chat + details state lives HERE (inside the card)
+  const [detailsFor, setDetailsFor] = useState(null);
+  const [chatFor, setChatFor] = useState(null);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const token = localStorage.getItem("mnc_mentor_token") || "";
+
+  const chatBookingId =
+    session.requestGroupId || session.bookingId || session.id;
+
+  // Unread badge.
+  // The server sends chat messages to the mentor's personal room,
+  // so this works even though the chat window is closed.
+  useEffect(() => {
+    const myIds = [session.requestGroupId, session.bookingId, session.id]
+      .filter(Boolean)
+      .map(String);
+
+    const onChatMessage = (message) => {
+      if (message.senderRole === "mentor") return;
+
+      // server sends both bookingId (_id) and requestGroupId
+      const incoming = [message.bookingId, message.requestGroupId]
+        .filter(Boolean)
+        .map(String);
+
+      if (!incoming.some((id) => myIds.includes(id))) return;
+
+      // chat is open -> ChatPanel marks it read, no badge
+      if (chatFor) return;
+
+      setUnreadCount((count) => count + 1);
+    };
+
+    socket.on("chat:message", onChatMessage);
+
+    return () => {
+      socket.off("chat:message", onChatMessage);
+    };
+  }, [session.requestGroupId, session.bookingId, session.id, chatFor]);
+
+  const openChat = () => {
+    setUnreadCount(0);
+    setChatFor(session);
+  };
+
   const isUpcoming = session.status === "Upcoming";
   const isAwaitingConfirmation = session.status === "awaiting_confirmation";
   const isCompleted = session.status === "Completed";
@@ -320,7 +382,9 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
   // ---- LIVE MEETING TIMER (same value as inside the video call) ----
   const timerRunning = isUpcoming && Boolean(timer?.running);
   const baseRemaining =
-    typeof timer?.remainingMs === "number" ? timer.remainingMs : session.remainingMs;
+    typeof timer?.remainingMs === "number"
+      ? timer.remainingMs
+      : session.remainingMs;
   const remaining =
     timerRunning && typeof baseRemaining === "number"
       ? Math.max(0, baseRemaining - (nowMs - (timer?.at || nowMs)))
@@ -360,183 +424,282 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
     </>
   );
 
+  const secondaryBtn =
+    "flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50";
+
+  const UnreadBadge = () =>
+    unreadCount > 0 ? (
+      <span className="absolute -right-3 -top-3 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
+        {unreadCount > 99 ? "99+" : unreadCount}
+      </span>
+    ) : null;
+
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-200 hover:shadow-md">
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-center">
-        <div className="flex flex-1 items-center gap-4">
-          <img
-            src={session.avatar}
-            alt={session.name}
-            className="h-12 w-12 rounded-full border-2 border-blue-100 object-cover"
-          />
-          <div className="min-w-0">
-            <h3 className="font-semibold text-slate-900">{session.name}</h3>
-            <p className="mt-0.5 text-xs text-slate-500">{session.role}</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {session.topic && (
-                <span className="rounded-lg bg-blue-50 px-2.5 py-1 text-[10px] font-medium text-blue-600">
-                  {session.topic}
+    <>
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-200 hover:shadow-md">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center">
+          <div className="flex flex-1 items-center gap-4">
+            <img
+              src={session.avatar}
+              alt={session.name}
+              className="h-12 w-12 rounded-full border-2 border-blue-100 object-cover"
+            />
+            <div className="min-w-0">
+              <h3 className="font-semibold text-slate-900">{session.name}</h3>
+              <p className="mt-0.5 text-xs text-slate-500">{session.role}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {session.topic && (
+                  <span className="rounded-lg bg-blue-50 px-2.5 py-1 text-[10px] font-medium text-blue-600">
+                    {session.topic}
+                  </span>
+                )}
+                <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-[10px] font-medium text-slate-500">
+                  {session.type}
                 </span>
-              )}
-              <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-[10px] font-medium text-slate-500">
-                {session.type}
-              </span>
+              </div>
             </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:w-[560px]">
+            <SessionInfo
+              icon={<CalendarDays size={15} />}
+              label="Date"
+              value={session.date}
+            />
+            <SessionInfo
+              icon={<Clock3 size={15} />}
+              label="Start → End"
+              value={timeRange}
+            />
+            <SessionInfo
+              icon={<Video size={15} />}
+              label="Duration"
+              value={session.duration}
+            />
+            <SessionInfo
+              icon={<Star size={15} />}
+              label="You earn"
+              value={inr(session.earning ?? 0)}
+            />
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:w-[560px]">
-          <SessionInfo icon={<CalendarDays size={15} />} label="Date" value={session.date} />
-          <SessionInfo icon={<Clock3 size={15} />} label="Start → End" value={timeRange} />
-          <SessionInfo icon={<Video size={15} />} label="Duration" value={session.duration} />
-          <SessionInfo icon={<Star size={15} />} label="You earn" value={inr(session.earning ?? 0)} />
-        </div>
-      </div>
-
-      {/* LIVE TIMER BAR */}
-      {timerRunning && (
-        <div
-          className={`mt-4 flex items-center justify-between gap-4 rounded-xl border p-3 ${
-            isFinalWarning
-              ? "border-amber-200 bg-amber-50"
-              : "border-emerald-200 bg-emerald-50"
-          }`}
-        >
-          <div className="flex items-center gap-2.5">
-            {isFinalWarning ? (
-              <AlertTriangle size={16} className="text-amber-600" />
-            ) : (
-              <span className="relative flex h-2.5 w-2.5">
-                <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-60 motion-safe:animate-ping" />
-                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-600" />
-              </span>
-            )}
-            <div>
-              <p className={`text-[11px] font-semibold ${isFinalWarning ? "text-amber-800" : "text-emerald-800"}`}>
-                {isFinalWarning ? "Final 5 minutes — start wrapping up" : "Session in progress"}
-              </p>
-              <p className={`text-[10px] ${isFinalWarning ? "text-amber-700" : "text-emerald-600"}`}>
-                {isFinalWarning
-                  ? "Ask the fresher to confirm the session went well"
-                  : `Time left in the meeting · ${timeRange}`}
-              </p>
-            </div>
-          </div>
+        {/* LIVE TIMER BAR */}
+        {timerRunning && (
           <div
-            className={`rounded-lg px-3 py-1.5 font-mono text-xl font-bold tabular-nums ${
-              isFinalWarning ? "bg-amber-200 text-amber-900" : "bg-emerald-200 text-emerald-900"
+            className={`mt-4 flex items-center justify-between gap-4 rounded-xl border p-3 ${
+              isFinalWarning
+                ? "border-amber-200 bg-amber-50"
+                : "border-emerald-200 bg-emerald-50"
             }`}
           >
-            {fmtClock(remaining)}
-          </div>
-        </div>
-      )}
-
-      <div className="mt-5 flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2">
-          {isUpcoming && !hasEnded && (
-            <>
-              <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
-              <span className="text-xs font-medium text-emerald-600">
-                {timerRunning ? "Session in progress" : "Upcoming Session"}
-              </span>
-            </>
-          )}
-          {isUpcoming && hasEnded && (
-            <>
-              <Clock3 size={16} className="text-slate-400" />
-              <span className="text-xs font-medium text-slate-500">
-                Session ended · updating status…
-              </span>
-            </>
-          )}
-          {isAwaitingConfirmation && (
-            <>
-              <ShieldCheck size={16} className="text-amber-500" />
-              <span className="text-xs font-medium text-amber-700">Waiting for fresher to confirm</span>
-            </>
-          )}
-          {isCompleted && (
-            <>
-              <CheckCircle2 size={16} className="text-emerald-500" />
-              <span className="text-xs font-medium text-emerald-600">Completed · Earnings released</span>
-            </>
-          )}
-          {isCancelled && (
-            <>
-              <XCircle size={16} className="text-red-500" />
-              <span className="text-xs font-medium text-red-500">Cancelled</span>
-            </>
-          )}
-        </div>
-
-        <div className="flex gap-2">
-          {isUpcoming && !hasEnded && (
-            <>
-              <button
-                type="button"
-                className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
-              >
-                <MessageSquare size={15} /> Message
-              </button>
-              <button
-                type="button"
-                disabled={!joinable}
-                onClick={() => joinable && onJoin(session)}
-                className={`flex min-w-[150px] items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-semibold transition ${btnStyle}`}
-              >
-                {btnContent}
-              </button>
-            </>
-          )}
-          {(isCompleted || isCancelled || isAwaitingConfirmation) && (
-            <button
-              type="button"
-              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-medium text-slate-500 transition hover:bg-slate-100"
+            <div className="flex items-center gap-2.5">
+              {isFinalWarning ? (
+                <AlertTriangle size={16} className="text-amber-600" />
+              ) : (
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-60 motion-safe:animate-ping" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-600" />
+                </span>
+              )}
+              <div>
+                <p
+                  className={`text-[11px] font-semibold ${isFinalWarning ? "text-amber-800" : "text-emerald-800"}`}
+                >
+                  {isFinalWarning
+                    ? "Final 5 minutes — start wrapping up"
+                    : "Session in progress"}
+                </p>
+                <p
+                  className={`text-[10px] ${isFinalWarning ? "text-amber-700" : "text-emerald-600"}`}
+                >
+                  {isFinalWarning
+                    ? "Ask the fresher to confirm the session went well"
+                    : `Time left in the meeting · ${timeRange}`}
+                </p>
+              </div>
+            </div>
+            <div
+              className={`rounded-lg px-3 py-1.5 font-mono text-xl font-bold tabular-nums ${
+                isFinalWarning
+                  ? "bg-amber-200 text-amber-900"
+                  : "bg-emerald-200 text-emerald-900"
+              }`}
             >
-              View Details
-            </button>
-          )}
-        </div>
-      </div>
+              {fmtClock(remaining)}
+            </div>
+          </div>
+        )}
 
-      {isUpcoming && !hasEnded && !isLive && !isJoinWindow && (
-        <div className="mt-4 flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] text-blue-600">
-          <Clock3 size={14} />
-          <span>
-            Join opens at <strong>{fmtDateTime(joinOpenAt)}</strong>
-            {sessionEndAt && (
+        <div className="mt-5 flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            {isUpcoming && !hasEnded && (
               <>
-                {" "}
-                · Ends at <strong>{fmtTime(sessionEndAt)}</strong>
+                <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
+                <span className="text-xs font-medium text-emerald-600">
+                  {timerRunning ? "Session in progress" : "Upcoming Session"}
+                </span>
               </>
             )}
-          </span>
+            {isUpcoming && hasEnded && (
+              <>
+                <Clock3 size={16} className="text-slate-400" />
+                <span className="text-xs font-medium text-slate-500">
+                  Session ended · updating status…
+                </span>
+              </>
+            )}
+            {isAwaitingConfirmation && (
+              <>
+                <ShieldCheck size={16} className="text-amber-500" />
+                <span className="text-xs font-medium text-amber-700">
+                  Waiting for fresher to confirm
+                </span>
+              </>
+            )}
+            {isCompleted && (
+              <>
+                <CheckCircle2 size={16} className="text-emerald-500" />
+                <span className="text-xs font-medium text-emerald-600">
+                  Completed · Earnings released
+                </span>
+              </>
+            )}
+            {isCancelled && (
+              <>
+                <XCircle size={16} className="text-red-500" />
+                <span className="text-xs font-medium text-red-500">
+                  Cancelled
+                </span>
+              </>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {/* UPCOMING: Details + Message + Join */}
+            {isUpcoming && !hasEnded && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setDetailsFor(session)}
+                  className={secondaryBtn}
+                >
+                  View Details
+                </button>
+                <button
+                  type="button"
+                  onClick={openChat}
+                  className={`${secondaryBtn} relative`}
+                >
+                  <span className="relative inline-flex">
+                    <MessageSquare size={15} />
+                    <UnreadBadge />
+                  </span>
+                  Message
+                </button>
+
+                <button
+                  type="button"
+                  disabled={!joinable}
+                  onClick={() => joinable && onJoin(session)}
+                  className={`flex min-w-[150px] items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-semibold transition ${btnStyle}`}
+                >
+                  {btnContent}
+                </button>
+              </>
+            )}
+
+            {/* AWAITING / COMPLETED / CANCELLED: Message + View Details */}
+            {(isCompleted || isCancelled || isAwaitingConfirmation) && (
+              <>
+                <button
+                  type="button"
+                  onClick={openChat}
+                  className={`${secondaryBtn} relative`}
+                >
+                  <span className="relative inline-flex">
+                    <MessageSquare size={15} />
+                    <UnreadBadge />
+                  </span>
+                  Message
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDetailsFor(session)}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-medium text-slate-500 transition hover:bg-slate-100"
+                >
+                  View Details
+                </button>
+              </>
+            )}
+          </div>
         </div>
+
+        {isUpcoming && !hasEnded && !isLive && !isJoinWindow && (
+          <div className="mt-4 flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] text-blue-600">
+            <Clock3 size={14} />
+            <span>
+              Join opens at <strong>{fmtDateTime(joinOpenAt)}</strong>
+              {sessionEndAt && (
+                <>
+                  {" "}
+                  · Ends at <strong>{fmtTime(sessionEndAt)}</strong>
+                </>
+              )}
+            </span>
+          </div>
+        )}
+        {isUpcoming && isJoinWindow && (
+          <div className="mt-4 flex items-center gap-2 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-[11px] font-medium text-yellow-700">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-yellow-500" />
+            <span>
+              The meeting room is open. Click "Join Now". The timer starts when
+              you and the fresher are both inside.
+            </span>
+          </div>
+        )}
+        {isUpcoming && isLive && !timerRunning && (
+          <div className="mt-4 flex items-center gap-2 rounded-lg border border-green-100 bg-green-50 px-3 py-2 text-[11px] font-medium text-green-600">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
+            <span>
+              Session time reached. The timer starts when you and the fresher
+              are both inside.
+            </span>
+          </div>
+        )}
+        {isAwaitingConfirmation && (
+          <div className="mt-4 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-700">
+            <ShieldCheck size={14} />
+            <span>
+              The timer has ended. Waiting for the fresher to confirm the
+              session. Once they click "Yes", your earnings will be released.
+            </span>
+          </div>
+        )}
+      </div>
+
+      {detailsFor && (
+        <SessionDetailsModal
+          session={detailsFor}
+          onClose={() => setDetailsFor(null)}
+          onMessage={(s) => {
+            setDetailsFor(null);
+            setUnreadCount(0);
+            setChatFor(s);
+          }}
+        />
       )}
-      {isUpcoming && isJoinWindow && (
-        <div className="mt-4 flex items-center gap-2 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-[11px] font-medium text-yellow-700">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-yellow-500" />
-          <span>
-            The meeting room is open. Click "Join Now". The timer starts when you and the fresher are both inside.
-          </span>
-        </div>
+      {chatFor && (
+        <ChatPanel
+          variant="modal"
+          bookingId={chatBookingId}
+          token={token}
+          role="mentor"
+          title={`Chat with ${chatFor.name}`}
+          onClose={() => setChatFor(null)}
+        />
       )}
-      {isUpcoming && isLive && !timerRunning && (
-        <div className="mt-4 flex items-center gap-2 rounded-lg border border-green-100 bg-green-50 px-3 py-2 text-[11px] font-medium text-green-600">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
-          <span>Session time reached. The timer starts when you and the fresher are both inside.</span>
-        </div>
-      )}
-      {isAwaitingConfirmation && (
-        <div className="mt-4 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-700">
-          <ShieldCheck size={14} />
-          <span>
-            The timer has ended. Waiting for the fresher to confirm the session. Once they click "Yes", your earnings will be released.
-          </span>
-        </div>
-      )}
-    </div>
+    </>
   );
 };
 
