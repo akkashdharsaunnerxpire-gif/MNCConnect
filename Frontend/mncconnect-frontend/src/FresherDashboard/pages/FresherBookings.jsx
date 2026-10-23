@@ -14,6 +14,7 @@ import {
   ArrowRight,
   IndianRupee,
   MessageSquare,
+  RotateCcw,
 } from "lucide-react";
 import useLive from "../../hooks/useLive";
 import ReviewModal from "../pages/Reviewmodal";
@@ -234,7 +235,7 @@ const MyBookings = () => {
     if (b.status === "pending")
       return {
         key: "pending",
-        label: "Waiting for an employee",
+        label: b.direct ? "Waiting for your mentor" : "Waiting for an employee",
         tone: "amber",
       };
     if (b.status === "expired" || b.status === "missed")
@@ -252,7 +253,7 @@ const MyBookings = () => {
 
     // timer reached 0 -> server is moving it to confirmation, keep it in upcoming until status changes
     if (left !== null && left <= 0)
-      return { key: "open", label: "Finishing…", tone: "amber", opens, starts };
+      return { key: "open", label: "Finishing...", tone: "amber", opens, starts };
 
     if (now >= ends)
       return { key: "ended", label: "Meeting ended", tone: "slate" };
@@ -300,6 +301,18 @@ const MyBookings = () => {
     blue: "bg-blue-50 text-blue-700",
   };
 
+  // Book again -> goes to the booking flow with the same mentor locked in
+  const bookAgain = (b) =>
+    navigate("/Home", {
+      state: {
+        rebook: {
+          mentorId: b.mentor.id,
+          mentorName: b.mentor.name,
+          companyName: b.companyName || b.mentor.company,
+        },
+      },
+    });
+
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-6 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-6xl">
@@ -314,7 +327,7 @@ const MyBookings = () => {
               <span
                 className={`inline-flex items-center gap-1 text-xs font-medium ${connected ? "text-emerald-600" : "text-amber-600"}`}
               >
-                <Radio size={12} /> {connected ? "Live" : "Reconnecting…"}
+                <Radio size={12} /> {connected ? "Live" : "Reconnecting..."}
               </span>
             </p>
           </div>
@@ -382,6 +395,11 @@ const MyBookings = () => {
                 Boolean(b.mentor) &&
                 !NO_CHAT_STATUSES.includes(b.status) &&
                 v.key !== "pending";
+              // past + session really happened + we know the mentor
+              const canRebook =
+                tab === "past" &&
+                ["completed", "awaiting_confirmation"].includes(b.status) &&
+                Boolean(b.mentor?.id);
 
               return (
                 <div
@@ -451,7 +469,7 @@ const MyBookings = () => {
                       )}
                       {v.key === "pending" && (
                         <div className="flex items-center justify-center gap-2 rounded-xl bg-amber-50 px-4 py-3 text-xs font-medium text-amber-700">
-                          <Loader2 className="h-4 w-4 animate-spin" /> Waiting…
+                          <Loader2 className="h-4 w-4 animate-spin" /> Waiting...
                         </div>
                       )}
                       {v.key === "review" && (
@@ -478,6 +496,17 @@ const MyBookings = () => {
                               ? "refunded"
                               : "amount held"}
                         </div>
+                      )}
+
+                      {/* BOOK AGAIN with the same mentor */}
+                      {canRebook && (
+                        <button
+                          type="button"
+                          onClick={() => bookAgain(b)}
+                          className="flex items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-5 py-3 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+                        >
+                          <RotateCcw className="h-4 w-4" /> Book again
+                        </button>
                       )}
 
                       {/* MESSAGE (only after an employee accepted) */}

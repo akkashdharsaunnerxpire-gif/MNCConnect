@@ -55,6 +55,15 @@ const bookingSchema = new Schema(
       default: null,
       index: true,
     },
+
+    // "Book again": the fresher picked this exact mentor. null = normal broadcast request.
+    preferredMentor: {
+      type: Schema.Types.ObjectId,
+      ref: "Mentor",
+      default: null,
+      index: true,
+    },
+
     notified: [{ type: Schema.Types.ObjectId }],
     declinedBy: [{ type: Schema.Types.ObjectId }],
 
@@ -91,5 +100,6 @@ const bookingSchema = new Schema(
 bookingSchema.index({ status: 1, expiresAt: 1 });
 bookingSchema.index({ mentor: 1, status: 1, startsAt: 1 });
 bookingSchema.index({ status: 1, "meeting.timerEndsAt": 1 });
+bookingSchema.index({ status: 1, refundStatus: 1 }); // refund retry in the scheduler
 
 module.exports = mongoose.model("Booking", bookingSchema);

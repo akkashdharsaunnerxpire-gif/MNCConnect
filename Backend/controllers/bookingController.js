@@ -100,6 +100,7 @@ const toMentorPayload = (b) => ({
   startsAt: b.startsAt,
   expiresAt: b.expiresAt,
   status: "pending",
+  direct: Boolean(b.preferredMentor), // fresher picked THIS mentor (book again)
 });
 
 const mentorCard = (m) =>
@@ -142,6 +143,7 @@ const toClient = (b) => ({
   expiresAt: b.expiresAt,
   opensAt: new Date(new Date(b.startsAt).getTime() - OPEN_BEFORE_MS),
   mentor: mentorCard(b.mentor),
+  direct: Boolean(b.preferredMentor),
   reviewed: Boolean(b.reviewed),
   refundStatus: b.refundStatus || "",
   remainingMs: remainingOf(b),
@@ -185,10 +187,42 @@ const refundPaymentToWallet = async (payment, fresherId, amount) => {
   }
 };
 
+// pending request nobody accepted (or the chosen mentor declined) -> expire it and give the money back
+const expireAndRefund = async (bookingId, reason) => {
+  const locked = await Booking.findOneAndUpdate(
+    { _id: bookingId, status: "pending" },
+    { $set: { status: "expired" } },
+    { returnDocument: "after" }
+  );
+  if (!locked) return null; // someone accepted it / already expired
+
+  const payment = await Payment.findOne({ razorpayPaymentId: locked.razorpayPaymentId });
+  const result = await refundPayment(payment, reason);
+  await Booking.updateOne({ _id: locked._id }, { $set: { refundStatus: result } });
+
+  const fresh = await Booking.findById(locked._id).populate("mentor", POPULATE_MENTOR);
+  if (fresh?.fresher) {
+    notify({
+      user: fresh.fresher,
+      role: "fresher",
+      title: result === "refunded" ? "Request expired - refund started" : "Request expired",
+      message:
+        result === "refunded"
+          ? `${reason} Your payment of ₹${fresh.amount} is being refunded.`
+          : `${reason} Refund is processing, we will update you soon.`,
+      type: "payment",
+      link: "/Home",
+    });
+    emitToUser(fresh.fresher, "booking:updated", toClient(fresh));
+  }
+  return fresh;
+};
+
 const broadcastLoop = async (req, mentors, booking, payload, startsAt, endsAt, requestGroupId, notified) => {
   for (const m of mentors) {
+    // direct request (book again): fresher chose this mentor, so skip company/gender/language filters
     const reason =
-      whyNot(m, booking) ||
+      (booking.preferredMentor ? "" : whyNot(m, booking)) ||
       (socketIdsOf(req.app, m._id).length === 0 ? "not online" : "") ||
       ((await hasConflict(m._id, startsAt, endsAt, requestGroupId)) ? "conflict" : "");
     if (reason) continue;
@@ -197,7 +231,7 @@ const broadcastLoop = async (req, mentors, booking, payload, startsAt, endsAt, r
     notify({
       user: m._id,
       role: "mentor",
-      title: "New session request",
+      title: booking.preferredMentor ? "A fresher requested you again" : "New session request",
       message: `${booking.fresherName} wants a session.`,
       type: "session",
       link: "/mentor/home",
@@ -214,6 +248,9 @@ exports.createRequest = async (req, res) => {
     const sd = body.sessionDetails || {};
     const requestGroupId = String(body.requestGroupId || "").trim();
     const paymentId = String(body.razorpayPaymentId || "").trim();
+    const preferredMentorId = mongoose.Types.ObjectId.isValid(body.preferredMentorId)
+      ? String(body.preferredMentorId)
+      : null;
 
     if (!requestGroupId || !paymentId) return fail(res, 400, "requestGroupId and paymentId required");
 
@@ -234,6 +271,19 @@ exports.createRequest = async (req, res) => {
     const startsAt = parseSessionStart(sd.date, sd.time);
     if (!startsAt || startsAt.getTime() < Date.now() + MIN_LEAD_MS) return reject(400, "Invalid date/time");
 
+    // book again: the chosen mentor must still be approved + active (checked BEFORE the booking is created)
+    let preferredMentor = null;
+    if (preferredMentorId) {
+      preferredMentor = await Mentor.findOne({
+        _id: preferredMentorId,
+        verificationStatus: "approved",
+        accountStatus: "active",
+      })
+        .select(MENTOR_FIELDS)
+        .lean();
+      if (!preferredMentor) return reject(400, "Selected mentor is not available.");
+    }
+
     const fresherId = req.user?.role === "fresher" ? req.user.id : payment.fresher ? String(payment.fresher) : null;
     const fresherDoc = fresherId ? await Fresher.findById(fresherId).select("name email").lean() : null;
 
@@ -242,7 +292,7 @@ exports.createRequest = async (req, res) => {
       fresher: fresherId || null,
       fresherName: fresherDoc?.name || body.requester?.fullName || "Fresher",
       fresherEmail: fresherDoc?.email || body.requester?.email || "",
-      companyName: String(body.companyName || "").trim(),
+      companyName: String(body.companyName || preferredMentor?.currentCompany || "").trim(),
       sessionType: String(sd.sessionType || "").slice(0, 60),
       reason: String(sd.reason || "").slice(0, 1000),
       role: String(sd.role || ""),
@@ -255,6 +305,7 @@ exports.createRequest = async (req, res) => {
       endsAt: new Date(startsAt.getTime() + minutes * 60000),
       expiresAt: startsAt,
       razorpayPaymentId: paymentId,
+      preferredMentor: preferredMentor ? preferredMentor._id : null,
     });
 
     await linkPaymentToRequest({
@@ -266,9 +317,10 @@ exports.createRequest = async (req, res) => {
       duration: minutes,
     });
 
-    const mentors = await Mentor.find({ verificationStatus: "approved", accountStatus: "active" })
-      .select(MENTOR_FIELDS)
-      .lean();
+    const mentors = preferredMentor
+      ? [preferredMentor]
+      : await Mentor.find({ verificationStatus: "approved", accountStatus: "active" }).select(MENTOR_FIELDS).lean();
+
     const notified = [];
     await broadcastLoop(req, mentors, booking, toMentorPayload(booking), startsAt, booking.endsAt, requestGroupId, notified);
     if (notified.length) await Booking.updateOne({ _id: booking._id }, { $set: { notified } });
@@ -294,8 +346,18 @@ exports.updateRequest = async (req, res) => {
     const booking = await Booking.findOne({ requestGroupId });
     if (!booking) return fail(res, 404, "Request not found");
 
+    // direct request: only the chosen mentor may answer it
+    const isDirect = Boolean(booking.preferredMentor);
+    if (isDirect && String(booking.preferredMentor) !== String(mentorId)) {
+      return fail(res, 403, "This request is for another mentor");
+    }
+
     if (status === "rejected") {
       await Booking.updateOne({ _id: booking._id }, { $addToSet: { declinedBy: mentorId } });
+      // the only mentor who could take it said no -> expire now and refund (don't make the fresher wait)
+      if (isDirect && booking.status === "pending") {
+        await expireAndRefund(booking._id, "The mentor you selected is not available for this slot.");
+      }
       return res.json({ success: true, status: "rejected" });
     }
 
@@ -398,8 +460,6 @@ exports.mentorPending = async (req, res) => {
     return fail(res, 500, "Failed to load requests");
   }
 };
-
-/* ============================ COMPLETION ============================ */
 
 /* ============================ COMPLETION ============================ */
 
@@ -518,6 +578,7 @@ exports.confirmCompletion = async (req, res) => {
     return fail(res, 500, "Unable to confirm session");
   }
 };
+
 /* ============================ FRESHER NOTIFICATIONS ============================ */
 
 exports.getFresherNotifications = async (req, res) => {
@@ -563,7 +624,27 @@ exports.startSchedulers = (app) => {
     if (mongoose.connection.readyState !== 1) return;
     try {
       const now = new Date();
-      await Booking.updateMany({ status: "pending", expiresAt: { $lte: now } }, { $set: { status: "expired" } });
+
+      // nobody accepted before the start time -> expire + refund
+      const stale = await Booking.find({ status: "pending", expiresAt: { $lte: now } }).select("_id");
+      for (const b of stale) {
+        await expireAndRefund(b._id, "No employee accepted your request in time.");
+      }
+
+      // retry refunds that failed earlier (expired + refundStatus failed)
+      const failedRefunds = await Booking.find({
+        status: "expired",
+        refundStatus: "failed",
+        razorpayPaymentId: { $ne: "" },
+      }).limit(10);
+      for (const b of failedRefunds) {
+        const payment = await Payment.findOne({ razorpayPaymentId: b.razorpayPaymentId });
+        const result = await refundPayment(payment, "Retry: request expired");
+        if (result === "refunded") {
+          await Booking.updateOne({ _id: b._id }, { $set: { refundStatus: "refunded" } });
+          if (b.fresher) emitToUser(b.fresher, "booking:updated", { requestGroupId: b.requestGroupId, refundStatus: "refunded" });
+        }
+      }
 
       // safety net: a running timer that is overdue gets finished
       const overdue = await Booking.find({
@@ -591,15 +672,17 @@ exports.pushPendingToMentor = async (app, mentorId) => {
     const mentor = await Mentor.findById(mentorId).select(`${MENTOR_FIELDS} verificationStatus accountStatus`).lean();
     if (!mentor || mentor.verificationStatus !== "approved" || mentor.accountStatus !== "active") return;
 
+    // open requests: normal ones + direct ones addressed to THIS mentor only
     const open = await Booking.find({
       status: "pending",
       expiresAt: { $gt: new Date() },
       declinedBy: { $ne: mentor._id },
+      $or: [{ preferredMentor: null }, { preferredMentor: { $exists: false } }, { preferredMentor: mentor._id }],
     });
 
     for (const b of open) {
       const reason =
-        whyNot(mentor, b) ||
+        (b.preferredMentor ? "" : whyNot(mentor, b)) ||
         ((await hasConflict(mentor._id, b.startsAt, b.endsAt, b.requestGroupId)) ? "has another session within 30 minutes" : "");
       if (reason) continue;
 
