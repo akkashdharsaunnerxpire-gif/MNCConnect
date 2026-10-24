@@ -14,6 +14,7 @@ import SuspenseLoader from "./Commoncomponents/SuspenseLoader";
 import { LoadingProvider, useLoading } from "./context/LoadingContext";
 import { registerLoadingHandlers } from "./api/axios";
 import { registerFetchHandlers } from "./api/fetchWithLoading";
+import { isFresherLoggedIn, isMentorLoggedIn } from "./utils/auth";
 
 // Lazy load = bundle size kuraiyum + route load progress kaattum
 const Landing = lazy(() => import("./Landingpages/Landing"));
@@ -25,9 +26,8 @@ const MentorRoutes = lazy(() => import("./Routes/MentorRoutes"));
 const FresherRoutes = lazy(() => import("./Routes/FresherRoutes"));
 
 // ================= AUTH HELPERS =================
-
-const isMentorLoggedIn = () => Boolean(localStorage.getItem("mnc_mentor_token"));
-const isFresherLoggedIn = () => Boolean(localStorage.getItem("fresher_token"));
+// isMentorLoggedIn / isFresherLoggedIn now come from ./utils/auth
+// (they check the JWT expiry and clear expired tokens)
 
 const HomeRoute = () => {
   if (isMentorLoggedIn()) return <Navigate to="/mentor/home" replace />;

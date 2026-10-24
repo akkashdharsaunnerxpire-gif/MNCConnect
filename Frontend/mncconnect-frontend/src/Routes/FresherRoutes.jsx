@@ -18,10 +18,9 @@ import Notifications from "../FresherDashboard/pages/FresherNotifications";
 import Header from "../FresherDashboard/Component/Header";
 import BonusWallet from "../FresherDashboard/pages/FresherWallet";
 import MeetingRoom from "../Commoncomponents/Meetingroom";
+import { isFresherLoggedIn } from "../utils/auth";
 
-const isFresherLoggedIn = () =>
-  Boolean(localStorage.getItem("fresher_token"));
-
+// expired / missing token -> login (expired token is cleared inside isFresherLoggedIn)
 const FresherProtectedRoute = () => {
   if (!isFresherLoggedIn()) {
     return <Navigate to="/login" replace />;

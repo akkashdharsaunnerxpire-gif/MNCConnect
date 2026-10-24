@@ -1,4 +1,6 @@
 // src/services/fresherApi.js
+import { clearFresherSession } from "../utils/auth";
+
 export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 export const ENDPOINTS = {
@@ -27,7 +29,8 @@ export const PRICE_PER_30_MIN = 200; // ₹400 / hour. Keep equal to PRICE_PER_3
 export const priceFor = (minutes) => (minutes / 30) * PRICE_PER_30_MIN;
 
 export const DURATIONS = [30, 60, 90, 120, 150, 180, 210, 240];
-export const durationLabel = (m) => (m < 60 ? `${m} min` : m % 60 === 0 ? `${m / 60} hr` : `${Math.floor(m / 60)} hr 30 min`);
+export const durationLabel = (m) =>
+  m < 60 ? `${m} min` : m % 60 === 0 ? `${m / 60} hr` : `${Math.floor(m / 60)} hr 30 min`;
 
 export const getToken = () => localStorage.getItem("fresher_token") || "";
 
@@ -52,14 +55,40 @@ export const getUserId = () => {
   }
 };
 
+// only one redirect at a time (many requests can fail together)
+let redirectingToLogin = false;
+
+const sessionExpired = () => {
+  clearFresherSession(); // clear FIRST, so /login does not bounce back to /Home
+  if (!redirectingToLogin && window.location.pathname !== "/login") {
+    redirectingToLogin = true;
+    window.location.replace("/login");
+  }
+};
+
 export async function api(path, { method = "GET", body, token } = {}) {
+  const usingOwnToken = token === undefined; // true = the stored fresher token
   const t = token ?? getToken();
+
   const res = await fetch(`${API_URL}${path}`, {
     method,
-    headers: { "Content-Type": "application/json", ...(t ? { Authorization: `Bearer ${t}` } : {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...(t ? { Authorization: `Bearer ${t}` } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
+
   const data = await res.json().catch(() => ({}));
+
+  // token rejected by the server -> clear it and go to login (breaks the redirect loop)
+  if (res.status === 401 && usingOwnToken && t) {
+    sessionExpired();
+    const err = new Error("Session expired. Please login again.");
+    err.status = 401;
+    throw err;
+  }
+
   if (!res.ok || data.success === false) {
     const err = new Error(data.message || `Request failed (${res.status})`);
     err.status = res.status;
@@ -81,10 +110,15 @@ export const timeAgo = (value) => {
   const h = Math.floor(m / 60);
   if (h < 24) return `${h} hr ago`;
   const d = Math.floor(h / 24);
-  return d < 7 ? `${d} day${d > 1 ? "s" : ""} ago` : new Date(t).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  return d < 7
+    ? `${d} day${d > 1 ? "s" : ""} ago`
+    : new Date(t).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 };
 
-const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
 
 // "2026-10-20" -> "October 20, 2026"   (the format the backend / mentor app parse)
 export const toApiDate = (iso) => {
