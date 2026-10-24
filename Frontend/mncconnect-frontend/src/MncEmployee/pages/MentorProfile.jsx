@@ -190,11 +190,11 @@ const MentorProfile = () => {
 
   if (error || !profile) {
     return (
-      <div className="flex items-center justify-center min-h-screen px-5 bg-slate-50">
-        <div className="w-full max-w-md p-8 text-center bg-white shadow-xl rounded-3xl">
+      <div className="flex items-center justify-center min-h-screen px-4 sm:px-5 bg-slate-50">
+        <div className="w-full max-w-md p-6 sm:p-8 text-center bg-white shadow-xl rounded-3xl">
           <ShieldCheck size={48} className="mx-auto text-red-500" />
-          <h2 className="mt-4 text-xl font-bold text-slate-900">Profile unavailable</h2>
-          <p className="mt-2 text-sm text-slate-500">{error || "Mentor data could not be loaded."}</p>
+          <h2 className="mt-4 text-lg sm:text-xl font-bold text-slate-900">Profile unavailable</h2>
+          <p className="mt-2 text-sm text-slate-500 break-words">{error || "Mentor data could not be loaded."}</p>
           <Link to="/mentor/home" className="inline-block px-6 py-3 mt-6 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700">Back to Home</Link>
         </div>
       </div>
@@ -202,8 +202,9 @@ const MentorProfile = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="lg:hidden fixed top-4 left-4 z-50">
+    <div className="min-h-screen overflow-x-hidden bg-slate-50">
+      {/* Mobile menu button */}
+      <div className="lg:hidden fixed top-3 left-3 sm:top-4 sm:left-4 z-50">
         <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 bg-white rounded-lg shadow-lg" aria-label="Toggle menu">
           <Menu size={22} />
         </button>
@@ -211,9 +212,10 @@ const MentorProfile = () => {
       {sidebarOpen && <div onClick={() => setSidebarOpen(false)} className="fixed inset-0 z-40 bg-black/30 lg:hidden" />}
 
       <div className="flex">
-        <aside className={`fixed lg:static top-0 left-0 z-50 w-64 shrink-0 h-screen bg-white border-r border-slate-100 px-5 py-6 flex flex-col transition-transform duration-300 lg:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
+        {/* SIDEBAR: drawer on mobile, sticky column on desktop */}
+        <aside className={`fixed lg:sticky top-0 left-0 z-50 w-64 max-w-[85vw] shrink-0 h-[100dvh] overflow-y-auto bg-white border-r border-slate-100 px-5 py-6 flex flex-col transition-transform duration-300 lg:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
           <div className="flex items-center gap-2 px-1 mb-6">
-            <div className="w-8 h-8 rounded-lg bg-orange-500 flex items-center justify-center">
+            <div className="w-8 h-8 shrink-0 rounded-lg bg-orange-500 flex items-center justify-center">
               <Stethoscope size={18} className="text-white" />
             </div>
             <span className="text-[15px] font-semibold text-slate-900">MentorConnect<span className="text-orange-500">_</span></span>
@@ -221,7 +223,7 @@ const MentorProfile = () => {
 
           <div className="px-1 pb-5 mb-4 border-b border-slate-100">
             <div className="flex items-center gap-3">
-              <img src={profile.avatar} alt={profile.name} className="w-11 h-11 rounded-full object-cover border-2 border-blue-100" />
+              <img src={profile.avatar} alt={profile.name} className="w-11 h-11 shrink-0 rounded-full object-cover border-2 border-blue-100" />
               <div className="min-w-0">
                 <p className="font-semibold text-sm text-slate-900 truncate">{profile.name}</p>
                 <p className="text-xs text-slate-400 truncate">{profile.designation}</p>
@@ -236,19 +238,19 @@ const MentorProfile = () => {
                 <button key={key} onClick={() => { setActiveTab(key); setSidebarOpen(false); }}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium border-l-2 transition text-left ${isActive ? "bg-orange-50 text-orange-600 border-orange-500" : "text-slate-500 border-transparent hover:bg-slate-50 hover:text-slate-700"}`}
                 >
-                  <Icon size={18} />
+                  <Icon size={18} className="shrink-0" />
                   <span>{label}</span>
                 </button>
               );
             })}
             <div className="my-3 border-t border-slate-100" />
             <Link to="/mentor/settings" className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-500 hover:bg-slate-50 hover:text-slate-700">
-              <Edit3 size={18} />
+              <Edit3 size={18} className="shrink-0" />
               <span>Settings</span>
             </Link>
           </nav>
 
-          <div className="rounded-2xl bg-gradient-to-br from-blue-600 to-sky-500 p-4 text-white">
+          <div className="mt-4 rounded-2xl bg-gradient-to-br from-blue-600 to-sky-500 p-4 text-white">
             <div className="flex items-center gap-2 mb-1">
               <Award size={16} />
               <span className="text-xs font-semibold">Premium Mentor</span>
@@ -257,36 +259,41 @@ const MentorProfile = () => {
           </div>
         </aside>
 
-        <main className="flex-1 px-5 sm:px-8 py-6 max-w-6xl">
-          <div className="flex items-center justify-between mb-6">
-            <div className="text-sm text-slate-400">
+        {/* MAIN: pt-16 on mobile so the hamburger never overlaps content */}
+        <main className="flex-1 min-w-0 w-full max-w-6xl px-3 sm:px-6 lg:px-8 pt-16 pb-8 lg:pt-6">
+          <div className="flex items-center justify-between gap-3 mb-4 sm:mb-6">
+            <div className="min-w-0 truncate text-sm text-slate-400">
               <span>Mentor</span>
               <span className="mx-2">/</span>
               <span>Profile</span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               <button aria-label="Share" className="w-9 h-9 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50"><Share2 size={16} /></button>
-              <button onClick={() => setEditOpen(true)} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">
-                <Edit3 size={16} /> Edit Profile
+              <button onClick={() => setEditOpen(true)} className="flex items-center gap-2 px-3 sm:px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">
+                <Edit3 size={16} /> <span className="hidden min-[380px]:inline">Edit Profile</span><span className="min-[380px]:hidden">Edit</span>
               </button>
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 mb-6">
-            <div className="flex flex-col md:flex-row md:items-center gap-6">
-              <div className="flex items-center gap-4">
-                <img src={profile.avatar} alt={profile.name} className="w-16 h-16 rounded-2xl object-cover" />
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h1 className="text-lg font-semibold text-slate-900">{profile.name}</h1>
+          {/* PROFILE HEADER CARD */}
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 mb-4 sm:mb-6">
+            <div className="flex flex-col md:flex-row md:items-center gap-5 sm:gap-6">
+              <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+                <img src={profile.avatar} alt={profile.name} className="w-14 h-14 sm:w-16 sm:h-16 shrink-0 rounded-2xl object-cover" />
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h1 className="text-base sm:text-lg font-semibold text-slate-900 break-words">{profile.name}</h1>
                     {profile.isVerified && <span className="px-2 py-0.5 text-[10px] font-semibold text-blue-600 bg-blue-50 rounded-full">Verified</span>}
                   </div>
-                  <p className="text-sm text-slate-500 mt-0.5">{profile.designation} at {profile.company}</p>
-                  <p className="flex items-center gap-1.5 text-sm text-slate-400 mt-1"><Mail size={14} />{profile.email}</p>
+                  <p className="text-sm text-slate-500 mt-0.5 break-words">{profile.designation} at {profile.company}</p>
+                  <p className="flex items-start gap-1.5 text-sm text-slate-400 mt-1 min-w-0">
+                    <Mail size={14} className="mt-0.5 shrink-0" />
+                    <span className="min-w-0 break-all">{profile.email}</span>
+                  </p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-8 gap-y-4 md:ml-auto">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 sm:gap-x-8 gap-y-4 md:ml-auto">
                 <Field label="Location" value={profile.location} />
                 <Field label="Experience" value={`${profile.experience} yrs`} />
                 <Field label="Status" value={
@@ -302,11 +309,12 @@ const MentorProfile = () => {
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+          {/* TAB CONTENT */}
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6">
             {activeTab === "personal" && (
               <div>
                 <h2 className="text-sm font-semibold text-slate-900 mb-4">Personal Information</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
                   <DetailItem icon={<User size={16} />} label="Full Name" value={profile.name} />
                   <DetailItem icon={<Mail size={16} />} label="Email" value={profile.email} />
                   <DetailItem icon={<Phone size={16} />} label="Phone" value={profile.phone} />
@@ -318,7 +326,7 @@ const MentorProfile = () => {
                 </div>
                 <div className="mt-6 pt-6 border-t border-slate-100">
                   <h3 className="text-sm font-semibold text-slate-700 mb-2">About Me</h3>
-                  <p className="text-sm text-slate-600 leading-relaxed">{profile.bio}</p>
+                  <p className="text-sm text-slate-600 leading-relaxed break-words">{profile.bio}</p>
                 </div>
               </div>
             )}
@@ -329,7 +337,7 @@ const MentorProfile = () => {
                 <div className="flex flex-wrap gap-2">
                   {profile.skills.length > 0 ? (
                     profile.skills.map((skill, index) => (
-                      <span key={index} className="px-4 py-2 bg-blue-50 text-blue-600 rounded-lg text-sm font-medium">{skill}</span>
+                      <span key={index} className="px-3 sm:px-4 py-1.5 sm:py-2 bg-blue-50 text-blue-600 rounded-lg text-sm font-medium break-words">{skill}</span>
                     ))
                   ) : (
                     <p className="text-slate-400 text-sm">No skills added yet</p>
@@ -349,7 +357,7 @@ const MentorProfile = () => {
             {activeTab === "documents" && (
               <div>
                 <h2 className="text-sm font-semibold text-slate-900 mb-4">Uploaded Documents</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
                   <DocumentCard title="Offer Letter" url={profile.offerLetter} />
                   <DocumentCard title="Employee ID Proof" url={profile.employeeIdProof} />
                   {profile.additionalProof && <DocumentCard title="Additional Proof" url={profile.additionalProof} />}
@@ -358,7 +366,7 @@ const MentorProfile = () => {
             )}
           </div>
 
-          <div className="grid grid-cols-3 gap-4 mt-6">
+          <div className="grid grid-cols-3 gap-2 sm:gap-4 mt-4 sm:mt-6">
             <StatCard label="Sessions" value={profile.totalSessions} icon={BriefcaseBusiness} />
             <StatCard label="Rating" value={profile.rating} icon={Star} iconClass="text-yellow-400 fill-yellow-400" />
             <StatCard label="Reviews" value={profile.totalReviews} icon={FileText} />
@@ -371,14 +379,14 @@ const MentorProfile = () => {
       )}
 
       {toast && (
-        <div className="fixed bottom-6 right-6 z-[100]">
-          <div className="flex items-center gap-3 rounded-2xl bg-white px-5 py-4 shadow-2xl ring-1 ring-black/5">
-            <div className={`flex h-8 w-8 items-center justify-center rounded-full ${toast.type === "success" ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"}`}>
+        <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:bottom-6 z-[100]">
+          <div className="flex items-center gap-3 rounded-2xl bg-white px-4 sm:px-5 py-3 sm:py-4 shadow-2xl ring-1 ring-black/5 sm:max-w-sm">
+            <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${toast.type === "success" ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"}`}>
               {toast.type === "success" ? <Check size={15} /> : <AlertTriangle size={15} />}
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-sm font-semibold text-slate-900">{toast.type === "success" ? "Success" : "Error"}</p>
-              <p className="text-xs text-slate-500">{toast.message}</p>
+              <p className="text-xs text-slate-500 break-words">{toast.message}</p>
             </div>
           </div>
         </div>
@@ -450,86 +458,90 @@ const EditMentorModal = ({ mentor, saving, onClose, onSave }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-      <div className="relative max-h-[90vh] w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white px-6 py-5">
-          <h2 className="text-lg font-semibold text-slate-900">Edit Profile</h2>
-          <button type="button" onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100">
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4 backdrop-blur-sm">
+      {/* flex-col: header + footer stay put, only the form body scrolls */}
+      <div className="relative flex max-h-[95dvh] sm:max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl sm:rounded-2xl bg-white shadow-2xl">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-100 bg-white px-4 py-4 sm:px-6 sm:py-5">
+          <h2 className="text-base sm:text-lg font-semibold text-slate-900">Edit Profile</h2>
+          <button type="button" onClick={onClose} aria-label="Close" className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100">
             <X size={17} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="max-h-[calc(90vh-140px)] overflow-y-auto px-6 py-6">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {EDITABLE_FIELDS.map(({ key, label, type, placeholder, required }) => (
-              <div key={key} className={key === "name" ? "sm:col-span-2" : ""}>
-                <label className="mb-1.5 block text-xs font-medium text-slate-500">
-                  {label}
-                  {required && <span className="ml-1 text-red-500">*</span>}
-                </label>
-                <input
-                  type={type || "text"}
-                  value={form[key]}
-                  required={required}
-                  onChange={(e) => updateField(key, e.target.value)}
-                  placeholder={placeholder || `Enter ${label.toLowerCase()}`}
-                  className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-800 outline-none placeholder:text-slate-400 transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                />
-              </div>
-            ))}
-          </div>
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-6">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {EDITABLE_FIELDS.map(({ key, label, type, placeholder, required }) => (
+                <div key={key} className={key === "name" ? "sm:col-span-2" : ""}>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-500">
+                    {label}
+                    {required && <span className="ml-1 text-red-500">*</span>}
+                  </label>
+                  <input
+                    type={type || "text"}
+                    value={form[key]}
+                    required={required}
+                    onChange={(e) => updateField(key, e.target.value)}
+                    placeholder={placeholder || `Enter ${label.toLowerCase()}`}
+                    className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-800 outline-none placeholder:text-slate-400 transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
+              ))}
+            </div>
 
-          <div className="mt-4">
-            <label className="mb-1.5 block text-xs font-medium text-slate-500">About Me</label>
-            <textarea
-              value={form.bio}
-              onChange={(e) => updateField("bio", e.target.value)}
-              rows={4}
-              placeholder="Tell mentees about yourself..."
-              className="w-full resize-none rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-800 outline-none placeholder:text-slate-400 transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
-
-          <div className="mt-4">
-            <label className="mb-1.5 block text-xs font-medium text-slate-500">Skills / Languages</label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={skillInput}
-                onChange={(e) => setSkillInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSkill(); } }}
-                placeholder="e.g. React, Python, Java"
-                className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            <div className="mt-4">
+              <label className="mb-1.5 block text-xs font-medium text-slate-500">About Me</label>
+              <textarea
+                value={form.bio}
+                onChange={(e) => updateField("bio", e.target.value)}
+                rows={4}
+                placeholder="Tell mentees about yourself..."
+                className="w-full resize-none rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-800 outline-none placeholder:text-slate-400 transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               />
-              <button type="button" onClick={addSkill} className="flex items-center gap-1 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700">
-                <Plus size={16} /> Add
-              </button>
             </div>
 
-            <div className="mt-3 flex min-h-[44px] flex-wrap gap-2 rounded-xl border border-dashed border-slate-200 p-3">
-              {form.languages.length === 0 ? (
-                <p className="w-full py-1 text-center text-sm text-slate-400">No skills added yet</p>
-              ) : (
-                form.languages.map((skill) => (
-                  <span key={skill} className="flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700">
-                    {skill}
-                    <button type="button" onClick={() => removeSkill(skill)} className="hover:text-red-500"><X size={13} /></button>
-                  </span>
-                ))
-              )}
+            <div className="mt-4">
+              <label className="mb-1.5 block text-xs font-medium text-slate-500">Skills / Languages</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={skillInput}
+                  onChange={(e) => setSkillInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSkill(); } }}
+                  placeholder="e.g. React, Python, Java"
+                  className="min-w-0 flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                />
+                <button type="button" onClick={addSkill} className="flex shrink-0 items-center gap-1 rounded-xl bg-blue-600 px-3 sm:px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700">
+                  <Plus size={16} /> Add
+                </button>
+              </div>
+
+              <div className="mt-3 flex min-h-[44px] flex-wrap gap-2 rounded-xl border border-dashed border-slate-200 p-3">
+                {form.languages.length === 0 ? (
+                  <p className="w-full py-1 text-center text-sm text-slate-400">No skills added yet</p>
+                ) : (
+                  form.languages.map((skill) => (
+                    <span key={skill} className="flex max-w-full items-center gap-2 rounded-full bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700">
+                      <span className="min-w-0 break-words">{skill}</span>
+                      <button type="button" onClick={() => removeSkill(skill)} aria-label={`Remove ${skill}`} className="shrink-0 hover:text-red-500"><X size={13} /></button>
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="mt-6 pt-6 border-t border-slate-100">
+              <label className="mb-3 block text-xs font-medium text-slate-500">Documents</label>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <DocumentUploadField label="Offer Letter" currentUrl={form.offerLetter} file={form.offerLetterFile} onChange={(file) => updateFile("offerLetterFile", file)} />
+                <DocumentUploadField label="Employee ID Proof" currentUrl={form.employeeIdProof} file={form.employeeIdProofFile} onChange={(file) => updateFile("employeeIdProofFile", file)} />
+                <DocumentUploadField label="Additional Proof" currentUrl={form.additionalProof} file={form.additionalProofFile} onChange={(file) => updateFile("additionalProofFile", file)} />
+              </div>
             </div>
           </div>
 
-          <div className="mt-6 pt-6 border-t border-slate-100">
-            <label className="mb-3 block text-xs font-medium text-slate-500">Documents</label>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <DocumentUploadField label="Offer Letter" currentUrl={form.offerLetter} file={form.offerLetterFile} onChange={(file) => updateFile("offerLetterFile", file)} />
-              <DocumentUploadField label="Employee ID Proof" currentUrl={form.employeeIdProof} file={form.employeeIdProofFile} onChange={(file) => updateFile("employeeIdProofFile", file)} />
-              <DocumentUploadField label="Additional Proof" currentUrl={form.additionalProof} file={form.additionalProofFile} onChange={(file) => updateFile("additionalProofFile", file)} />
-            </div>
-          </div>
-
-          <div className="sticky bottom-0 mt-8 flex flex-col-reverse gap-3 border-t border-slate-100 bg-white pt-5 sm:flex-row sm:justify-end">
+          {/* footer always visible */}
+          <div className="flex shrink-0 flex-col-reverse gap-2 sm:gap-3 border-t border-slate-100 bg-white px-4 py-3 sm:flex-row sm:justify-end sm:px-6 sm:py-4">
             <button type="button" onClick={onClose} className="rounded-full border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-500 transition hover:bg-slate-50">
               Cancel
             </button>
@@ -547,7 +559,7 @@ const EditMentorModal = ({ mentor, saving, onClose, onSave }) => {
 const DocumentUploadField = ({ label, currentUrl, file, onChange }) => {
   const inputId = `doc-${label.replace(/\s+/g, "-").toLowerCase()}`;
   return (
-    <div className="rounded-xl border border-slate-200 p-3">
+    <div className="min-w-0 rounded-xl border border-slate-200 p-3">
       <p className="text-sm font-medium text-slate-700">{label}</p>
       {file ? (
         <p className="mt-1 truncate text-xs font-medium text-blue-600">Selected: {file.name}</p>
@@ -567,24 +579,24 @@ const DocumentUploadField = ({ label, currentUrl, file, onChange }) => {
 };
 
 const Field = ({ label, value }) => (
-  <div>
+  <div className="min-w-0">
     <p className="text-[11px] text-slate-400 mb-0.5">{label}</p>
-    <p className="text-sm font-medium text-slate-900">{value}</p>
+    <p className="text-sm font-medium text-slate-900 break-words">{value}</p>
   </div>
 );
 
 const DetailItem = ({ icon, label, value }) => (
-  <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
-    <div className="text-slate-400">{icon}</div>
-    <div>
+  <div className="flex min-w-0 items-center gap-3 p-3 bg-slate-50 rounded-lg">
+    <div className="shrink-0 text-slate-400">{icon}</div>
+    <div className="min-w-0">
       <p className="text-[10px] text-slate-400 uppercase tracking-wider">{label}</p>
-      <p className="text-sm font-medium text-slate-900">{value || "Not provided"}</p>
+      <p className="text-sm font-medium text-slate-900 break-words">{value || "Not provided"}</p>
     </div>
   </div>
 );
 
 const DocumentCard = ({ title, url }) => (
-  <div className="p-4 border border-slate-100 rounded-lg">
+  <div className="min-w-0 p-4 border border-slate-100 rounded-lg">
     <p className="text-sm font-medium text-slate-700">{title}</p>
     {url ? (
       <a href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 mt-2 text-blue-600 hover:underline text-sm">
@@ -597,10 +609,10 @@ const DocumentCard = ({ title, url }) => (
 );
 
 const StatCard = ({ label, value, icon: Icon, iconClass = "text-blue-500" }) => (
-  <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 text-center">
-    <Icon size={18} className={`mx-auto mb-2 ${iconClass}`} />
-    <div className="text-xl font-semibold text-slate-900">{value}</div>
-    <p className="text-xs text-slate-400">{label}</p>
+  <div className="min-w-0 bg-white rounded-2xl border border-slate-100 shadow-sm p-3 sm:p-4 text-center">
+    <Icon size={18} className={`mx-auto mb-1.5 sm:mb-2 ${iconClass}`} />
+    <div className="text-lg sm:text-xl font-semibold text-slate-900 truncate">{value}</div>
+    <p className="text-[11px] sm:text-xs text-slate-400">{label}</p>
   </div>
 );
 

@@ -228,41 +228,44 @@ const MentorSessions = () => {
     navigate(`/mentor/meeting/${encodeURIComponent(session.id)}`);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-white via-sky-50 to-blue-100 text-slate-800">
-      <main className="relative z-10 mx-auto max-w-7xl px-5 py-8">
-        <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex w-fit gap-2 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-            {TABS.map((tab) => {
-              const active = activeTab === tab;
-              return (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setActiveTab(tab)}
-                  className={`flex items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2.5 text-sm font-medium transition ${
-                    active
-                      ? "bg-blue-600 text-white shadow-sm"
-                      : "text-slate-500 hover:bg-blue-50 hover:text-blue-600"
-                  }`}
-                >
-                  {tab}
-                  <span
-                    className={`rounded-md px-1.5 py-0.5 text-[10px] ${active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}
+    <div className="min-h-screen overflow-x-hidden bg-gradient-to-br from-white via-sky-50 to-blue-100 text-slate-800">
+      <main className="relative z-10 mx-auto max-w-7xl px-3 py-5 sm:px-5 sm:py-8">
+        <div className="mb-5 flex flex-col gap-3 sm:mb-6 sm:gap-4 lg:flex-row lg:items-center lg:justify-between">
+          {/* TABS - scroll sideways on small screens */}
+          <div className="-mx-3 px-3 sm:mx-0 sm:px-0 lg:max-w-[70%]">
+            <div className="flex max-w-full gap-1.5 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm sm:w-fit sm:gap-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {TABS.map((tab) => {
+                const active = activeTab === tab;
+                return (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setActiveTab(tab)}
+                    className={`flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium transition sm:px-4 sm:py-2.5 sm:text-sm ${
+                      active
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "text-slate-500 hover:bg-blue-50 hover:text-blue-600"
+                    }`}
                   >
-                    {counts[tab]}
-                  </span>
-                </button>
-              );
-            })}
+                    {tab}
+                    <span
+                      className={`rounded-md px-1.5 py-0.5 text-[10px] ${active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}
+                    >
+                      {counts[tab]}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:items-center sm:gap-3 lg:w-auto">
             <span
               className={`inline-flex items-center gap-1 text-xs font-medium ${connected ? "text-emerald-600" : "text-amber-600"}`}
             >
               <Radio size={12} /> {connected ? "Live" : "Reconnecting…"}
             </span>
-            <div className="relative w-full lg:w-80">
+            <div className="relative w-full sm:flex-1 lg:w-80 lg:flex-none">
               <Search
                 size={17}
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
@@ -279,7 +282,7 @@ const MentorSessions = () => {
         </div>
 
         {error && (
-          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 sm:p-4">
             {error}{" "}
             <button onClick={reload} className="ml-2 font-semibold underline">
               Retry
@@ -287,7 +290,7 @@ const MentorSessions = () => {
           </div>
         )}
 
-        <div className="space-y-4">
+        <div className="space-y-3 sm:space-y-4">
           {loading ? (
             <div className="flex justify-center py-20">
               <Loader2 className="animate-spin text-blue-600" />
@@ -425,7 +428,7 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
   );
 
   const secondaryBtn =
-    "flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50";
+    "flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50 sm:w-auto sm:px-4";
 
   const UnreadBadge = () =>
     unreadCount > 0 ? (
@@ -436,31 +439,35 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
 
   return (
     <>
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-200 hover:shadow-md">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center">
-          <div className="flex flex-1 items-center gap-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-blue-200 hover:shadow-md sm:p-5">
+        <div className="flex flex-col gap-4 sm:gap-5 lg:flex-row lg:items-center">
+          <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
             <img
               src={session.avatar}
               alt={session.name}
-              className="h-12 w-12 rounded-full border-2 border-blue-100 object-cover"
+              className="h-11 w-11 shrink-0 rounded-full border-2 border-blue-100 object-cover sm:h-12 sm:w-12"
             />
             <div className="min-w-0">
-              <h3 className="font-semibold text-slate-900">{session.name}</h3>
-              <p className="mt-0.5 text-xs text-slate-500">{session.role}</p>
-              <div className="mt-2 flex flex-wrap gap-2">
+              <h3 className="truncate font-semibold text-slate-900">
+                {session.name}
+              </h3>
+              <p className="mt-0.5 truncate text-xs text-slate-500">
+                {session.role}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5 sm:gap-2">
                 {session.topic && (
-                  <span className="rounded-lg bg-blue-50 px-2.5 py-1 text-[10px] font-medium text-blue-600">
+                  <span className="max-w-full truncate rounded-lg bg-blue-50 px-2.5 py-1 text-[10px] font-medium text-blue-600">
                     {session.topic}
                   </span>
                 )}
-                <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-[10px] font-medium text-slate-500">
+                <span className="max-w-full truncate rounded-lg bg-slate-100 px-2.5 py-1 text-[10px] font-medium text-slate-500">
                   {session.type}
                 </span>
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:w-[560px]">
+          <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-4 lg:w-[480px] xl:w-[560px]">
             <SessionInfo
               icon={<CalendarDays size={15} />}
               label="Date"
@@ -487,22 +494,25 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
         {/* LIVE TIMER BAR */}
         {timerRunning && (
           <div
-            className={`mt-4 flex items-center justify-between gap-4 rounded-xl border p-3 ${
+            className={`mt-4 flex flex-col gap-3 rounded-xl border p-3 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between min-[420px]:gap-4 ${
               isFinalWarning
                 ? "border-amber-200 bg-amber-50"
                 : "border-emerald-200 bg-emerald-50"
             }`}
           >
-            <div className="flex items-center gap-2.5">
+            <div className="flex min-w-0 items-start gap-2.5 sm:items-center">
               {isFinalWarning ? (
-                <AlertTriangle size={16} className="text-amber-600" />
+                <AlertTriangle
+                  size={16}
+                  className="mt-0.5 shrink-0 text-amber-600 sm:mt-0"
+                />
               ) : (
-                <span className="relative flex h-2.5 w-2.5">
+                <span className="relative mt-1 flex h-2.5 w-2.5 shrink-0 sm:mt-0">
                   <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-60 motion-safe:animate-ping" />
                   <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-600" />
                 </span>
               )}
-              <div>
+              <div className="min-w-0">
                 <p
                   className={`text-[11px] font-semibold ${isFinalWarning ? "text-amber-800" : "text-emerald-800"}`}
                 >
@@ -511,7 +521,7 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
                     : "Session in progress"}
                 </p>
                 <p
-                  className={`text-[10px] ${isFinalWarning ? "text-amber-700" : "text-emerald-600"}`}
+                  className={`break-words text-[10px] ${isFinalWarning ? "text-amber-700" : "text-emerald-600"}`}
                 >
                   {isFinalWarning
                     ? "Ask the fresher to confirm the session went well"
@@ -520,7 +530,7 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
               </div>
             </div>
             <div
-              className={`rounded-lg px-3 py-1.5 font-mono text-xl font-bold tabular-nums ${
+              className={`self-start rounded-lg px-3 py-1.5 font-mono text-lg font-bold tabular-nums sm:text-xl min-[420px]:self-auto ${
                 isFinalWarning
                   ? "bg-amber-200 text-amber-900"
                   : "bg-emerald-200 text-emerald-900"
@@ -531,11 +541,11 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
           </div>
         )}
 
-        <div className="mt-5 flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:mt-5 sm:pt-5 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-2">
             {isUpcoming && !hasEnded && (
               <>
-                <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
+                <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-emerald-500" />
                 <span className="text-xs font-medium text-emerald-600">
                   {timerRunning ? "Session in progress" : "Upcoming Session"}
                 </span>
@@ -543,7 +553,7 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
             )}
             {isUpcoming && hasEnded && (
               <>
-                <Clock3 size={16} className="text-slate-400" />
+                <Clock3 size={16} className="shrink-0 text-slate-400" />
                 <span className="text-xs font-medium text-slate-500">
                   Session ended · updating status…
                 </span>
@@ -551,7 +561,7 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
             )}
             {isAwaitingConfirmation && (
               <>
-                <ShieldCheck size={16} className="text-amber-500" />
+                <ShieldCheck size={16} className="shrink-0 text-amber-500" />
                 <span className="text-xs font-medium text-amber-700">
                   Waiting for fresher to confirm
                 </span>
@@ -559,7 +569,10 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
             )}
             {isCompleted && (
               <>
-                <CheckCircle2 size={16} className="text-emerald-500" />
+                <CheckCircle2
+                  size={16}
+                  className="shrink-0 text-emerald-500"
+                />
                 <span className="text-xs font-medium text-emerald-600">
                   Completed · Earnings released
                 </span>
@@ -567,7 +580,7 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
             )}
             {isCancelled && (
               <>
-                <XCircle size={16} className="text-red-500" />
+                <XCircle size={16} className="shrink-0 text-red-500" />
                 <span className="text-xs font-medium text-red-500">
                   Cancelled
                 </span>
@@ -575,7 +588,7 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
             )}
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
             {/* UPCOMING: Details + Message + Join */}
             {isUpcoming && !hasEnded && (
               <>
@@ -602,7 +615,7 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
                   type="button"
                   disabled={!joinable}
                   onClick={() => joinable && onJoin(session)}
-                  className={`flex min-w-[150px] items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-semibold transition ${btnStyle}`}
+                  className={`col-span-2 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-semibold transition sm:col-span-1 sm:w-auto sm:min-w-[150px] ${btnStyle}`}
                 >
                   {btnContent}
                 </button>
@@ -626,7 +639,7 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
                 <button
                   type="button"
                   onClick={() => setDetailsFor(session)}
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-medium text-slate-500 transition hover:bg-slate-100"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-medium text-slate-500 transition hover:bg-slate-100 sm:w-auto sm:px-4"
                 >
                   View Details
                 </button>
@@ -636,9 +649,9 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
         </div>
 
         {isUpcoming && !hasEnded && !isLive && !isJoinWindow && (
-          <div className="mt-4 flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] text-blue-600">
-            <Clock3 size={14} />
-            <span>
+          <div className="mt-4 flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] text-blue-600">
+            <Clock3 size={14} className="mt-0.5 shrink-0" />
+            <span className="min-w-0 break-words">
               Join opens at <strong>{fmtDateTime(joinOpenAt)}</strong>
               {sessionEndAt && (
                 <>
@@ -650,27 +663,27 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
           </div>
         )}
         {isUpcoming && isJoinWindow && (
-          <div className="mt-4 flex items-center gap-2 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-[11px] font-medium text-yellow-700">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-yellow-500" />
-            <span>
+          <div className="mt-4 flex items-start gap-2 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-[11px] font-medium text-yellow-700">
+            <span className="mt-1 h-2 w-2 shrink-0 animate-pulse rounded-full bg-yellow-500" />
+            <span className="min-w-0">
               The meeting room is open. Click "Join Now". The timer starts when
               you and the fresher are both inside.
             </span>
           </div>
         )}
         {isUpcoming && isLive && !timerRunning && (
-          <div className="mt-4 flex items-center gap-2 rounded-lg border border-green-100 bg-green-50 px-3 py-2 text-[11px] font-medium text-green-600">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
-            <span>
+          <div className="mt-4 flex items-start gap-2 rounded-lg border border-green-100 bg-green-50 px-3 py-2 text-[11px] font-medium text-green-600">
+            <span className="mt-1 h-2 w-2 shrink-0 animate-pulse rounded-full bg-green-500" />
+            <span className="min-w-0">
               Session time reached. The timer starts when you and the fresher
               are both inside.
             </span>
           </div>
         )}
         {isAwaitingConfirmation && (
-          <div className="mt-4 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-700">
-            <ShieldCheck size={14} />
-            <span>
+          <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-700">
+            <ShieldCheck size={14} className="mt-0.5 shrink-0" />
+            <span className="min-w-0">
               The timer has ended. Waiting for the fresher to confirm the
               session. Once they click "Yes", your earnings will be released.
             </span>
@@ -704,22 +717,28 @@ const SessionCard = ({ session, nowMs, timer, onJoin }) => {
 };
 
 const SessionInfo = ({ icon, label, value }) => (
-  <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+  <div className="min-w-0 rounded-xl border border-slate-100 bg-slate-50 p-2.5 sm:p-3">
     <div className="flex items-center gap-1.5 text-slate-400">
-      {icon}
-      <span className="text-[10px]">{label}</span>
+      <span className="shrink-0">{icon}</span>
+      <span className="truncate text-[10px]">{label}</span>
     </div>
-    <p className="mt-1.5 text-xs font-semibold text-slate-700">{value}</p>
+    <p className="mt-1.5 break-words text-[11px] font-semibold text-slate-700 sm:text-xs">
+      {value}
+    </p>
   </div>
 );
 
 const EmptyState = ({ title, description }) => (
-  <div className="rounded-2xl border border-slate-200 bg-white py-20 text-center shadow-sm">
+  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-14 text-center shadow-sm sm:py-20">
     <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50">
       <CalendarDays size={25} className="text-blue-500" />
     </div>
-    <h3 className="mt-5 text-lg font-semibold text-slate-900">{title}</h3>
-    <p className="mt-2 text-sm text-slate-500">{description}</p>
+    <h3 className="mt-5 text-base font-semibold text-slate-900 sm:text-lg">
+      {title}
+    </h3>
+    <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
+      {description}
+    </p>
   </div>
 );
 
