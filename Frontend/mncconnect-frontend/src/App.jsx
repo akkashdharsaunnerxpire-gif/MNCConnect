@@ -1,5 +1,5 @@
 // src/App.jsx
-import React, { useState } from "react";
+import React, { Suspense, lazy, useEffect } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -7,24 +7,27 @@ import {
   Navigate,
 } from "react-router-dom";
 
-import Landing from "./Landingpages/Landing";
 import LinearProgress from "./components/LinearProgress";
-import Auth from "./Authpage/Auth";
-import Login from "./Authpage/FresherAuth/FresherLoginRegister";
-import Forgetpassword from "./Authpage/FresherAuth/Forgetpassword";
-import MentorRoutes from "./Routes/MentorRoutes";
-import FresherRoutes from "./Routes/FresherRoutes";
-import FresherResetPassword from "./Authpage/FresherAuth/FresherResetPassword";
+import RouteProgress from "./Commoncomponents/RouteProgress";
+import SuspenseLoader from "./Commoncomponents/SuspenseLoader";
 
-import { LoadingContext } from "./context/LoadingContext";
+import { LoadingProvider, useLoading } from "./context/LoadingContext";
+import { registerLoadingHandlers } from "./api/axios";
+import { registerFetchHandlers } from "./api/fetchWithLoading";
+
+// Lazy load = bundle size kuraiyum + route load progress kaattum
+const Landing = lazy(() => import("./Landingpages/Landing"));
+const Auth = lazy(() => import("./Authpage/Auth"));
+const Login = lazy(() => import("./Authpage/FresherAuth/FresherLoginRegister"));
+const Forgetpassword = lazy(() => import("./Authpage/FresherAuth/Forgetpassword"));
+const FresherResetPassword = lazy(() => import("./Authpage/FresherAuth/FresherResetPassword"));
+const MentorRoutes = lazy(() => import("./Routes/MentorRoutes"));
+const FresherRoutes = lazy(() => import("./Routes/FresherRoutes"));
 
 // ================= AUTH HELPERS =================
 
-const isMentorLoggedIn = () =>
-  Boolean(localStorage.getItem("mnc_mentor_token"));
-
-const isFresherLoggedIn = () =>
-  Boolean(localStorage.getItem("fresher_token"));
+const isMentorLoggedIn = () => Boolean(localStorage.getItem("mnc_mentor_token"));
+const isFresherLoggedIn = () => Boolean(localStorage.getItem("fresher_token"));
 
 const HomeRoute = () => {
   if (isMentorLoggedIn()) return <Navigate to="/mentor/home" replace />;
@@ -32,60 +35,58 @@ const HomeRoute = () => {
   return <Landing />;
 };
 
+// ================= INNER APP =================
+
+function AppContent() {
+  const { isLoading, start, stop } = useLoading();
+
+  // Interceptors ku start/stop connect pannuvom
+  useEffect(() => {
+    registerLoadingHandlers(start, stop);
+    registerFetchHandlers(start, stop);
+  }, [start, stop]);
+
+  return (
+    <div className="min-h-screen bg-white font-sans text-gray-900">
+      <LinearProgress isLoading={isLoading} />
+      <RouteProgress />
+
+      <Suspense fallback={<SuspenseLoader />}>
+        <Routes>
+          <Route path="/" element={<HomeRoute />} />
+          <Route path="/auth" element={<Auth />} />
+
+          <Route
+            path="/login"
+            element={isFresherLoggedIn() ? <Navigate to="/Home" replace /> : <Login />}
+          />
+
+          <Route path="/forgot-password" element={<Forgetpassword />} />
+          <Route path="/reset-password/:token" element={<FresherResetPassword />} />
+
+          <Route path="/mentor/*" element={<MentorRoutes />} />
+          <Route path="/Home/*" element={<FresherRoutes />} />
+
+          <Route path="/profile" element={<Navigate to="/Home/profile" replace />} />
+          <Route path="/Mnclogos" element={<Navigate to="/Home/mnc-logos" replace />} />
+          <Route path="/employee-profile" element={<Navigate to="/mentor/register" replace />} />
+
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
+    </div>
+  );
+}
+
 // ================= APP =================
 
 function App() {
-  const [isLoading, setIsLoading] = useState(false);
-
   return (
-    <LoadingContext.Provider value={{ isLoading, setIsLoading }}>
+    <LoadingProvider>
       <Router>
-        <div className="min-h-screen bg-white font-sans text-gray-900">
-          <LinearProgress isLoading={isLoading} />
-
-          <Routes>
-            <Route path="/" element={<HomeRoute />} />
-
-            <Route path="/auth" element={<Auth />} />
-
-            <Route
-              path="/login"
-              element={
-                isFresherLoggedIn() ? (
-                  <Navigate to="/Home" replace />
-                ) : (
-                  <Login />
-                )
-              }
-            />
-
-            <Route path="/forgot-password" element={<Forgetpassword />} />
-            <Route
-              path="/reset-password/:token"
-              element={<FresherResetPassword />}
-            />
-
-            <Route path="/mentor/*" element={<MentorRoutes />} />
-            <Route path="/Home/*" element={<FresherRoutes />} />
-
-            <Route
-              path="/profile"
-              element={<Navigate to="/Home/profile" replace />}
-            />
-            <Route
-              path="/Mnclogos"
-              element={<Navigate to="/Home/mnc-logos" replace />}
-            />
-            <Route
-              path="/employee-profile"
-              element={<Navigate to="/mentor/register" replace />}
-            />
-
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </div>
+        <AppContent />
       </Router>
-    </LoadingContext.Provider>
+    </LoadingProvider>
   );
 }
 

@@ -14,92 +14,19 @@ import {
   Loader2,
   MessageSquare,
   Send,
+  Smile,
   X,
 } from "lucide-react";
 import socket from "../socket";
+import EmojiPicker from "./EmojiPicker";
+import {
+  playSendSound,
+  playReceiveSound,
+  unlockAudio,
+} from "../utils/chatSounds";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
-
-/* ---------------- sounds (no mp3 needed) ---------------- */
-let audioCtx = null;
-
-const getAudioCtx = () => {
-  if (typeof window === "undefined") return null;
-  const AC = window.AudioContext || window.webkitAudioContext;
-  if (!AC) return null;
-  if (!audioCtx) audioCtx = new AC();
-  return audioCtx;
-};
-
-// browsers block audio until the user interacts with the page once
-const unlockAudio = () => {
-  const ctx = getAudioCtx();
-  if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
-};
-
-const tone = (
-  ctx,
-  { freq, endFreq, start = 0, duration, volume = 0.15, type = "sine" },
-) => {
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  const t0 = ctx.currentTime + start;
-
-  osc.type = type;
-  osc.frequency.setValueAtTime(freq, t0);
-  if (endFreq) {
-    osc.frequency.exponentialRampToValueAtTime(endFreq, t0 + duration);
-  }
-
-  gain.gain.setValueAtTime(0.0001, t0);
-  gain.gain.exponentialRampToValueAtTime(volume, t0 + 0.01);
-  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
-
-  osc.connect(gain);
-  gain.connect(ctx.destination);
-  osc.start(t0);
-  osc.stop(t0 + duration + 0.05);
-};
-
-// short "tick" when I send a message (louder)
-const playSendSound = () => {
-  try {
-    const ctx = getAudioCtx();
-    if (!ctx) return;
-    unlockAudio();
-
-    // 2 tones layer panni sound clear ah, loud ah kekum
-    tone(ctx, {
-      freq: 1500,
-      endFreq: 900,
-      duration: 0.09,
-      volume: 0.5,
-      type: "triangle",
-    });
-    tone(ctx, {
-      freq: 750,
-      endFreq: 450,
-      duration: 0.09,
-      volume: 0.35,
-      type: "sine",
-    });
-  } catch {
-    /* ignore audio errors */
-  }
-};
-
-// WhatsApp-like "pop-pop" when a message arrives
-const playReceiveSound = () => {
-  try {
-    const ctx = getAudioCtx();
-    if (!ctx) return;
-    unlockAudio();
-    tone(ctx, { freq: 880, duration: 0.12, volume: 0.18 });
-    tone(ctx, { freq: 1175, start: 0.1, duration: 0.2, volume: 0.18 });
-  } catch {
-    /* ignore audio errors */
-  }
-};
+const MAX_LEN = 1000;
 
 /* ---------------- helpers ---------------- */
 const fmtTime = (d) =>
@@ -139,6 +66,19 @@ const getMyId = (token) => {
   } catch {
     return "";
   }
+};
+
+// true when message has only 1-6 emojis (no normal text) -> show it big
+const isEmojiOnly = (text = "") => {
+  const t = text.trim();
+  if (!t) return false;
+  const pictos = t.match(/\p{Extended_Pictographic}/gu);
+  if (!pictos || pictos.length > 6) return false;
+
+  const rest = t
+    .replace(/\p{Extended_Pictographic}/gu, "")
+    .replace(/[\u200d\ufe0f\u{1F3FB}-\u{1F3FF}\s]/gu, "");
+  return rest.length === 0;
 };
 
 /**
@@ -202,6 +142,7 @@ export default function ChatPanel({
   const [peerOnline, setPeerOnline] = useState(false);
   const [err, setErr] = useState("");
   const [showJump, setShowJump] = useState(false);
+  const [showEmoji, setShowEmoji] = useState(false);
 
   const scrollRef = useRef(null);
   const textareaRef = useRef(null);
@@ -210,6 +151,9 @@ export default function ChatPanel({
   const soundedRef = useRef(new Set()); // message ids we already played sound for
   const incomingRef = useRef(onIncoming);
   incomingRef.current = onIncoming;
+
+  const emojiPickerRef = useRef(null);
+  const emojiBtnRef = useRef(null);
 
   // scroll bookkeeping
   const initialScrollDone = useRef(false);
@@ -289,7 +233,7 @@ export default function ChatPanel({
       addMessage(m);
 
       if (m.senderRole !== role) {
-        // 🔔 play "what-shap" sound once per incoming message
+        // play receive sound once per incoming message
         const id = String(m._id);
         if (!soundedRef.current.has(id)) {
           soundedRef.current.add(id);
@@ -435,12 +379,72 @@ export default function ChatPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [variant, onClose]);
 
+  /* ---------------- emoji picker: outside click / Esc / panel closed ---------------- */
+  useEffect(() => {
+    if (!showEmoji) return undefined;
+
+    const onDown = (e) => {
+      if (
+        emojiPickerRef.current?.contains(e.target) ||
+        emojiBtnRef.current?.contains(e.target)
+      ) {
+        return;
+      }
+      setShowEmoji(false);
+    };
+
+    // capture phase: runs before the modal's Esc handler, so Esc closes
+    // only the picker first, and the chat stays open
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setShowEmoji(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", onDown);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [showEmoji]);
+
+  useEffect(() => {
+    if (!open) setShowEmoji(false);
+  }, [open]);
+
   /* ---------------- sending ---------------- */
   const resizeTextarea = () => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 112)}px`;
+  };
+
+  // insert emoji at the cursor position (picker stays open for more)
+  const insertEmoji = (emoji) => {
+    const el = textareaRef.current;
+
+    if (!el) {
+      setText((p) => (p + emoji).slice(0, MAX_LEN));
+      return;
+    }
+
+    const start = el.selectionStart ?? text.length;
+    const end = el.selectionEnd ?? text.length;
+    const next = (text.slice(0, start) + emoji + text.slice(end)).slice(
+      0,
+      MAX_LEN,
+    );
+    setText(next);
+
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = Math.min(start + emoji.length, next.length);
+      el.setSelectionRange(pos, pos);
+      resizeTextarea();
+    });
   };
 
   const send = () => {
@@ -453,13 +457,14 @@ export default function ChatPanel({
     sendingRef.current = true;
     setSending(true);
     setErr("");
+    setShowEmoji(false);
 
     socket.emit("chat:send", { bookingId, text: t }, (res) => {
       sendingRef.current = false;
       setSending(false);
 
       if (res?.ok) {
-        playSendSound(); // ✓ tick sound after message is sent
+        playSendSound(); // swoosh + tick + pop after message is sent
         forceScroll.current = true; // always follow my own message
         setText("");
         if (res.message) addMessage(res.message);
@@ -610,6 +615,7 @@ export default function ChatPanel({
               }
 
               const { m, mine, firstInGroup, lastInGroup } = row;
+              const big = isEmojiOnly(m.text);
 
               return (
                 <div
@@ -633,7 +639,11 @@ export default function ChatPanel({
                           }`
                     }`}
                   >
-                    <p className="whitespace-pre-wrap break-words leading-relaxed">
+                    <p
+                      className={`whitespace-pre-wrap break-words ${
+                        big ? "text-4xl leading-tight" : "leading-relaxed"
+                      }`}
+                    >
                       {m.text}
                     </p>
                     <div className="mt-0.5 flex items-center justify-end gap-1">
@@ -668,7 +678,26 @@ export default function ChatPanel({
       )}
 
       {/* Composer */}
-      <div className="flex shrink-0 items-end gap-2 border-t border-slate-200 bg-white p-3">
+      <div className="relative flex shrink-0 items-end gap-2 border-t border-slate-200 bg-white p-3">
+        {showEmoji && (
+          <EmojiPicker pickerRef={emojiPickerRef} onPick={insertEmoji} />
+        )}
+
+        <button
+          ref={emojiBtnRef}
+          type="button"
+          onClick={() => setShowEmoji((v) => !v)}
+          aria-label="Emoji"
+          aria-expanded={showEmoji}
+          className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-full transition ${
+            showEmoji
+              ? "bg-blue-50 text-blue-600"
+              : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          }`}
+        >
+          <Smile size={22} />
+        </button>
+
         <textarea
           ref={textareaRef}
           value={text}
@@ -678,10 +707,11 @@ export default function ChatPanel({
           }}
           onKeyDown={onKeyDown}
           rows={1}
-          maxLength={1000}
+          maxLength={MAX_LEN}
           placeholder="Type a message…"
           className="max-h-28 min-h-[42px] flex-1 resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
         />
+
         <button
           type="button"
           onClick={send}
