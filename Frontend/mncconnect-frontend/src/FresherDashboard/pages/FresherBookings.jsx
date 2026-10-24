@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   CalendarDays,
@@ -54,6 +54,7 @@ const NO_TIMER_STATUSES = [
   "cancelled",
 ];
 const NO_CHAT_STATUSES = ["pending", "expired", "missed", "cancelled"];
+const DONE_STATUSES = ["completed", "awaiting_confirmation", "disputed"];
 
 const MyBookings = () => {
   const navigate = useNavigate();
@@ -70,6 +71,11 @@ const MyBookings = () => {
   // requestGroupId -> { remainingMs, running, at }
   const [timers, setTimers] = useState({});
 
+  // requestGroupId -> true  (meeting timer finished -> move to past immediately)
+  const [finishedIds, setFinishedIds] = useState({});
+  // requestGroupId -> true  (timer was running at least once)
+  const wasRunningRef = useRef({});
+
   const { data, loading, error, connected, reload } = useLive({
     fetcher: () => api(ENDPOINTS.myBookings),
     events: [EVENTS.booking, EVENTS.reminder],
@@ -85,10 +91,27 @@ const MyBookings = () => {
 
   const bookings = data?.bookings || [];
 
+  // mark a meeting as finished (moves it to Past) + refresh from server
+  const markFinished = (ids) => {
+    const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
+    if (!list.length) return;
+    setFinishedIds((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      list.forEach((id) => {
+        if (!next[id]) {
+          next[id] = true;
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+    reload();
+    setTimeout(reload, 2000);
+  };
+
   // Unread badge.
-  // The server now delivers chat messages to the user's personal room,
-  // so we receive them here even when the chat window is closed.
-  const seenMessageIds = React.useRef(new Set());
+  const seenMessageIds = useRef(new Set());
   useEffect(() => {
     const onChatMessage = (message) => {
       if (message.senderRole === "fresher") return;
@@ -100,11 +123,9 @@ const MyBookings = () => {
         seenMessageIds.current.add(messageId);
       }
 
-      // bookings are keyed by requestGroupId in this page
       const id = String(message.requestGroupId || message.bookingId || "");
       if (!id) return;
 
-      // chat is open for this booking -> ChatPanel marks it read, no badge
       if (String(chatFor?.requestGroupId || "") === id) return;
 
       setUnreadCounts((prev) => ({
@@ -125,9 +146,11 @@ const MyBookings = () => {
     const fromList = {};
     bookings.forEach((b) => {
       if (typeof b.remainingMs === "number") {
+        const running = Boolean(b.timerRunning);
+        if (running) wasRunningRef.current[b.requestGroupId] = true;
         fromList[b.requestGroupId] = {
           remainingMs: b.remainingMs,
-          running: Boolean(b.timerRunning),
+          running,
           at: Date.now(),
         };
       }
@@ -155,30 +178,46 @@ const MyBookings = () => {
 
     const fetchTimers = async () => {
       const results = {};
+      const justFinished = [];
+
       await Promise.all(
         ids.map(async (id) => {
           try {
             const d = await api(ENDPOINTS.booking(id));
             if (d?.booking) {
+              const running = Boolean(d.booking.timerRunning);
+              const remaining = d.booking.remainingMs;
+
+              if (running) wasRunningRef.current[id] = true;
+
               results[id] = {
-                remainingMs: d.booking.remainingMs,
-                running: Boolean(d.booking.timerRunning),
+                remainingMs: remaining,
+                running,
                 at: Date.now(),
               };
-              // meeting finished on the server -> refresh the list
-              if (
-                ["awaiting_confirmation", "completed"].includes(
-                  d.booking.status,
-                )
-              )
-                reload();
+
+              // server says meeting is over
+              if (DONE_STATUSES.includes(d.booking.status)) {
+                justFinished.push(id);
+              }
+              // timer was running before and now it is stopped / reached 0
+              else if (
+                wasRunningRef.current[id] &&
+                (!running ||
+                  (typeof remaining === "number" && remaining <= 0))
+              ) {
+                justFinished.push(id);
+              }
             }
           } catch {
             /* ignore single failure */
           }
         }),
       );
-      if (!cancelled) setTimers((prev) => ({ ...prev, ...results }));
+
+      if (cancelled) return;
+      setTimers((prev) => ({ ...prev, ...results }));
+      if (justFinished.length) markFinished(justFinished);
     };
 
     fetchTimers();
@@ -195,14 +234,23 @@ const MyBookings = () => {
     const onTimer = (p) => {
       const id = p?.requestGroupId || p?.bookingId;
       if (!id || typeof p.remainingMs !== "number") return;
+
+      const running = Boolean(p.running);
+      if (running) wasRunningRef.current[id] = true;
+
       setTimers((prev) => ({
         ...prev,
         [id]: {
           remainingMs: p.remainingMs,
-          running: Boolean(p.running),
+          running,
           at: Date.now(),
         },
       }));
+
+      // timer stopped / hit 0 after it had been running
+      if (wasRunningRef.current[id] && (!running || p.remainingMs <= 0)) {
+        markFinished(id);
+      }
     };
     socket.on("meeting:timer", onTimer);
     socket.on("meeting:state", onTimer);
@@ -210,21 +258,44 @@ const MyBookings = () => {
       socket.off("meeting:timer", onTimer);
       socket.off("meeting:state", onTimer);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const timerOf = (b) => {
+  // raw countdown (ignores finished flag)
+  const rawLeft = (b) => {
     const t = timers[b.requestGroupId];
     if (!t?.running || typeof t.remainingMs !== "number") return null;
     return Math.max(0, t.remainingMs - (now - t.at));
   };
+
+  // countdown shown in UI -> null once the meeting is finished
+  const timerOf = (b) => {
+    if (finishedIds[b.requestGroupId]) return null;
+    return rawLeft(b);
+  };
+
+  // Every second: if a running timer reached 0 -> meeting finished -> move to Past
+  useEffect(() => {
+    const newly = [];
+    bookings.forEach((b) => {
+      const id = b.requestGroupId;
+      if (finishedIds[id]) return;
+      if (NO_TIMER_STATUSES.includes(b.status)) return;
+      const l = rawLeft(b);
+      if (l !== null && l <= 0) newly.push(id);
+    });
+    if (newly.length) markFinished(newly);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [now]);
 
   const view = (b) => {
     const starts = new Date(b.startsAt).getTime();
     const ends = new Date(b.endsAt).getTime();
     const opens = starts - 5 * 60000;
     const left = timerOf(b);
+    const finished = Boolean(finishedIds[b.requestGroupId]);
 
-    if (["completed", "awaiting_confirmation", "disputed"].includes(b.status)) {
+    if (DONE_STATUSES.includes(b.status)) {
       if (b.reviewed)
         return { key: "done", label: "Completed", tone: "emerald" };
       if (b.status === "disputed")
@@ -251,9 +322,13 @@ const MyBookings = () => {
         starts,
       };
 
-    // timer reached 0 -> server is moving it to confirmation, keep it in upcoming until status changes
-    if (left !== null && left <= 0)
-      return { key: "open", label: "Finishing...", tone: "amber", opens, starts };
+    // meeting finished (timer hit 0) -> move to Past right away,
+    // even if the server status has not changed yet
+    if (finished) {
+      if (b.reviewed)
+        return { key: "done", label: "Completed", tone: "emerald" };
+      return { key: "review", label: "Review required", tone: "red" };
+    }
 
     if (now >= ends)
       return { key: "ended", label: "Meeting ended", tone: "slate" };
@@ -277,7 +352,7 @@ const MyBookings = () => {
 
   const decorated = useMemo(
     () => bookings.map((b) => ({ b, v: view(b) })),
-    [bookings, now, timers],
+    [bookings, now, timers, finishedIds],
   ); // eslint-disable-line
 
   const upcoming = decorated.filter(({ v }) =>
@@ -302,7 +377,6 @@ const MyBookings = () => {
   };
 
   // Book again -> straight to the booking form (SessionBoard) with the same mentor locked in.
-  // Route: /Home/sessionboard/:companyName  (SessionBoard reads location.state.rebook)
   const bookAgain = (b) => {
     const company = b.companyName || b.mentor?.company;
     if (!company || !b.mentor?.id) return;
@@ -401,10 +475,11 @@ const MyBookings = () => {
                 !NO_CHAT_STATUSES.includes(b.status) &&
                 v.key !== "pending";
               // past + session really happened + we know the mentor
+              const sessionHappened =
+                ["completed", "awaiting_confirmation"].includes(b.status) ||
+                Boolean(finishedIds[b.requestGroupId]);
               const canRebook =
-                tab === "past" &&
-                ["completed", "awaiting_confirmation"].includes(b.status) &&
-                Boolean(b.mentor?.id);
+                tab === "past" && sessionHappened && Boolean(b.mentor?.id);
 
               return (
                 <div

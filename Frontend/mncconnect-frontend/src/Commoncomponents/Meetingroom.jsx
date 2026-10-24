@@ -29,8 +29,10 @@ const ICE = {
   ],
 };
 
-const FIVE_MIN = 5 * 60 * 1000;
-const THREE_MIN = 3 * 60 * 1000;
+const ONE_MIN = 60 * 1000;
+const THREE_MIN = 3 * 60 * 1000; // confirm "did the session go well?"
+const FIVE_MIN = 5 * 60 * 1000; // timer turns red + wrap-up banner
+const REVIEW_AT_MS = ONE_MIN; // review pops in the last 1 minute
 
 /* ---------- HD camera + mic ---------- */
 const HD_VIDEO = {
@@ -90,7 +92,7 @@ const tuneSenders = async (peer) => {
 
 const sendSignal = (data) => socket.emit("meeting:signal", { data });
 
-/* ---------- Fresher: last 5 minutes, stars + feedback REQUIRED ---------- */
+/* ---------- Fresher: last 1 minute, stars + feedback REQUIRED ---------- */
 const ReviewGate = ({ booking, token, onDone }) => {
   const [rating, setRating] = useState(0);
   const [hover, setHover] = useState(0);
@@ -128,9 +130,9 @@ const ReviewGate = ({ booking, token, onDone }) => {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
       <div className="w-full max-w-md rounded-2xl bg-white p-6 text-slate-900 shadow-2xl">
         <p className="text-[11px] font-bold uppercase tracking-wide text-blue-600">
-          Required · last 5 minutes
+          Required · last minute
         </p>
-        <h3 className="mt-1 text-xl font-bold">How is your session going?</h3>
+        <h3 className="mt-1 text-xl font-bold">How was your session?</h3>
         <p className="mt-1 text-xs text-slate-500">
           Give a star rating and your feedback. The meeting continues until the timer ends.
         </p>
@@ -178,7 +180,7 @@ const ReviewGate = ({ booking, token, onDone }) => {
   );
 };
 
-/* ---------- Fresher: mentor asked "did the session go well?" ---------- */
+/* ---------- Fresher: "did the session go well?" (last 3 minutes) ---------- */
 const SuccessConfirmModal = ({ onYes, onNo }) => (
   <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 px-4">
     <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center text-slate-900 shadow-2xl">
@@ -187,7 +189,7 @@ const SuccessConfirmModal = ({ onYes, onNo }) => (
       </div>
       <h3 className="mt-4 text-lg font-bold">Did the session go well?</h3>
       <p className="mt-1 text-sm text-slate-500">
-        The employee marked this session as successful. Please confirm. The meeting continues until the timer ends.
+        Please confirm your session. The meeting continues until the timer ends.
       </p>
       <div className="mt-5 flex gap-3">
         <button onClick={onNo} className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600">
@@ -246,6 +248,8 @@ export default function MeetingRoom() {
   const [endedConfirmed, setEndedConfirmed] = useState(false);
   const [reviewDone, setReviewDone] = useState(false);
   const [showSuccessBtn, setShowSuccessBtn] = useState(false);
+  // fresher pressed "No" on the auto pop-up (do not show it again until the mentor asks)
+  const [confirmSkipped, setConfirmSkipped] = useState(false);
 
   const [instructionsAccepted, setInstructionsAccepted] = useState({
     mentor: false,
@@ -401,6 +405,8 @@ export default function MeetingRoom() {
     const onState = (s) => {
       setClock({ ...s, at: Date.now() });
       if (s.instructions) setInstructionsAccepted(s.instructions);
+      // mentor asked again -> allow the pop-up to show again
+      if (s.successRequested) setConfirmSkipped(false);
     };
     const onInstructionsState = (state) => setInstructionsAccepted(state);
 
@@ -516,26 +522,33 @@ export default function MeetingRoom() {
     ? Math.max(0, clock.remainingMs - (Date.now() - clock.at))
     : clock.remainingMs;
 
+  const inLast5 = clock.running && currentRemaining > 0 && currentRemaining <= FIVE_MIN;
+  const inLast3 = clock.running && currentRemaining > 0 && currentRemaining <= THREE_MIN;
+  const inLast1 = clock.running && currentRemaining > 0 && currentRemaining <= REVIEW_AT_MS;
+
   // Mentor: "Meeting Success" button in the last 3 min
   useEffect(() => {
-    setShowSuccessBtn(
-      isMentor && phase === "in" && clock.running &&
-        currentRemaining > 0 && currentRemaining <= THREE_MIN,
-    );
-  }, [currentRemaining, phase, isMentor, clock.running]);
+    setShowSuccessBtn(isMentor && phase === "in" && inLast3);
+  }, [inLast3, phase, isMentor]);
 
   const sendSuccessRequest = () => socket.emit("meeting:success-request", { bookingId });
-  const answerSuccess = (accepted) => socket.emit("meeting:success-confirm", { bookingId, accepted });
+  const answerSuccess = (accepted) => {
+    if (!accepted) setConfirmSkipped(true);
+    socket.emit("meeting:success-confirm", { bookingId, accepted });
+  };
 
-  // Fresher: mandatory review popup in the last 5 min
+  // Fresher: mandatory review popup in the LAST 1 MINUTE
   const alreadyReviewed = reviewDone || Boolean(booking?.reviewed);
   const showReviewGate =
-    !isMentor && phase === "in" && Boolean(booking) && clock.running &&
-    currentRemaining > 0 && currentRemaining <= FIVE_MIN && !alreadyReviewed;
+    !isMentor && phase === "in" && Boolean(booking) && inLast1 && !alreadyReviewed;
 
-  // Fresher: mentor asked "did it go well?"
+  // Fresher: "did the session go well?" pops at 3 minutes (or when the mentor asks)
   const showSuccessConfirm =
-    !isMentor && phase === "in" && clock.successRequested && !clock.fresherConfirmed && !showReviewGate;
+    !isMentor &&
+    phase === "in" &&
+    !clock.fresherConfirmed &&
+    !showReviewGate &&
+    (clock.successRequested || (inLast3 && !confirmSkipped));
 
   const toggle = (kind) => {
     const tracks =
@@ -661,17 +674,28 @@ export default function MeetingRoom() {
         ? "Connecting…"
         : `Waiting for the ${isMentor ? "fresher" : "employee"} to join.`;
 
+  // timer colours: normal = emerald, last 5 min = RED
+  const timerCls = inLast5
+    ? "animate-pulse bg-red-600 text-white ring-2 ring-red-400/60"
+    : clock.running
+      ? "bg-emerald-500/15 text-emerald-300"
+      : "bg-amber-500/15 text-amber-300";
+
   return (
     <>
       <div className="fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-slate-950 text-white">
         <div className="flex shrink-0 items-center justify-between px-5 py-3">
           <div>
             <p className="text-sm font-semibold">{booking?.companyName || "MNCConnect session"}</p>
-            <p className={`text-xs ${clock.running ? "text-emerald-400" : "text-amber-300"}`}>{status}</p>
+            <p
+              className={`text-xs ${
+                inLast5 ? "text-red-400" : clock.running ? "text-emerald-400" : "text-amber-300"
+              }`}
+            >
+              {inLast5 ? "Last 5 minutes" : status}
+            </p>
           </div>
-          <div
-            className={`rounded-xl px-4 py-2 font-mono text-xl font-bold ${clock.running ? "bg-emerald-500/15 text-emerald-300" : "bg-amber-500/15 text-amber-300"}`}
-          >
+          <div className={`rounded-xl px-4 py-2 font-mono text-xl font-bold tabular-nums ${timerCls}`}>
             {fmtClock(currentRemaining)}
           </div>
         </div>
@@ -733,8 +757,8 @@ export default function MeetingRoom() {
             />
           </div>
 
-          {clock.running && currentRemaining > 0 && currentRemaining <= FIVE_MIN && (
-            <p className="absolute right-8 top-4 z-20 rounded-lg bg-amber-500/95 px-3 py-1.5 text-xs font-semibold text-slate-950 shadow-lg">
+          {inLast5 && (
+            <p className="absolute right-8 top-4 z-20 rounded-lg bg-red-600/95 px-3 py-1.5 text-xs font-semibold text-white shadow-lg">
               ⏱ Last 5 minutes. Please start wrapping up.
             </p>
           )}
