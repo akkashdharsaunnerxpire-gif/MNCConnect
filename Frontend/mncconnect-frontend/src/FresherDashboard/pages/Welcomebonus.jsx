@@ -1,16 +1,11 @@
 // src/FresherDashboard/pages/Welcomebonus.jsx
 //
 // Rendered by Header.jsx (not inside <Routes>).
+// Plays ONCE per account: server flag `welcomeBonusSeen` (+ localStorage as a
+// fast guard). Every new user gets it. Only the "Add to wallet" button closes
+// it (no skip, no auto-claim).
 //
-//   1. a real-3D gift box floats on screen and tilts with the pointer
-//   2. tap it: it shakes, the lid flies off, a thick 3D gold coin rises out
-//   3. drag the coin to spin / tilt it (inertia), then claim
-//   4. the coin spins in 3D along an arc (comet trail) into the navbar wallet
-//   5. impact ripple + "+₹25"; the nav balance counts up (Header does that,
-//      we only tell it when to start via onHold / onLand)
-//
-// Plays once per account (localStorage). To replay while testing, open any
-// fresher page with  ?replayBonus=1  at the end of the URL.
+// To replay while testing, add  ?replayBonus=1  to the URL.
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -21,12 +16,10 @@ import {
   useTransform,
 } from "framer-motion";
 import { Gift, Sparkles, Wallet } from "lucide-react";
-import { getUserId } from "../../services/fresherApi"; // <- fix the path if needed
+import { api, getUserId } from "../../services/fresherApi"; // <- fix the path if needed
 
 const WELCOME_BONUS = 25;
 const COLORS = ["#8b5cf6", "#6366f1", "#0ea5e9", "#10b981", "#f59e0b", "#f43f5e"];
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-const AUTO_CLAIM_MS = 15000;
 
 const SCENE_W = 300;
 const SCENE_H = 340;
@@ -41,7 +34,7 @@ const LID_H = 34;
 const inr = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-// small chime + haptic. Runs inside a click handler / user gesture, so browsers allow it.
+// chime + haptic (runs inside a click, so browsers allow it)
 const feedback = (kind) => {
   try {
     navigator.vibrate?.(kind === "open" ? [30, 40, 60] : 25);
@@ -52,7 +45,10 @@ const feedback = (kind) => {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
     const ctx = new Ctx();
-    const notes = kind === "open" ? [[784, 0], [1047, 0.09], [1319, 0.18], [1568, 0.28]] : [[1319, 0], [1760, 0.1]];
+    const notes =
+      kind === "open"
+        ? [[784, 0], [1047, 0.09], [1319, 0.18], [1568, 0.28]]
+        : [[1319, 0], [1760, 0.1]];
     notes.forEach(([f, d]) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -73,16 +69,11 @@ const feedback = (kind) => {
 };
 
 /* ------------------------------------------------------------------
-   3D COIN: stacked discs for real thickness + front / back faces
+   3D COIN (5 stacked discs = real thickness, light enough for phones)
 ------------------------------------------------------------------ */
-const CoinBody = ({ size = COIN, spin }) => {
-  const own = useMotionValue(0);
-  const s = spin || own;
-  // specular highlight slides across the face as the coin turns
-  const sheen = useTransform(s, (v) => `${((((v % 360) + 360) % 360) / 360) * 100}% 0`);
-
+const CoinBody = ({ size = COIN }) => {
   const half = size * 0.075;
-  const layers = Array.from({ length: 9 }, (_, i) => (i - 4) * (half / 4));
+  const layers = Array.from({ length: 5 }, (_, i) => (i - 2) * (half / 2));
 
   const faceBase = {
     position: "absolute",
@@ -91,24 +82,11 @@ const CoinBody = ({ size = COIN, spin }) => {
     backfaceVisibility: "hidden",
     WebkitBackfaceVisibility: "hidden",
     background:
-      "radial-gradient(circle at 32% 28%, #fef3c7 0%, #fbbf24 42%, #d97706 100%)",
+      "linear-gradient(135deg, rgba(255,255,255,.35) 0%, transparent 40%), radial-gradient(circle at 32% 28%, #fef3c7 0%, #fbbf24 42%, #d97706 100%)",
     border: `${size * 0.04}px solid #fde68a`,
-    boxShadow: "inset 0 -6px 12px rgba(180,83,9,.5), inset 0 4px 8px rgba(255,255,255,.35)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-  };
-
-  const sheenStyle = {
-    position: "absolute",
-    inset: 0,
-    borderRadius: "9999px",
-    backgroundImage:
-      "linear-gradient(115deg, transparent 35%, rgba(255,255,255,.8) 50%, transparent 65%)",
-    backgroundSize: "300% 100%",
-    backgroundPosition: sheen,
-    mixBlendMode: "overlay",
-    pointerEvents: "none",
   };
 
   const ring = (
@@ -117,13 +95,21 @@ const CoinBody = ({ size = COIN, spin }) => {
         position: "absolute",
         inset: size * 0.1,
         borderRadius: "9999px",
-        border: `2px dashed rgba(146,64,14,.45)`,
+        border: "2px dashed rgba(146,64,14,.45)",
       }}
     />
   );
 
   return (
-    <div style={{ width: size, height: size, position: "relative", transformStyle: "preserve-3d" }}>
+    <div
+      style={{
+        width: size,
+        height: size,
+        position: "relative",
+        transformStyle: "preserve-3d",
+        willChange: "transform",
+      }}
+    >
       {layers.map((z, i) => (
         <div
           key={i}
@@ -139,25 +125,25 @@ const CoinBody = ({ size = COIN, spin }) => {
 
       <div style={{ ...faceBase, transform: `translateZ(${half + 1}px)` }}>
         {ring}
-        <span style={{ fontSize: size * 0.3, fontWeight: 900, color: "#78350f", textShadow: "0 1px 0 rgba(255,255,255,.5)" }}>
+        <span style={{ fontSize: size * 0.3, fontWeight: 900, color: "#78350f" }}>
           ₹{WELCOME_BONUS}
         </span>
-        <motion.span style={sheenStyle} />
       </div>
 
       <div style={{ ...faceBase, transform: `rotateY(180deg) translateZ(${half + 1}px)` }}>
         {ring}
-        <span style={{ fontSize: size * 0.22, fontWeight: 900, letterSpacing: 1, color: "#78350f", textShadow: "0 1px 0 rgba(255,255,255,.5)" }}>
+        <span
+          style={{ fontSize: size * 0.22, fontWeight: 900, letterSpacing: 1, color: "#78350f" }}
+        >
           MNC
         </span>
-        <motion.span style={sheenStyle} />
       </div>
     </div>
   );
 };
 
 /* ------------------------------------------------------------------
-   3D GIFT BOX: 4 sides + bottom, and a separate lid that flies off
+   3D GIFT BOX
 ------------------------------------------------------------------ */
 const RIBBON_V = "linear-gradient(90deg, transparent 0 41%, #fbbf24 41% 59%, transparent 59% 100%)";
 const RIBBON_H = "linear-gradient(0deg, transparent 0 41%, #fbbf24 41% 59%, transparent 59% 100%)";
@@ -189,12 +175,12 @@ const GiftBox = ({ open }) => {
         width: BOX_W,
         height: BOX_H,
         transformStyle: "preserve-3d",
+        willChange: "transform",
       }}
       initial={false}
       animate={open ? { y: 40, scale: 0.94 } : { y: 0, scale: 1 }}
       transition={{ type: "spring", stiffness: 120, damping: 14, delay: open ? 0.2 : 0 }}
     >
-      {/* body */}
       {bodyFaces.map((f, i) => (
         <div
           key={i}
@@ -203,7 +189,6 @@ const GiftBox = ({ open }) => {
             inset: 0,
             transform: f.t,
             backgroundImage: `${RIBBON_V}, ${f.base}`,
-            boxShadow: "inset 0 0 18px rgba(0,0,0,.25)",
           }}
         />
       ))}
@@ -228,6 +213,7 @@ const GiftBox = ({ open }) => {
           width: LID_W,
           height: LID_H,
           transformStyle: "preserve-3d",
+          willChange: "transform",
         }}
         initial={false}
         animate={
@@ -245,11 +231,9 @@ const GiftBox = ({ open }) => {
               inset: 0,
               transform: f.t,
               backgroundImage: `${RIBBON_V}, ${f.base}`,
-              boxShadow: "inset 0 0 10px rgba(0,0,0,.2)",
             }}
           />
         ))}
-        {/* lid top (crossed ribbons) */}
         <div
           style={{
             position: "absolute",
@@ -261,7 +245,6 @@ const GiftBox = ({ open }) => {
             backgroundImage: `${RIBBON_V}, ${RIBBON_H}, linear-gradient(135deg,#c4b5fd,#7c3aed)`,
           }}
         />
-        {/* lid underside */}
         <div
           style={{
             position: "absolute",
@@ -339,7 +322,7 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
   cb.current = { onHold, onLand };
   phaseRef.current = phase;
 
-  /* ---------- pointer parallax (whole box + coin tilt toward the pointer) ---------- */
+  /* ---------- pointer parallax ---------- */
   const mx = useMotionValue(0);
   const my = useMotionValue(0);
   const rotX = useSpring(useTransform(my, [-1, 1], [26, 2]), { stiffness: 120, damping: 14 });
@@ -354,7 +337,7 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
     my.set(0);
   };
 
-  /* ---------- coin spin with inertia (drag it!) ---------- */
+  /* ---------- coin spin with inertia (drag it) ---------- */
   const coinSpin = useMotionValue(0);
   const tiltTarget = useMotionValue(0);
   const coinTilt = useSpring(tiltTarget, { stiffness: 140, damping: 12 });
@@ -385,18 +368,18 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
         }
       : {};
 
-  /* ---------- decorations ---------- */
+  /* ---------- decorations (kept small for smoothness) ---------- */
   const pieces = useMemo(
     () =>
-      Array.from({ length: 44 }, (_, i) => {
-        const angle = (i / 44) * Math.PI * 2 + Math.random() * 0.4;
-        const dist = 150 + Math.random() * 230;
+      Array.from({ length: 24 }, (_, i) => {
+        const angle = (i / 24) * Math.PI * 2 + Math.random() * 0.4;
+        const dist = 150 + Math.random() * 200;
         return {
           id: i,
           tx: Math.cos(angle) * dist,
           ty: Math.sin(angle) * dist - 60,
           rot: Math.round(Math.random() * 720 - 360),
-          delay: Math.round(Math.random() * 200),
+          delay: Math.round(Math.random() * 150),
           w: 6 + Math.round(Math.random() * 4),
           h: 10 + Math.round(Math.random() * 5),
           color: COLORS[i % COLORS.length],
@@ -407,7 +390,7 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
 
   const stars = useMemo(
     () =>
-      Array.from({ length: 22 }, (_, i) => ({
+      Array.from({ length: 10 }, (_, i) => ({
         id: i,
         left: Math.random() * 100,
         top: Math.random() * 100,
@@ -441,7 +424,7 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
   );
 
   // ---------------------------------------------------------
-  // 1) should this user see the animation?
+  // 1) should this user see it? ONLY if never seen (server + local)
   // ---------------------------------------------------------
   useEffect(() => {
     if (!user || !userId || decidedRef.current) return;
@@ -450,21 +433,22 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
     const replay =
       typeof window !== "undefined" && window.location.search.includes("replayBonus");
 
-    let seen = true;
+    let seenLocal = true;
     try {
-      seen = Boolean(localStorage.getItem(storageKey));
+      seenLocal = Boolean(localStorage.getItem(storageKey));
     } catch {
-      seen = true;
+      seenLocal = true;
     }
 
+    // strict: only `welcomeBonusSeen === false` (new users) can see it.
+    // old users (migrated to true) or a missing field never see it.
+    const neverSeenOnServer = user.welcomeBonusSeen === false;
     const wallet = Number(user.walletBalance) || 0;
-    const created = user.createdAt ? Date.now() - new Date(user.createdAt).getTime() : Infinity;
-    const isNew = created < WEEK_MS;
 
     const eligible =
       wallet >= WELCOME_BONUS &&
       user.welcomeBonusClaimed !== false &&
-      (replay || (!seen && isNew));
+      (replay || (neverSeenOnServer && !seenLocal));
 
     if (!eligible) return;
 
@@ -484,9 +468,20 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
     setPhase("shake");
   };
 
+  // mark as seen the moment the user claims (never plays again)
+  const markSeen = () => {
+    try {
+      localStorage.setItem(storageKey, "1");
+    } catch {
+      /* ignore */
+    }
+    api("/auth/welcome-bonus-seen", { method: "PATCH" }).catch(() => {});
+  };
+
   const startFly = () => {
-    const p = phaseRef.current;
-    if (p === "fly" || p === "impact" || p === "done" || p === "idle") return;
+    if (phaseRef.current !== "open") return; // claim button only shows in "open"
+
+    markSeen();
 
     // target: navbar wallet button
     let cx = window.innerWidth - 90;
@@ -502,11 +497,11 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
       }
     }
 
-    // start: wherever the coin currently is on screen
+    // start: wherever the coin currently is
     let sx = window.innerWidth / 2;
     let sy = window.innerHeight / 2;
     const cr = coinRef.current?.getBoundingClientRect();
-    if (p === "open" && cr && cr.width > 0) {
+    if (cr && cr.width > 0) {
       sx = cr.left + cr.width / 2;
       sy = cr.top + cr.height / 2;
     }
@@ -519,7 +514,7 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
       sy,
       dx: cx - sx,
       dy: cy - sy,
-      my: (cy - sy) * 0.5 - 170, // arc peak
+      my: (cy - sy) * 0.5 - 170,
       spin: coinSpin.get(),
     });
     setPhase("fly");
@@ -540,20 +535,11 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
     if (phase === "open") {
       countUp(WELCOME_BONUS, 1000);
       const b = setTimeout(() => setBurst(false), 2300);
-      const auto = setTimeout(startFly, AUTO_CLAIM_MS); // never leave the user stuck
-      return () => {
-        clearTimeout(b);
-        clearTimeout(auto);
-      };
+      return () => clearTimeout(b);
     }
 
     if (phase === "fly") {
       const t = setTimeout(() => {
-        try {
-          localStorage.setItem(storageKey, "1");
-        } catch {
-          /* ignore */
-        }
         cb.current.onHold?.(null); // navbar starts counting up now
         cb.current.onLand?.(); // navbar button bumps + glows
         setPhase("impact");
@@ -601,10 +587,10 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
           0%   { transform: scale(.85); opacity: .7; }
           100% { transform: scale(1.35); opacity: 0; }
         }
-        .mc-wb-confetti { animation: mc-wb-confetti 1.9s cubic-bezier(.15,.7,.3,1) both; }
+        .mc-wb-confetti { animation: mc-wb-confetti 1.9s cubic-bezier(.15,.7,.3,1) both; will-change: transform, opacity; }
         .mc-wb-impact { animation: mc-wb-impact .85s ease-out both; }
         .mc-wb-spark { animation: mc-wb-spark .8s ease-out both; }
-        .mc-wb-rays { animation: mc-wb-rays 16s linear infinite; }
+        .mc-wb-rays { animation: mc-wb-rays 22s linear infinite; will-change: transform; }
         .mc-wb-twinkle { animation: mc-wb-twinkle var(--dur) ease-in-out var(--delay) infinite; }
         .mc-wb-pulse { animation: mc-wb-pulse 1.6s ease-out infinite; }
         @media (prefers-reduced-motion: reduce) {
@@ -680,10 +666,17 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
               }}
               {...panProps}
             >
-              {/* light rays + halo behind the coin */}
+              {/* light rays: the mask sits on a STATIC wrapper, only the inner layer rotates (smooth) */}
               <motion.div
                 className="pointer-events-none absolute"
-                style={{ left: SCENE_W / 2 - 260, top: COIN_TOP + COIN / 2 - 260, width: 520, height: 520 }}
+                style={{
+                  left: SCENE_W / 2 - 260,
+                  top: COIN_TOP + COIN / 2 - 260,
+                  width: 520,
+                  height: 520,
+                  WebkitMaskImage: "radial-gradient(circle, black 15%, transparent 68%)",
+                  maskImage: "radial-gradient(circle, black 15%, transparent 68%)",
+                }}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: isOpen ? 1 : 0 }}
                 transition={{ duration: 0.6 }}
@@ -694,19 +687,25 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
                   style={{
                     background:
                       "repeating-conic-gradient(from 0deg, rgba(251,191,36,.30) 0deg 10deg, transparent 10deg 30deg)",
-                    WebkitMaskImage: "radial-gradient(circle, black 15%, transparent 68%)",
-                    maskImage: "radial-gradient(circle, black 15%, transparent 68%)",
-                  }}
-                />
-                <div
-                  className="absolute rounded-full"
-                  style={{
-                    inset: 150,
-                    background: "radial-gradient(circle, rgba(253,224,71,.55), transparent 70%)",
-                    filter: "blur(10px)",
                   }}
                 />
               </motion.div>
+
+              {/* soft golden halo behind the coin (plain gradient, no blur filter) */}
+              <motion.div
+                className="pointer-events-none absolute rounded-full"
+                style={{
+                  left: SCENE_W / 2 - 130,
+                  top: COIN_TOP + COIN / 2 - 130,
+                  width: 260,
+                  height: 260,
+                  background: "radial-gradient(circle, rgba(253,224,71,.45), transparent 70%)",
+                }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: isOpen ? 1 : 0 }}
+                transition={{ duration: 0.6 }}
+                aria-hidden="true"
+              />
 
               {/* tap-me pulse ring */}
               {phase === "gift" && (
@@ -726,7 +725,6 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
                   width: 180,
                   height: 22,
                   background: "radial-gradient(ellipse, rgba(0,0,0,.55), transparent 70%)",
-                  filter: "blur(4px)",
                 }}
                 aria-hidden="true"
               />
@@ -786,7 +784,7 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
                             rotateX: coinTilt,
                           }}
                         >
-                          <CoinBody spin={coinSpin} />
+                          <CoinBody />
                         </motion.div>
                       </motion.div>
                     </motion.div>
@@ -867,18 +865,6 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
               )}
             </div>
           </motion.div>
-
-          {!isFly && (
-            <div className="absolute inset-x-0 bottom-6 flex justify-center">
-              <button
-                type="button"
-                onClick={startFly}
-                className="rounded-full bg-white/10 px-4 py-1.5 text-xs font-medium text-white/80 backdrop-blur transition hover:bg-white/20"
-              >
-                Skip
-              </button>
-            </div>
-          )}
         </div>
       )}
 
@@ -889,16 +875,17 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
           style={{ left: dest.sx, top: dest.sy }}
           aria-hidden="true"
         >
-          {[4, 3, 2, 1].map((i) => (
+          {[2, 1].map((i) => (
             <motion.div
               key={i}
               className="absolute rounded-full"
               style={{
-                width: COIN - i * 14,
-                height: COIN - i * 14,
-                marginLeft: -(COIN - i * 14) / 2,
-                marginTop: -(COIN - i * 14) / 2,
+                width: COIN - i * 24,
+                height: COIN - i * 24,
+                marginLeft: -(COIN - i * 24) / 2,
+                marginTop: -(COIN - i * 24) / 2,
                 background: "radial-gradient(circle at 30% 30%, #fde68a, #f59e0b)",
+                willChange: "transform, opacity",
               }}
               initial={{ x: 0, y: 0, scale: 1, opacity: 0 }}
               animate={{
@@ -907,7 +894,7 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
                 scale: [1, 1.1, 0.25],
                 opacity: [0, 0.5, 0],
               }}
-              transition={{ duration: 1, delay: 0.07 * i, ease: "easeInOut", times: [0, 0.45, 1] }}
+              transition={{ duration: 1, delay: 0.09 * i, ease: "easeInOut", times: [0, 0.45, 1] }}
             />
           ))}
 
@@ -919,6 +906,7 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
               width: COIN,
               height: COIN,
               perspective: 700,
+              willChange: "transform",
             }}
             initial={{ x: 0, y: 0, scale: 1 }}
             animate={{
@@ -953,8 +941,8 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
             style={{ animationDelay: ".12s" }}
           />
 
-          {Array.from({ length: 12 }, (_, i) => {
-            const a = (i / 12) * Math.PI * 2;
+          {Array.from({ length: 10 }, (_, i) => {
+            const a = (i / 10) * Math.PI * 2;
             return (
               <span
                 key={i}

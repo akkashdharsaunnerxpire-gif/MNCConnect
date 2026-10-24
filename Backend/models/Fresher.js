@@ -82,11 +82,18 @@ const fresherSchema = new mongoose.Schema(
       ref: "Fresher",
       default: null,
     },
+    hasUsedReferral: {
+      type: Boolean,
+      default: false,
+    },
+
+    // welcome bonus ₹25 wallet la add aachu
     welcomeBonusClaimed: {
       type: Boolean,
       default: false,
     },
-    hasUsedReferral: {
+    // gift animation user paathu "claim" pannitaara? true aana marubadi varaadhu
+    welcomeBonusSeen: {
       type: Boolean,
       default: false,
     },

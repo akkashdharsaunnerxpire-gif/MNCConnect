@@ -58,6 +58,7 @@ const sanitizeFresher = (user) => {
     referralEarnings: user.referralEarnings || 0,
     totalRefunds: user.totalRefunds || 0,
     welcomeBonusClaimed: user.welcomeBonusClaimed || false,
+     welcomeBonusSeen: Boolean(user.welcomeBonusSeen), 
     lastLoginAt: user.lastLoginAt,
     createdAt: user.createdAt,
   };
@@ -488,6 +489,30 @@ exports.applyReferral = async (req, res) => {
   } catch (error) {
     console.error("applyReferral error:", error.message);
     return res.status(500).json({ success: false, message: "Unable to apply referral code." });
+  }
+};
+// =====================================================
+// 3.6 WELCOME GIFT SEEN
+// PATCH /api/auth/welcome-bonus-seen
+// Called when the fresher clicks "Add ₹25 to my wallet".
+// After this the gift animation never plays again (any device).
+// =====================================================
+
+exports.markWelcomeBonusSeen = async (req, res) => {
+  try {
+    if (!req.user?.id || req.user.role !== "fresher") {
+      return res.status(403).json({ success: false, message: "Only freshers can do this." });
+    }
+
+    await Fresher.updateOne(
+      { _id: req.user.id },
+      { $set: { welcomeBonusSeen: true } }
+    );
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("markWelcomeBonusSeen error:", error.message);
+    return res.status(500).json({ success: false, message: "Unable to update." });
   }
 };
 
