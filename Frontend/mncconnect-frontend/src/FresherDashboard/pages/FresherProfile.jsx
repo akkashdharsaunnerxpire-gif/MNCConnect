@@ -24,8 +24,6 @@ import {
   BriefcaseBusiness,
   Trash2,
   Menu,
-  Linkedin,
-  Github,
   LogOut as LogOutIcon,
 } from "lucide-react";
 
@@ -1958,7 +1956,7 @@ const ProfileContent = ({
 
         {fieldByKey("linkedin") && (
           <InfoItem
-            icon={Linkedin}
+            icon={Globe}
             label="LinkedIn"
             value={user?.linkedin}
           />
@@ -1966,7 +1964,7 @@ const ProfileContent = ({
 
         {fieldByKey("github") && (
           <InfoItem
-            icon={Github}
+            icon={Globe}
             label="GitHub"
             value={user?.github}
           />
