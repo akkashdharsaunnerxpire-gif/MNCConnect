@@ -24,6 +24,8 @@ import {
   BriefcaseBusiness,
   Trash2,
   Menu,
+  Linkedin,
+  Github,
   LogOut as LogOutIcon,
 } from "lucide-react";
 
@@ -320,6 +322,10 @@ const hasValue = (value) => {
 
 /* =========================================================================
    SIDEBAR
+   - Uses 100dvh so the Logout button is never hidden under the mobile
+     browser's address bar / bottom toolbar.
+   - Nav area scrolls, Logout stays pinned at the bottom (shrink-0).
+   - Extra always-visible Logout icon button in the top-right on phones.
 ========================================================================= */
 
 const Sidebar = ({
@@ -331,6 +337,16 @@ const Sidebar = ({
   onLogout,
 }) => {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+
+  /* Lock background scroll while the mobile drawer is open */
+  useEffect(() => {
+    if (!isMobileOpen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [isMobileOpen]);
 
   const navItems = [
     {
@@ -361,19 +377,30 @@ const Sidebar = ({
   ];
 
   const sidebarContent = (
-    <div className="flex h-full flex-col bg-[#0B1E3F]">
+    <div className="flex h-full min-h-0 flex-col bg-[#0B1E3F]">
       {/* Brand */}
-      <div className="flex items-center gap-2.5 px-6 pb-2 pt-6">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-400 to-blue-600 text-sm font-bold text-white shadow-md shadow-blue-900/40">
-          F
+      <div className="flex shrink-0 items-center justify-between gap-2.5 px-6 pb-2 pt-6">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-400 to-blue-600 text-sm font-bold text-white shadow-md shadow-blue-900/40">
+            F
+          </div>
+          <span className="font-serif text-base font-semibold tracking-wide text-white">
+            Fresher<span className="text-blue-300">Space</span>
+          </span>
         </div>
-        <span className="font-serif text-base font-semibold tracking-wide text-white">
-          Fresher<span className="text-blue-300">Space</span>
-        </span>
+
+        {/* Close button (phones only) */}
+        <button
+          onClick={() => setIsMobileOpen(false)}
+          aria-label="Close menu"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-blue-200 hover:bg-white/10 lg:hidden"
+        >
+          <X size={18} />
+        </button>
       </div>
 
       {/* User */}
-      <div className="mx-4 mt-10 rounded-xl border border-white/10 bg-white/5 p-4">
+      <div className="mx-4 mt-6 shrink-0 rounded-xl border border-white/10 bg-white/5 p-4 lg:mt-10">
         <div className="flex items-center gap-3">
           <img
             src={avatarUrl}
@@ -393,8 +420,8 @@ const Sidebar = ({
         </div>
       </div>
 
-      {/* Navigation */}
-      <nav className="mt-4 flex-1 overflow-y-auto px-4 py-2">
+      {/* Navigation (scrolls if the screen is short) */}
+      <nav className="mt-4 min-h-0 flex-1 overflow-y-auto px-4 py-2">
         <p className="px-3 pb-2 text-[11px] font-medium tracking-wide text-blue-300/60">
           Menu
         </p>
@@ -436,11 +463,14 @@ const Sidebar = ({
         </ul>
       </nav>
 
-      {/* Logout */}
-      <div className="border-t border-white/10 p-4">
+      {/* Logout — pinned, with safe-area padding for phones */}
+      <div className="shrink-0 border-t border-white/10 bg-[#0B1E3F] p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
         <button
-          onClick={onLogout}
-          className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-red-300 transition hover:bg-red-500/10 hover:text-red-200"
+          onClick={() => {
+            setIsMobileOpen(false);
+            onLogout();
+          }}
+          className="flex w-full items-center gap-3 rounded-xl bg-red-500/10 px-4 py-3 text-sm font-medium text-red-300 transition hover:bg-red-500/20 hover:text-red-200 lg:bg-transparent lg:hover:bg-red-500/10"
         >
           <LogOutIcon size={18} />
           <span>Logout</span>
@@ -454,21 +484,32 @@ const Sidebar = ({
       {/* Mobile menu toggle */}
       <button
         onClick={() => setIsMobileOpen(!isMobileOpen)}
+        aria-label="Open menu"
         className="fixed left-4 top-4 z-50 rounded-lg bg-white p-2 shadow-lg ring-1 ring-blue-100 lg:hidden"
       >
         <Menu size={24} className="text-[#0F2A56]" />
       </button>
 
+      {/* Mobile quick logout — always visible on phones */}
+      <button
+        onClick={onLogout}
+        aria-label="Logout"
+        className="fixed right-4 top-4 z-30 flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-red-600 shadow-lg ring-1 ring-red-100 lg:hidden"
+      >
+        <LogOutIcon size={16} />
+        Logout
+      </button>
+
       {isMobileOpen && (
         <div
-          className="fixed inset-0 z-40 bg-[#0B1E3F]/60 backdrop-blur-sm lg:hidden"
+          className="fixed inset-0 z-40 bg-[#0B1E3F]/60 lg:hidden"
           onClick={() => setIsMobileOpen(false)}
         />
       )}
 
       {/* Sidebar is fixed on every breakpoint; main content offsets with lg:pl-72 */}
       <aside
-        className={`fixed left-0 top-0 z-40 h-screen w-72 transform shadow-2xl shadow-black/20 transition-transform duration-300 ease-in-out lg:translate-x-0 ${
+        className={`fixed left-0 top-0 z-50 h-[100vh] h-[100dvh] w-72 max-w-[85vw] transform shadow-2xl shadow-black/20 transition-transform duration-300 ease-in-out lg:z-40 lg:max-w-none lg:translate-x-0 ${
           isMobileOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
@@ -528,7 +569,7 @@ const AddEducationModal = ({ isOpen, onClose, onAdd }) => {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#0F2A56]/50 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl ring-1 ring-blue-100">
+      <div className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl ring-1 ring-blue-100">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-serif text-xl font-semibold text-[#0F2A56]">
             Add Education
@@ -667,7 +708,7 @@ const AddCareerModal = ({ isOpen, onClose, onAdd }) => {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#0F2A56]/50 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl ring-1 ring-blue-100">
+      <div className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl ring-1 ring-blue-100">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-serif text-xl font-semibold text-[#0F2A56]">
             Add Career Experience
@@ -814,7 +855,7 @@ const AddSkillModal = ({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#0F2A56]/50 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl ring-1 ring-blue-100">
+      <div className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl ring-1 ring-blue-100">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-serif text-xl font-semibold text-[#0F2A56]">
             Add Skills
@@ -846,7 +887,7 @@ const AddSkillModal = ({
                   }
                 }}
                 placeholder="e.g. React, JavaScript, Python"
-                className="flex-1 rounded-xl border border-blue-100 px-4 py-3 text-sm outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                className="min-w-0 flex-1 rounded-xl border border-blue-100 px-4 py-3 text-sm outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               />
 
               <button
@@ -942,7 +983,7 @@ const AddInterestModal = ({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#0F2A56]/50 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl ring-1 ring-blue-100">
+      <div className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl ring-1 ring-blue-100">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-serif text-xl font-semibold text-[#0F2A56]">
             Add Career Interests
@@ -974,7 +1015,7 @@ const AddInterestModal = ({
                   }
                 }}
                 placeholder="e.g. AI/ML, Full Stack, Data Science"
-                className="flex-1 rounded-xl border border-blue-100 px-4 py-3 text-sm outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                className="min-w-0 flex-1 rounded-xl border border-blue-100 px-4 py-3 text-sm outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               />
 
               <button
@@ -1052,15 +1093,20 @@ const FresherProfile = () => {
   const [uploading, setUploading] = useState(false);
 
   const fileInputRef = useRef(null);
+  const toastTimer = useRef(null);
 
   const showToast = useCallback((type, message) => {
     setToast({ type, message });
 
-    window.clearTimeout(showToast._t);
+    window.clearTimeout(toastTimer.current);
 
-    showToast._t = window.setTimeout(() => {
+    toastTimer.current = window.setTimeout(() => {
       setToast(null);
     }, 3000);
+  }, []);
+
+  useEffect(() => {
+    return () => window.clearTimeout(toastTimer.current);
   }, []);
 
   const loadUser = useCallback(async () => {
@@ -1138,79 +1184,79 @@ const FresherProfile = () => {
   /* =======================================================================
      AVATAR UPLOAD
   ======================================================================= */
-    
- const handleAvatarUpload = async (file) => {
-  if (!file) return;
 
-  setUploading(true);
+  const handleAvatarUpload = async (file) => {
+    if (!file) return;
 
-  try {
-    // Instant preview
-    const reader = new FileReader();
+    setUploading(true);
 
-    reader.onloadend = () => {
-      const imageUrl = reader.result;
+    try {
+      // Instant preview
+      const reader = new FileReader();
 
-      setPreviewImage(imageUrl);
+      reader.onloadend = () => {
+        const imageUrl = reader.result;
 
-      setUser((prev) => {
-        const updatedUser = {
-          ...prev,
-          avatar: imageUrl,
-        };
+        setPreviewImage(imageUrl);
 
-        saveToLocalStorage(updatedUser);
-        return updatedUser;
-      });
-    };
+        setUser((prev) => {
+          const updatedUser = {
+            ...prev,
+            avatar: imageUrl,
+          };
 
-    reader.readAsDataURL(file);
+          saveToLocalStorage(updatedUser);
+          return updatedUser;
+        });
+      };
 
-    // Upload to backend
-    const updated = await apiUploadAvatar(file);
+      reader.readAsDataURL(file);
 
-    if (updated) {
-      setUser((prev) => {
-        const mergedUser = {
-          ...prev,
-          ...updated,
-          avatar:
-            updated.avatar ||
-            updated.profilePic ||
-            updated.profileImage ||
-            updated.photo ||
-            updated.photoUrl ||
-            prev.avatar,
-        };
+      // Upload to backend
+      const updated = await apiUploadAvatar(file);
 
-        saveToLocalStorage(mergedUser);
-        return mergedUser;
-      });
+      if (updated) {
+        setUser((prev) => {
+          const mergedUser = {
+            ...prev,
+            ...updated,
+            avatar:
+              updated.avatar ||
+              updated.profilePic ||
+              updated.profileImage ||
+              updated.photo ||
+              updated.photoUrl ||
+              prev.avatar,
+          };
+
+          saveToLocalStorage(mergedUser);
+          return mergedUser;
+        });
+
+        showToast(
+          "success",
+          "Profile photo updated successfully!"
+        );
+      }
+    } catch (err) {
+      console.error("Upload failed:", err);
 
       showToast(
-        "success",
-        "Profile photo updated successfully!"
+        "error",
+        err.message || "Could not upload photo. Please try again."
       );
+
+      setPreviewImage(null);
+
+      const localData = getFromLocalStorage();
+
+      if (localData) {
+        setUser(localData);
+      }
+    } finally {
+      setUploading(false);
     }
-  } catch (err) {
-    console.error("Upload failed:", err);
-
-    showToast(
-      "error",
-      err.message || "Could not upload photo. Please try again."
-    );
-
-    setPreviewImage(null);
-
-    const localData = getFromLocalStorage();
-
-    if (localData) {
-      setUser(localData);
-    }
-  } finally {
-    setUploading(false);
-  }
-};
+  };
 
   const handleAvatarRemove = async () => {
     try {
@@ -1529,9 +1575,9 @@ const FresherProfile = () => {
   const displayName =
     (user?.name || "").trim() || "Fresher";
 
- const avatarUrl =
-  previewImage ||
-  (user ? resolveAvatar(user) : null);
+  const avatarUrl =
+    previewImage ||
+    (user ? resolveAvatar(user) : null);
 
   /* =======================================================================
      STATES
@@ -1571,12 +1617,12 @@ const FresherProfile = () => {
 
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-[#F5F8FC]">
-      {/* Advanced premium background: soft radial glows + faint grid */}
+      {/* Premium background — heavy blurs only on desktop (lag on phones) */}
       <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
         <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(15,42,86,0.035)_1px,transparent_1px),linear-gradient(to_bottom,rgba(15,42,86,0.035)_1px,transparent_1px)] bg-[size:44px_44px] [mask-image:radial-gradient(ellipse_80%_60%_at_50%_-10%,black_40%,transparent_100%)]" />
-        <div className="absolute -top-40 left-1/3 h-[36rem] w-[36rem] rounded-full bg-blue-300/25 blur-[120px]" />
-        <div className="absolute -right-32 top-1/4 h-[28rem] w-[28rem] rounded-full bg-blue-500/15 blur-[110px]" />
-        <div className="absolute bottom-[-10rem] left-[-6rem] h-[26rem] w-[26rem] rounded-full bg-indigo-200/40 blur-[100px]" />
+        <div className="absolute -top-40 left-1/3 hidden h-[36rem] w-[36rem] rounded-full bg-blue-300/25 blur-[120px] md:block" />
+        <div className="absolute -right-32 top-1/4 hidden h-[28rem] w-[28rem] rounded-full bg-blue-500/15 blur-[110px] md:block" />
+        <div className="absolute bottom-[-10rem] left-[-6rem] hidden h-[26rem] w-[26rem] rounded-full bg-indigo-200/40 blur-[100px] md:block" />
       </div>
 
       <div className="relative z-10 flex min-h-screen">
@@ -1590,11 +1636,11 @@ const FresherProfile = () => {
           onLogout={handleLogout}
         />
 
-        {/* Main — offset to clear the fixed sidebar on desktop */}
-        <div className="flex-1 overflow-y-auto p-4 lg:pl-72 lg:p-8">
+        {/* Main — offset to clear the fixed sidebar on desktop; top padding clears the phone buttons */}
+        <div className="min-w-0 flex-1 overflow-y-auto p-4 pt-20 lg:p-8 lg:pl-72">
           <div className="mx-auto max-w-4xl">
             {/* Profile Header */}
-            <div className="mb-8 overflow-hidden rounded-2xl bg-white/90 shadow-xl shadow-blue-900/5 ring-1 ring-blue-100/70 backdrop-blur-sm">
+            <div className="mb-8 overflow-hidden rounded-2xl bg-white/90 shadow-xl shadow-blue-900/5 ring-1 ring-blue-100/70 md:backdrop-blur-sm">
               <div className="relative h-24 overflow-hidden bg-gradient-to-r from-[#0B1E3F] via-[#0F2A56] to-blue-700">
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(255,255,255,0.18),transparent_55%)]" />
                 <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.06)_1px,transparent_1px)] bg-[size:28px_100%]" />
@@ -1603,7 +1649,7 @@ const FresherProfile = () => {
               <div className="flex flex-col gap-6 p-6 pt-0 sm:flex-row sm:items-end sm:justify-between">
                 <div className="flex items-end gap-6">
                   {/* Avatar */}
-                  <div className="group relative -mt-12">
+                  <div className="group relative -mt-12 shrink-0">
                     <img
                       src={avatarUrl}
                       alt={displayName}
@@ -1643,12 +1689,12 @@ const FresherProfile = () => {
                   </div>
 
                   {/* User details */}
-                  <div className="pb-1">
-                    <h1 className="font-serif text-2xl font-semibold text-[#0F2A56]">
+                  <div className="min-w-0 pb-1">
+                    <h1 className="truncate font-serif text-2xl font-semibold text-[#0F2A56]">
                       {displayName}
                     </h1>
 
-                    <p className="text-sm text-slate-500">
+                    <p className="truncate text-sm text-slate-500">
                       {user?.email}
                     </p>
 
@@ -1786,11 +1832,11 @@ const FresherProfile = () => {
               opacity: 0,
               y: 10,
             }}
-            className="fixed bottom-6 right-6 z-[100]"
+            className="fixed bottom-6 right-6 z-[110] max-w-[calc(100vw-3rem)]"
           >
             <div className="flex items-center gap-3 rounded-2xl bg-white px-5 py-4 shadow-2xl ring-1 ring-blue-100">
               <div
-                className={`flex h-8 w-8 items-center justify-center rounded-full ${
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
                   toast.type === "success"
                     ? "bg-emerald-50 text-emerald-600"
                     : toast.type === "info"
@@ -1956,14 +2002,14 @@ const EducationContent = ({
   onDelete,
 }) => (
   <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-blue-100/70">
-    <div className="mb-4 flex items-center justify-between">
+    <div className="mb-4 flex items-center justify-between gap-3">
       <h2 className="font-serif text-lg font-semibold text-[#0F2A56]">
         Education
       </h2>
 
       <button
         onClick={onAdd}
-        className="flex items-center gap-1.5 rounded-xl bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 hover:shadow-md"
+        className="flex shrink-0 items-center gap-1.5 rounded-xl bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 hover:shadow-md"
       >
         <Plus size={16} />
         Add Education
@@ -1978,7 +2024,7 @@ const EducationContent = ({
             className="rounded-xl border border-blue-100/70 bg-white p-4 transition-shadow hover:shadow-md"
           >
             <div className="flex items-start justify-between">
-              <div className="flex-1">
+              <div className="min-w-0 flex-1">
                 <h3 className="font-semibold text-[#0F2A56]">
                   {edu.institution}
                 </h3>
@@ -2018,6 +2064,7 @@ const EducationContent = ({
                 onClick={() =>
                   onDelete(edu.id)
                 }
+                aria-label="Delete education"
                 className="p-2 text-slate-400 transition-colors hover:text-red-500"
               >
                 <Trash2 size={18} />
@@ -2046,14 +2093,14 @@ const CareerContent = ({
   onDelete,
 }) => (
   <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-blue-100/70">
-    <div className="mb-4 flex items-center justify-between">
+    <div className="mb-4 flex items-center justify-between gap-3">
       <h2 className="font-serif text-lg font-semibold text-[#0F2A56]">
         Career Experience
       </h2>
 
       <button
         onClick={onAdd}
-        className="flex items-center gap-1.5 rounded-xl bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 hover:shadow-md"
+        className="flex shrink-0 items-center gap-1.5 rounded-xl bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 hover:shadow-md"
       >
         <Plus size={16} />
         Add Experience
@@ -2068,7 +2115,7 @@ const CareerContent = ({
             className="rounded-xl border border-blue-100/70 bg-white p-4 transition-shadow hover:shadow-md"
           >
             <div className="flex items-start justify-between">
-              <div className="flex-1">
+              <div className="min-w-0 flex-1">
                 <h3 className="font-semibold text-[#0F2A56]">
                   {exp.company}
                 </h3>
@@ -2114,6 +2161,7 @@ const CareerContent = ({
                 onClick={() =>
                   onDelete(exp.id)
                 }
+                aria-label="Delete experience"
                 className="p-2 text-slate-400 transition-colors hover:text-red-500"
               >
                 <Trash2 size={18} />
@@ -2134,6 +2182,7 @@ const CareerContent = ({
 
 /* =========================================================================
    SKILLS
+   (delete "x" is always visible on touch screens — hover doesn't exist there)
 ========================================================================= */
 
 const SkillsContent = ({
@@ -2142,14 +2191,14 @@ const SkillsContent = ({
   onDelete,
 }) => (
   <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-blue-100/70">
-    <div className="mb-4 flex items-center justify-between">
+    <div className="mb-4 flex items-center justify-between gap-3">
       <h2 className="font-serif text-lg font-semibold text-[#0F2A56]">
         Skills
       </h2>
 
       <button
         onClick={onAdd}
-        className="flex items-center gap-1.5 rounded-xl bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 hover:shadow-md"
+        className="flex shrink-0 items-center gap-1.5 rounded-xl bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 hover:shadow-md"
       >
         <Plus size={16} />
         Add Skills
@@ -2169,7 +2218,8 @@ const SkillsContent = ({
               onClick={() =>
                 onDelete(skill)
               }
-              className="opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-500"
+              aria-label={`Remove ${skill}`}
+              className="opacity-100 transition-opacity hover:text-red-500 md:opacity-0 md:group-hover:opacity-100"
             >
               <X size={14} />
             </button>
@@ -2196,14 +2246,14 @@ const InterestsContent = ({
   onDelete,
 }) => (
   <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-blue-100/70">
-    <div className="mb-4 flex items-center justify-between">
+    <div className="mb-4 flex items-center justify-between gap-3">
       <h2 className="font-serif text-lg font-semibold text-[#0F2A56]">
         Career Interests
       </h2>
 
       <button
         onClick={onAdd}
-        className="flex items-center gap-1.5 rounded-xl bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 hover:shadow-md"
+        className="flex shrink-0 items-center gap-1.5 rounded-xl bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 hover:shadow-md"
       >
         <Plus size={16} />
         Add Interests
@@ -2223,7 +2273,8 @@ const InterestsContent = ({
               onClick={() =>
                 onDelete(interest)
               }
-              className="opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-500"
+              aria-label={`Remove ${interest}`}
+              className="opacity-100 transition-opacity hover:text-red-500 md:opacity-0 md:group-hover:opacity-100"
             >
               <X size={14} />
             </button>
@@ -2342,7 +2393,7 @@ const EditProfileModal = ({
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[#0F2A56]/50 p-4 backdrop-blur-sm">
-      <div className="relative max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-blue-100">
+      <div className="relative max-h-[90dvh] w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-blue-100">
         {/* Header */}
 
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-blue-100/70 bg-white px-6 py-5">
@@ -2373,7 +2424,7 @@ const EditProfileModal = ({
 
         <form
           onSubmit={handleSubmit}
-          className="max-h-[calc(90vh-80px)] overflow-y-auto px-6 py-6"
+          className="max-h-[calc(90dvh-80px)] overflow-y-auto px-6 py-6"
         >
           {/* Photo */}
 
@@ -2555,7 +2606,7 @@ const EditProfileModal = ({
 
           {/* Buttons */}
 
-          <div className="sticky bottom-0 mt-8 flex flex-col-reverse gap-3 border-t border-blue-100/70 bg-white pt-5 sm:flex-row sm:justify-end">
+          <div className="sticky bottom-0 mt-8 flex flex-col-reverse gap-3 border-t border-blue-100/70 bg-white pb-[env(safe-area-inset-bottom)] pt-5 sm:flex-row sm:justify-end">
             <button
               type="button"
               onClick={onClose}
@@ -2841,7 +2892,7 @@ const InfoItem = ({
   <div className="flex items-start gap-3 rounded-xl bg-[#F5F8FC] p-4">
     <Icon
       size={16}
-      className="mt-0.5 text-blue-700"
+      className="mt-0.5 shrink-0 text-blue-700"
     />
 
     <div className="min-w-0">
@@ -2887,12 +2938,12 @@ const EmptyStateShell = ({
   action,
 }) => (
   <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#F5F8FC] px-5">
-    <div className="pointer-events-none absolute inset-0">
+    <div className="pointer-events-none absolute inset-0 hidden md:block">
       <div className="absolute -top-40 left-1/2 h-[32rem] w-[32rem] -translate-x-1/2 rounded-full bg-blue-300/25 blur-[120px]" />
       <div className="absolute bottom-[-8rem] right-[-6rem] h-[22rem] w-[22rem] rounded-full bg-indigo-200/40 blur-[100px]" />
     </div>
 
-    <div className="relative w-full max-w-sm rounded-2xl bg-white/90 p-8 text-center shadow-xl shadow-blue-900/5 ring-1 ring-blue-100/70 backdrop-blur-sm">
+    <div className="relative w-full max-w-sm rounded-2xl bg-white/90 p-8 text-center shadow-xl shadow-blue-900/5 ring-1 ring-blue-100/70">
       <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[#0F2A56] to-blue-700 text-white shadow-lg shadow-blue-900/20">
         {icon}
       </div>
@@ -2942,7 +2993,7 @@ const ProfileSkeleton = () => (
       </div>
     </div>
 
-    <div className="flex-1 p-8 lg:pl-72">
+    <div className="min-w-0 flex-1 p-4 pt-20 lg:p-8 lg:pl-72">
       <div className="mx-auto max-w-4xl space-y-6">
         <div className="h-32 animate-pulse rounded-2xl bg-white shadow-sm ring-1 ring-blue-100/50" />
 

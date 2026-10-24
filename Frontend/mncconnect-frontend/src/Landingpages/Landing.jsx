@@ -2,27 +2,19 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   Award,
-  BriefcaseBusiness,
   CalendarDays,
   CheckCircle2,
   ChevronRight,
   CircleDollarSign,
-  Clock3,
-  Code2,
   DollarSign,
   GraduationCap,
-  Headphones,
   Menu,
-  MessageCircleQuestion,
-  MessageSquare,
   Play,
   Rocket,
   Search,
-  ShieldCheck,
   Sparkles,
   Star,
   Target,
-  UserRound,
   Users,
   Video,
   WalletCards,
@@ -127,25 +119,42 @@ const features = [
   },
 ];
 
+/* Small hook: true on phones / small tablets (used to switch off heavy effects) */
+function useIsMobile(query = "(max-width: 768px)") {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia
+      ? window.matchMedia(query).matches
+      : false
+  );
+
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const mq = window.matchMedia(query);
+    const handler = (e) => setIsMobile(e.matches);
+    setIsMobile(mq.matches);
+    mq.addEventListener?.("change", handler);
+    return () => mq.removeEventListener?.("change", handler);
+  }, [query]);
+
+  return isMobile;
+}
+
 export default function Landing() {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [persona, setPersona] = useState("fresher");
   const [menuOpen, setMenuOpen] = useState(false);
   const [videoOpen, setVideoOpen] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [mentorIndex, setMentorIndex] = useState(0);
   const [mentorPaused, setMentorPaused] = useState(false);
+  const [mentorVisible, setMentorVisible] = useState(false);
   const mentorStartX = useRef(0);
   const mentorDragging = useRef(false);
+  const mentorSectionRef = useRef(null);
 
   /*
    * AUTH MODAL SCROLL LOCK
-   * ----------------------
-   * When the login / signup popup opens:
-   * - Lock the body so the landing page cannot scroll.
-   * - Preserve the exact background scroll position.
-   * - Restore it when the popup closes.
-   * - Also compensate for the scrollbar width to avoid layout jumping.
    */
   useEffect(() => {
     if (!showAuthModal) return;
@@ -225,32 +234,47 @@ export default function Landing() {
     return () => cancelAnimationFrame(frame);
   }, []);
 
-  /* Hero 3D parallax */
+  /* Hero 3D parallax — desktop (mouse) only, throttled with rAF */
   useEffect(() => {
-    const handlePointerMove = (event) => {
-      if (!heroRef.current) return;
+    if (isMobile) {
+      if (heroRef.current) heroRef.current.style.transform = "";
+      return;
+    }
+    if (window.matchMedia?.("(pointer: coarse)").matches) return;
+
+    let raf = 0;
+    let lastEvent = null;
+
+    const apply = () => {
+      raf = 0;
+      if (!heroRef.current || !lastEvent) return;
 
       const rect = heroRef.current.getBoundingClientRect();
+      const x = (lastEvent.clientX - rect.left) / rect.width - 0.5;
+      const y = (lastEvent.clientY - rect.top) / rect.height - 0.5;
 
-      const x = (event.clientX - rect.left) / rect.width - 0.5;
-      const y = (event.clientY - rect.top) / rect.height - 0.5;
+      heroRef.current.style.transform = `perspective(1400px) rotateX(${
+        y * -5
+      }deg) rotateY(${x * 7}deg) translateZ(0)`;
+    };
 
-      heroRef.current.style.transform = `
-        perspective(1400px)
-        rotateX(${y * -5}deg)
-        rotateY(${x * 7}deg)
-        translateZ(0)
-      `;
+    const handlePointerMove = (event) => {
+      lastEvent = event;
+      if (!raf) raf = requestAnimationFrame(apply);
     };
 
     window.addEventListener("pointermove", handlePointerMove, {
       passive: true,
     });
 
-    return () => window.removeEventListener("pointermove", handlePointerMove);
-  }, []);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [isMobile]);
 
   const tiltCard = (event) => {
+    if (isMobile) return;
     const card = event.currentTarget;
     const rect = card.getBoundingClientRect();
 
@@ -260,23 +284,12 @@ export default function Landing() {
     const rotateX = (y / rect.height - 0.5) * -9;
     const rotateY = (x / rect.width - 0.5) * 9;
 
-    card.style.transform = `
-      perspective(1100px)
-      rotateX(${rotateX}deg)
-      rotateY(${rotateY}deg)
-      scale(1.025)
-      translateZ(18px)
-    `;
+    card.style.transform = `perspective(1100px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale(1.025) translateZ(18px)`;
   };
 
   const resetTilt = (event) => {
-    event.currentTarget.style.transform = `
-      perspective(1100px)
-      rotateX(0deg)
-      rotateY(0deg)
-      scale(1)
-      translateZ(0)
-    `;
+    if (isMobile) return;
+    event.currentTarget.style.transform = `perspective(1100px) rotateX(0deg) rotateY(0deg) scale(1) translateZ(0)`;
   };
 
   const fresherMode = persona === "fresher";
@@ -286,13 +299,36 @@ export default function Landing() {
   const prevMentor = () =>
     setMentorIndex((value) => (value - 1 + mentors.length) % mentors.length);
 
+  /* Only run the carousel when it is on screen */
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      setMentorIndex((value) => (value + 1) % mentors.length);
-    }, 3000);
+    const node = mentorSectionRef.current;
+    if (!node || typeof IntersectionObserver === "undefined") {
+      setMentorVisible(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => setMentorVisible(entry.isIntersecting),
+      { threshold: 0.15 }
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  /* Auto-rotate: paused when hovered, off-screen, or while a modal is open */
+  useEffect(() => {
+    if (mentorPaused || !mentorVisible || showAuthModal || videoOpen) return;
+
+    const timer = window.setInterval(
+      () => {
+        setMentorIndex((value) => (value + 1) % mentors.length);
+      },
+      isMobile ? 4000 : 3000
+    );
 
     return () => window.clearInterval(timer);
-  }, []);
+  }, [mentorPaused, mentorVisible, showAuthModal, videoOpen, isMobile]);
 
   const handleMentorPointerDown = (event) => {
     mentorDragging.current = true;
@@ -345,10 +381,10 @@ export default function Landing() {
 
         @keyframes marqueeSlide {
           from {
-            transform: translateX(0);
+            transform: translate3d(0, 0, 0);
           }
           to {
-            transform: translateX(-50%);
+            transform: translate3d(-50%, 0, 0);
           }
         }
 
@@ -464,6 +500,7 @@ export default function Landing() {
 
         .marquee-track {
           animation: marqueeSlide 28s linear infinite;
+          will-change: transform;
         }
 
         .grid-scan {
@@ -522,13 +559,6 @@ export default function Landing() {
         @keyframes premiumCardGlow {
           0%, 100% { opacity: .25; transform: translateX(-20%); }
           50% { opacity: .8; transform: translateX(220%); }
-        }
-
-        @keyframes premiumNoise {
-          0%, 100% { transform: translate(0,0); }
-          25% { transform: translate(1%, -1%); }
-          50% { transform: translate(-1%, 1%); }
-          75% { transform: translate(1%, 1%); }
         }
 
         .premium-feature-section {
@@ -659,10 +689,60 @@ export default function Landing() {
           }
         }
 
+        /* ===== MOBILE PERFORMANCE MODE ===== */
+        @media (max-width: 768px) {
+          /* No infinite decorative animations on phones */
+          .float-block,
+          .pulse-glow,
+          .ring-a,
+          .ring-b,
+          .orbit-dot,
+          .grid-scan,
+          .particle,
+          .scan-line,
+          .live-pulse,
+          .premium-feature-section::after,
+          .feature-card-premium::after {
+            animation: none !important;
+          }
+
+          /* Big blurs + backdrop filters are the #1 cause of scroll lag */
+          .mobile-hide {
+            display: none !important;
+          }
+
+          .premium-feature-section::after,
+          .feature-card-premium::after {
+            display: none !important;
+          }
+
+          .glass {
+            background: rgba(255,255,255,.95);
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+          }
+
+          .backdrop-blur-xl,
+          .backdrop-blur-2xl,
+          .backdrop-blur {
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+          }
+
+          .feature-card-premium {
+            box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 12px 30px rgba(0,0,0,.25);
+          }
+
+          .mentor-carousel-stage {
+            perspective: 1000px;
+          }
+        }
+
         @media (prefers-reduced-motion: reduce) {
           .premium-feature-section::after,
           .feature-card-premium::after,
           .float-block,
+          .pulse-glow,
           .marquee-track,
           .scan-line,
           .grid-scan,
@@ -681,29 +761,31 @@ export default function Landing() {
 
       <div className="pointer-events-none fixed inset-0 z-0 cyber-grid opacity-55" />
 
-      <div className="pointer-events-none fixed left-[-10%] top-[10%] z-0 h-[500px] w-[500px] rounded-full bg-indigo-500/10 blur-[140px]" />
+      <div className="mobile-hide pointer-events-none fixed left-[-10%] top-[10%] z-0 h-[500px] w-[500px] rounded-full bg-indigo-500/10 blur-[140px]" />
 
-      <div className="pointer-events-none fixed right-[-10%] top-[25%] z-0 h-[600px] w-[600px] rounded-full bg-emerald-400/10 blur-[150px]" />
+      <div className="mobile-hide pointer-events-none fixed right-[-10%] top-[25%] z-0 h-[600px] w-[600px] rounded-full bg-emerald-400/10 blur-[150px]" />
 
-      <div className="pointer-events-none fixed bottom-[-15%] left-[35%] z-0 h-[500px] w-[500px] rounded-full bg-violet-500/10 blur-[140px]" />
+      <div className="mobile-hide pointer-events-none fixed bottom-[-15%] left-[35%] z-0 h-[500px] w-[500px] rounded-full bg-violet-500/10 blur-[140px]" />
 
-      <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
-        <div className="grid-scan absolute left-0 right-0 h-48 bg-gradient-to-b from-transparent via-indigo-400/10 to-transparent" />
+      {!isMobile && (
+        <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+          <div className="grid-scan absolute left-0 right-0 h-48 bg-gradient-to-b from-transparent via-indigo-400/10 to-transparent" />
 
-        {[...Array(15)].map((_, i) => (
-          <span
-            key={i}
-            className="particle absolute h-1 w-1 rounded-full bg-indigo-400/30"
-            style={{
-              left: `${(i * 17) % 100}%`,
-              animationDelay: `${(i * 1.7) % 10}s`,
-            }}
-          />
-        ))}
-      </div>
+          {[...Array(8)].map((_, i) => (
+            <span
+              key={i}
+              className="particle absolute h-1 w-1 rounded-full bg-indigo-400/30"
+              style={{
+                left: `${(i * 17) % 100}%`,
+                animationDelay: `${(i * 1.7) % 10}s`,
+              }}
+            />
+          ))}
+        </div>
+      )}
 
       {/* NAVBAR */}
-      <nav className="fixed left-0 right-0 top-0 z-50 border-b border-slate-200/80 bg-white/80 backdrop-blur-2xl">
+      <nav className="fixed left-0 right-0 top-0 z-50 border-b border-slate-200/80 bg-white/95 backdrop-blur-2xl md:bg-white/80">
         <div className="mx-auto flex h-20 max-w-[1500px] items-center justify-between px-5 sm:px-8 lg:px-12">
           <a href="#" className="flex items-center gap-3">
             <div className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-violet-50 shadow-sm">
@@ -757,6 +839,7 @@ export default function Landing() {
           <button
             onClick={() => setMenuOpen(!menuOpen)}
             className="rounded-xl border border-slate-200 p-2.5 md:hidden"
+            aria-label="Toggle menu"
           >
             {menuOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
@@ -765,10 +848,39 @@ export default function Landing() {
         {menuOpen && (
           <div className="border-t border-slate-200 bg-white px-6 py-6 md:hidden">
             <div className="flex flex-col gap-5 text-sm font-semibold text-slate-600">
-              <a href="#section-0">MNC connect</a>
-              <a href="#section-3">How It Works</a>
-              <a href="#section-2">For Freshers</a>
-              <a href="#section-4">For Professionals</a>
+              <a href="#section-0" onClick={() => setMenuOpen(false)}>
+                MNC connect
+              </a>
+              <a href="#section-3" onClick={() => setMenuOpen(false)}>
+                How It Works
+              </a>
+              <a href="#section-2" onClick={() => setMenuOpen(false)}>
+                For Freshers
+              </a>
+              <a href="#section-4" onClick={() => setMenuOpen(false)}>
+                For Professionals
+              </a>
+
+              <div className="flex gap-3 border-t border-slate-100 pt-5">
+                <button
+                  className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-700"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setShowAuthModal(true);
+                  }}
+                >
+                  Log in
+                </button>
+                <button
+                  className="flex-1 rounded-xl bg-slate-900 py-3 text-sm font-bold text-white"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setShowAuthModal(true);
+                  }}
+                >
+                  Get Started
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -833,7 +945,7 @@ export default function Landing() {
             </div>
 
             {/* HUD */}
-            <div className="mt-12 overflow-hidden rounded-2xl border border-slate-200 bg-white/75 shadow-[0_20px_60px_rgba(15,23,42,.06)] backdrop-blur-xl">
+            <div className="mt-12 overflow-hidden rounded-2xl border border-slate-200 bg-white/90 shadow-[0_20px_60px_rgba(15,23,42,.06)] backdrop-blur-xl md:bg-white/75">
               <div className="grid grid-cols-3">
                 <HudStat
                   value={stats.sessions.toLocaleString()}
@@ -872,12 +984,12 @@ export default function Landing() {
               className="preserve-3d relative h-[560px] w-full max-w-[650px] transition-transform duration-200 ease-out"
             >
               {/* Ambient halo */}
-              <div className="absolute left-1/2 top-1/2 h-[480px] w-[480px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-indigo-500/10 blur-[90px]" />
+              <div className="mobile-hide absolute left-1/2 top-1/2 h-[480px] w-[480px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-indigo-500/10 blur-[90px]" />
 
               {/* Rings */}
-              <div className="ring-a absolute left-1/2 top-1/2 h-[470px] w-[470px] rounded-full border border-indigo-300/40" />
+              <div className="ring-a mobile-hide absolute left-1/2 top-1/2 h-[470px] w-[470px] rounded-full border border-indigo-300/40" />
 
-              <div className="ring-b absolute left-1/2 top-1/2 h-[520px] w-[280px] rounded-[50%] border border-violet-300/40" />
+              <div className="ring-b mobile-hide absolute left-1/2 top-1/2 h-[520px] w-[280px] rounded-[50%] border border-violet-300/40" />
 
               <div className="absolute left-1/2 top-1/2 h-[420px] w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-slate-200/70" />
 
@@ -908,9 +1020,10 @@ export default function Landing() {
 
                 {/* Video */}
                 <div className="relative grid aspect-[16/9] grid-cols-2 gap-2 bg-slate-900 p-2">
+                  {/* Phones: static poster image (no autoplaying video decode) */}
                   <VideoPerson
                     image={mentors[0].image}
-                    videoSrc={DEMO_VIDEO_URL}
+                    videoSrc={isMobile ? undefined : DEMO_VIDEO_URL}
                     name="Ananya"
                     role="Mentor • Zoho SDE II"
                     mentor
@@ -998,7 +1111,7 @@ export default function Landing() {
               </div>
 
               {/* Orbit dot */}
-              <div className="absolute left-1/2 top-1/2">
+              <div className="mobile-hide absolute left-1/2 top-1/2">
                 <div className="orbit-dot h-3 w-3 rounded-full bg-indigo-500 shadow-[0_0_20px_rgba(99,102,241,.8)]" />
               </div>
             </div>
@@ -1159,7 +1272,7 @@ export default function Landing() {
 
                 <div className="relative flex min-h-[330px] items-center justify-center">
                   <div
-                    className={`absolute h-64 w-64 rounded-full blur-[70px] ${
+                    className={`mobile-hide absolute h-64 w-64 rounded-full blur-[70px] ${
                       fresherMode ? "bg-indigo-300/30" : "bg-emerald-300/30"
                     }`}
                   />
@@ -1274,7 +1387,7 @@ export default function Landing() {
                   }`}
                 >
                   <div
-                    className={`absolute -right-20 -top-20 h-48 w-48 rounded-full blur-[70px] ${
+                    className={`mobile-hide absolute -right-20 -top-20 h-48 w-48 rounded-full blur-[70px] ${
                       feature.accent === "emerald"
                         ? "bg-emerald-400/10"
                         : feature.accent === "violet"
@@ -1334,6 +1447,7 @@ export default function Landing() {
       {/* MENTOR SPOTLIGHT — 3D AUTO CAROUSEL */}
       <section
         id="section-0"
+        ref={mentorSectionRef}
         className="relative z-10 overflow-hidden px-5 py-28 sm:px-8 lg:px-12"
         onMouseEnter={() => setMentorPaused(true)}
         onMouseLeave={() => setMentorPaused(false)}
@@ -1355,9 +1469,9 @@ export default function Landing() {
               mentorDragging.current = false;
             }}
           >
-            <div className="pointer-events-none absolute left-1/2 top-1/2 h-[430px] w-[850px] -translate-x-1/2 -translate-y-1/2 rounded-[50%] border border-indigo-200/60 [transform:translate(-50%,-50%)_rotateX(67deg)]" />
-            <div className="pointer-events-none absolute left-1/2 top-1/2 h-[330px] w-[680px] -translate-x-1/2 -translate-y-1/2 rounded-[50%] border border-violet-200/50 [transform:translate(-50%,-50%)_rotateX(67deg)]" />
-            <div className="pointer-events-none absolute left-1/2 top-[72%] h-28 w-[70%] -translate-x-1/2 rounded-[50%] bg-indigo-500/10 blur-3xl" />
+            <div className="mobile-hide pointer-events-none absolute left-1/2 top-1/2 h-[430px] w-[850px] -translate-x-1/2 -translate-y-1/2 rounded-[50%] border border-indigo-200/60 [transform:translate(-50%,-50%)_rotateX(67deg)]" />
+            <div className="mobile-hide pointer-events-none absolute left-1/2 top-1/2 h-[330px] w-[680px] -translate-x-1/2 -translate-y-1/2 rounded-[50%] border border-violet-200/50 [transform:translate(-50%,-50%)_rotateX(67deg)]" />
+            <div className="mobile-hide pointer-events-none absolute left-1/2 top-[72%] h-28 w-[70%] -translate-x-1/2 rounded-[50%] bg-indigo-500/10 blur-3xl" />
 
             {mentors.map((mentor, index) => {
               let offset = index - mentorIndex;
@@ -1365,22 +1479,36 @@ export default function Landing() {
               if (offset < -mentors.length / 2) offset += mentors.length;
 
               const abs = Math.abs(offset);
-              const x = offset * 305;
+
+              /* Phones: tighter spacing, only center + 2 neighbours visible */
+              const spacing = isMobile ? 215 : 305;
+              const x = offset * spacing;
               const z = abs === 0 ? 100 : abs === 1 ? -45 : -190;
               const rotateY = offset === 0 ? 0 : offset > 0 ? -34 : 34;
               const scale = abs === 0 ? 1 : abs === 1 ? 0.82 : 0.64;
-              const opacity = abs === 0 ? 1 : abs === 1 ? 0.78 : 0.2;
+              const opacity = isMobile
+                ? abs === 0
+                  ? 1
+                  : abs === 1
+                    ? 0.55
+                    : 0
+                : abs === 0
+                  ? 1
+                  : abs === 1
+                    ? 0.78
+                    : 0.2;
 
               return (
                 <div
                   key={mentor.name}
                   onClick={() => setMentorIndex(index)}
-                  className={`absolute left-1/2 top-1/2 h-[400px] w-[300px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[30px] border border-white/90 bg-white shadow-[0_35px_100px_rgba(15,23,42,.20)] transition-all duration-700 ease-[cubic-bezier(.22,1,.36,1)] ${abs > 2 ? "pointer-events-none" : "cursor-pointer"}`}
+                  className={`absolute left-1/2 top-1/2 h-[400px] w-[300px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[30px] border border-white/90 bg-white shadow-[0_35px_100px_rgba(15,23,42,.20)] transition-all duration-700 ease-[cubic-bezier(.22,1,.36,1)] max-md:shadow-[0_14px_30px_rgba(15,23,42,.16)] ${abs > (isMobile ? 1 : 2) ? "pointer-events-none" : "cursor-pointer"}`}
                   style={{
                     transform: `translate(-50%, -50%) translateX(${x}px) translateZ(${z}px) rotateY(${rotateY}deg) scale(${scale})`,
                     opacity,
                     zIndex: 30 - abs,
                     transformStyle: "preserve-3d",
+                    visibility: isMobile && abs > 1 ? "hidden" : "visible",
                   }}
                 >
                   <div className="relative h-[270px] overflow-hidden bg-slate-100">
@@ -1388,6 +1516,8 @@ export default function Landing() {
                       src={mentor.image}
                       alt={`${mentor.name} - ${mentor.role} at ${mentor.company}`}
                       draggable="false"
+                      loading="lazy"
+                      decoding="async"
                       className="h-full w-full object-cover transition duration-700"
                     />
                     <div
@@ -1562,7 +1692,7 @@ export default function Landing() {
 
       {/* FINAL CTA */}
       <section className="relative z-10 overflow-hidden px-5 py-32 sm:px-8 lg:px-12">
-        <div className="absolute left-1/2 top-1/2 h-[500px] w-[900px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-indigo-500/10 blur-[130px]" />
+        <div className="mobile-hide absolute left-1/2 top-1/2 h-[500px] w-[900px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-indigo-500/10 blur-[130px]" />
 
         <div className="relative mx-auto max-w-5xl text-center">
           <div className="mx-auto mb-6 flex w-fit items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-4 py-2 font-mono text-[8px] font-bold tracking-[.3em] text-indigo-600">
@@ -1627,6 +1757,7 @@ export default function Landing() {
             <button
               onClick={() => setVideoOpen(false)}
               className="absolute right-5 top-5 z-20 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur-xl transition hover:bg-white/20"
+              aria-label="Close video"
             >
               <X size={18} />
             </button>
@@ -1654,6 +1785,7 @@ export default function Landing() {
           </div>
         </div>
       )}
+
       {/* Auth Modal - Smooth / Scroll Locked */}
       {showAuthModal && (
         <div
@@ -1730,6 +1862,8 @@ function VideoPerson({ image, videoSrc, name, role, mentor = false }) {
         <img
           src={image}
           alt={name}
+          loading="lazy"
+          decoding="async"
           className="h-full w-full object-cover opacity-90 transition duration-700 group-hover:scale-105"
         />
       )}
@@ -1765,6 +1899,8 @@ function MentorFloatCard({ mentor, className, delay }) {
         <img
           src={mentor.image}
           alt={mentor.name}
+          loading="lazy"
+          decoding="async"
           className="h-12 w-12 rounded-xl object-cover"
         />
 
