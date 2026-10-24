@@ -23,7 +23,6 @@ import {
   UserCircle,
   BriefcaseBusiness,
   Trash2,
-  Menu,
   LogOut as LogOutIcon,
 } from "lucide-react";
 
@@ -479,43 +478,52 @@ const Sidebar = ({
 
   return (
     <>
-      {/* Mobile menu toggle */}
-      <button
-        onClick={() => setIsMobileOpen(!isMobileOpen)}
-        aria-label="Open menu"
-        className="fixed left-4 top-4 z-50 rounded-lg bg-white p-2 shadow-lg ring-1 ring-blue-100 lg:hidden"
-      >
-        <Menu size={24} className="text-[#0F2A56]" />
-      </button>
-
-      {/* Mobile quick logout — always visible on phones */}
-      <button
-        onClick={onLogout}
-        aria-label="Logout"
-        className="fixed right-4 top-4 z-30 flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-red-600 shadow-lg ring-1 ring-red-100 lg:hidden"
-      >
-        <LogOutIcon size={16} />
-        Logout
-      </button>
-
-      {isMobileOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-[#0B1E3F]/60 lg:hidden"
-          onClick={() => setIsMobileOpen(false)}
-        />
-      )}
-
-      {/* Sidebar is fixed on every breakpoint; main content offsets with lg:pl-72 */}
-      <aside
-        className={`fixed left-0 top-0 z-50 h-[100vh] h-[100dvh] w-72 max-w-[85vw] transform shadow-2xl shadow-black/20 transition-transform duration-300 ease-in-out lg:z-40 lg:max-w-none lg:translate-x-0 ${
-          isMobileOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
-      >
+      {/* Desktop sidebar only. On phones the tabs + Logout live inside the page content
+          (fixed buttons got hidden behind the parent layout's navbar). */}
+      <aside className="fixed left-0 top-0 z-40 hidden h-[100vh] h-[100dvh] w-72 shadow-2xl shadow-black/20 lg:block">
         {sidebarContent}
       </aside>
     </>
   );
 };
+
+/* =========================================================================
+   MOBILE TAB BAR (phones / tablets) — tabs + Logout, rendered inside the page
+========================================================================= */
+
+const MOBILE_TABS = [
+  { id: "profile", label: "Profile", icon: UserCircle },
+  { id: "education", label: "Education", icon: GraduationCap },
+  { id: "career", label: "Career", icon: BriefcaseBusiness },
+  { id: "skills", label: "Skills", icon: Code },
+  { id: "interests", label: "Interests", icon: Heart },
+];
+
+const MobileTabBar = ({ activeTab, setActiveTab, onLogout }) => (
+  <div className="mb-5 flex items-center gap-2 lg:hidden">
+    <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {MOBILE_TABS.map((tab) => {
+        const Icon = tab.icon;
+        const active = activeTab === tab.id;
+
+        return (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`flex shrink-0 items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold transition ${
+              active
+                ? "bg-[#0B1E3F] text-white shadow-md"
+                : "bg-white text-slate-600 ring-1 ring-blue-100"
+            }`}
+          >
+            <Icon size={14} />
+            {tab.label}
+          </button>
+        );
+      })}
+    </div>
+  </div>
+);
 
 /* =========================================================================
    ADD EDUCATION MODAL
@@ -1635,8 +1643,14 @@ const FresherProfile = () => {
         />
 
         {/* Main — offset to clear the fixed sidebar on desktop; top padding clears the phone buttons */}
-        <div className="min-w-0 flex-1 overflow-y-auto p-4 pt-20 lg:p-8 lg:pl-72">
+        <div className="min-w-0 flex-1 overflow-y-auto p-4 lg:p-8 lg:pl-72">
           <div className="mx-auto max-w-4xl">
+            <MobileTabBar
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
+              onLogout={handleLogout}
+            />
+
             {/* Profile Header */}
             <div className="mb-8 overflow-hidden rounded-2xl bg-white/90 shadow-xl shadow-blue-900/5 ring-1 ring-blue-100/70 md:backdrop-blur-sm">
               <div className="relative h-24 overflow-hidden bg-gradient-to-r from-[#0B1E3F] via-[#0F2A56] to-blue-700">
@@ -1771,6 +1785,14 @@ const FresherProfile = () => {
                 />
               )}
             </div>
+
+            <button
+              onClick={handleLogout}
+              className="mt-8 flex w-full items-center justify-center gap-2 rounded-2xl bg-white py-3.5 text-sm font-semibold text-red-600 shadow-sm ring-1 ring-red-100 transition hover:bg-red-50 lg:hidden"
+            >
+              <LogOutIcon size={18} />
+              Logout
+            </button>
           </div>
         </div>
       </div>
@@ -2991,7 +3013,7 @@ const ProfileSkeleton = () => (
       </div>
     </div>
 
-    <div className="min-w-0 flex-1 p-4 pt-20 lg:p-8 lg:pl-72">
+    <div className="min-w-0 flex-1 p-4 lg:p-8 lg:pl-72">
       <div className="mx-auto max-w-4xl space-y-6">
         <div className="h-32 animate-pulse rounded-2xl bg-white shadow-sm ring-1 ring-blue-100/50" />
 
