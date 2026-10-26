@@ -1,26 +1,34 @@
+// middleware/adminAuth.js
+// Single auth guard for every protected /admin route.
+//  - Pages (GET)        -> redirect to the login page
+//  - API calls (PATCH / POST / ...) -> 401 JSON, so admin.js can show
+//    "Session expired" instead of crashing on an HTML login page.
+
 const requireAdminAuth = (req, res, next) => {
-    try {
-        // Check whether admin session exists
-        if (!req.session || !req.session.admin) {
-            return res.redirect("/admin/login");
-        }
+  try {
+    const admin = req.session && req.session.admin;
 
-        // Check admin is properly authenticated
-        if (!req.session.admin.id) {
-            return res.redirect("/admin/login");
-        }
+    // session must exist and the admin must be properly authenticated
+    if (admin && admin.id) return next();
 
-        // Admin authenticated
-        next();
-
-    } catch (error) {
-        console.error("Admin middleware error:", error);
-
-        return res.redirect("/admin/login");
+    if (req.method !== "GET") {
+      return res.status(401).json({
+        success: false,
+        message: "Session expired. Please log in again.",
+      });
     }
+    return res.redirect("/admin/login");
+  } catch (error) {
+    console.error("Admin middleware error:", error);
+
+    if (req.method !== "GET") {
+      return res.status(401).json({
+        success: false,
+        message: "Session error. Please log in again.",
+      });
+    }
+    return res.redirect("/admin/login");
+  }
 };
 
-
-module.exports = {
-    requireAdminAuth
-};
+module.exports = { requireAdminAuth };

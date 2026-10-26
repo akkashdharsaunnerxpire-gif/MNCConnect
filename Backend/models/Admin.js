@@ -1,3 +1,4 @@
+// models/Admin.js
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 
@@ -20,10 +21,12 @@ const adminSchema = new mongoose.Schema(
       match: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
     },
 
+    // Validated on the PLAIN password before it is hashed.
+    // Raise minlength to 12 once your .env password is long enough.
     password: {
       type: String,
       required: true,
-      minlength: 6,
+      minlength: 8,
       select: false,
     },
 
@@ -53,28 +56,21 @@ const adminSchema = new mongoose.Schema(
 // ============================================================
 
 adminSchema.pre("save", async function () {
-  if (!this.isModified("password")) {
-    return;
-  }
+  if (!this.isModified("password")) return;
 
   const salt = await bcrypt.genSalt(12);
-
-  this.password = await bcrypt.hash(
-    this.password,
-    salt
-  );
+  this.password = await bcrypt.hash(this.password, salt);
 });
 
 // ============================================================
-// COMPARE PASSWORD METHOD
+// COMPARE PASSWORD
 // ============================================================
 
-adminSchema.methods.comparePassword = async function(enteredPassword) {
-  try {
-    return await bcrypt.compare(enteredPassword, this.password);
-  } catch (error) {
-    throw error;
-  }
+adminSchema.methods.comparePassword = async function (enteredPassword) {
+  // password is `select: false`; without .select("+password") it is undefined
+  if (!this.password || !enteredPassword) return false;
+  return bcrypt.compare(String(enteredPassword), this.password);
 };
 
-module.exports = mongoose.model("Admin", adminSchema);
+// `models.Admin ||` avoids OverwriteModelError on nodemon hot reload
+module.exports = mongoose.models.Admin || mongoose.model("Admin", adminSchema);

@@ -20,7 +20,6 @@
 
   const platformCards = [];
   if (stats.totalUsers !== null) platformCards.push({ l: 'Total Users', v: fmt(stats.totalUsers), i: 'fa-users', t: 't-info', href: '/admin/users' });
-  if (stats.totalFreshers !== null) platformCards.push({ l: 'Freshers', v: fmt(stats.totalFreshers), i: 'fa-graduation-cap', t: 't-purple', href: '/admin/freshers' });
   if (stats.totalPayments !== null) platformCards.push({ l: 'Payments', v: fmt(stats.totalPayments), i: 'fa-receipt', t: 't-primary', href: '/admin/payments' });
   if (stats.revenue !== null) platformCards.push({ l: 'Revenue', v: '₹' + fmt(stats.revenue), i: 'fa-indian-rupee-sign', t: 't-ok', href: '/admin/payments' });
 %>
@@ -42,18 +41,6 @@
         </a>
     <% }) %>
 </div>
-
-<!-- Platform stats -->
-<% if (platformCards.length) { %>
-<div class="grid g-4 mb">
-    <% platformCards.forEach(function (c) { %>
-        <a href="<%= c.href %>" class="card stat <%= c.t %>">
-            <div><small><%= c.l %></small><h3><%= c.v %></h3></div>
-            <div class="stat-ico"><i class="fas <%= c.i %>"></i></div>
-        </a>
-    <% }) %>
-</div>
-<% } %>
 
 <!-- Charts -->
 <div class="grid g-main mb">

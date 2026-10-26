@@ -4,6 +4,7 @@ const router = express.Router();
 
 const ctrl = require("../controllers/adminController");
 const Mentor = require("../models/Mentor");
+const { loginLimiter, sameOriginOnly } = require("../middleware/adminSecurity");
 
 // ============================================================
 // MIDDLEWARE
@@ -35,32 +36,20 @@ const attachLocals = async (req, res, next) => {
   next();
 };
 
-// Simple in-memory brute-force protection: 10 attempts / 15 minutes / IP
-const attempts = new Map();
-const WINDOW_MS = 15 * 60 * 1000;
-const MAX_ATTEMPTS = 10;
+// ============================================================
+// SECURITY (applies to every admin route)
+// ============================================================
 
-const loginLimiter = (req, res, next) => {
-  const now = Date.now();
-  const rec = attempts.get(req.ip) || { count: 0, start: now };
-
-  if (now - rec.start > WINDOW_MS) { rec.count = 0; rec.start = now; }
-  rec.count += 1;
-  attempts.set(req.ip, rec);
-
-  if (rec.count > MAX_ATTEMPTS) {
-    return res.status(429).render("admin/login", {
-      error: "Too many login attempts. Please try again in 15 minutes.",
-    });
-  }
-  next();
-};
+// CSRF protection: blocks POST / PATCH / PUT / DELETE coming from another site.
+// No change is needed in admin.js (browsers send the Origin header automatically).
+router.use(sameOriginOnly);
 
 // ============================================================
 // PUBLIC ROUTES
 // ============================================================
 
 router.get("/login", ctrl.showLoginPage);
+// Counts only FAILED logins (5 per 15 min per IP + email), resets on success
 router.post("/login", loginLimiter, ctrl.login);
 router.get("/logout", ctrl.logout);
 
@@ -77,14 +66,12 @@ router.get("/mentors", ctrl.listMentors);
 router.get("/mentors/export", ctrl.exportMentors);
 router.post("/mentors/bulk", ctrl.bulkMentorAction);
 router.get("/mentors/:id", ctrl.mentorDetails);
+router.post("/mentors/:id/review", ctrl.saveReview); // NEW: manual verification checklist
 router.patch("/mentors/:id/approve", ctrl.approveMentor);
 router.patch("/mentors/:id/reject", ctrl.rejectMentor);
 router.patch("/mentors/:id/pending", ctrl.resetMentor);
 
-// Users & freshers
-router.get("/users", ctrl.listUsers("users"));
-router.get("/freshers", ctrl.listUsers("freshers"));
-router.patch("/users/:id/toggle", ctrl.toggleUser);
+
 
 // Payments
 router.get("/payments", ctrl.listPayments);
