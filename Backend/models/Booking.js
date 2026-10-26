@@ -100,6 +100,22 @@ const bookingSchema = new Schema(
 bookingSchema.index({ status: 1, expiresAt: 1 });
 bookingSchema.index({ mentor: 1, status: 1, startsAt: 1 });
 bookingSchema.index({ status: 1, "meeting.timerEndsAt": 1 });
-bookingSchema.index({ status: 1, refundStatus: 1 }); // refund retry in the scheduler
+bookingSchema.index({ status: 1, refundStatus: 1 });
+
+// Prevent duplicate bookings using the same Razorpay payment ID
+bookingSchema.index(
+  { razorpayPaymentId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      razorpayPaymentId: { $type: "string", $gt: "" },
+    },
+  },
+);
+
+// Improve queries filtering by status and notification state
+bookingSchema.index({ status: 1, notified: 1 });
+
+module.exports = mongoose.model("Booking", bookingSchema);
 
 module.exports = mongoose.model("Booking", bookingSchema);
