@@ -338,29 +338,10 @@ const Home = () => {
       );
     };
 
-    // NEW: backend says this request now clashes with a session this mentor just accepted
-    // -> remove the card live (and close the confirm modal if it is open for that request)
-    const onRemove = ({ id, requestGroupId } = {}) => {
-      const key = String(id ?? requestGroupId ?? "");
-      if (!key) return;
-      setRequests((prev) =>
-        prev.filter(
-          (p) => String(p.id) !== key && String(p.requestGroupId) !== key
-        )
-      );
-      setConfirmRequest((prev) =>
-        prev &&
-        (String(prev.id) === key || String(prev.requestGroupId) === key)
-          ? null
-          : prev
-      );
-    };
-
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on("session-request", onRequest);
     socket.on("session-request-taken", onTaken);
-    socket.on("session-request:remove", onRemove); // NEW
 
     if (socket.connected) onConnect();
     else socket.connect();
@@ -370,7 +351,6 @@ const Home = () => {
       socket.off("disconnect", onDisconnect);
       socket.off("session-request", onRequest);
       socket.off("session-request-taken", onTaken);
-      socket.off("session-request:remove", onRemove); // NEW
     };
   }, []);
 
@@ -439,54 +419,55 @@ const Home = () => {
     [claimingId, navigate, reloadWallet, showToast]
   );
 
+  /* ---------- skip: remove + track + resume scanning ---------- */
   /* ---------- skip: notify backend + remove locally + resume scanning ---------- */
-  const skip = useCallback(
-    async (id) => {
-      if (!id || claimingId) return;
+const skip = useCallback(
+  async (id) => {
+    if (!id || claimingId) return;
 
-      // Find the full request object so we can send it to the backend
-      const target = requests.find(
+    // Find the full request object so we can send it to the backend
+    const target = requests.find(
+      (r) =>
+        String(r.id) === String(id) ||
+        String(r.requestGroupId) === String(id)
+    );
+    if (!target) return;
+
+    // 1. Remove from UI instantly (optimistic)
+    setRequests((prev) =>
+      prev.filter(
         (r) =>
-          String(r.id) === String(id) ||
-          String(r.requestGroupId) === String(id)
-      );
-      if (!target) return;
+          String(r.id) !== String(id) &&
+          String(r.requestGroupId) !== String(id)
+      )
+    );
 
-      // 1. Remove from UI instantly (optimistic)
+    // 2. Show "restarting scan" feedback
+    setScanningBoost(true);
+    clearTimeout(scanBoostTimer.current);
+    scanBoostTimer.current = setTimeout(
+      () => setScanningBoost(false),
+      1500
+    );
+
+    showToast("info", "Skipped. Scanning for new requests…");
+
+    // 3. Tell backend this mentor declined — so it NEVER comes back
+    try {
+      await respondToSessionRequest(target, "rejected");
+    } catch (e) {
+      console.error("Skip (reject) failed:", e);
+      // Put the request back if the call failed — user can retry
       setRequests((prev) =>
-        prev.filter(
-          (r) =>
-            String(r.id) !== String(id) &&
-            String(r.requestGroupId) !== String(id)
-        )
+        prev.some((r) => String(r.id) === String(target.id))
+          ? prev
+          : [target, ...prev]
       );
-
-      // 2. Show "restarting scan" feedback
-      setScanningBoost(true);
-      clearTimeout(scanBoostTimer.current);
-      scanBoostTimer.current = setTimeout(
-        () => setScanningBoost(false),
-        1500
-      );
-
-      showToast("info", "Skipped. Scanning for new requests…");
-
-      // 3. Tell backend this mentor declined — so it NEVER comes back
-      try {
-        await respondToSessionRequest(target, "rejected");
-      } catch (e) {
-        console.error("Skip (reject) failed:", e);
-        // Put the request back if the call failed — user can retry
-        setRequests((prev) =>
-          prev.some((r) => String(r.id) === String(target.id))
-            ? prev
-            : [target, ...prev]
-        );
-        showToast("error", "Could not skip. Please try again.");
-      }
-    },
-    [claimingId, requests, showToast]
-  );
+      showToast("error", "Could not skip. Please try again.");
+    }
+  },
+  [claimingId, requests, showToast]
+);
 
   const msToNext = nextSession?.startsAt ? nextSession.startsAt - now : null;
 
@@ -957,8 +938,7 @@ const ConfirmAcceptModal = ({ req, busy, onCancel, onConfirm }) => {
       label: "Role wanted",
       value:
         req.role === "Other" && req.otherRole
-          ? req.otherRole
-          : req.role || "Not specified",
+          ? req.otherRole          : req.role || "Not specified",
     },
     {
       icon: Globe,

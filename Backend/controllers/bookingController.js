@@ -16,12 +16,9 @@ const { linkPaymentToRequest, assignMentorToRequest } = require("./paymentContro
 /* ============================ CONFIG ============================ */
 
 const MIN_LEAD_MS = 15 * 60 * 1000;
-const GAP_MS = 30 * 60 * 1000; // set to 0 if you don't want a buffer between sessions
+const GAP_MS = 30 * 60 * 1000;
 const OPEN_BEFORE_MS = 5 * 60 * 1000;
 const STRICT_MATCH = process.env.STRICT_MENTOR_MATCH === "true";
-
-// statuses that mean "this mentor is busy in that time slot"
-const ACTIVE = ["accepted", "in_progress"];
 
 // Must match priceFor() in the frontend (fresherApi.js): ₹400 per hour.
 // If your priceFor() uses a different formula, change expectedPrice() below.
@@ -78,20 +75,16 @@ const emitToMentorSockets = (app, mentorId, event, payload) => {
   socketIdsOf(app, mentorId).forEach((sid) => io.to(sid).emit(event, payload));
 };
 
-// does this mentor already have an accepted / running session overlapping [startsAt, endsAt] (+ GAP_MS buffer)?
+// true when the mentor already has an ACCEPTED / RUNNING session that overlaps
+// [startsAt, endsAt] (including the 30 minute gap on both sides)
 const hasConflict = (mentorId, startsAt, endsAt, excludeId) =>
   Booking.exists({
     mentor: mentorId,
-    status: { $in: ACTIVE },
+    status: { $in: ["accepted", "in_progress"] },
     requestGroupId: { $ne: excludeId || "" },
     startsAt: { $lt: new Date(new Date(endsAt).getTime() + GAP_MS) },
     endsAt: { $gt: new Date(new Date(startsAt).getTime() - GAP_MS) },
   });
-
-// in-memory version of the same check (used when we already loaded the mentor's busy list)
-const overlaps = (a, b) =>
-  new Date(a.startsAt).getTime() < new Date(b.endsAt).getTime() + GAP_MS &&
-  new Date(a.endsAt).getTime() > new Date(b.startsAt).getTime() - GAP_MS;
 
 const toMentorPayload = (b) => ({
   id: b.requestGroupId,
@@ -234,10 +227,16 @@ const expireAndRefund = async (bookingId, reason) => {
   return fresh;
 };
 
+/* ============================ BROADCAST ============================ */
+
 const broadcastLoop = async (req, mentors, booking, payload, startsAt, endsAt, requestGroupId, notified) => {
   const direct = Boolean(booking.preferredMentor);
 
   for (const m of mentors) {
+    // NEW: busy mentors (already accepted a session around this time) NEVER get the request,
+    // direct or normal, online or offline. Check this FIRST.
+    if (await hasConflict(m._id, startsAt, endsAt, requestGroupId)) continue;
+
     const online = socketIdsOf(req.app, m._id).length > 0;
 
     // direct request (book again) and the mentor is offline:
@@ -255,11 +254,7 @@ const broadcastLoop = async (req, mentors, booking, payload, startsAt, endsAt, r
     }
 
     // direct request: fresher chose this mentor, so skip company/gender/language filters
-    // a mentor who is busy in that slot (accepted another session) NEVER gets the request
-    const reason =
-      (direct ? "" : whyNot(m, booking)) ||
-      (!online ? "not online" : "") ||
-      ((await hasConflict(m._id, startsAt, endsAt, requestGroupId)) ? "conflict" : "");
+    const reason = (direct ? "" : whyNot(m, booking)) || (!online ? "not online" : "");
     if (reason) continue;
 
     notified.push(m._id);
@@ -272,6 +267,39 @@ const broadcastLoop = async (req, mentors, booking, payload, startsAt, endsAt, r
       type: "session",
       link: "/mentor/home",
     });
+  }
+};
+
+// NEW: a mentor just accepted `accepted`.
+// 1) every OTHER pending request that overlaps this slot is taken away from this mentor
+// 2) a direct request addressed only to him is expired + refunded (nobody else can take it)
+const withdrawOverlapping = async (app, mentorId, accepted) => {
+  try {
+    const overlapping = await Booking.find({
+      _id: { $ne: accepted._id },
+      status: "pending",
+      startsAt: { $lt: new Date(new Date(accepted.endsAt).getTime() + GAP_MS) },
+      endsAt: { $gt: new Date(new Date(accepted.startsAt).getTime() - GAP_MS) },
+      $or: [{ notified: mentorId }, { preferredMentor: mentorId }],
+    });
+
+    for (const b of overlapping) {
+      const isMine = b.preferredMentor && String(b.preferredMentor) === String(mentorId);
+
+      if (isMine) {
+        await expireAndRefund(b._id, "The mentor you selected has another session at that time.");
+      } else {
+        await Booking.updateOne({ _id: b._id }, { $pull: { notified: mentorId } });
+      }
+
+      // remove the card from this mentor's screen
+      emitToMentorSockets(app, mentorId, "session-request-taken", {
+        id: b.requestGroupId,
+        requestGroupId: b.requestGroupId,
+      });
+    }
+  } catch (error) {
+    console.error("withdrawOverlapping error:", error.message);
   }
 };
 
@@ -397,26 +425,6 @@ exports.createRequest = async (req, res) => {
 
 /* ============================ ACCEPT / REJECT ============================ */
 
-// After a mentor accepts a session:
-//  1. remove every OTHER pending card that clashes with it from this mentor's screen (live)
-//  2. a direct (book again) request addressed to this mentor can never be served now -> expire + refund at once
-const dropClashingRequests = async (app, mentorId, accepted) => {
-  const clashing = await Booking.find({
-    status: "pending",
-    requestGroupId: { $ne: accepted.requestGroupId },
-    $or: [{ notified: mentorId }, { preferredMentor: mentorId }],
-    startsAt: { $lt: new Date(new Date(accepted.endsAt).getTime() + GAP_MS) },
-    endsAt: { $gt: new Date(new Date(accepted.startsAt).getTime() - GAP_MS) },
-  }).select("_id requestGroupId preferredMentor");
-
-  for (const c of clashing) {
-    emitToMentorSockets(app, mentorId, "session-request:remove", { requestGroupId: c.requestGroupId });
-    if (c.preferredMentor && String(c.preferredMentor) === String(mentorId)) {
-      await expireAndRefund(c._id, "The mentor you selected has another session at that time.");
-    }
-  }
-};
-
 exports.updateRequest = async (req, res) => {
   try {
     optionalAuth(req, null, () => {});
@@ -455,8 +463,6 @@ exports.updateRequest = async (req, res) => {
     if (booking.status !== "pending" || booking.expiresAt <= new Date()) return fail(res, 409, "Request unavailable");
 
     if (await hasConflict(mentorId, booking.startsAt, booking.endsAt, requestGroupId)) {
-      // this card is stale on the mentor's screen -> remove it
-      emitToMentorSockets(req.app, mentorId, "session-request:remove", { requestGroupId });
       return fail(res, 409, "You have another session near this time");
     }
 
@@ -468,28 +474,26 @@ exports.updateRequest = async (req, res) => {
 
     if (!accepted) return fail(res, 409, "Already accepted");
 
-    // RACE GUARD: the check above and the update are two separate steps.
-    // If the mentor accepted two overlapping requests at the same moment, both could pass.
-    // Check again now that we are accepted; if a clash exists, put this one back to pending.
-    if (await hasConflict(mentorId, accepted.startsAt, accepted.endsAt, requestGroupId)) {
-      await Booking.updateOne(
-        { _id: accepted._id, status: "accepted", mentor: mentorId },
-        { $set: { status: "pending" }, $unset: { mentor: "", acceptedAt: "" } }
-      );
-      emitToMentorSockets(req.app, mentorId, "session-request:remove", { requestGroupId });
-      return fail(res, 409, "You have another session near this time");
-    }
-
     await assignMentorToRequest({ requestGroupId, mentorId }).catch(() => {});
 
-    // remove clashing pending cards from this mentor's screen + refund clashing direct requests
-    await dropClashingRequests(req.app, mentorId, accepted).catch((e) =>
-      console.error("dropClashingRequests error:", e.message)
-    );
-
     emitToUser(accepted.fresher, "booking:updated", toClient(accepted));
+
+    // NEW: tell every other mentor who got this request that it is gone
+    (accepted.notified || [])
+      .filter((id) => String(id) !== String(mentorId))
+      .forEach((id) =>
+        emitToMentorSockets(req.app, id, "session-request-taken", {
+          id: accepted.requestGroupId,
+          requestGroupId: accepted.requestGroupId,
+        })
+      );
+
+    // NEW: this mentor is now busy -> pull his other overlapping pending requests
+    await withdrawOverlapping(req.app, mentorId, accepted);
+
     return res.json({ success: true, status: "accepted", booking: toClient(accepted) });
   } catch (error) {
+    console.error("updateRequest error:", error);
     return fail(res, 500, "Failed to update");
   }
 };
@@ -568,25 +572,24 @@ exports.getBooking = async (req, res) => {
   }
 };
 
-// pending requests for this mentor, EXCLUDING any that clash with a session they already accepted
 exports.mentorPending = async (req, res) => {
   try {
-    const [list, busy] = await Promise.all([
-      Booking.find({
-        status: "pending",
-        expiresAt: { $gt: new Date() },
-        declinedBy: { $ne: req.user.id },
-        // normal requests this mentor was sent + direct (book again) requests addressed to them
-        $or: [{ notified: req.user.id }, { preferredMentor: req.user.id }],
-      }).sort({ createdAt: -1 }),
-      Booking.find({ mentor: req.user.id, status: { $in: ACTIVE } })
-        .select("requestGroupId startsAt endsAt")
-        .lean(),
-    ]);
+    const list = await Booking.find({
+      status: "pending",
+      expiresAt: { $gt: new Date() },
+      declinedBy: { $ne: req.user.id },
+      // normal requests this mentor was sent + direct (book again) requests addressed to them
+      $or: [{ notified: req.user.id }, { preferredMentor: req.user.id }],
+    }).sort({ createdAt: -1 });
 
-    const clashes = (b) => busy.some((x) => x.requestGroupId !== b.requestGroupId && overlaps(x, b));
+    // NEW: hide requests that clash with a session this mentor already accepted
+    const free = [];
+    for (const b of list) {
+      if (await hasConflict(req.user.id, b.startsAt, b.endsAt, b.requestGroupId)) continue;
+      free.push(b);
+    }
 
-    return res.json({ success: true, requests: list.filter((b) => !clashes(b)).map(toMentorPayload) });
+    return res.json({ success: true, requests: free.map(toMentorPayload) });
   } catch (error) {
     return fail(res, 500, "Failed to load requests");
   }
@@ -812,9 +815,10 @@ exports.pushPendingToMentor = async (app, mentorId) => {
     });
 
     for (const b of open) {
-      const reason =
-        (b.preferredMentor ? "" : whyNot(mentor, b)) ||
-        ((await hasConflict(mentor._id, b.startsAt, b.endsAt, b.requestGroupId)) ? "has another session within 30 minutes" : "");
+      // NEW: conflict is checked for every request (direct or normal) before anything else
+      if (await hasConflict(mentor._id, b.startsAt, b.endsAt, b.requestGroupId)) continue;
+
+      const reason = b.preferredMentor ? "" : whyNot(mentor, b);
       if (reason) continue;
 
       await Booking.updateOne({ _id: b._id }, { $addToSet: { notified: mentor._id } });
