@@ -36,8 +36,8 @@ const LinearProgress = ({ isLoading }) => {
       `}</style>
 
       <div
-        className={`fixed top-0 left-0 right-0 z-[99999] h-[5px] pointer-events-none bg-indigo-900/10 transition-opacity duration-300 ${
-          isLoading ? "opacity-100" : "opacity-0"
+        className={`fixed inset-x-0 top-0 z-[99999] h-[5px] pointer-events-none bg-[#2569e9] transition-opacity duration-300 ${
+          visible && isLoading ? "opacity-100" : "opacity-0"
         }`}
         role="progressbar"
         aria-busy={isLoading}

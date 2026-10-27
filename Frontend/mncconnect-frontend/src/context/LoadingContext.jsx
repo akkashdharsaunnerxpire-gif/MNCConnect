@@ -1,5 +1,12 @@
-// src/context/LoadingContext.jsx
-import React, { createContext, useCallback, useContext, useRef, useState } from "react";
+
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 export const LoadingContext = createContext({
   isLoading: false,
@@ -9,29 +16,37 @@ export const LoadingContext = createContext({
 
 export const LoadingProvider = ({ children }) => {
   const [count, setCount] = useState(0);
-  const timer = useRef(null);
   const [isLoading, setIsLoading] = useState(false);
+  const timer = useRef(null);
 
-  // Small delay: very fast requests (<150ms) la bar flicker aagaama irukka
   const start = useCallback(() => {
-    setCount((c) => {
-      if (c === 0) {
+    setCount((current) => {
+      if (current === 0) {
         clearTimeout(timer.current);
-        timer.current = setTimeout(() => setIsLoading(true), 150);
+        timer.current = setTimeout(() => {
+          setIsLoading(true);
+        }, 150);
       }
-      return c + 1;
+
+      return current + 1;
     });
   }, []);
 
   const stop = useCallback(() => {
-    setCount((c) => {
-      const next = Math.max(0, c - 1);
+    setCount((current) => {
+      const next = Math.max(0, current - 1);
+
       if (next === 0) {
         clearTimeout(timer.current);
         setIsLoading(false);
       }
+
       return next;
     });
+  }, []);
+
+  useEffect(() => {
+    return () => clearTimeout(timer.current);
   }, []);
 
   return (

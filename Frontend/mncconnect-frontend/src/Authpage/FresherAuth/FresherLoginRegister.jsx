@@ -51,8 +51,7 @@ const shouldShowIntro = () => {
 
 export default function LoginRegister() {
   const navigate = useNavigate();
-  const loadingContext = useContext(LoadingContext);
-  const setIsLoading = loadingContext?.setIsLoading || (() => {});
+  const { start, stop } = useContext(LoadingContext);
 
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState(initialForm);
@@ -197,7 +196,7 @@ export default function LoginRegister() {
       }
     }
 
-    setIsLoading(true);
+    start();
 
     try {
       const endpoint = isRegister
@@ -262,7 +261,7 @@ export default function LoginRegister() {
       console.error("Authentication error:", authError);
       setError(authError.message || "Unable to connect to the server.");
     } finally {
-      setIsLoading(false);
+      stop();
     }
   };
 
