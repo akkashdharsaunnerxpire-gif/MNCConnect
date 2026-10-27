@@ -15,7 +15,6 @@ import { api, EVENTS, ENDPOINTS } from "../../services/mentorApi";
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 const MentorProfile = () => {
-  const mentorEmail = localStorage.getItem("mnc_mentor_registered_email") || "";
   const [mentor, setMentor] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -62,30 +61,36 @@ const MentorProfile = () => {
 
   /* ---------- mentor profile ---------- */
 
-  const fetchMentorProfile = async () => {
-    try {
-      setLoading(true);
-      setError("");
-      const response = await axios.get(
-        `${API_URL}/mentor/${encodeURIComponent(mentorEmail)}`,
-        { withCredentials: true }
-      );
-      if (response.data?.success) {
-        setMentor(response.data.mentor);
-      } else {
-        setError(response.data?.message || "Unable to load mentor profile.");
-      }
-    } catch (err) {
-      console.error("Mentor profile error:", err);
-      setError(err?.response?.data?.message || "Unable to load mentor profile.");
-    } finally {
-      setLoading(false);
-    }
-  };
+ const fetchMentorProfile = async () => {
+  try {
+    setLoading(true);
+    setError("");
 
-  useEffect(() => {
-    fetchMentorProfile();
-  }, [mentorEmail]);
+    // identity comes from the cookie session, not localStorage
+    const me = await axios.get(`${API_URL}/auth/me`, { withCredentials: true });
+    const email = me.data?.user?.email;
+    if (!email) throw new Error("Session expired. Please login again.");
+
+    const response = await axios.get(
+      `${API_URL}/mentor/${encodeURIComponent(email)}`,
+      { withCredentials: true }
+    );
+    if (response.data?.success) {
+      setMentor(response.data.mentor);
+    } else {
+      setError(response.data?.message || "Unable to load mentor profile.");
+    }
+  } catch (err) {
+    console.error("Mentor profile error:", err);
+    setError(err?.response?.data?.message || err.message || "Unable to load mentor profile.");
+  } finally {
+    setLoading(false);
+  }
+};
+
+useEffect(() => {
+  fetchMentorProfile();
+}, []);
 
   const apiUpdateMentor = async (email, formValues) => {
     const { offerLetterFile, employeeIdProofFile, additionalProofFile, languages, ...rest } = formValues;
@@ -112,7 +117,7 @@ const MentorProfile = () => {
   const handleSaveProfile = async (formValues) => {
     setSaving(true);
     try {
-      const data = await apiUpdateMentor(mentorEmail, formValues);
+     const data = await apiUpdateMentor(mentor.email, formValues);
       if (data?.success === false) throw new Error(data?.message || "Failed to save changes");
 
       const { offerLetterFile, employeeIdProofFile, additionalProofFile, ...plainValues } = formValues;

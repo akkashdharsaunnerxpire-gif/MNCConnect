@@ -1,83 +1,74 @@
 // src/utils/auth.js
-// Auth uses an HttpOnly cookie (mnc_token). JavaScript cannot read it, so we
-// keep a small "session marker" in localStorage ONLY for route guarding in the UI.
-// The real security check always happens on the server through the cookie.
-
-const SESSION_DAYS = 7; // must match the JWT / cookie lifetime on the server
-const USER_KEY = "user";
-const EXP_KEY = "mnc_session_exp";
+// Login state lives ONLY in the HttpOnly cookie (mnc_token) + the server.
+// To know who is logged in, use:  const { user, role, loading } = useAuth();
+// (from context/AuthContext.jsx). Nothing about the session is kept in localStorage.
+// This file only removes the old keys left behind by the previous version.
 
 const LEGACY_KEYS = [
+  // old session marker
+  "user",
+  "mnc_session_exp",
+  // old tokens
   "fresher_token",
   "mnc_mentor_token",
   "token",
   "fresherName",
+  // old mentor keys
+  "mentorId",
+  "mentorName",
+  "mnc_mentor_registered_email",
+  "mnc_mentor_registration_complete",
+  "mnc_mentor_verification_status",
+  "mncconnect_accepted_sessions",
+  "mncconnect_skipped_requests",
+  "mncconnect_request_sound",
 ];
 
-const parseJSON = (value) => {
+// Call once when the app starts (App.jsx does this).
+export const clearLegacyStorage = () => {
   try {
-    return value ? JSON.parse(value) : null;
-  } catch {
-    return null;
-  }
-};
-
-// ---------- save / clear ----------
-
-// Call this right after a successful login or register
-export const saveSession = (user) => {
-  try {
-    localStorage.setItem(USER_KEY, JSON.stringify(user));
-    localStorage.setItem(
-      EXP_KEY,
-      String(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000),
-    );
-    // remove old token keys so nothing stale is left behind
-    LEGACY_KEYS.forEach((k) => localStorage.removeItem(k));
+    LEGACY_KEYS.forEach((key) => localStorage.removeItem(key));
   } catch {
     /* ignore */
   }
 };
 
+// ---------------------------------------------------------------------------
+// DEPRECATED shims: only here so old imports don't crash the app.
+// Each one prints a warning in the console, so you can search and replace
+// the files that still use them.
+// ---------------------------------------------------------------------------
+
+const warn = (name, instead) =>
+  console.warn(`[auth] ${name}() is deprecated. ${instead}`);
+
+// Does nothing now. After a successful login/register call `await refresh()`
+// from useAuth() instead.
+export const saveSession = () => {
+  warn("saveSession", "Use `await refresh()` from useAuth() after login.");
+};
+
+// These only clean old browser keys. They do NOT log the user out,
+// because only the server can clear the HttpOnly cookie. Use `logout()` from useAuth().
 export const clearSession = () => {
-  try {
-    localStorage.removeItem(USER_KEY);
-    localStorage.removeItem(EXP_KEY);
-    LEGACY_KEYS.forEach((k) => localStorage.removeItem(k));
-  } catch {
-    /* ignore */
-  }
+  warn("clearSession", "Use `await logout()` from useAuth().");
+  clearLegacyStorage();
 };
-
-// kept for backward compatibility (other files may already import these)
 export const clearFresherSession = clearSession;
 export const clearMentorSession = clearSession;
 
-// ---------- read ----------
-
-// Returns the stored user only if the session marker has not expired
+// Always empty / false now. Replace with `const { user, role } = useAuth()`.
 export const getStoredUser = () => {
-  try {
-    const exp = Number(localStorage.getItem(EXP_KEY) || 0);
-
-    if (!exp || Date.now() > exp) {
-      // missing or expired -> clean up
-      if (localStorage.getItem(USER_KEY)) clearSession();
-      return null;
-    }
-
-    return parseJSON(localStorage.getItem(USER_KEY));
-  } catch {
-    return null;
-  }
+  warn("getStoredUser", "Use `const { user } = useAuth()`.");
+  return null;
 };
 
 export const isFresherLoggedIn = () => {
-  const user = getStoredUser();
-  return Boolean(user && user.role === "fresher");
+  warn("isFresherLoggedIn", "Use `const { role } = useAuth()`.");
+  return false;
 };
 
 export const isMentorLoggedIn = () => {
-  const user = getStoredUser();
-  return Boolean(user && user.role === "mentor");
+  warn("isMentorLoggedIn", "Use `const { role } = useAuth()`.");
+  return false;
 };

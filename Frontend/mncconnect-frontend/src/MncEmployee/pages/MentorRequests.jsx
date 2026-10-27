@@ -105,16 +105,9 @@ const MentorRequests = () => {
 
   /* ---------- live request feed ---------- */
   useEffect(() => {
-    const mentorId = localStorage.getItem("mentorId");
-
-    if (!mentorId) {
-      console.warn("mentorId not found in localStorage");
-      return;
-    }
-
+  
     const handleConnect = () => {
       setSocketConnected(true);
-      socket.emit("mentor-online", mentorId); // server re-sends pending requests
     };
 
     const handleDisconnect = () => setSocketConnected(false);

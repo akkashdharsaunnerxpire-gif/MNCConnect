@@ -18,13 +18,16 @@ import Notifications from "../FresherDashboard/pages/FresherNotifications";
 import Header from "../FresherDashboard/Component/Header";
 import BonusWallet from "../FresherDashboard/pages/FresherWallet";
 import MeetingRoom from "../Commoncomponents/Meetingroom";
-import { isFresherLoggedIn } from "../utils/auth";
+import SuspenseLoader from "../Commoncomponents/SuspenseLoader";
+import { useAuth } from "../context/AuthContext";
 
-// expired / missing token -> login (expired token is cleared inside isFresherLoggedIn)
+// The server (via cookie) decides. While it answers, show the loader.
 const FresherProtectedRoute = () => {
-  if (!isFresherLoggedIn()) {
-    return <Navigate to="/login" replace />;
-  }
+  const { role, loading } = useAuth();
+
+  if (loading) return <SuspenseLoader />;
+  if (role !== "fresher") return <Navigate to="/login" replace />;
+
   return <Outlet />;
 };
 

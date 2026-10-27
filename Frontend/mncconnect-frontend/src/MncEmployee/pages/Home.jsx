@@ -32,7 +32,7 @@ import {
   ShieldCheck,
   AlertTriangle,
 } from "lucide-react";
-import {socket} from "../../utils/socket";
+import { socket } from "../../utils/socket";
 import useLive from "../../hooks/useLive";
 import useMentorSessions from "../../hooks/useMentorSessions";
 import { api, ENDPOINTS, EVENTS, inr, timeAgo } from "../../services/mentorApi";
@@ -168,7 +168,7 @@ const useCountUp = (target, duration = 700) => {
     const to = Number(target) || 0;
     const from = last.current;
     const reduce = window.matchMedia?.(
-      "(prefers-reduced-motion: reduce)"
+      "(prefers-reduced-motion: reduce)",
     ).matches;
 
     if (reduce || from === to) {
@@ -196,17 +196,31 @@ const useCountUp = (target, duration = 700) => {
 
 const Home = () => {
   const navigate = useNavigate();
-  const mentorName = localStorage.getItem("mentorName") || "Mentor";
-
+  const [mentorName, setMentorName] = useState("Mentor");
   const [connected, setConnected] = useState(socket.connected);
   const [requests, setRequests] = useState([]);
   const [now, setNow] = useState(Date.now());
   const [claimingId, setClaimingId] = useState(null);
   const [toast, setToast] = useState(null);
   const [tab, setTab] = useState("upcoming");
-  const [soundOn, setSoundOn] = useState(
-    () => localStorage.getItem(SOUND_KEY) !== "off"
-  );
+  const [soundOn, setSoundOn] = useState(true);
+
+  useEffect(() => {
+    soundRef.current = soundOn;
+  }, [soundOn]);
+
+  useEffect(() => {
+    let alive = true;
+    fetch(`${import.meta.env.VITE_API_URL}/auth/me`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (alive && d?.user?.name) setMentorName(d.user.name);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // Confirm modal state
   const [confirmRequest, setConfirmRequest] = useState(null);
@@ -251,7 +265,7 @@ const Home = () => {
 
   const serverUpcoming = useMemo(
     () => sessions.filter((s) => s.status === "Upcoming"),
-    [sessions]
+    [sessions],
   );
 
   const upcomingSessions = useMemo(
@@ -259,7 +273,7 @@ const Home = () => {
       serverUpcoming
         .filter((s) => !s.endsAt || s.endsAt > now)
         .sort((a, b) => (a.startsAt || 0) - (b.startsAt || 0)),
-    [serverUpcoming, now]
+    [serverUpcoming, now],
   );
   const nextSession = upcomingSessions[0];
 
@@ -268,7 +282,7 @@ const Home = () => {
     setToast({ type, message });
     toastTimer.current = setTimeout(
       () => setToast(null),
-      type === "error" ? 6000 : 3500
+      type === "error" ? 6000 : 3500,
     );
   }, []);
 
@@ -314,7 +328,6 @@ const Home = () => {
       if (!req.id) return;
 
       // 🔴 Never re-add a request the user has permanently skipped
-      if (isSkippedPermanently(req.id)) return;
 
       if (!seenIds.current.has(String(req.id))) {
         seenIds.current.add(String(req.id));
@@ -324,7 +337,7 @@ const Home = () => {
       setRequests((prev) =>
         prev.some((p) => String(p.id) === String(req.id))
           ? prev
-          : [req, ...prev]
+          : [req, ...prev],
       );
     };
 
@@ -333,8 +346,8 @@ const Home = () => {
       if (!key) return;
       setRequests((prev) =>
         prev.filter(
-          (p) => String(p.id) !== key && String(p.requestGroupId) !== key
-        )
+          (p) => String(p.id) !== key && String(p.requestGroupId) !== key,
+        ),
       );
     };
 
@@ -362,7 +375,7 @@ const Home = () => {
       const serverReady = !sessionsLoading && !walletError;
       const conflict = getSessionConflict(
         req,
-        serverReady ? serverUpcoming : null
+        serverReady ? serverUpcoming : null,
       );
       if (conflict) {
         showToast("error", getConflictMessage(conflict));
@@ -371,7 +384,7 @@ const Home = () => {
 
       setConfirmRequest(req);
     },
-    [claimingId, sessionsLoading, walletError, serverUpcoming, showToast]
+    [claimingId, sessionsLoading, walletError, serverUpcoming, showToast],
   );
 
   /* ---------- actual accept (called from modal) ---------- */
@@ -386,13 +399,8 @@ const Home = () => {
         const result = await respondToSessionRequest(req, "accepted");
 
         if (result.taken) {
-          setRequests((p) =>
-            p.filter((x) => String(x.id) !== String(req.id))
-          );
-          showToast(
-            "error",
-            "Another mentor accepted this request first."
-          );
+          setRequests((p) => p.filter((x) => String(x.id) !== String(req.id)));
+          showToast("error", "Another mentor accepted this request first.");
           return;
         }
         if (!result.ok)
@@ -401,10 +409,6 @@ const Home = () => {
         assignPaymentToMentor(result.requestGroupId);
 
         const session = { ...req, status: "Upcoming" };
-        persistAcceptedSession(session);
-
-        // Accept pannina, antha skip history clear pannu
-        clearSkip(req.id);
 
         setRequests((p) => p.filter((x) => String(x.id) !== String(req.id)));
         reloadWallet();
@@ -416,58 +420,55 @@ const Home = () => {
         setClaimingId(null);
       }
     },
-    [claimingId, navigate, reloadWallet, showToast]
+    [claimingId, navigate, reloadWallet, showToast],
   );
 
   /* ---------- skip: remove + track + resume scanning ---------- */
   /* ---------- skip: notify backend + remove locally + resume scanning ---------- */
-const skip = useCallback(
-  async (id) => {
-    if (!id || claimingId) return;
+  const skip = useCallback(
+    async (id) => {
+      if (!id || claimingId) return;
 
-    // Find the full request object so we can send it to the backend
-    const target = requests.find(
-      (r) =>
-        String(r.id) === String(id) ||
-        String(r.requestGroupId) === String(id)
-    );
-    if (!target) return;
-
-    // 1. Remove from UI instantly (optimistic)
-    setRequests((prev) =>
-      prev.filter(
+      // Find the full request object so we can send it to the backend
+      const target = requests.find(
         (r) =>
-          String(r.id) !== String(id) &&
-          String(r.requestGroupId) !== String(id)
-      )
-    );
-
-    // 2. Show "restarting scan" feedback
-    setScanningBoost(true);
-    clearTimeout(scanBoostTimer.current);
-    scanBoostTimer.current = setTimeout(
-      () => setScanningBoost(false),
-      1500
-    );
-
-    showToast("info", "Skipped. Scanning for new requests…");
-
-    // 3. Tell backend this mentor declined — so it NEVER comes back
-    try {
-      await respondToSessionRequest(target, "rejected");
-    } catch (e) {
-      console.error("Skip (reject) failed:", e);
-      // Put the request back if the call failed — user can retry
-      setRequests((prev) =>
-        prev.some((r) => String(r.id) === String(target.id))
-          ? prev
-          : [target, ...prev]
+          String(r.id) === String(id) ||
+          String(r.requestGroupId) === String(id),
       );
-      showToast("error", "Could not skip. Please try again.");
-    }
-  },
-  [claimingId, requests, showToast]
-);
+      if (!target) return;
+
+      // 1. Remove from UI instantly (optimistic)
+      setRequests((prev) =>
+        prev.filter(
+          (r) =>
+            String(r.id) !== String(id) &&
+            String(r.requestGroupId) !== String(id),
+        ),
+      );
+
+      // 2. Show "restarting scan" feedback
+      setScanningBoost(true);
+      clearTimeout(scanBoostTimer.current);
+      scanBoostTimer.current = setTimeout(() => setScanningBoost(false), 1500);
+
+      showToast("info", "Skipped. Scanning for new requests…");
+
+      // 3. Tell backend this mentor declined — so it NEVER comes back
+      try {
+        await respondToSessionRequest(target, "rejected");
+      } catch (e) {
+        console.error("Skip (reject) failed:", e);
+        // Put the request back if the call failed — user can retry
+        setRequests((prev) =>
+          prev.some((r) => String(r.id) === String(target.id))
+            ? prev
+            : [target, ...prev],
+        );
+        showToast("error", "Could not skip. Please try again.");
+      }
+    },
+    [claimingId, requests, showToast],
+  );
 
   const msToNext = nextSession?.startsAt ? nextSession.startsAt - now : null;
 
@@ -580,10 +581,7 @@ const skip = useCallback(
         {walletError && (
           <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
             Couldn't load your earnings.{" "}
-            <button
-              onClick={reloadWallet}
-              className="font-semibold underline"
-            >
+            <button onClick={reloadWallet} className="font-semibold underline">
               Retry
             </button>
           </div>
@@ -632,11 +630,11 @@ const skip = useCallback(
             const r = el.getBoundingClientRect();
             el.style.setProperty(
               "--gx",
-              `${((e.clientX - r.left) / r.width) * 100}%`
+              `${((e.clientX - r.left) / r.width) * 100}%`,
             );
             el.style.setProperty(
               "--gy",
-              `${((e.clientY - r.top) / r.height) * 100}%`
+              `${((e.clientY - r.top) / r.height) * 100}%`,
             );
           }}
           className="mc-fade-up relative mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white"
@@ -663,13 +661,17 @@ const skip = useCallback(
               amount={wallet.week}
               icon={IndianRupee}
             />
-            <Stat label="Lifetime earnings" amount={wallet.lifetime} icon={Star} />
+            <Stat
+              label="Lifetime earnings"
+              amount={wallet.lifetime}
+              icon={Star}
+            />
           </div>
           <div className="flex flex-col gap-3 border-t border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-slate-500">
-              You keep {Math.round((1 - PLATFORM_FEE) * 100)}% of every
-              session. Earnings are released when a session ends, and you can
-              withdraw anytime above ₹500.
+              You keep {Math.round((1 - PLATFORM_FEE) * 100)}% of every session.
+              Earnings are released when a session ends, and you can withdraw
+              anytime above ₹500.
             </p>
             <Link
               to="/mentor/earnings"
@@ -796,7 +798,9 @@ const skip = useCallback(
                                     className={`mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${soon ? "bg-green-50 text-green-700" : "bg-slate-100 text-slate-500"}`}
                                   >
                                     <Clock3 size={11} />
-                                    {ms > 0 ? `in ${countdown(ms)}` : "Live now"}
+                                    {ms > 0
+                                      ? `in ${countdown(ms)}`
+                                      : "Live now"}
                                   </span>
                                 )}
                               </div>
@@ -877,8 +881,8 @@ const skip = useCallback(
             toast.type === "error"
               ? "border-red-200 text-red-700"
               : toast.type === "info"
-              ? "border-blue-200 text-blue-700"
-              : "border-emerald-200 text-emerald-700"
+                ? "border-blue-200 text-blue-700"
+                : "border-emerald-200 text-emerald-700"
           }`}
         >
           {toast.type === "error" ? (
@@ -938,7 +942,8 @@ const ConfirmAcceptModal = ({ req, busy, onCancel, onConfirm }) => {
       label: "Role wanted",
       value:
         req.role === "Other" && req.otherRole
-          ? req.otherRole          : req.role || "Not specified",
+          ? req.otherRole
+          : req.role || "Not specified",
     },
     {
       icon: Globe,
@@ -974,10 +979,7 @@ const ConfirmAcceptModal = ({ req, busy, onCancel, onConfirm }) => {
               <p className="text-xs font-semibold uppercase tracking-wider text-blue-100">
                 Review before accepting
               </p>
-              <h2
-                id="confirm-accept-title"
-                className="mt-1 text-xl font-bold"
-              >
+              <h2 id="confirm-accept-title" className="mt-1 text-xl font-bold">
                 Check the fresher's requirements
               </h2>
             </div>
@@ -1205,8 +1207,8 @@ const Scanning = ({ connected, boost }) => (
       {!connected
         ? "Reconnecting…"
         : boost
-        ? "Restarting scan…"
-        : "Scanning for requests"}
+          ? "Restarting scan…"
+          : "Scanning for requests"}
     </h3>
     <p className="mx-auto mt-1 max-w-xs text-sm text-slate-500">
       {connected
@@ -1263,7 +1265,7 @@ const RequestCard = ({ req, now, busy, disabled, onClaim, onSkip }) => {
   const [open, setOpen] = useState(false);
   const left = Math.max(
     0,
-    CLAIM_WINDOW_SECONDS - Math.floor((now - req.receivedAt) / 1000)
+    CLAIM_WINDOW_SECONDS - Math.floor((now - req.receivedAt) / 1000),
   );
   const pct = (left / CLAIM_WINDOW_SECONDS) * 100;
   const urgent = left <= 20;
@@ -1272,9 +1274,7 @@ const RequestCard = ({ req, now, busy, disabled, onClaim, onSkip }) => {
   return (
     <article
       className={`mc-slide-in overflow-hidden rounded-2xl border bg-white transition duration-200 hover:-translate-y-0.5 hover:shadow-lg ${
-        urgent
-          ? "border-red-200"
-          : "border-slate-200 hover:border-blue-300"
+        urgent ? "border-red-200" : "border-slate-200 hover:border-blue-300"
       }`}
     >
       <div className="p-5">

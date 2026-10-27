@@ -17,16 +17,13 @@ import {
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { COUNTRY_CODES } from "../../data/countryCodes"; // <-- adjust path to your folder
-
+import { useAuth } from "../../context/AuthContext";
 const API_URL = import.meta.env.VITE_API_URL;
 
 // Auth endpoints / storage keys. Keep these in one place if your backend paths differ.
 const MENTOR_LOGIN_URL = `${API_URL}/auth/mentor/login`;
 const MENTOR_FORGOT_PASSWORD_URL = `${API_URL}/auth/mentor/forgot-password`;
 const MENTOR_DASHBOARD_PATH = "/mentor/home";
-const MENTOR_REGISTERED_KEY = "mnc_mentor_registration_complete";
-const MENTOR_VERIFICATION_KEY = "mnc_mentor_verification_status";
-const MENTOR_EMAIL_KEY = "mnc_mentor_registered_email";
 
 // Server-side statuses that must NOT be allowed to log in.
 const BLOCKED_STATUSES = [
@@ -180,7 +177,6 @@ export default function MncLoginRegister() {
   const location = useLocation();
 
   const [showLoader, setShowLoader] = useState(true);
-  const [isRegistered, setIsRegistered] = useState(false);
   const [step, setStep] = useState(1);
 
   const [profile, setProfile] = useState(initialProfile);
@@ -196,7 +192,7 @@ export default function MncLoginRegister() {
     cropH: 0.7,
   });
   const [toasts, setToasts] = useState([]);
-
+  const isRegistered = false;
   const objectUrlsRef = useRef(new Set());
 
   const currentPath = location.pathname;
@@ -221,13 +217,7 @@ export default function MncLoginRegister() {
   // ==========================================================================
   // EFFECTS
   // ==========================================================================
-
   useEffect(() => {
-    const registered =
-      window.localStorage.getItem(MENTOR_REGISTERED_KEY) === "true";
-    setIsRegistered(registered);
-
-    // Show toast if registration success flag is present
     if (location.state?.registrationSuccess) {
       showToast(
         "🎉 Registration successful! Your account is pending verification.",
@@ -237,7 +227,6 @@ export default function MncLoginRegister() {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
-    // Email already registered (409) on another device -> sent here to login
     if (location.state?.alreadyRegistered) {
       showToast(
         "This email is already registered. Please login with your password.",
@@ -245,11 +234,6 @@ export default function MncLoginRegister() {
         5000,
       );
       window.history.replaceState({}, document.title, window.location.pathname);
-    }
-
-    if (registered && isRegisterRoute) {
-      navigate("/mentor/login", { replace: true });
-      return;
     }
 
     if (!isRegisterRoute) {
@@ -260,8 +244,7 @@ export default function MncLoginRegister() {
     const timer = window.setTimeout(() => setShowLoader(false), 2650);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isRegisterRoute, navigate, location.state]);
-
+  }, [isRegisterRoute, location.state]);
   useEffect(() => {
     const urls = objectUrlsRef.current;
     return () => {
@@ -623,26 +606,6 @@ export default function MncLoginRegister() {
         showToast(errorMessage, "error", 5000);
         return;
       }
-
-      window.localStorage.setItem(MENTOR_REGISTERED_KEY, "true");
-      window.localStorage.setItem(MENTOR_EMAIL_KEY, profile.email.trim());
-
-      const backendVerificationStatus = String(
-        data?.verificationStatus ||
-          data?.verification?.status ||
-          data?.status ||
-          "pending",
-      ).toLowerCase();
-      const verificationStatus = [
-        "verified",
-        "approved",
-        "success",
-        "active",
-      ].includes(backendVerificationStatus)
-        ? "verified"
-        : "pending";
-
-      window.localStorage.setItem(MENTOR_VERIFICATION_KEY, verificationStatus);
       setIsRegistered(true);
 
       navigate("/mentor/login", {
@@ -650,7 +613,7 @@ export default function MncLoginRegister() {
         state: {
           registered: true,
           email: profile.email.trim(),
-          verificationStatus,
+          verificationStatus: "pending",
           registrationSuccess: true,
         },
       });
@@ -952,9 +915,7 @@ function MobileAuthNav({
   isRegisterRoute = false,
 }) {
   const navigate = useNavigate();
-  const isVerified =
-    (window.localStorage.getItem(MENTOR_VERIFICATION_KEY) || "pending") ===
-    "verified";
+  const isVerified = false;
   return (
     <div className="mb-4 grid grid-cols-2 gap-2 rounded-2xl border border-slate-200 bg-white/90 p-1.5 shadow-sm lg:hidden">
       <button
@@ -1001,9 +962,7 @@ function AuthSidebar({
   isRegisterRoute = false,
 }) {
   const navigate = useNavigate();
-  const verificationStatus =
-    window.localStorage.getItem(MENTOR_VERIFICATION_KEY) || "pending";
-  const isVerified = verificationStatus === "verified";
+  const isVerified = false;
 
   const itemClass = (active) =>
     `group relative flex w-full items-center gap-4 rounded-2xl px-3 py-3 text-left ${
@@ -1167,13 +1126,9 @@ function AuthSidebar({
 // ----- MENTOR LOGIN -----
 function MentorLogin({ showToast }) {
   const navigate = useNavigate();
+  const { refresh } = useAuth();
   const location = useLocation();
-  const [email, setEmail] = useState(
-    () =>
-      location.state?.email ||
-      window.localStorage.getItem(MENTOR_EMAIL_KEY) ||
-      "",
-  );
+  const [email, setEmail] = useState(() => location.state?.email || "");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1242,13 +1197,7 @@ function MentorLogin({ showToast }) {
       if (!mentorId) {
         throw new Error("Mentor ID was not returned by the server.");
       }
-
-      window.localStorage.setItem("mentorId", String(mentorId));
-      window.localStorage.setItem(MENTOR_EMAIL_KEY, email.trim());
-      // Login worked, so mark THIS device/browser as registered + verified.
-      window.localStorage.setItem(MENTOR_REGISTERED_KEY, "true");
-      window.localStorage.setItem(MENTOR_VERIFICATION_KEY, "verified");
-
+      await refresh();
       showToast("✅ Login successful! Welcome back, Mentor.", "success", 4000);
       navigate(MENTOR_DASHBOARD_PATH, { replace: true });
     } catch (loginError) {
@@ -1383,9 +1332,7 @@ function MentorLogin({ showToast }) {
 // ----- FORGOT PASSWORD -----
 function MentorForgotPassword({ showToast }) {
   const navigate = useNavigate();
-  const [email, setEmail] = useState(
-    () => window.localStorage.getItem(MENTOR_EMAIL_KEY) || "",
-  );
+  const [email, setEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");

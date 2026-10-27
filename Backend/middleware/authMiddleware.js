@@ -1,4 +1,3 @@
-
 const jwt = require("jsonwebtoken");
 
 const Fresher = require("../models/Fresher");
@@ -18,7 +17,12 @@ const protect = async (req, res, next) => {
     }
 
     // Read JWT from the HttpOnly cookie
-    const token = req.cookies?.[AUTH_COOKIE_NAME];
+
+    const token =
+      req.cookies?.[AUTH_COOKIE_NAME] ||
+      (req.headers.authorization?.startsWith("Bearer ")
+        ? req.headers.authorization.slice(7).trim()
+        : "");
 
     if (!token) {
       return res.status(401).json({
@@ -64,8 +68,10 @@ const protect = async (req, res, next) => {
 
     return next();
   } catch (error) {
-    if (error.name !== "JsonWebTokenError" &&
-        error.name !== "TokenExpiredError") {
+    if (
+      error.name !== "JsonWebTokenError" &&
+      error.name !== "TokenExpiredError"
+    ) {
       console.error("Auth middleware error:", error);
     }
 

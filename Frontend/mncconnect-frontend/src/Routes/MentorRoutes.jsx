@@ -14,15 +14,27 @@ import MentorSettings from "../MncEmployee/pages/MentorSettings";
 import MentorHeader from "../MncEmployee/Components/MentorHeader";
 import ResetPassword from "../Authpage/MncEmployeeAuth/ResetPassword";
 import MeetingRoom from "../Commoncomponents/Meetingroom";
+import SuspenseLoader from "../Commoncomponents/SuspenseLoader";
+import { useAuth } from "../context/AuthContext";
 
-const isMentorLoggedIn = () =>
-  Boolean(localStorage.getItem("mnc_mentor_token"));
-
+// The server (via cookie) decides. While it answers, show the loader.
 const MentorProtectedRoute = () => {
-  if (!isMentorLoggedIn()) {
-    return <Navigate to="/mentor/login" replace />;
-  }
+  const { role, loading } = useAuth();
+
+  if (loading) return <SuspenseLoader />;
+  if (role !== "mentor") return <Navigate to="/mentor/login" replace />;
+
   return <Outlet />;
+};
+
+const MentorFallback = () => {
+  const { role, loading } = useAuth();
+
+  if (loading) return <SuspenseLoader />;
+
+  return (
+    <Navigate to={role === "mentor" ? "/mentor/home" : "/mentor/login"} replace />
+  );
 };
 
 const MentorLayout = () => (
@@ -37,25 +49,19 @@ const MentorLayout = () => (
 const MentorRoutes = () => {
   return (
     <Routes>
+      {/* public */}
       <Route path="reset-password/:token" element={<ResetPassword />} />
       <Route path="register" element={<MncEmployeeProfile />} />
       <Route path="login" element={<MncEmployeeProfile />} />
       <Route path="forgot-password" element={<MncEmployeeProfile />} />
 
+      {/* private */}
       <Route element={<MentorProtectedRoute />}>
         {/* Full-screen meeting room (no header) */}
         <Route path="meeting/:bookingId" element={<MeetingRoom />} />
 
         <Route element={<MentorLayout />}>
-          <Route
-            index
-            element={
-              <Navigate
-                to={isMentorLoggedIn() ? "/mentor/home" : "/mentor/login"}
-                replace
-              />
-            }
-          />
+          <Route index element={<Navigate to="/mentor/home" replace />} />
           <Route path="home" element={<Home />} />
           <Route path="requests" element={<MentorRequests />} />
           <Route path="sessions" element={<MentorSessions />} />
@@ -67,15 +73,7 @@ const MentorRoutes = () => {
         </Route>
       </Route>
 
-      <Route
-        path="*"
-        element={
-          <Navigate
-            to={isMentorLoggedIn() ? "/mentor/home" : "/mentor/login"}
-            replace
-          />
-        }
-      />
+      <Route path="*" element={<MentorFallback />} />
     </Routes>
   );
 };

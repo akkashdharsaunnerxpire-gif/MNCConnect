@@ -1,5 +1,4 @@
-
- // src/App.jsx
+// src/App.jsx
 import React, { Suspense, lazy, useEffect } from "react";
 import {
   BrowserRouter as Router,
@@ -13,11 +12,10 @@ import RouteProgress from "./Commoncomponents/RouteProgress";
 import SuspenseLoader from "./Commoncomponents/SuspenseLoader";
 
 import { LoadingProvider, useLoading } from "./context/LoadingContext";
+import { AuthProvider, useAuth } from "./context/AuthContext";
 import { registerLoadingHandlers } from "./api/axios";
 import { registerFetchHandlers } from "./api/fetchWithLoading";
-import { isFresherLoggedIn, isMentorLoggedIn } from "./utils/auth";
-import { socket } from "./utils/socket";
-
+import { clearLegacyStorage } from "./utils/auth";
 // Lazy-loaded pages
 const Landing = lazy(() => import("./Landingpages/Landing"));
 const Auth = lazy(() => import("./Authpage/Auth"));
@@ -37,18 +35,26 @@ const FresherResetPassword = lazy(
 const MentorRoutes = lazy(() => import("./Routes/MentorRoutes"));
 const FresherRoutes = lazy(() => import("./Routes/FresherRoutes"));
 
+// Old keys from the previous localStorage-based login. Removed once per browser. 
 // ================= AUTH HELPERS =================
 
 const HomeRoute = () => {
-  if (isMentorLoggedIn()) {
-    return <Navigate to="/mentor/home" replace />;
-  }
+  const { role, loading } = useAuth();
 
-  if (isFresherLoggedIn()) {
-    return <Navigate to="/Home" replace />;
-  }
+  if (loading) return <SuspenseLoader />;
+  if (role === "mentor") return <Navigate to="/mentor/home" replace />;
+  if (role === "fresher") return <Navigate to="/Home" replace />;
 
   return <Landing />;
+};
+
+const FresherLoginRoute = () => {
+  const { role, loading } = useAuth();
+
+  if (loading) return <SuspenseLoader />;
+  if (role === "fresher") return <Navigate to="/Home" replace />;
+
+  return <Login />;
 };
 
 // ================= INNER APP =================
@@ -56,93 +62,41 @@ const HomeRoute = () => {
 function AppContent() {
   const { isLoading, start, stop } = useLoading();
 
-  // Register global Axios and fetch loading handlers.
-  // Both use the same shared LoadingProvider.
+  useEffect(() => {
+  clearLegacyStorage();
+}, []);
+
   useEffect(() => {
     registerLoadingHandlers(start, stop);
     registerFetchHandlers(start, stop);
   }, [start, stop]);
-
-  // Reconnect the socket when an existing session is detected.
-  useEffect(() => {
-    const loggedIn =
-      isFresherLoggedIn() || isMentorLoggedIn();
-
-    if (loggedIn && !socket.connected && !socket.active) {
-      socket.connect();
-    }
-  }, []);
-
   return (
     <div className="min-h-screen bg-white font-sans text-gray-900">
-      {/* Global API request progress bar */}
       <LinearProgress isLoading={isLoading} />
-
-      {/* Navigation progress indicator */}
       <RouteProgress />
 
       <Suspense fallback={<SuspenseLoader />}>
         <Routes>
           <Route path="/" element={<HomeRoute />} />
-
           <Route path="/auth" element={<Auth />} />
-
-          <Route
-            path="/login"
-            element={
-              isFresherLoggedIn() ? (
-                <Navigate to="/Home" replace />
-              ) : (
-                <Login />
-              )
-            }
-          />
-
-          <Route
-            path="/forgot-password"
-            element={<Forgetpassword />}
-          />
-
+          <Route path="/login" element={<FresherLoginRoute />} />
+          <Route path="/forgot-password" element={<Forgetpassword />} />
           <Route
             path="/reset-password/:token"
             element={<FresherResetPassword />}
           />
 
-          <Route
-            path="/mentor/*"
-            element={<MentorRoutes />}
-          />
+          <Route path="/mentor/*" element={<MentorRoutes />} />
+          <Route path="/Home/*" element={<FresherRoutes />} />
 
-          <Route
-            path="/Home/*"
-            element={<FresherRoutes />}
-          />
-
-          <Route
-            path="/profile"
-            element={
-              <Navigate to="/Home/profile" replace />
-            }
-          />
-
-          <Route
-            path="/Mnclogos"
-            element={
-              <Navigate to="/Home/mnc-logos" replace />
-            }
-          />
-
+          <Route path="/profile" element={<Navigate to="/Home/profile" replace />} />
+          <Route path="/Mnclogos" element={<Navigate to="/Home/mnc-logos" replace />} />
           <Route
             path="/employee-profile"
-            element={
-              <Navigate to="/mentor/register" replace />
-            }
+            element={<Navigate to="/mentor/register" replace />}
           />
 
-          <Route
-            path="*"
-            element={<Navigate to="/" replace />}
-          />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
     </div>
@@ -155,7 +109,9 @@ function App() {
   return (
     <LoadingProvider>
       <Router>
-        <AppContent />
+        <AuthProvider>
+          <AppContent />
+        </AuthProvider>
       </Router>
     </LoadingProvider>
   );
