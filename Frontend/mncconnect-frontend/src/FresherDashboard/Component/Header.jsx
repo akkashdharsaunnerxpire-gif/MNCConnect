@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import useLive from "../../hooks/useLive";
 import useUserEvents from "../../hooks/useUserEvents";
-import { api, ENDPOINTS, EVENTS, NOTIFICATIONS_CHANGED, getToken, getUserId, timeAgo } from "../../services/fresherApi";
+import { api, ENDPOINTS, EVENTS, NOTIFICATIONS_CHANGED, getUser, getUserId, timeAgo } from "../../services/fresherApi";
 // !! fix this path if Welcomebonus.jsx lives somewhere else
 import WelcomeBonus from "../pages/Welcomebonus";
 
@@ -100,7 +100,6 @@ const Header = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const userId = useMemo(() => getUserId(), []);
-  const userName = localStorage.getItem("fresherName") || "";
 
   const [mobileMenu, setMobileMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -122,15 +121,19 @@ const Header = () => {
   const menuBtnRef = useRef(null); // mobile hamburger (fallback when wallet button is hidden)
   const walletCtl = useAnimationControls();
 
-  /* ---------- wallet balance: SAME source as the wallet page (/auth/me -> walletBalance) ---------- */
+  /* ---------- wallet balance: SAME source as the wallet page (/auth/me -> walletBalance) ----------
+     Auth is cookie based now, so there is NO token check: the cookie is sent by api(). */
   const { data: meData } = useLive({
-    fetcher: () => (getToken() ? api("/auth/me") : Promise.resolve(null)),
+    fetcher: () => api("/auth/me"),
     events: [EVENTS.notification, "wallet:updated"],
     userId,
   });
 
   const me = meData?.user || meData || null;
   const realBalance = Number(me?.walletBalance) || 0;
+
+  // name: live profile first, then the saved session marker
+  const userName = (me?.name || getUser().name || "").trim();
 
   // while the welcome animation plays, the nav shows the balance WITHOUT the bonus
   // (Welcomebonus calls onHold(base) at the start and onHold(null) when the coin lands)
@@ -152,7 +155,7 @@ const Header = () => {
 
   /* ---------- live notifications from the server ---------- */
   const { data, reload, setData, connected } = useLive({
-    fetcher: () => (getToken() ? api(`${ENDPOINTS.notifications}?limit=20`) : Promise.resolve({ notifications: [], unreadCount: 0 })),
+    fetcher: () => api(`${ENDPOINTS.notifications}?limit=20`),
     events: [EVENTS.notification],
     userId,
   });
@@ -162,7 +165,7 @@ const Header = () => {
 
   /* ---------- live bookings (next session, waiting requests) ---------- */
   const { data: bookingData } = useLive({
-    fetcher: () => (getToken() ? api(ENDPOINTS.myBookings || "/bookings/me") : Promise.resolve({ bookings: [] })),
+    fetcher: () => api(ENDPOINTS.myBookings || "/bookings/me"),
     events: ["booking:updated", EVENTS.reminder].filter(Boolean),
     userId,
   });
@@ -350,7 +353,7 @@ const Header = () => {
   const badgeFor = (key) => (key === "unread" ? unreadCount : key === "upcoming" ? upcoming.length : 0);
 
   const shown = (filter === "unread" ? notifications.filter((n) => !n.read) : notifications).slice(0, 8);
-  const initial = userName ? userName.trim().charAt(0).toUpperCase() : "";
+  const initial = userName ? userName.charAt(0).toUpperCase() : "";
 
   /* small "next session" chip, used on desktop and in the mobile menu */
   const renderSessionChip = (block = false) => {
@@ -691,10 +694,10 @@ const Header = () => {
         )}
       </AnimatePresence>
 
-      {/* welcome bonus: plays once on Home, coin flies into the wallet button above */}
+      {/* welcome bonus: plays once on Home, coin flies into the wallet button above.
+          It reads welcomeBonusSeen from the DB itself, so it only needs the refs + callbacks. */}
       {showWelcome && me && (
         <WelcomeBonus
-          user={me}
           targetRef={walletBtnRef}
           fallbackRef={menuBtnRef}
           onHold={setHold}

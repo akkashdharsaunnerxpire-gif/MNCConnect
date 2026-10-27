@@ -224,3 +224,4 @@ const FresherResetPassword = () => {
 };
 
 export default FresherResetPassword;
+    

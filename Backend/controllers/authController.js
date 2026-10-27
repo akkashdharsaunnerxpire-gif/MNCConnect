@@ -4,7 +4,10 @@ const crypto = require("crypto");
 
 const Fresher = require("../models/Fresher");
 const Mentor = require("../models/Mentor");
-const { uploadFromBuffer, deleteFromCloudinary } = require("../config/cloudinary");
+const {
+  uploadFromBuffer,
+  deleteFromCloudinary,
+} = require("../config/cloudinary");
 const { sendMail, otpVerificationEmail } = require("../utils/mailer");
 const { notify, emitToUser } = require("../utils/realtime");
 
@@ -12,9 +15,9 @@ const { notify, emitToUser } = require("../utils/realtime");
 // CONSTANTS
 // =====================================================
 
-const WELCOME_BONUS = 25;     // every new fresher gets this in the wallet
-const REFERRAL_REWARD = 10;   // the referrer gets this per successful referral
-const TEMP_NAME = "Temp";     // placeholder name used by send-otp
+const WELCOME_BONUS = 25; // every new fresher gets this in the wallet
+const REFERRAL_REWARD = 10; // the referrer gets this per successful referral
+const TEMP_NAME = "Temp"; // placeholder name used by send-otp
 
 // =====================================================
 // HELPERS
@@ -22,16 +25,50 @@ const TEMP_NAME = "Temp";     // placeholder name used by send-otp
 
 const generateToken = (id, role) => {
   if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET is not configured.");
-  return jwt.sign({ id: id.toString(), role }, process.env.JWT_SECRET, { expiresIn: "7d" });
+  return jwt.sign({ id: id.toString(), role }, process.env.JWT_SECRET, {
+    expiresIn: "7d",
+  });
 };
 
-const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
-const validatePassword = (password) => typeof password === "string" && password.length >= 8 && password.length <= 128;
+const AUTH_COOKIE_NAME = "mnc_token";
+
+const setAuthCookie = (res, token) => {
+  const isProd = process.env.NODE_ENV === "production";
+
+  res.cookie(AUTH_COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? "none" : "lax",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    path: "/",
+  });
+};
+
+const clearAuthCookie = (res) => {
+  const isProd = process.env.NODE_ENV === "production";
+
+  res.clearCookie(AUTH_COOKIE_NAME, {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? "none" : "lax",
+    path: "/",
+  });
+};
+
+const normalizeEmail = (email) =>
+  String(email || "")
+    .trim()
+    .toLowerCase();
+const validatePassword = (password) =>
+  typeof password === "string" &&
+  password.length >= 8 &&
+  password.length <= 128;
 
 const generateReferralCode = () => {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   let code = "";
-  for (let i = 0; i < 6; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
+  for (let i = 0; i < 6; i++)
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
   return code;
 };
 
@@ -40,7 +77,8 @@ const generateOtp = () => crypto.randomInt(100000, 999999).toString();
 
 // unique dummy 10-digit mobile for the temporary OTP record
 // (so two temp records never clash on a unique mobile index)
-const tempMobile = () => `+910${String(crypto.randomInt(0, 999999999)).padStart(9, "0")}`;
+const tempMobile = () =>
+  `+910${String(crypto.randomInt(0, 999999999)).padStart(9, "0")}`;
 
 const sanitizeFresher = (user) => {
   return {
@@ -58,36 +96,30 @@ const sanitizeFresher = (user) => {
     referralEarnings: user.referralEarnings || 0,
     totalRefunds: user.totalRefunds || 0,
     welcomeBonusClaimed: user.welcomeBonusClaimed || false,
-     welcomeBonusSeen: Boolean(user.welcomeBonusSeen), 
+    welcomeBonusSeen: Boolean(user.welcomeBonusSeen),
     lastLoginAt: user.lastLoginAt,
     createdAt: user.createdAt,
   };
 };
 
-const sanitizeMentor = (mentor) => {
-  return {
-    id: mentor._id,
-    name: mentor.name,
-    email: mentor.email,
-    role: "mentor",
-    isEmailVerified: true,
-    isVerified: mentor.isVerified,
-    verificationStatus: mentor.verificationStatus,
-    accountStatus: mentor.accountStatus,
-    // ... (Add your other mentor fields here)
-  };
-};
 
 // Gives the referrer REFERRAL_REWARD (atomic, one query) and links the new user.
 // Returns true when a reward was paid.
 const rewardReferrer = async ({ fresher, referralCode }) => {
-  const code = String(referralCode || "").trim().toUpperCase();
+  const code = String(referralCode || "")
+    .trim()
+    .toUpperCase();
   if (code.length !== 6) return false;
 
   const referrer = await Fresher.findOneAndUpdate(
     { referralCode: code, _id: { $ne: fresher._id } },
-    { $inc: { walletBalance: REFERRAL_REWARD, referralEarnings: REFERRAL_REWARD } },
-    { new: true }
+    {
+      $inc: {
+        walletBalance: REFERRAL_REWARD,
+        referralEarnings: REFERRAL_REWARD,
+      },
+    },
+    { new: true },
   );
   if (!referrer) return false;
 
@@ -102,7 +134,9 @@ const rewardReferrer = async ({ fresher, referralCode }) => {
     message: `${fresher.name} joined with your code. ₹${REFERRAL_REWARD} added to your wallet.`,
     type: "payment",
   });
-  emitToUser(String(referrer._id), "wallet:updated", { balance: referrer.walletBalance });
+  emitToUser(String(referrer._id), "wallet:updated", {
+    balance: referrer.walletBalance,
+  });
 
   return true;
 };
@@ -114,39 +148,66 @@ const rewardReferrer = async ({ fresher, referralCode }) => {
 
 exports.registerFresher = async (req, res) => {
   try {
-    const { name, email, mobile, countryCode, password, referralInput } = req.body;
+    const { name, email, mobile, countryCode, password, referralInput } =
+      req.body;
 
     // ---------- validations ----------
     if (!name || !email || !mobile || !password) {
-      return res.status(400).json({ success: false, message: "Name, email, mobile number and password are required." });
+      return res.status(400).json({
+        success: false,
+        message: "Name, email, mobile number and password are required.",
+      });
     }
 
-    if (typeof name !== "string" || name.trim().length < 2 || name.trim().length > 50) {
-      return res.status(400).json({ success: false, message: "Name must be between 2 and 50 characters." });
+    if (
+      typeof name !== "string" ||
+      name.trim().length < 2 ||
+      name.trim().length > 50
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Name must be between 2 and 50 characters.",
+      });
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(String(email).trim())) {
-      return res.status(400).json({ success: false, message: "Please provide a valid email address." });
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid email address.",
+      });
     }
 
     if (!validatePassword(password)) {
-      return res.status(400).json({ success: false, message: "Password must be between 8 and 128 characters." });
+      return res.status(400).json({
+        success: false,
+        message: "Password must be between 8 and 128 characters.",
+      });
     }
 
     const cleanName = String(name).trim();
     const normalizedEmail = normalizeEmail(email);
 
     let cleanCountryCode = String(countryCode || "+91").trim();
-    if (!cleanCountryCode.startsWith("+")) cleanCountryCode = "+" + cleanCountryCode;
+    if (!cleanCountryCode.startsWith("+"))
+      cleanCountryCode = "+" + cleanCountryCode;
     if (!/^\+\d{1,4}$/.test(cleanCountryCode)) {
-      return res.status(400).json({ success: false, message: "Please provide a valid country code (e.g., +91)." });
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid country code (e.g., +91).",
+      });
     }
 
-    let cleanMobileForValidation = String(mobile).replace(/[\s\-\(\)]/g, "").replace(/[^0-9]/g, "");
-    if (cleanMobileForValidation.length > 10) cleanMobileForValidation = cleanMobileForValidation.slice(-10);
+    let cleanMobileForValidation = String(mobile)
+      .replace(/[\s\-\(\)]/g, "")
+      .replace(/[^0-9]/g, "");
+    if (cleanMobileForValidation.length > 10)
+      cleanMobileForValidation = cleanMobileForValidation.slice(-10);
     if (!/^[0-9]{10}$/.test(cleanMobileForValidation)) {
-      return res.status(400).json({ success: false, message: "Please provide a valid 10-digit mobile number." });
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid 10-digit mobile number.",
+      });
     }
     const cleanMobile = cleanCountryCode + cleanMobileForValidation;
 
@@ -154,32 +215,51 @@ exports.registerFresher = async (req, res) => {
     // A "Temp" record is only the placeholder that send-otp created for this
     // email. It is NOT a real account, so register is allowed to claim it.
     const existingFresher = await Fresher.findOne({ email: normalizedEmail });
-    const isPlaceholder = Boolean(existingFresher && existingFresher.name === TEMP_NAME);
+    const isPlaceholder = Boolean(
+      existingFresher && existingFresher.name === TEMP_NAME,
+    );
 
     if (existingFresher && !isPlaceholder) {
-      return res.status(409).json({ success: false, message: "A fresher account already exists with this email." });
+      return res.status(409).json({
+        success: false,
+        message: "A fresher account already exists with this email.",
+      });
     }
 
-    const existingMentorByEmail = await Mentor.findOne({ email: normalizedEmail });
+    const existingMentorByEmail = await Mentor.findOne({
+      email: normalizedEmail,
+    });
     if (existingMentorByEmail) {
-      return res.status(409).json({ success: false, message: "This email is already registered as a mentor." });
+      return res.status(409).json({
+        success: false,
+        message: "This email is already registered as a mentor.",
+      });
     }
 
     const mobileOwnerFilter = { mobile: cleanMobile };
     if (existingFresher) mobileOwnerFilter._id = { $ne: existingFresher._id };
 
     if (await Fresher.findOne(mobileOwnerFilter)) {
-      return res.status(409).json({ success: false, message: "This mobile number is already registered with a fresher account." });
+      return res.status(409).json({
+        success: false,
+        message:
+          "This mobile number is already registered with a fresher account.",
+      });
     }
     if (await Mentor.findOne({ mobile: cleanMobile })) {
-      return res.status(409).json({ success: false, message: "This mobile number is already registered with a mentor account." });
+      return res.status(409).json({
+        success: false,
+        message:
+          "This mobile number is already registered with a mentor account.",
+      });
     }
 
     // ---------- build the account ----------
     const hashedPassword = await bcrypt.hash(password, 12);
 
     let myReferralCode = generateReferralCode();
-    while (await Fresher.exists({ referralCode: myReferralCode })) myReferralCode = generateReferralCode();
+    while (await Fresher.exists({ referralCode: myReferralCode }))
+      myReferralCode = generateReferralCode();
 
     let fresher;
     let needsOtp = true;
@@ -198,7 +278,9 @@ exports.registerFresher = async (req, res) => {
 
       if (needsOtp) {
         existingFresher.emailOtp = generateOtp();
-        existingFresher.emailOtpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+        existingFresher.emailOtpExpiresAt = new Date(
+          Date.now() + 10 * 60 * 1000,
+        );
       }
 
       await existingFresher.save();
@@ -234,12 +316,13 @@ exports.registerFresher = async (req, res) => {
     // ---------- email already verified earlier: log the user in ----------
     if (!needsOtp) {
       const token = generateToken(fresher._id, "fresher");
+      setAuthCookie(res, token);
+
       return res.status(201).json({
         success: true,
         message: "Account created successfully.",
         requiresVerification: false,
         user: sanitizeFresher(fresher),
-        token,
       });
     }
 
@@ -263,7 +346,9 @@ exports.registerFresher = async (req, res) => {
       });
     }
 
-    return res.status(500).json({ success: false, message: "Unable to create account." });
+    return res
+      .status(500)
+      .json({ success: false, message: "Unable to create account." });
   }
 };
 
@@ -277,7 +362,9 @@ exports.sendFresherOtp = async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) {
-      return res.status(400).json({ success: false, message: "Email is required." });
+      return res
+        .status(400)
+        .json({ success: false, message: "Email is required." });
     }
 
     const normalizedEmail = normalizeEmail(email);
@@ -333,9 +420,14 @@ exports.sendFresherOtp = async (req, res) => {
   } catch (error) {
     console.error("Send OTP error:", error);
     if (error.code === 11000) {
-      return res.status(409).json({ success: false, message: "A fresher account already exists with this email." });
+      return res.status(409).json({
+        success: false,
+        message: "A fresher account already exists with this email.",
+      });
     }
-    return res.status(500).json({ success: false, message: "Unable to send OTP." });
+    return res
+      .status(500)
+      .json({ success: false, message: "Unable to send OTP." });
   }
 };
 
@@ -347,13 +439,22 @@ exports.sendFresherOtp = async (req, res) => {
 exports.verifyFresherOtp = async (req, res) => {
   try {
     const { email, otp } = req.body;
-    if (!email || !otp) return res.status(400).json({ success: false, message: "Email and OTP are required." });
+    if (!email || !otp)
+      return res
+        .status(400)
+        .json({ success: false, message: "Email and OTP are required." });
 
     const fresher = await Fresher.findOne({ email: normalizeEmail(email) });
-    if (!fresher) return res.status(404).json({ success: false, message: "Account not found." });
+    if (!fresher)
+      return res
+        .status(404)
+        .json({ success: false, message: "Account not found." });
 
     if (fresher.isEmailVerified) {
-      return res.status(400).json({ success: false, message: "Email is already verified. Please login." });
+      return res.status(400).json({
+        success: false,
+        message: "Email is already verified. Please login.",
+      });
     }
 
     if (!fresher.emailOtp || String(fresher.emailOtp) !== String(otp).trim()) {
@@ -361,7 +462,10 @@ exports.verifyFresherOtp = async (req, res) => {
     }
 
     if (!fresher.emailOtpExpiresAt || new Date() > fresher.emailOtpExpiresAt) {
-      return res.status(400).json({ success: false, message: "OTP has expired. Please request a new one." });
+      return res.status(400).json({
+        success: false,
+        message: "OTP has expired. Please request a new one.",
+      });
     }
 
     // ✅ Mark as verified
@@ -370,17 +474,16 @@ exports.verifyFresherOtp = async (req, res) => {
     fresher.emailOtpExpiresAt = null;
     await fresher.save();
 
-    const token = generateToken(fresher._id, "fresher");
-
     return res.status(200).json({
       success: true,
       message: "Email verified successfully!",
       user: sanitizeFresher(fresher),
-      token,
     });
   } catch (error) {
     console.error("OTP verification error:", error);
-    return res.status(500).json({ success: false, message: "Unable to verify OTP." });
+    return res
+      .status(500)
+      .json({ success: false, message: "Unable to verify OTP." });
   }
 };
 
@@ -393,18 +496,28 @@ exports.loginFresher = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if (!email || !password) return res.status(400).json({ success: false, message: "Email and password are required." });
+    if (!email || !password)
+      return res
+        .status(400)
+        .json({ success: false, message: "Email and password are required." });
 
     const normalizedEmail = normalizeEmail(email);
-    const fresher = await Fresher.findOne({ email: normalizedEmail }).select("+password");
+    const fresher = await Fresher.findOne({ email: normalizedEmail }).select(
+      "+password",
+    );
 
     // a "Temp" placeholder is not a real account
     if (!fresher || fresher.name === TEMP_NAME) {
-      return res.status(401).json({ success: false, message: "Invalid email or password." });
+      return res
+        .status(401)
+        .json({ success: false, message: "Invalid email or password." });
     }
 
     const passwordMatched = await bcrypt.compare(password, fresher.password);
-    if (!passwordMatched) return res.status(401).json({ success: false, message: "Invalid email or password." });
+    if (!passwordMatched)
+      return res
+        .status(401)
+        .json({ success: false, message: "Invalid email or password." });
 
     // ✅ Check if Email is Verified
     if (!fresher.isEmailVerified) {
@@ -420,15 +533,17 @@ exports.loginFresher = async (req, res) => {
     await fresher.save();
 
     const token = generateToken(fresher._id, "fresher");
+    setAuthCookie(res, token);
 
     return res.status(200).json({
       success: true,
       message: "Fresher login successful.",
       user: sanitizeFresher(fresher),
-      token,
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: "Unable to login." });
+    return res
+      .status(500)
+      .json({ success: false, message: "Unable to login." });
   }
 };
 
@@ -440,40 +555,68 @@ exports.loginFresher = async (req, res) => {
 
 exports.applyReferral = async (req, res) => {
   try {
-    const code = String(req.body?.referralCode || "").trim().toUpperCase();
+    const code = String(req.body?.referralCode || "")
+      .trim()
+      .toUpperCase();
     if (code.length !== 6) {
-      return res.status(400).json({ success: false, message: "Referral code must contain 6 characters." });
+      return res.status(400).json({
+        success: false,
+        message: "Referral code must contain 6 characters.",
+      });
     }
 
-    const me = await Fresher.findById(req.user.id).select("referralCode hasUsedReferral name");
-    if (!me) return res.status(404).json({ success: false, message: "Account not found." });
+    const me = await Fresher.findById(req.user.id).select(
+      "referralCode hasUsedReferral name",
+    );
+    if (!me)
+      return res
+        .status(404)
+        .json({ success: false, message: "Account not found." });
 
     if (me.hasUsedReferral) {
-      return res.status(400).json({ success: false, message: "You have already used a referral code." });
+      return res.status(400).json({
+        success: false,
+        message: "You have already used a referral code.",
+      });
     }
     if (me.referralCode === code) {
-      return res.status(400).json({ success: false, message: "You cannot use your own referral code." });
+      return res.status(400).json({
+        success: false,
+        message: "You cannot use your own referral code.",
+      });
     }
 
-    const referrer = await Fresher.findOne({ referralCode: code }).select("_id");
+    const referrer = await Fresher.findOne({ referralCode: code }).select(
+      "_id",
+    );
     if (!referrer) {
-      return res.status(404).json({ success: false, message: "Invalid referral code." });
+      return res
+        .status(404)
+        .json({ success: false, message: "Invalid referral code." });
     }
 
     // claim once: only succeeds if this user has not used a code yet
     const claimed = await Fresher.findOneAndUpdate(
       { _id: me._id, hasUsedReferral: { $ne: true } },
-      { $set: { hasUsedReferral: true, referredBy: referrer._id } }
+      { $set: { hasUsedReferral: true, referredBy: referrer._id } },
     );
     if (!claimed) {
-      return res.status(400).json({ success: false, message: "You have already used a referral code." });
+      return res.status(400).json({
+        success: false,
+        message: "You have already used a referral code.",
+      });
     }
 
     // referrer gets +₹10
     const updated = await Fresher.findByIdAndUpdate(
       referrer._id,
-      { $inc: { walletBalance: REFERRAL_REWARD, referralEarnings: REFERRAL_REWARD } },
-      { new: true }
+      {
+        $inc: {
+          walletBalance: REFERRAL_REWARD,
+          referralEarnings: REFERRAL_REWARD,
+        },
+      },
+      { new: true },
     );
 
     notify({
@@ -483,12 +626,16 @@ exports.applyReferral = async (req, res) => {
       message: `${me.name || "Someone"} used your code. ₹${REFERRAL_REWARD} added to your wallet.`,
       type: "payment",
     });
-    emitToUser(String(referrer._id), "wallet:updated", { balance: updated?.walletBalance });
+    emitToUser(String(referrer._id), "wallet:updated", {
+      balance: updated?.walletBalance,
+    });
 
     return res.json({ success: true, message: "Referral applied." });
   } catch (error) {
     console.error("applyReferral error:", error.message);
-    return res.status(500).json({ success: false, message: "Unable to apply referral code." });
+    return res
+      .status(500)
+      .json({ success: false, message: "Unable to apply referral code." });
   }
 };
 // =====================================================
@@ -501,18 +648,22 @@ exports.applyReferral = async (req, res) => {
 exports.markWelcomeBonusSeen = async (req, res) => {
   try {
     if (!req.user?.id || req.user.role !== "fresher") {
-      return res.status(403).json({ success: false, message: "Only freshers can do this." });
+      return res
+        .status(403)
+        .json({ success: false, message: "Only freshers can do this." });
     }
 
     await Fresher.updateOne(
       { _id: req.user.id },
-      { $set: { welcomeBonusSeen: true } }
+      { $set: { welcomeBonusSeen: true } },
     );
 
     return res.json({ success: true });
   } catch (error) {
     console.error("markWelcomeBonusSeen error:", error.message);
-    return res.status(500).json({ success: false, message: "Unable to update." });
+    return res
+      .status(500)
+      .json({ success: false, message: "Unable to update." });
   }
 };
 
@@ -521,128 +672,290 @@ exports.markWelcomeBonusSeen = async (req, res) => {
 // POST /api/auth/mentor/register
 // =====================================================
 
+// =====================================================
+// REPLACE these 2 things in your authController.js
+//   1. sanitizeMentor   (helpers section)
+//   2. exports.registerMentor
+// Everything else in the file stays exactly the same.
+// =====================================================
+
+// ---------- 1. sanitizeMentor (helpers section) ----------
+
+const sanitizeMentor = (mentor) => {
+  return {
+    id: mentor._id,
+    name: mentor.name,
+    email: mentor.email,
+    role: "mentor",
+    countryCode: mentor.countryCode || "+91",
+    mobile: mentor.mobile || "",
+    gender: mentor.gender || "",
+    profilePic: mentor.profilePic || "",
+    employeeId: mentor.employeeId || "",
+    currentCompany: mentor.currentCompany || "",
+    designation: mentor.designation || "",
+    department: mentor.department || "",
+    officeLocation: mentor.officeLocation || "",
+    yearsOfExperience: mentor.yearsOfExperience || 0,
+    linkedinProfile: mentor.linkedinProfile || "",
+    skills: mentor.skills || [],
+    languages: mentor.languages || [],
+    bio: mentor.bio || "",
+    isEmailVerified: true,
+    isVerified: mentor.isVerified,
+    verificationStatus: mentor.verificationStatus,
+    accountStatus: mentor.accountStatus,
+    rejectionReason: mentor.rejectionReason || "",
+    lastLoginAt: mentor.lastLoginAt,
+    createdAt: mentor.createdAt,
+  };
+};
+
+// ---------- 2. MENTOR REGISTER WITH CLOUDINARY ----------
+// POST /api/auth/mentor/register
+
 exports.registerMentor = async (req, res) => {
   let uploadedFiles = [];
 
+  const cleanupUploads = async () => {
+    for (const publicId of uploadedFiles) {
+      try {
+        await deleteFromCloudinary(publicId);
+      } catch (deleteError) {
+        console.error(
+          "Unable to delete file from Cloudinary:",
+          deleteError.message,
+        );
+      }
+    }
+    uploadedFiles = [];
+  };
+
   try {
     const {
-      name, email, mobile, countryCode, password, company, designation, department,
-      gender, experience, location, linkedin, skills, bio, companyId, confirmationAccepted,
+      name,
+      email,
+      mobile,
+      countryCode,
+      password,
+      company,
+      designation,
+      department,
+      gender,
+      experience,
+      location,
+      linkedin,
+      skills,
+      bio,
+      companyId,
+      confirmationAccepted,
     } = req.body;
 
     // 1. Required fields
     if (!name || !email || !mobile || !password) {
-      return res.status(400).json({ success: false, message: "Name, email, mobile number and password are required." });
+      return res.status(400).json({
+        success: false,
+        message: "Name, email, mobile number and password are required.",
+      });
     }
 
     // 2. Validate name
-    if (typeof name !== "string" || name.trim().length < 2 || name.trim().length > 50) {
-      return res.status(400).json({ success: false, message: "Name must be between 2 and 50 characters." });
+    if (
+      typeof name !== "string" ||
+      name.trim().length < 2 ||
+      name.trim().length > 50
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Name must be between 2 and 50 characters.",
+      });
     }
 
     // 3. Validate email
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({ success: false, message: "Please provide a valid email address." });
+    if (!emailRegex.test(String(email).trim())) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid email address.",
+      });
     }
 
-    // 4. Validate password
+    // 4. Validate password (never trim a password)
     if (!validatePassword(password)) {
-      return res.status(400).json({ success: false, message: "Password must be between 8 and 128 characters." });
+      return res.status(400).json({
+        success: false,
+        message: "Password must be between 8 and 128 characters.",
+      });
     }
 
-    // 5. Validate mobile number
-    const mobileRegex = /^[0-9]{10}$/;
-    let cleanMobileForValidation = String(mobile).replace(/[\s\-\(\)]/g, "");
-
-    if (cleanMobileForValidation.startsWith("+")) {
-      const digitsOnly = cleanMobileForValidation.replace(/[^0-9]/g, "");
-      if (digitsOnly.length >= 10) {
-        cleanMobileForValidation = digitsOnly.slice(-10);
-      }
-    }
-
-    if (cleanMobileForValidation.length > 10 && /^\d{11,13}$/.test(cleanMobileForValidation)) {
-      cleanMobileForValidation = cleanMobileForValidation.slice(-10);
-    }
-
-    if (!mobileRegex.test(cleanMobileForValidation)) {
-      return res.status(400).json({ success: false, message: "Please provide a valid 10-digit mobile number." });
-    }
-
-    // 6. Validate country code
-    const countryCodeRegex = /^\+\d{1,4}$/;
+    // 5. Validate country code
     let cleanCountryCode = String(countryCode || "+91").trim();
     if (!cleanCountryCode.startsWith("+")) {
       cleanCountryCode = "+" + cleanCountryCode;
     }
-    if (!countryCodeRegex.test(cleanCountryCode)) {
-      return res.status(400).json({ success: false, message: "Please provide a valid country code (e.g., +91)." });
+    if (!/^\+\d{1,4}$/.test(cleanCountryCode)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid country code (e.g., +91).",
+      });
     }
+
+    // 6. Validate mobile (national number, any country)
+    let nationalNumber = String(mobile).replace(/[\s\-\(\)]/g, "");
+    // old clients may send the full "+91XXXXXXXXXX"
+    if (nationalNumber.startsWith(cleanCountryCode)) {
+      nationalNumber = nationalNumber.slice(cleanCountryCode.length);
+    }
+    nationalNumber = nationalNumber.replace(/\D/g, "");
+
+    const totalDigits = cleanCountryCode.length - 1 + nationalNumber.length;
+
+    if (cleanCountryCode === "+91") {
+      if (!/^\d{10}$/.test(nationalNumber)) {
+        return res.status(400).json({
+          success: false,
+          message: "Indian mobile number must be exactly 10 digits.",
+        });
+      }
+    } else if (nationalNumber.length < 6 || totalDigits > 15) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid mobile number for the selected country.",
+      });
+    }
+
+    // stored the same way as Fresher: "+" + countryCode + national digits
+    const cleanMobile = cleanCountryCode + nationalNumber;
 
     // 7. Validate company
     if (!company || typeof company !== "string" || company.trim().length < 2) {
-      return res.status(400).json({ success: false, message: "Company name is required and must be at least 2 characters." });
+      return res.status(400).json({
+        success: false,
+        message: "Company name is required and must be at least 2 characters.",
+      });
     }
 
     // 8. Validate designation
-    if (!designation || typeof designation !== "string" || designation.trim().length < 2) {
-      return res.status(400).json({ success: false, message: "Designation is required and must be at least 2 characters." });
+    if (
+      !designation ||
+      typeof designation !== "string" ||
+      designation.trim().length < 2
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Designation is required and must be at least 2 characters.",
+      });
     }
 
     // 9. Validate department
-    if (!department || typeof department !== "string" || department.trim().length < 2) {
-      return res.status(400).json({ success: false, message: "Department is required and must be at least 2 characters." });
+    if (
+      !department ||
+      typeof department !== "string" ||
+      department.trim().length < 2
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Department is required and must be at least 2 characters.",
+      });
     }
 
-    // 10. VALIDATE GENDER
+    // 10. Validate gender
     const allowedGenders = ["male", "female", "other"];
-    const cleanGender = String(gender || "").trim().toLowerCase();
+    const cleanGender = String(gender || "")
+      .trim()
+      .toLowerCase();
     if (!cleanGender) {
-      return res.status(400).json({ success: false, message: "Gender is required." });
+      return res
+        .status(400)
+        .json({ success: false, message: "Gender is required." });
     }
     if (!allowedGenders.includes(cleanGender)) {
-      return res.status(400).json({ success: false, message: "Invalid gender. Please select Male, Female or Other." });
+      return res.status(400).json({
+        success: false,
+        message: "Invalid gender. Please select Male, Female or Other.",
+      });
     }
 
     // 11. Validate Employee ID
-    if (!companyId || typeof companyId !== "string" || companyId.trim().length < 2) {
-      return res.status(400).json({ success: false, message: "Employee ID is required and must be at least 2 characters." });
+    if (
+      !companyId ||
+      typeof companyId !== "string" ||
+      companyId.trim().length < 2
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Employee ID is required and must be at least 2 characters.",
+      });
     }
 
     // 12. Validate confirmation
     if (confirmationAccepted !== "true") {
-      return res.status(400).json({ success: false, message: "Please confirm that the submitted information is correct." });
+      return res.status(400).json({
+        success: false,
+        message: "Please confirm that the submitted information is correct.",
+      });
     }
 
     // 13. Validate experience
     const parsedExperience = Number(experience);
-    if (Number.isNaN(parsedExperience) || parsedExperience < 0 || parsedExperience > 60) {
-      return res.status(400).json({ success: false, message: "Please provide valid years of experience (0-60 years)." });
+    if (
+      experience === undefined ||
+      experience === "" ||
+      Number.isNaN(parsedExperience) ||
+      parsedExperience < 0 ||
+      parsedExperience > 60
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide valid years of experience (0-60 years).",
+      });
     }
 
     // 14. Validate location
-    if (location && (typeof location !== "string" || location.trim().length < 2)) {
-      return res.status(400).json({ success: false, message: "Location must be at least 2 characters if provided." });
+    if (
+      location &&
+      (typeof location !== "string" || location.trim().length < 2)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Location must be at least 2 characters if provided.",
+      });
     }
 
     // 15. Validate LinkedIn
-    if (linkedin && typeof linkedin === "string" && linkedin.trim().length > 0) {
-      const linkedinRegex = /^(https?:\/\/)?(www\.)?linkedin\.com\/in\/[a-zA-Z0-9\-_]+\/?$/;
+    if (
+      linkedin &&
+      typeof linkedin === "string" &&
+      linkedin.trim().length > 0
+    ) {
+      const linkedinRegex =
+        /^(https?:\/\/)?(www\.)?linkedin\.com\/in\/[a-zA-Z0-9\-_%]+\/?$/;
       if (!linkedinRegex.test(linkedin.trim())) {
-        return res.status(400).json({ success: false, message: "Please provide a valid LinkedIn profile URL." });
+        return res.status(400).json({
+          success: false,
+          message: "Please provide a valid LinkedIn profile URL.",
+        });
       }
     }
 
-    // 16. Validate bio
-    if (bio && (typeof bio !== "string" || bio.trim().length > 500)) {
-      return res.status(400).json({ success: false, message: "Bio must be less than 500 characters." });
+    // 16. Validate bio (limit matches the model: 2000)
+    if (bio && (typeof bio !== "string" || bio.trim().length > 2000)) {
+      return res.status(400).json({
+        success: false,
+        message: "Bio must be less than 2000 characters.",
+      });
     }
 
-    // 17. Validate skills
-    const languages = String(skills || "").split(",").map((item) => item.trim()).filter(Boolean);
-    if (languages.length === 0) {
-      return res.status(400).json({ success: false, message: "At least one skill/language is required." });
+    // 17. Validate skills  (saved in `skills`, NOT in `languages`)
+    const skillList = String(skills || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (skillList.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one skill is required.",
+      });
     }
 
     // 18. Validate files
@@ -650,30 +963,18 @@ exports.registerMentor = async (req, res) => {
     const employeeIdProof = req.files?.employeeIdProof?.[0];
     const additionalProof = req.files?.additionalProof?.[0];
 
-    if (!offerLetter) return res.status(400).json({ success: false, message: "Offer letter is required." });
-    if (!employeeIdProof) return res.status(400).json({ success: false, message: "Employee ID proof is required." });
-
-    // UPLOAD FILES TO CLOUDINARY
-    const timestamp = Date.now();
-    const userEmail = normalizeEmail(email);
-    const folderName = `mentors/${userEmail}`;
-
-    const offerLetterUpload = await uploadFromBuffer(offerLetter.buffer, `${folderName}/documents`, `offer_letter_${timestamp}`);
-    uploadedFiles.push(offerLetterUpload.public_id);
-
-    const employeeIdProofUpload = await uploadFromBuffer(employeeIdProof.buffer, `${folderName}/documents`, `employee_id_${timestamp}`);
-    uploadedFiles.push(employeeIdProofUpload.public_id);
-
-    let additionalProofUpload = null;
-    if (additionalProof) {
-      additionalProofUpload = await uploadFromBuffer(additionalProof.buffer, `${folderName}/documents`, `additional_proof_${timestamp}`);
-      uploadedFiles.push(additionalProofUpload.public_id);
-    }
+    if (!offerLetter)
+      return res
+        .status(400)
+        .json({ success: false, message: "Offer letter is required." });
+    if (!employeeIdProof)
+      return res
+        .status(400)
+        .json({ success: false, message: "Employee ID proof is required." });
 
     // CLEAN DATA
     const cleanName = String(name).trim();
     const normalizedEmail = normalizeEmail(email);
-    const cleanMobile = cleanCountryCode + cleanMobileForValidation;
     const cleanCompany = String(company).trim();
     const cleanDesignation = String(designation).trim();
     const cleanDepartment = String(department).trim();
@@ -682,43 +983,80 @@ exports.registerMentor = async (req, res) => {
     const cleanLinkedin = linkedin ? String(linkedin).trim() : "";
     const cleanBio = bio ? String(bio).trim() : "";
 
-    // UNIQUENESS CHECKS
-    const existingMentorByEmail = await Mentor.findOne({ email: normalizedEmail });
-    if (existingMentorByEmail) {
-      for (const publicId of uploadedFiles) await deleteFromCloudinary(publicId).catch(console.error);
-      return res.status(409).json({ success: false, message: "A mentor account already exists with this email." });
+    // UNIQUENESS CHECKS  (done BEFORE uploading, so nothing to clean up)
+    if (await Mentor.findOne({ email: normalizedEmail })) {
+      return res.status(409).json({
+        success: false,
+        message: "A mentor account already exists with this email.",
+      });
     }
 
-    const existingFresherByEmail = await Fresher.findOne({ email: normalizedEmail });
-    if (existingFresherByEmail) {
-      for (const publicId of uploadedFiles) await deleteFromCloudinary(publicId).catch(console.error);
-      return res.status(409).json({ success: false, message: "This email is already registered as a fresher." });
+    if (await Fresher.findOne({ email: normalizedEmail })) {
+      return res.status(409).json({
+        success: false,
+        message: "This email is already registered as a fresher.",
+      });
     }
 
-    const existingMentorByMobile = await Mentor.findOne({ mobile: cleanMobile });
-    if (existingMentorByMobile) {
-      for (const publicId of uploadedFiles) await deleteFromCloudinary(publicId).catch(console.error);
-      return res.status(409).json({ success: false, message: "This mobile number is already registered with a mentor account." });
+    if (await Mentor.findOne({ mobile: cleanMobile })) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "This mobile number is already registered with a mentor account.",
+      });
     }
 
-    const existingFresherByMobile = await Fresher.findOne({ mobile: cleanMobile });
-    if (existingFresherByMobile) {
-      for (const publicId of uploadedFiles) await deleteFromCloudinary(publicId).catch(console.error);
-      return res.status(409).json({ success: false, message: "This mobile number is already registered with a fresher account." });
+    if (await Fresher.findOne({ mobile: cleanMobile })) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "This mobile number is already registered with a fresher account.",
+      });
     }
 
-    const existingMentorByEmployeeId = await Mentor.findOne({ employeeId: cleanEmployeeId });
-    if (existingMentorByEmployeeId) {
-      for (const publicId of uploadedFiles) await deleteFromCloudinary(publicId).catch(console.error);
-      return res.status(409).json({ success: false, message: "This Employee ID is already registered with another mentor account." });
+    if (await Mentor.findOne({ employeeId: cleanEmployeeId })) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "This Employee ID is already registered with another mentor account.",
+      });
+    }
+
+    // UPLOAD FILES TO CLOUDINARY
+    const timestamp = Date.now();
+    const folderName = `mentors/${normalizedEmail}`;
+
+    const offerLetterUpload = await uploadFromBuffer(
+      offerLetter.buffer,
+      `${folderName}/documents`,
+      `offer_letter_${timestamp}`,
+    );
+    uploadedFiles.push(offerLetterUpload.public_id);
+
+    const employeeIdProofUpload = await uploadFromBuffer(
+      employeeIdProof.buffer,
+      `${folderName}/documents`,
+      `employee_id_${timestamp}`,
+    );
+    uploadedFiles.push(employeeIdProofUpload.public_id);
+
+    let additionalProofUpload = null;
+    if (additionalProof) {
+      additionalProofUpload = await uploadFromBuffer(
+        additionalProof.buffer,
+        `${folderName}/documents`,
+        `additional_proof_${timestamp}`,
+      );
+      uploadedFiles.push(additionalProofUpload.public_id);
     }
 
     // CREATE MENTOR
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    const mentorData = {
+    const mentor = await Mentor.create({
       name: cleanName,
       email: normalizedEmail,
+      countryCode: cleanCountryCode,
       mobile: cleanMobile,
       password: hashedPassword,
       employeeId: cleanEmployeeId,
@@ -730,15 +1068,19 @@ exports.registerMentor = async (req, res) => {
       department: cleanDepartment,
       gender: cleanGender,
       officeLocation: cleanLocation,
-      languages: languages,
-      hourlyRate: 0,
+      skills: skillList,
+      languages: [],
       bio: cleanBio,
       offerLetter: offerLetterUpload.secure_url,
       offerLetterPublicId: offerLetterUpload.public_id,
       employeeIdProof: employeeIdProofUpload.secure_url,
       employeeIdProofPublicId: employeeIdProofUpload.public_id,
-      additionalProof: additionalProofUpload ? additionalProofUpload.secure_url : "",
-      additionalProofPublicId: additionalProofUpload ? additionalProofUpload.public_id : "",
+      additionalProof: additionalProofUpload
+        ? additionalProofUpload.secure_url
+        : "",
+      additionalProofPublicId: additionalProofUpload
+        ? additionalProofUpload.public_id
+        : "",
       isVerified: false,
       verificationStatus: "pending",
       verificationMethod: "document",
@@ -746,38 +1088,36 @@ exports.registerMentor = async (req, res) => {
       accountStatus: "pending",
       lastLoginAt: null,
       profilePic: "",
-    };
-
-    const mentor = await Mentor.create(mentorData);
+    });
 
     return res.status(201).json({
       success: true,
-      message: "MNC employee profile submitted successfully. Your account is pending admin verification.",
+      message:
+        "MNC employee profile submitted successfully. Your account is pending admin verification.",
+      verificationStatus: mentor.verificationStatus,
       user: sanitizeMentor(mentor),
     });
-
   } catch (error) {
     console.error("Mentor registration error:", error);
 
-    for (const publicId of uploadedFiles) {
-      try {
-        await deleteFromCloudinary(publicId);
-      } catch (deleteError) {
-        console.error("Unable to delete file from Cloudinary:", deleteError.message);
-      }
-    }
+    await cleanupUploads();
 
     if (error.name === "ValidationError") {
       return res.status(400).json({
         success: false,
-        message: "Validation error: " + Object.values(error.errors).map((e) => e.message).join(", "),
+        message:
+          "Validation error: " +
+          Object.values(error.errors)
+            .map((e) => e.message)
+            .join(", "),
       });
     }
 
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
-        message: "An account already exists with this email, mobile number, or employee ID.",
+        message:
+          "An account already exists with this email, mobile number, or employee ID.",
       });
     }
 
@@ -798,39 +1138,62 @@ exports.loginMentor = async (req, res) => {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({ success: false, message: "Email and password are required." });
+      return res
+        .status(400)
+        .json({ success: false, message: "Email and password are required." });
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      return res.status(400).json({ success: false, message: "Please provide a valid email address." });
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid email address.",
+      });
     }
 
     const normalizedEmail = normalizeEmail(email);
 
-    const mentor = await Mentor.findOne({ email: normalizedEmail }).select("+password");
+    const mentor = await Mentor.findOne({ email: normalizedEmail }).select(
+      "+password",
+    );
 
     if (!mentor) {
-      return res.status(401).json({ success: false, message: "Invalid email or password." });
+      return res
+        .status(401)
+        .json({ success: false, message: "Invalid email or password." });
     }
 
     const passwordMatched = await bcrypt.compare(password, mentor.password);
     if (!passwordMatched) {
-      return res.status(401).json({ success: false, message: "Invalid email or password." });
+      return res
+        .status(401)
+        .json({ success: false, message: "Invalid email or password." });
     }
 
     if (mentor.accountStatus === "suspended") {
-      return res.status(403).json({ success: false, message: "Your account has been suspended. Please contact support." });
+      return res.status(403).json({
+        success: false,
+        message: "Your account has been suspended. Please contact support.",
+      });
     }
 
     if (mentor.accountStatus === "rejected") {
-      return res.status(403).json({ success: false, message: "Your mentor application was rejected.", rejectionReason: mentor.rejectionReason || "" });
-    }
-
-    if (mentor.accountStatus !== "active" || mentor.verificationStatus !== "approved" || !mentor.isVerified) {
       return res.status(403).json({
         success: false,
-        message: "Your MNC employee profile is still pending admin verification.",
+        message: "Your mentor application was rejected.",
+        rejectionReason: mentor.rejectionReason || "",
+      });
+    }
+
+    if (
+      mentor.accountStatus !== "active" ||
+      mentor.verificationStatus !== "approved" ||
+      !mentor.isVerified
+    ) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Your MNC employee profile is still pending admin verification.",
         verificationStatus: mentor.verificationStatus || "pending",
         accountStatus: mentor.accountStatus,
       });
@@ -840,11 +1203,11 @@ exports.loginMentor = async (req, res) => {
     await mentor.save();
 
     const token = generateToken(mentor._id, "mentor");
+    setAuthCookie(res, token);
 
     return res.status(200).json({
       success: true,
       message: "Mentor login successful",
-      token,
       verificationStatus: mentor.verificationStatus,
       accountStatus: mentor.accountStatus,
       mentor: {
@@ -857,10 +1220,11 @@ exports.loginMentor = async (req, res) => {
         accountStatus: mentor.accountStatus,
       },
     });
-
   } catch (error) {
     console.error("Mentor login error:", error);
-    return res.status(500).json({ success: false, message: "Unable to login. Please try again." });
+    return res
+      .status(500)
+      .json({ success: false, message: "Unable to login. Please try again." });
   }
 };
 
@@ -872,26 +1236,45 @@ exports.loginMentor = async (req, res) => {
 exports.getMe = async (req, res) => {
   try {
     if (!req.user || !req.user.id) {
-      return res.status(401).json({ success: false, message: "Authentication required." });
+      return res
+        .status(401)
+        .json({ success: false, message: "Authentication required." });
     }
 
     if (req.user.role === "mentor") {
       const mentor = await Mentor.findById(req.user.id).select("-password");
-      if (!mentor) return res.status(404).json({ success: false, message: "Mentor account not found." });
-      return res.status(200).json({ success: true, message: "Mentor data fetched successfully.", user: sanitizeMentor(mentor) });
+      if (!mentor)
+        return res
+          .status(404)
+          .json({ success: false, message: "Mentor account not found." });
+      return res.status(200).json({
+        success: true,
+        message: "Mentor data fetched successfully.",
+        user: sanitizeMentor(mentor),
+      });
     }
 
     if (req.user.role === "fresher") {
       const fresher = await Fresher.findById(req.user.id).select("-password");
-      if (!fresher) return res.status(404).json({ success: false, message: "Fresher account not found." });
-      return res.status(200).json({ success: true, message: "Fresher data fetched successfully.", user: sanitizeFresher(fresher) });
+      if (!fresher)
+        return res
+          .status(404)
+          .json({ success: false, message: "Fresher account not found." });
+      return res.status(200).json({
+        success: true,
+        message: "Fresher data fetched successfully.",
+        user: sanitizeFresher(fresher),
+      });
     }
 
-    return res.status(403).json({ success: false, message: "Invalid user role." });
-
+    return res
+      .status(403)
+      .json({ success: false, message: "Invalid user role." });
   } catch (error) {
     console.error("Get current user error:", error);
-    return res.status(500).json({ success: false, message: "Unable to fetch user information." });
+    return res
+      .status(500)
+      .json({ success: false, message: "Unable to fetch user information." });
   }
 };
 
@@ -905,27 +1288,44 @@ exports.updateMentorVerification = async (req, res) => {
     const { status, rejectionReason } = req.body;
 
     if (!status) {
-      return res.status(400).json({ success: false, message: "Status is required." });
+      return res
+        .status(400)
+        .json({ success: false, message: "Status is required." });
     }
 
     if (!["approved", "rejected"].includes(status)) {
-      return res.status(400).json({ success: false, message: "Status must be either 'approved' or 'rejected'." });
+      return res.status(400).json({
+        success: false,
+        message: "Status must be either 'approved' or 'rejected'.",
+      });
     }
 
     if (status === "rejected") {
-      if (!rejectionReason || typeof rejectionReason !== "string" || rejectionReason.trim().length < 5) {
-        return res.status(400).json({ success: false, message: "Rejection reason is required and must be at least 5 characters." });
+      if (
+        !rejectionReason ||
+        typeof rejectionReason !== "string" ||
+        rejectionReason.trim().length < 5
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Rejection reason is required and must be at least 5 characters.",
+        });
       }
     }
 
     const mentor = await Mentor.findById(req.params.id);
 
     if (!mentor) {
-      return res.status(404).json({ success: false, message: "Mentor account not found." });
+      return res
+        .status(404)
+        .json({ success: false, message: "Mentor account not found." });
     }
 
     if (status === "approved" && mentor.verificationStatus === "approved") {
-      return res.status(400).json({ success: false, message: "This mentor is already approved." });
+      return res
+        .status(400)
+        .json({ success: false, message: "This mentor is already approved." });
     }
 
     if (status === "approved") {
@@ -946,12 +1346,25 @@ exports.updateMentorVerification = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: status === "approved" ? "Mentor approved successfully." : "Mentor verification rejected.",
+      message:
+        status === "approved"
+          ? "Mentor approved successfully."
+          : "Mentor verification rejected.",
       user: sanitizeMentor(mentor),
     });
-
   } catch (error) {
     console.error("Mentor verification error:", error);
-    return res.status(500).json({ success: false, message: "Unable to update mentor verification." });
+    return res.status(500).json({
+      success: false,
+      message: "Unable to update mentor verification.",
+    });
   }
+};
+exports.logout = (req, res) => {
+  clearAuthCookie(res);
+
+  return res.status(200).json({
+    success: true,
+    message: "Logged out successfully.",
+  });
 };

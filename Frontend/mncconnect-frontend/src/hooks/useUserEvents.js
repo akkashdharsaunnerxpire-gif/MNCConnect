@@ -2,7 +2,7 @@
 // Listen to socket events pushed to this user's room:
 //   useUserEvents(userId, { "booking:updated": (payload) => ... })
 import { useEffect, useRef } from "react";
-import socket from "../socket";
+import {socket} from "../utils/socket";
 
 export default function useUserEvents(userId, handlers) {
   const ref = useRef(handlers);

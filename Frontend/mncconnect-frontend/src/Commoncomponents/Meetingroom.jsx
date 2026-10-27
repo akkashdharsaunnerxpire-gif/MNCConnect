@@ -14,7 +14,7 @@ import {
   Star,
   MessageSquare,
 } from "lucide-react";
-import socket from "../socket";
+import {socket} from "../utils/socket";
 import ReviewModal from "../FresherDashboard/pages/Reviewmodal";
 import MeetingInstructionsGate from "../Commoncomponents/MeetingInstructionsGate";
 import SessionCompletionModal from "../Commoncomponents/SessionCompletionModal";

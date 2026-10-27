@@ -6,22 +6,22 @@
   const aDeg = total ? (stats.approvedMentors / total) * 360 : 0;
   const pDeg = total ? (stats.pendingMentors / total) * 360 : 0;
   const donutBg = total
-    ? `conic-gradient(var(--ok) 0 ${aDeg}deg, var(--warn) ${aDeg}deg ${aDeg + pDeg}deg, var(--bad) ${aDeg + pDeg}deg 360deg)`
-    : 'var(--surface-2)';
-  const maxMonth = Math.max.apply(null, monthly.map(m => m.count).concat([1]));
-  const maxCompany = Math.max.apply(null, topCompanies.map(c => c.count).concat([1]));
+    ? 'conic-gradient(#10b981 0deg ' + aDeg + 'deg, #f59e0b ' + aDeg + 'deg ' + (aDeg + pDeg) + 'deg, #ef4444 ' + (aDeg + pDeg) + 'deg 360deg)'
+    : '';
+  const maxMonth = Math.max.apply(null, monthly.map(function (m) { return m.count; }).concat([1]));
+  const maxCompany = Math.max.apply(null, topCompanies.map(function (c) { return c.count; }).concat([1]));
 
   const mentorCards = [
-    { l: 'Total Mentors', v: stats.totalMentors, i: 'fa-user-tie', t: 't-primary', href: '/admin/mentors' },
-    { l: 'Pending Approvals', v: stats.pendingMentors, i: 'fa-clock', t: 't-warn', href: '/admin/mentors?status=pending' },
-    { l: 'Approved Mentors', v: stats.approvedMentors, i: 'fa-circle-check', t: 't-ok', href: '/admin/mentors?status=approved' },
-    { l: 'Rejected Mentors', v: stats.rejectedMentors, i: 'fa-circle-xmark', t: 't-bad', href: '/admin/mentors?status=rejected' }
+    { l: 'Total mentors', v: stats.totalMentors, i: 'fa-user-tie', t: 't-primary', href: '/admin/mentors' },
+    { l: 'Pending approvals', v: stats.pendingMentors, i: 'fa-clock', t: 't-warn', href: '/admin/mentors?status=pending' },
+    { l: 'Approved mentors', v: stats.approvedMentors, i: 'fa-circle-check', t: 't-ok', href: '/admin/mentors?status=approved' },
+    { l: 'Rejected mentors', v: stats.rejectedMentors, i: 'fa-circle-xmark', t: 't-bad', href: '/admin/mentors?status=rejected' }
   ];
 
   const platformCards = [];
-  if (stats.totalUsers !== null) platformCards.push({ l: 'Total Users', v: fmt(stats.totalUsers), i: 'fa-users', t: 't-info', href: '/admin/users' });
-  if (stats.totalPayments !== null) platformCards.push({ l: 'Payments', v: fmt(stats.totalPayments), i: 'fa-receipt', t: 't-primary', href: '/admin/payments' });
-  if (stats.revenue !== null) platformCards.push({ l: 'Revenue', v: '₹' + fmt(stats.revenue), i: 'fa-indian-rupee-sign', t: 't-ok', href: '/admin/payments' });
+  if (stats.totalUsers !== null && stats.totalUsers !== undefined) platformCards.push({ l: 'Total users', v: fmt(stats.totalUsers), i: 'fa-users', t: 't-info', href: '/admin/users' });
+  if (stats.totalPayments !== null && stats.totalPayments !== undefined) platformCards.push({ l: 'Payments', v: fmt(stats.totalPayments), i: 'fa-receipt', t: 't-primary', href: '/admin/payments' });
+  if (stats.revenue !== null && stats.revenue !== undefined) platformCards.push({ l: 'Revenue', v: '₹' + fmt(stats.revenue), i: 'fa-indian-rupee-sign', t: 't-ok', href: '/admin/payments' });
 %>
 
 <% if (stats.pendingMentors > 0) { %>
@@ -42,18 +42,30 @@
     <% }) %>
 </div>
 
+<!-- Platform stats (only if the models exist) -->
+<% if (platformCards.length) { %>
+<div class="grid g-3 mb">
+    <% platformCards.forEach(function (c) { %>
+        <a href="<%= c.href %>" class="card stat <%= c.t %>">
+            <div><small><%= c.l %></small><h3><%= c.v %></h3></div>
+            <div class="stat-ico"><i class="fas <%= c.i %>"></i></div>
+        </a>
+    <% }) %>
+</div>
+<% } %>
+
 <!-- Charts -->
 <div class="grid g-main mb">
     <div class="card">
         <div class="card-head">
-            <div><h3>Mentor Registrations</h3><p>Last 6 months</p></div>
+            <div><h3>Mentor registrations</h3><p>Last 6 months</p></div>
         </div>
         <div class="card-body">
             <div class="bars">
                 <% monthly.forEach(function (m) { %>
                     <div class="bar" title="<%= m.count %> registrations">
                         <b><%= m.count %></b>
-                        <div class="bar-fill" style="height: <%= Math.round((m.count / maxMonth) * 100) %>%"></div>
+                        <div class="bar-fill" data-h="<%= Math.round((m.count / maxMonth) * 100) %>"></div>
                         <span><%= m.label %></span>
                     </div>
                 <% }) %>
@@ -63,16 +75,16 @@
 
     <div class="card">
         <div class="card-head">
-            <div><h3>Verification Status</h3><p>Approval rate: <b><%= approvalRate %>%</b></p></div>
+            <div><h3>Verification status</h3><p>Approval rate: <b><%= approvalRate %>%</b></p></div>
         </div>
         <div class="card-body donut-wrap">
-          <div class="donut" <%- 'style="background:' + donutBg + '"' %>>
+            <div class="donut" data-bg="<%= donutBg %>">
                 <div class="donut-in"><div><b><%= total %></b><small>Mentors</small></div></div>
             </div>
             <div class="legend">
-                <div><i style="background:var(--ok)"></i>Approved<span><%= stats.approvedMentors %></span></div>
-                <div><i style="background:var(--warn)"></i>Pending<span><%= stats.pendingMentors %></span></div>
-                <div><i style="background:var(--bad)"></i>Rejected<span><%= stats.rejectedMentors %></span></div>
+                <div><i class="lg-ok"></i>Approved<span><%= stats.approvedMentors %></span></div>
+                <div><i class="lg-warn"></i>Pending<span><%= stats.pendingMentors %></span></div>
+                <div><i class="lg-bad"></i>Rejected<span><%= stats.rejectedMentors %></span></div>
             </div>
         </div>
     </div>
@@ -82,7 +94,7 @@
 <div class="grid g-main mb">
     <div class="card">
         <div class="card-head">
-            <div><h3>Pending Verification Queue</h3><p>Oldest requests first</p></div>
+            <div><h3>Pending verification queue</h3><p>Oldest requests first</p></div>
             <a href="/admin/mentors?status=pending" class="btn btn-ghost btn-sm">View all</a>
         </div>
         <% if (pendingQueue.length) { %>
@@ -102,8 +114,7 @@
                         <td class="muted small"><%= m.createdAt ? new Date(m.createdAt).toLocaleDateString('en-GB') : '—' %></td>
                         <td>
                             <div class="row-actions">
-                                <a href="/admin/mentors/<%= m._id %>" class="btn btn-ghost btn-sm">Review</a>
-                                <button class="btn btn-ok btn-sm" data-action="approve" data-id="<%= m._id %>" data-name="<%= m.name %>">Approve</button>
+                                <a href="/admin/mentors/<%= m._id %>" class="btn btn-primary btn-sm"><i class="fas fa-magnifying-glass"></i> Review</a>
                             </div>
                         </td>
                     </tr>
@@ -117,19 +128,17 @@
     </div>
 
     <div class="card">
-        <div class="card-head"><div><h3>Top Companies</h3><p>By mentor count</p></div></div>
+        <div class="card-head"><div><h3>Top companies</h3><p>By mentor count</p></div></div>
         <div class="card-body">
             <% if (topCompanies.length) { %>
                 <% topCompanies.forEach(function (c) { %>
-                    <div class="list-row" style="display:block;">
-                        <div style="display:flex;justify-content:space-between;">
-                            <span><%= c.name %></span><b><%= c.count %></b>
-                        </div>
-                        <div class="progress"><i style="width: <%= Math.round((c.count / maxCompany) * 100) %>%"></i></div>
+                    <div class="list-row block">
+                        <div class="lr-top"><span><%= c.name %></span><b><%= c.count %></b></div>
+                        <div class="progress"><i data-w="<%= Math.round((c.count / maxCompany) * 100) %>"></i></div>
                     </div>
                 <% }) %>
             <% } else { %>
-                <div class="empty" style="padding:24px 0;">No company data yet</div>
+                <div class="empty">No company data yet</div>
             <% } %>
         </div>
     </div>
@@ -138,7 +147,7 @@
 <!-- Recent mentors -->
 <div class="card">
     <div class="card-head">
-        <div><h3>Recently Registered</h3><p>Latest 5 mentors</p></div>
+        <div><h3>Recently registered</h3><p>Latest 5 mentors</p></div>
         <a href="/admin/mentors" class="btn btn-ghost btn-sm">All mentors</a>
     </div>
     <% if (recentMentors.length) { %>

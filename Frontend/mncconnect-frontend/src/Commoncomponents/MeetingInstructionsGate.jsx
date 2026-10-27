@@ -1,7 +1,7 @@
 // src/Commoncomponents/MeetingInstructionsGate.jsx
 import React, { useEffect, useState } from "react";
 import { CheckCircle2, Loader2, ChevronDown, AlertTriangle } from "lucide-react";
-import socket from "../socket";
+import {socket} from "../utils/socket";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 

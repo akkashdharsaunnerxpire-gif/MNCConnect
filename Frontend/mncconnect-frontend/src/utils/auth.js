@@ -1,33 +1,83 @@
 // src/utils/auth.js
-const decode = (token) => {
+// Auth uses an HttpOnly cookie (mnc_token). JavaScript cannot read it, so we
+// keep a small "session marker" in localStorage ONLY for route guarding in the UI.
+// The real security check always happens on the server through the cookie.
+
+const SESSION_DAYS = 7; // must match the JWT / cookie lifetime on the server
+const USER_KEY = "user";
+const EXP_KEY = "mnc_session_exp";
+
+const LEGACY_KEYS = [
+  "fresher_token",
+  "mnc_mentor_token",
+  "token",
+  "fresherName",
+];
+
+const parseJSON = (value) => {
   try {
-    const payload = token.split(".")[1];
-    return JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
+    return value ? JSON.parse(value) : null;
   } catch {
     return null;
   }
 };
 
-// Returns the token only if it is a real, non-expired JWT. Otherwise clears it.
-const getValidToken = (key) => {
-  const token = localStorage.getItem(key);
-  if (!token) return null;
+// ---------- save / clear ----------
 
-  const payload = decode(token);
-  const expired = !payload || (payload.exp && payload.exp * 1000 < Date.now());
-
-  if (expired) {
-    localStorage.removeItem(key);
-    return null;
+// Call this right after a successful login or register
+export const saveSession = (user) => {
+  try {
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+    localStorage.setItem(
+      EXP_KEY,
+      String(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000),
+    );
+    // remove old token keys so nothing stale is left behind
+    LEGACY_KEYS.forEach((k) => localStorage.removeItem(k));
+  } catch {
+    /* ignore */
   }
-  return token;
 };
 
-export const isFresherLoggedIn = () => Boolean(getValidToken("fresher_token"));
-export const isMentorLoggedIn = () => Boolean(getValidToken("mnc_mentor_token"));
+export const clearSession = () => {
+  try {
+    localStorage.removeItem(USER_KEY);
+    localStorage.removeItem(EXP_KEY);
+    LEGACY_KEYS.forEach((k) => localStorage.removeItem(k));
+  } catch {
+    /* ignore */
+  }
+};
 
-export const clearFresherSession = () => {
-  ["fresher_token", "user", "token", "fresherName"].forEach((k) =>
-    localStorage.removeItem(k),
-  );
+// kept for backward compatibility (other files may already import these)
+export const clearFresherSession = clearSession;
+export const clearMentorSession = clearSession;
+
+// ---------- read ----------
+
+// Returns the stored user only if the session marker has not expired
+export const getStoredUser = () => {
+  try {
+    const exp = Number(localStorage.getItem(EXP_KEY) || 0);
+
+    if (!exp || Date.now() > exp) {
+      // missing or expired -> clean up
+      if (localStorage.getItem(USER_KEY)) clearSession();
+      return null;
+    }
+
+    return parseJSON(localStorage.getItem(USER_KEY));
+  } catch {
+    return null;
+  }
+};
+
+export const isFresherLoggedIn = () => {
+  const user = getStoredUser();
+  return Boolean(user && user.role === "fresher");
+};
+
+export const isMentorLoggedIn = () => {
+  const user = getStoredUser();
+  return Boolean(user && user.role === "mentor");
 };

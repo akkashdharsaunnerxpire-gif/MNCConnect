@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { LayoutDashboard, UserPlus, CalendarDays, Wallet, Star, Bell, UserCircle, LogOut } from "lucide-react";
-import socket from "../../socket";
+import {socket} from "../../utils/socket";
 import { api, ENDPOINTS, EVENTS, NOTIFICATIONS_CHANGED } from "../../services/mentorApi";
 import useMentorSessions from "../../hooks/useMentorSessions";
 

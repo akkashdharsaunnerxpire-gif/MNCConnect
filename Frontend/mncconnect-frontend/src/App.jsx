@@ -15,19 +15,25 @@ import { LoadingProvider, useLoading } from "./context/LoadingContext";
 import { registerLoadingHandlers } from "./api/axios";
 import { registerFetchHandlers } from "./api/fetchWithLoading";
 import { isFresherLoggedIn, isMentorLoggedIn } from "./utils/auth";
+import { socket } from "./utils/socket";
 
 // Lazy load = bundle size kuraiyum + route load progress kaattum
 const Landing = lazy(() => import("./Landingpages/Landing"));
 const Auth = lazy(() => import("./Authpage/Auth"));
 const Login = lazy(() => import("./Authpage/FresherAuth/FresherLoginRegister"));
-const Forgetpassword = lazy(() => import("./Authpage/FresherAuth/Forgetpassword"));
-const FresherResetPassword = lazy(() => import("./Authpage/FresherAuth/FresherResetPassword"));
+const Forgetpassword = lazy(
+  () => import("./Authpage/FresherAuth/Forgetpassword"),
+);
+const FresherResetPassword = lazy(
+  () => import("./Authpage/FresherAuth/FresherResetPassword"),
+);
 const MentorRoutes = lazy(() => import("./Routes/MentorRoutes"));
 const FresherRoutes = lazy(() => import("./Routes/FresherRoutes"));
 
 // ================= AUTH HELPERS =================
-// isMentorLoggedIn / isFresherLoggedIn now come from ./utils/auth
-// (they check the JWT expiry and clear expired tokens)
+// isMentorLoggedIn / isFresherLoggedIn come from ./utils/auth.
+// Auth is cookie based (mnc_token). These helpers only check the small
+// session marker in localStorage; the server verifies the real cookie.
 
 const HomeRoute = () => {
   if (isMentorLoggedIn()) return <Navigate to="/mentor/home" replace />;
@@ -46,6 +52,14 @@ function AppContent() {
     registerFetchHandlers(start, stop);
   }, [start, stop]);
 
+  // Page refresh: user already logged in-na socket thirumba connect pannu
+  useEffect(() => {
+    const loggedIn = isFresherLoggedIn() || isMentorLoggedIn();
+    if (loggedIn && !socket.connected && !socket.active) {
+      socket.connect();
+    }
+  }, []);
+
   return (
     <div className="min-h-screen bg-white font-sans text-gray-900">
       <LinearProgress isLoading={isLoading} />
@@ -58,18 +72,32 @@ function AppContent() {
 
           <Route
             path="/login"
-            element={isFresherLoggedIn() ? <Navigate to="/Home" replace /> : <Login />}
+            element={
+              isFresherLoggedIn() ? <Navigate to="/Home" replace /> : <Login />
+            }
           />
 
           <Route path="/forgot-password" element={<Forgetpassword />} />
-          <Route path="/reset-password/:token" element={<FresherResetPassword />} />
+          <Route
+            path="/reset-password/:token"
+            element={<FresherResetPassword />}
+          />
 
           <Route path="/mentor/*" element={<MentorRoutes />} />
           <Route path="/Home/*" element={<FresherRoutes />} />
 
-          <Route path="/profile" element={<Navigate to="/Home/profile" replace />} />
-          <Route path="/Mnclogos" element={<Navigate to="/Home/mnc-logos" replace />} />
-          <Route path="/employee-profile" element={<Navigate to="/mentor/register" replace />} />
+          <Route
+            path="/profile"
+            element={<Navigate to="/Home/profile" replace />}
+          />
+          <Route
+            path="/Mnclogos"
+            element={<Navigate to="/Home/mnc-logos" replace />}
+          />
+          <Route
+            path="/employee-profile"
+            element={<Navigate to="/mentor/register" replace />}
+          />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -17,7 +17,7 @@ import {
   Smile,
   X,
 } from "lucide-react";
-import socket from "../socket";
+import {socket} from "../utils/socket";
 import EmojiPicker from "./EmojiPicker";
 import {
   playSendSound,

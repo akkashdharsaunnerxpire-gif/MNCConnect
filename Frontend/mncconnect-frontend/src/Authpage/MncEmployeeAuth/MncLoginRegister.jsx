@@ -6,18 +6,17 @@ import {
   FileCheck2,
   FileText,
   LockKeyhole,
-  MapPin,
   ShieldCheck,
   UploadCloud,
   UserRound,
   X,
   LogIn,
-  UserPlus,
   Home,
   Eye,
   EyeOff,
 } from "lucide-react";
-import { useNavigate, NavLink, useLocation } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
+import { COUNTRY_CODES } from "../../data/countryCodes"; // <-- adjust path to your folder
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -42,9 +41,12 @@ const BLOCKED_STATUSES = [
 // CONSTANTS & CONFIG
 // ============================================================================
 
+const DEFAULT_COUNTRY_LABEL = "IN (+91)";
+
 const initialProfile = {
   name: "",
   email: "",
+  countryLabel: DEFAULT_COUNTRY_LABEL, // dropdown selection (label is unique, code is not)
   mobile: "",
   password: "",
   company: "",
@@ -69,6 +71,12 @@ const emptyFiles = {
   additionalProof: null,
 };
 
+// "+1" is shared by US / CA / DO / JM, so we store the unique label and look up the code.
+const getDialCode = (label) =>
+  COUNTRY_CODES.find((c) => c.label === label)?.code || "+91";
+
+const getDigits = (value) => String(value || "").replace(/\D/g, "");
+
 const INPUT_CLASS =
   "w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm text-slate-800 outline-none placeholder:text-slate-400 transition-all duration-200 focus:border-amber-500 focus:ring-4 focus:ring-amber-50 hover:border-slate-300";
 
@@ -77,12 +85,6 @@ const PRIMARY_ACTION =
 
 const SECONDARY_ACTION =
   "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 hover:shadow-md transition-all duration-300";
-
-const STEP_ITEMS = [
-  { number: 1, title: "Create profile", icon: UserRound },
-  { number: 2, title: "Submit proof", icon: FileCheck2 },
-  { number: 3, title: "Verification", icon: ShieldCheck },
-];
 
 const REQUIRED_STEP_1_FIELDS = [
   ["name", "Full name is required."],
@@ -140,6 +142,7 @@ function Toast({ message, type = "success", onClose, duration = 4000 }) {
             <p className="text-xs text-slate-600 mt-0.5 leading-5">{message}</p>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="shrink-0 rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
           >
@@ -172,7 +175,7 @@ function ToastContainer({ toasts, removeToast }) {
 // MAIN COMPONENT
 // ============================================================================
 
-export default function MncEmployeeProfile() {
+export default function MncLoginRegister() {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -231,7 +234,6 @@ export default function MncEmployeeProfile() {
         "success",
         5000,
       );
-      // Clear the state to prevent showing again on refresh
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
@@ -257,12 +259,14 @@ export default function MncEmployeeProfile() {
 
     const timer = window.setTimeout(() => setShowLoader(false), 2650);
     return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRegisterRoute, navigate, location.state]);
 
   useEffect(() => {
+    const urls = objectUrlsRef.current;
     return () => {
-      objectUrlsRef.current.forEach(URL.revokeObjectURL);
-      objectUrlsRef.current.clear();
+      urls.forEach((url) => URL.revokeObjectURL(url));
+      urls.clear();
     };
   }, []);
 
@@ -300,7 +304,9 @@ export default function MncEmployeeProfile() {
   const update = (field, value) => {
     setProfile((prev) => ({ ...prev, [field]: value }));
     setErrors((prev) => {
-      const { [field]: _, ...rest } = prev;
+      const { [field]: _removed, ...rest } = prev;
+      // confirmation error is stored under "confirmation", not the field name
+      if (field === "confirmationAccepted") delete rest.confirmation;
       return rest;
     });
   };
@@ -314,6 +320,12 @@ export default function MncEmployeeProfile() {
 
   const handleFile = (field, file) => {
     if (!file) return;
+
+    // 10MB limit (matches the text shown in the upload card)
+    if (file.size > 10 * 1024 * 1024) {
+      showToast("File is too large. Maximum size is 10MB.", "error", 4000);
+      return;
+    }
 
     const currentFile = files[field];
     if (currentFile?.__url) {
@@ -442,6 +454,7 @@ export default function MncEmployeeProfile() {
       closePreview();
     } catch (error) {
       console.error("Crop failed:", error);
+      showToast("Could not crop the image. Please try again.", "error", 4000);
     }
   };
 
@@ -458,11 +471,24 @@ export default function MncEmployeeProfile() {
       if (profile.password && profile.password.length < 8) {
         nextErrors.password = "Password must be at least 8 characters.";
       }
+
       if (
         profile.email &&
         !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profile.email.trim())
       ) {
         nextErrors.email = "Enter a valid professional email.";
+      }
+
+      // Mobile: digits only, 6-15 (E.164 max), India must be exactly 10
+      if (profile.mobile && !nextErrors.mobile) {
+        const digits = getDigits(profile.mobile);
+        const dial = getDialCode(profile.countryLabel);
+
+        if (dial === "+91" && digits.length !== 10) {
+          nextErrors.mobile = "Indian mobile number must be 10 digits.";
+        } else if (digits.length < 6 || digits.length > 15) {
+          nextErrors.mobile = "Enter a valid mobile number (6–15 digits).";
+        }
       }
     }
 
@@ -476,7 +502,7 @@ export default function MncEmployeeProfile() {
           "Employee ID / company ID proof is required.";
       }
       if (!String(profile.companyId || "").trim()) {
-        nextErrors.companyId = "Company Employee ID is required.";
+        nextErrors.companyId = "Employee ID / Associate No  is required.";
       }
     }
 
@@ -525,12 +551,39 @@ export default function MncEmployeeProfile() {
       const formData = new FormData();
 
       Object.entries(profile).forEach(([key, value]) => {
+        // dropdown label is UI-only; backend gets countryCode below
+        if (key === "countryLabel") return;
+
+        // mobile is sent as digits only; countryCode is a separate field
+        if (key === "mobile") {
+          const digits = getDigits(value);
+          if (digits) formData.append("mobile", digits);
+          return;
+        }
+
+        // file names are text copies of the uploaded files; real files appended below
+        if (
+          key === "offerLetter" ||
+          key === "employeeIdProof" ||
+          key === "additionalProof"
+        ) {
+          return;
+        }
+
         if (key === "confirmationAccepted") {
           formData.append(key, value ? "true" : "false");
         } else if (value !== undefined && value !== null && value !== "") {
-          formData.append(key, value);
+          // never trim the password (login sends it exactly as typed)
+          formData.append(
+            key,
+            typeof value === "string" && key !== "password"
+              ? value.trim()
+              : value,
+          );
         }
       });
+
+      formData.append("countryCode", getDialCode(profile.countryLabel));
 
       if (files.offerLetter) formData.append("offerLetter", files.offerLetter);
       if (files.employeeIdProof)
@@ -592,7 +645,6 @@ export default function MncEmployeeProfile() {
       window.localStorage.setItem(MENTOR_VERIFICATION_KEY, verificationStatus);
       setIsRegistered(true);
 
-      // Navigate to login with success state to show toast
       navigate("/mentor/login", {
         replace: true,
         state: {
@@ -1159,6 +1211,7 @@ function MentorLogin({ showToast }) {
     try {
       const response = await fetch(MENTOR_LOGIN_URL, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim(), password }),
       });
@@ -1169,8 +1222,6 @@ function MentorLogin({ showToast }) {
       }
 
       // Block ONLY when the server explicitly says the account is not approved.
-      // (Strict "=== approved" check removed: it broke logins when the backend
-      // sent "verified" / "active" or no status field.)
       const status = String(
         data?.verificationStatus ||
           data?.verification?.status ||
@@ -1184,9 +1235,6 @@ function MentorLogin({ showToast }) {
           data?.message || "Your account is waiting for admin verification.",
         );
       }
-
-      const token = data.token || data.accessToken;
-      if (token) window.localStorage.setItem("mnc_mentor_token", token);
 
       const mentorId =
         data?.mentor?.id || data?.mentor?._id || data?.id || data?._id;
@@ -1436,8 +1484,28 @@ function MentorForgotPassword({ showToast }) {
 function AuthMotionStyles() {
   return (
     <style>{`
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes slideInRight {
+        from { opacity: 0; transform: translateX(40px) scale(0.96); }
+        to { opacity: 1; transform: translateX(0) scale(1); }
+      }
+      @keyframes completeToast {
+        from { opacity: 0; transform: translateY(-8px) scale(.985); }
+        to { opacity: 1; transform: translateY(0) scale(1); }
+      }
+      @keyframes completeLine {
+        from { transform: scaleX(0); }
+        to { transform: scaleX(1); }
+      }
+      .animate-fadeIn { animation: fadeIn 0.32s cubic-bezier(.22,1,.36,1) forwards; }
+      .animate-slideInRight { animation: slideInRight 0.35s cubic-bezier(.22,1,.36,1) forwards; }
+      .animate-completeToast { animation: completeToast .42s cubic-bezier(.22,1,.36,1) both; }
+      .animate-completeLine { animation: completeLine 1.6s cubic-bezier(.22,1,.36,1) both; }
       @media (prefers-reduced-motion: reduce) {
-        .animate-fadeIn, .animate-slideIn, .animate-slideInRight { animation: none !important; }
+        .animate-fadeIn, .animate-slideInRight, .animate-completeToast, .animate-completeLine { animation: none !important; }
       }
     `}</style>
   );
@@ -1598,6 +1666,9 @@ function StepOne({
 }) {
   const [showPassword, setShowPassword] = useState(false);
 
+  const dialCode = getDialCode(profile.countryLabel);
+  const isIndia = dialCode === "+91";
+
   return (
     <div className="animate-fadeIn">
       <InfoBanner icon={UserRound} className="mb-7">
@@ -1634,14 +1705,36 @@ function StepOne({
           />
         </Field>
 
+        {/* ---------- MOBILE WITH COUNTRY CODE ---------- */}
         <Field label="Mobile Number" required={validationAttempted}>
-          <input
-            value={profile.mobile}
-            onChange={(e) => update("mobile", e.target.value)}
-            placeholder="+91 98765 43210"
-            className={`${INPUT_CLASS} ${errors.mobile && validationAttempted ? "border-red-300 bg-red-50/50" : ""}`}
-          />
-          <Hint>Approval notification will be sent here.</Hint>
+          <div className="flex gap-2">
+            <select
+              value={profile.countryLabel}
+              onChange={(e) => update("countryLabel", e.target.value)}
+              className={`${INPUT_CLASS} !w-[116px] shrink-0 px-2`}
+              aria-label="Country code"
+            >
+              {COUNTRY_CODES.map((c) => (
+                <option key={c.label} value={c.label}>
+                  {c.label} {c.name}
+                </option>
+              ))}
+            </select>
+
+            <input
+              type="tel"
+              inputMode="numeric"
+              autoComplete="tel-national"
+              maxLength={isIndia ? 10 : 15}
+              value={profile.mobile}
+              onChange={(e) =>
+                update("mobile", e.target.value.replace(/\D/g, ""))
+              }
+              placeholder={isIndia ? "9876543210" : "Mobile number"}
+              className={`${INPUT_CLASS} ${errors.mobile && validationAttempted ? "border-red-300 bg-red-50/50" : ""}`}
+            />
+          </div>
+          <Hint>Approval notification will be sent to {dialCode}…</Hint>
           <ErrorText
             error={errors.mobile}
             validationAttempted={validationAttempted}
@@ -1722,6 +1815,7 @@ function StepOne({
             validationAttempted={validationAttempted}
           />
         </Field>
+
         <Field label="Gender" required={validationAttempted}>
           <select
             value={profile.gender}
@@ -1748,6 +1842,7 @@ function StepOne({
           <input
             type="number"
             min="0"
+            max="60"
             value={profile.experience}
             onChange={(e) => update("experience", e.target.value)}
             placeholder="5"
@@ -1789,6 +1884,7 @@ function StepOne({
             placeholder="React, Java, DSA, Cloud..."
             className={`${INPUT_CLASS} ${errors.skills && validationAttempted ? "border-red-300 bg-red-50/50" : ""}`}
           />
+          <Hint>Separate skills with commas.</Hint>
           <ErrorText
             error={errors.skills}
             validationAttempted={validationAttempted}
@@ -1800,6 +1896,7 @@ function StepOne({
         <Field label="Professional Bio" required={validationAttempted}>
           <textarea
             value={profile.bio}
+            maxLength={2000}
             onChange={(e) => update("bio", e.target.value)}
             placeholder="Tell freshers about your career, expertise and what you can help them with..."
             className={`${INPUT_CLASS} min-h-32 resize-y ${errors?.bio && validationAttempted ? "border-red-300 bg-red-50/50" : ""}`}
@@ -1818,7 +1915,6 @@ function StepOne({
 function StepTwo({
   profile,
   update,
-  files,
   handleFile,
   openPreview,
   errors = {},
@@ -1860,13 +1956,17 @@ function StepTwo({
         />
 
         <div className="grid gap-5 sm:grid-cols-2">
-          <Field label="Company Employee ID" required={validationAttempted}>
+          <Field
+            label="Employee ID / Associate No"
+            required={validationAttempted}
+          >
             <input
               value={profile.companyId}
               onChange={(e) => update("companyId", e.target.value)}
-              placeholder="EMP-10293"
+              placeholder="e.g. 2345678"
               className={`${INPUT_CLASS} ${errors.companyId && validationAttempted ? "border-red-300 bg-red-50/50" : ""}`}
             />
+            <Hint>Permanent employee number, not the ID card number.</Hint>
             <ErrorText
               error={errors.companyId}
               validationAttempted={validationAttempted}
@@ -1902,6 +2002,10 @@ function StepThree({
   errors = {},
   validationAttempted = false,
 }) {
+  const genderLabel = profile.gender
+    ? profile.gender.charAt(0).toUpperCase() + profile.gender.slice(1)
+    : "";
+
   return (
     <div className="animate-fadeIn">
       <InfoBanner icon={FileCheck2} className="mb-7" variant="warning">
@@ -1918,7 +2022,13 @@ function StepThree({
         rows={[
           ["Full Name", profile.name],
           ["Professional Email", profile.email],
-          ["Mobile", profile.mobile],
+          [
+            "Mobile",
+            profile.mobile
+              ? `${getDialCode(profile.countryLabel)} ${getDigits(profile.mobile)}`
+              : "",
+          ],
+          ["Gender", genderLabel],
           ["Company", profile.company],
           ["Designation", profile.designation],
           ["Department", profile.department],
@@ -1998,7 +2108,7 @@ function ActionBar({ step, goBack, goNext, isSubmitting = false }) {
               type="button"
               onClick={goBack}
               disabled={isSubmitting}
-              className={`flex-1 rounded-xl border px-5 py-3.5 text-sm font-bold transition-all duration-300 disabled:opacity-50 ${SECONDARY_ACTION}`}
+              className={`group flex-1 rounded-xl border px-5 py-3.5 text-sm font-bold transition-all duration-300 disabled:opacity-50 ${SECONDARY_ACTION}`}
             >
               <ArrowLeft className="mr-2 inline h-4 w-4 transition-transform duration-300 group-hover:-translate-x-1" />
               Back
@@ -2009,7 +2119,7 @@ function ActionBar({ step, goBack, goNext, isSubmitting = false }) {
             type={isLast ? "submit" : "button"}
             onClick={handlePrimary}
             disabled={isSubmitting}
-            className={`flex flex-1 items-center justify-center gap-2 rounded-xl border px-5 py-3.5 text-sm font-bold disabled:opacity-70 transition-all duration-300 ${PRIMARY_ACTION}`}
+            className={`group flex flex-1 items-center justify-center gap-2 rounded-xl border px-5 py-3.5 text-sm font-bold disabled:opacity-70 transition-all duration-300 ${PRIMARY_ACTION}`}
           >
             {isSubmitting ? (
               <>
@@ -2391,7 +2501,9 @@ function DocumentPreview({
             <p className="truncate text-sm font-semibold text-white">
               {previewName}
             </p>
-            <p className="mt-0.5 text-[10px] text-white/40">Crop</p>
+            <p className="mt-0.5 text-[10px] text-white/40">
+              {preview?.isImage ? "Crop" : "Preview"}
+            </p>
           </div>
           <button
             type="button"

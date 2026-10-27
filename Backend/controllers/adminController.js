@@ -467,7 +467,6 @@ const exportMentors = async (req, res) => {
       "Designation",
       "Department",
       "Experience (yrs)",
-      "Hourly Rate",
       "Status",
       "Joined",
     ];
@@ -481,7 +480,6 @@ const exportMentors = async (req, res) => {
         n.designation,
         n.department,
         n.yearsOfExperience,
-        n.hourlyRate,
         n.status,
         n.createdAt ? new Date(n.createdAt).toISOString().slice(0, 10) : "",
       ]

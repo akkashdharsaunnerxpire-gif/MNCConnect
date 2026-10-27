@@ -1,112 +1,5 @@
 <%- include('partials/layout-start') %>
 
-<style>
-    /* ---------- Mentor details page ---------- */
-    .md-crumb { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 13px; margin-bottom: 16px; }
-    .md-crumb a:hover { color: var(--text); }
-    .md-hero { overflow: hidden; margin-bottom: 20px; }
-    .md-cover { height: 112px; background: linear-gradient(120deg, #312e81, #6366f1 55%, #8b5cf6); }
-    .md-cover.st-approved { background: linear-gradient(120deg, #064e3b, #10b981 60%, #34d399); }
-    .md-cover.st-rejected { background: linear-gradient(120deg, #7f1d1d, #ef4444 60%, #f87171); }
-    .md-cover.st-pending { background: linear-gradient(120deg, #78350f, #f59e0b 60%, #fbbf24); }
-    .md-hero-body { padding: 0 28px 24px; display: flex; gap: 22px; align-items: flex-end; flex-wrap: wrap; margin-top: -44px; }
-    .md-avatar { width: 104px; height: 104px; border-radius: 24px; border: 4px solid var(--surface); background: var(--surface-2); display: grid; place-items: center; font-size: 40px; font-weight: 700; color: var(--primary-h); overflow: hidden; flex-shrink: 0; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
-    .md-avatar img { width: 100%; height: 100%; object-fit: cover; }
-    .md-id { flex: 1; min-width: 240px; padding-bottom: 4px; }
-    .md-id h3 { font-size: 26px; letter-spacing: -.02em; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-    .md-id .sub { color: #cdd5ee; margin-top: 2px; }
-    .md-meta { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 10px; color: var(--muted); font-size: 13px; }
-    .md-meta i { margin-right: 6px; color: var(--primary-h); }
-
-    .md-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
-    .md-stat { padding: 18px 20px; }
-    .md-stat small { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
-    .md-stat b { display: block; font-size: 24px; margin-top: 4px; letter-spacing: -.02em; }
-
-    .md-grid { display: grid; grid-template-columns: minmax(0, 1fr) 370px; gap: 20px; align-items: start; }
-    .md-side { position: sticky; top: 96px; display: grid; gap: 20px; }
-
-    .md-tabs { display: flex; gap: 4px; padding: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 20px; width: max-content; max-width: 100%; overflow-x: auto; }
-    .md-tab { border: 0; background: none; padding: 9px 18px; border-radius: 8px; color: var(--muted); font-weight: 600; cursor: pointer; display: flex; gap: 8px; align-items: center; white-space: nowrap; }
-    .md-tab:hover { color: var(--text); }
-    .md-tab.active { background: var(--primary); color: #fff; }
-    .md-pane { display: none; gap: 20px; }
-    .md-pane.active { display: grid; }
-
-    /* automatic signals */
-    .sig { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--border); }
-    .sig:first-of-type { border-top: 0; }
-    .sig i { margin-top: 3px; width: 16px; text-align: center; }
-    .sig .ok { color: var(--ok); } .sig .bad { color: var(--bad); } .sig .warn { color: var(--warn); }
-    .sig span small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; line-height: 1.5; }
-
-    /* manual review */
-    .rv-item { display: flex; gap: 12px; align-items: flex-start; padding: 12px 12px; border: 1px solid var(--border); border-radius: 12px; cursor: pointer; transition: .15s; background: var(--surface-2); }
-    .rv-item + .rv-item { margin-top: 8px; }
-    .rv-item:hover { border-color: var(--primary); }
-    .rv-item.on { border-color: rgba(16,185,129,.55); background: rgba(16,185,129,.07); }
-    .rv-item input { margin-top: 3px; width: 17px; height: 17px; accent-color: var(--ok); flex-shrink: 0; cursor: pointer; }
-    .rv-item b { display: block; font-size: 13.5px; }
-    .rv-item small { display: block; color: var(--muted); font-size: 12px; margin-top: 3px; line-height: 1.5; }
-    .rv-req { color: var(--bad); font-weight: 700; }
-    .rv-opt { color: var(--muted); font-size: 11px; font-weight: 500; margin-left: 6px; }
-    .rv-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
-    .rv-meta { font-size: 12px; color: var(--muted); }
-    .rv-notes { width: 100%; margin-top: 12px; }
-
-    .md-contact { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); }
-    .md-contact:first-of-type { border-top: 0; }
-    .md-contact .ic { width: 34px; height: 34px; border-radius: 10px; background: var(--surface-2); display: grid; place-items: center; color: var(--primary-h); flex-shrink: 0; }
-    .md-contact div { min-width: 0; flex: 1; }
-    .md-contact small { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
-    .md-contact b { font-weight: 500; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-    .md-decision { display: grid; gap: 10px; }
-    .md-decision .btn { width: 100%; }
-    .md-decision .btn[disabled] { opacity: .45; cursor: not-allowed; filter: grayscale(.4); }
-    .md-ready { padding: 12px 14px; border-radius: 12px; font-size: 13px; display: flex; gap: 10px; align-items: flex-start; line-height: 1.5; }
-    .md-ready i { margin-top: 2px; }
-    .md-ready.yes { background: rgba(16,185,129,.1); border: 1px solid rgba(16,185,129,.3); color: #6ee7b7; }
-    .md-ready.no { background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.3); color: #fcd34d; }
-
-    .dup-alert { border: 1px solid rgba(239,68,68,.45); background: rgba(239,68,68,.08); border-radius: 14px; padding: 14px 16px; margin-bottom: 20px; }
-    .dup-alert h4 { color: #fca5a5; font-size: 14px; display: flex; gap: 8px; align-items: center; }
-    .dup-alert ul { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 13px; }
-    .dup-alert a { color: var(--primary-h); text-decoration: underline; }
-
-    .md-doc { background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; transition: .2s; }
-    .md-doc:hover { border-color: var(--primary); transform: translateY(-2px); }
-    .md-doc-thumb { height: 150px; background: var(--bg); display: grid; place-items: center; font-size: 40px; color: var(--muted); position: relative; border: 0; width: 100%; padding: 0; }
-    button.md-doc-thumb { cursor: zoom-in; }
-    .md-doc-thumb img { width: 100%; height: 100%; object-fit: cover; }
-    .md-doc-thumb .tag { position: absolute; top: 10px; right: 10px; }
-    .md-doc-body { padding: 16px; display: grid; gap: 12px; }
-    .md-doc-body h4 { font-size: 14px; }
-    .md-doc-row { display: flex; gap: 8px; }
-    .md-doc-row .btn { flex: 1; }
-    .md-doc-warn { font-size: 12px; color: #fcd34d; background: rgba(245,158,11,.08); border: 1px solid rgba(245,158,11,.25); border-radius: 10px; padding: 10px 12px; display: flex; gap: 8px; line-height: 1.5; }
-
-    .md-lightbox { position: fixed; inset: 0; background: rgba(3,6,18,.88); display: none; place-items: center; z-index: 150; padding: 30px; }
-    .md-lightbox.show { display: grid; }
-    .md-lightbox img { max-width: 100%; max-height: 88vh; border-radius: 12px; box-shadow: 0 30px 80px rgba(0,0,0,.6); }
-    .md-lb-close { position: absolute; top: 20px; right: 24px; width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--border); background: var(--surface); cursor: pointer; font-size: 16px; }
-
-    .au-row { display: flex; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); }
-    .au-row:first-child { border-top: 0; }
-    .au-dot { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; font-size: 12px; background: var(--surface-2); color: var(--primary-h); }
-    .au-dot.ok { color: var(--ok); } .au-dot.bad { color: var(--bad); } .au-dot.warn { color: var(--warn); }
-
-    @media (max-width: 1100px) {
-        .md-grid { grid-template-columns: 1fr; }
-        .md-side { position: static; order: -1; }
-        .md-stats { grid-template-columns: repeat(2, 1fr); }
-    }
-    @media (max-width: 560px) {
-        .md-stats { grid-template-columns: 1fr; }
-        .md-hero-body { padding: 0 18px 20px; }
-    }
-</style>
-
 <%
   const safeUrl = (u) => (u && /^https?:\/\//i.test(String(u))) ? String(u) : '';
   const isImg = (u) => /\.(png|jpe?g|webp|gif)(\?|$)/i.test(String(u || ''));
@@ -137,23 +30,24 @@
 
 <% if (!mentor) { %>
 
-    <div class="card empty" style="padding:80px 20px;">
+    <div class="card empty">
         <i class="fas fa-user-slash"></i>
         <h4>Mentor not found</h4>
-        <p>The mentor you're looking for doesn't exist or has been removed.</p>
-        <a href="/admin/mentors" class="btn btn-primary" style="margin-top:20px;"><i class="fas fa-arrow-left"></i> Back to mentors</a>
+        <p>This mentor doesn't exist or has been removed.</p>
+        <a href="/admin/mentors" class="btn btn-primary"><i class="fas fa-arrow-left"></i> Back to mentors</a>
     </div>
 
 <% } else {
     const linkedin = safeUrl(mentor.linkedinProfile);
-    const phone = mentor.mobile ? ((mentor.countryCode || '+91') + ' ' + mentor.mobile) : '';
+    const rawMobile = mentor.mobile ? String(mentor.mobile).trim() : '';
+    const phone = rawMobile ? (rawMobile.startsWith('+') ? rawMobile : ((mentor.countryCode || '+91') + ' ' + rawMobile)) : '';
     const telHref = phone ? String(phone).replace(/[^\d+]/g, '') : '';
 
     // ---- Documents ----
     const docList = [
-      { k: 'offerLetter', t: 'Offer Letter', s: 'Employment document', i: 'fa-file-contract' },
-      { k: 'employeeIdProof', t: 'Employee ID Proof', s: 'Employee identification', i: 'fa-id-card' },
-      { k: 'additionalProof', t: 'Additional Proof', s: 'Supporting document', i: 'fa-file-circle-check' }
+      { k: 'offerLetter', t: 'Offer letter', s: 'Employment document', i: 'fa-file-contract' },
+      { k: 'employeeIdProof', t: 'Employee ID proof', s: 'Employee identification', i: 'fa-id-card' },
+      { k: 'additionalProof', t: 'Additional proof', s: 'Supporting document', i: 'fa-file-circle-check' }
     ].map(function (d) {
       const url = safeUrl(mentor[d.k]);
       const ext = url ? (url.split('?')[0].split('.').pop() || '').toUpperCase() : '';
@@ -171,11 +65,15 @@
       { t: 'LinkedIn profile added', tone: linkedin ? 'ok' : 'warn', hint: linkedin ? '' : 'Optional but recommended' },
       { t: 'Duplicate check', tone: duplicates.length ? 'bad' : 'ok', hint: duplicates.length ? duplicates.length + ' possible duplicate account(s) found' : 'No other mentor shares these details' }
     ];
+    const sigOk = signals.filter(function (x) { return x.tone === 'ok'; }).length;
+    const sigBad = signals.some(function (x) { return x.tone === 'bad'; });
+    const sigWarn = signals.some(function (x) { return x.tone === 'warn'; });
     const toneIcon = { ok: 'fa-circle-check', bad: 'fa-circle-xmark', warn: 'fa-triangle-exclamation' };
 
     // ---- Manual review progress ----
     const reqChecks = reviewChecks.filter(function (c) { return c.required; });
     const reqDone = reqChecks.filter(function (c) { return review.checks[c.key]; }).length;
+    const reqPct = reqChecks.length ? Math.round((reqDone / reqChecks.length) * 100) : 0;
     const canApprove = review.complete && docsOk;
 
     // ---- Profile completeness ----
@@ -190,8 +88,8 @@
 <!-- Breadcrumb -->
 <div class="md-crumb">
     <a href="/admin/mentors"><i class="fas fa-user-tie"></i> Mentors</a>
-    <i class="fas fa-chevron-right" style="font-size:10px;"></i>
-    <span style="color:var(--text);"><%= mentor.name || 'Mentor' %></span>
+    <i class="fas fa-chevron-right sep"></i>
+    <span class="cur"><%= mentor.name || 'Mentor' %></span>
 </div>
 
 <!-- Hero -->
@@ -232,12 +130,12 @@
 
 <!-- Stat strip -->
 <div class="md-stats">
-    <div class="card md-stat t-primary"><small>Experience</small><b><%= mentor.yearsOfExperience != null ? mentor.yearsOfExperience : 0 %> <span style="font-size:14px;color:var(--muted);font-weight:500;">yrs</span></b></div>
-    <div class="card md-stat t-ok"><small>Hourly Rate</small><b><%= mentor.hourlyRate ? '₹' + Number(mentor.hourlyRate).toLocaleString('en-IN') : '—' %></b></div>
-    <div class="card md-stat t-warn"><small>Documents</small><b><%= docsDone %><span style="font-size:14px;color:var(--muted);font-weight:500;"> / <%= docList.length %></span></b></div>
+    <div class="card md-stat t-primary"><small>Experience</small><b><%= mentor.yearsOfExperience != null ? mentor.yearsOfExperience : 0 %> <em>yrs</em></b></div>
+    <div class="card md-stat t-ok"><small>Hourly rate</small><b><%= mentor.hourlyRate ? '₹' + Number(mentor.hourlyRate).toLocaleString('en-IN') : '—' %></b></div>
+    <div class="card md-stat t-warn"><small>Documents</small><b><%= docsDone %><em> / <%= docList.length %></em></b></div>
     <div class="card md-stat t-info">
-        <small>Profile Complete</small><b><%= completeness %>%</b>
-        <div class="progress"><i style="width: <%= completeness %>%"></i></div>
+        <small>Profile complete</small><b><%= completeness %>%</b>
+        <div class="progress"><i data-w="<%= completeness %>"></i></div>
     </div>
 </div>
 
@@ -247,27 +145,51 @@
     <div>
         <div class="md-tabs">
             <button type="button" class="md-tab active" data-tab="overview"><i class="fas fa-user"></i> Overview</button>
-            <button type="button" class="md-tab" data-tab="documents"><i class="fas fa-file-shield"></i> Documents <span class="badge <%= docsDone === docList.length ? 'b-ok' : 'b-warn' %>" style="padding:0 8px;"><%= docsDone %>/<%= docList.length %></span></button>
+            <button type="button" class="md-tab" data-tab="documents"><i class="fas fa-file-shield"></i> Documents <span class="badge <%= docsDone === docList.length ? 'b-ok' : 'b-warn' %>"><%= docsDone %>/<%= docList.length %></span></button>
             <button type="button" class="md-tab" data-tab="activity"><i class="fas fa-clock-rotate-left"></i> Activity</button>
         </div>
 
         <!-- Overview -->
         <div class="md-pane active" id="pane-overview">
 
+            <!-- Quick checks (automatic hints) -->
+            <div class="card">
+                <div class="card-head">
+                    <div class="sec-title t-info"><div class="sec-ico"><i class="fas fa-wand-magic-sparkles"></i></div>
+                        <div><h3>Quick checks</h3><p>Automatic hints only. The final decision is yours.</p></div></div>
+                    <span class="badge <%= sigBad ? 'b-bad' : (sigWarn ? 'b-warn' : 'b-ok') %>"><%= sigOk %>/<%= signals.length %> passed</span>
+                </div>
+                <div class="card-body">
+                    <div class="qc-grid">
+                        <% signals.forEach(function (s) { %>
+                            <div class="qc <%= s.tone %>">
+                                <i class="fas <%= toneIcon[s.tone] %>"></i>
+                                <div><b><%= s.t %></b><% if (s.hint) { %><small><%= s.hint %></small><% } %></div>
+                            </div>
+                        <% }) %>
+                    </div>
+                </div>
+            </div>
+
             <div class="card">
                 <div class="card-head">
                     <div class="sec-title t-primary"><div class="sec-ico"><i class="fas fa-user"></i></div>
-                        <div><h3>Personal Information</h3><p>Basic mentor details</p></div></div>
+                        <div><h3>Personal information</h3><p>Basic details and contact</p></div></div>
+                    <div class="head-actions">
+                        <% if (mentor.email) { %><a class="btn btn-ghost btn-sm" href="mailto:<%= mentor.email %>"><i class="fas fa-paper-plane"></i> Email</a><% } %>
+                        <% if (phone) { %><a class="btn btn-ghost btn-sm" href="tel:<%= telHref %>"><i class="fas fa-phone-volume"></i> Call</a><% } %>
+                        <% if (linkedin) { %><a class="btn btn-ghost btn-sm" href="<%= linkedin %>" target="_blank" rel="noopener noreferrer"><i class="fab fa-linkedin"></i> LinkedIn</a><% } %>
+                    </div>
                 </div>
                 <div class="card-body">
                     <div class="info-grid">
-                        <div class="info"><div class="k">Full Name</div><div class="v"><%= mentor.name || 'Not provided' %></div></div>
-                        <div class="info"><div class="k">Email</div><div class="v"><%= mentor.email || 'Not provided' %></div></div>
-                        <div class="info"><div class="k">Mobile</div><div class="v"><%= phone || 'Not provided' %></div></div>
-                        <div class="info"><div class="k">Work Email</div><div class="v"><%= mentor.workEmail || 'Not provided' %></div></div>
-                        <div class="info"><div class="k">Employee ID</div><div class="v"><%= mentor.employeeId || 'Not provided' %></div></div>
+                        <div class="info"><div class="k">Full name</div><div class="v"><%= mentor.name || 'Not provided' %></div></div>
+                        <div class="info"><div class="k">Email</div><div class="v has-copy"><span><%= mentor.email || 'Not provided' %></span><% if (mentor.email) { %><button type="button" class="copy-btn" data-copy="<%= mentor.email %>" title="Copy"><i class="fas fa-copy"></i></button><% } %></div></div>
+                        <div class="info"><div class="k">Mobile</div><div class="v has-copy"><span><%= phone || 'Not provided' %></span><% if (phone) { %><button type="button" class="copy-btn" data-copy="<%= phone %>" title="Copy"><i class="fas fa-copy"></i></button><% } %></div></div>
+                        <div class="info"><div class="k">Work email</div><div class="v has-copy"><span><%= mentor.workEmail || 'Not provided' %></span><% if (mentor.workEmail) { %><button type="button" class="copy-btn" data-copy="<%= mentor.workEmail %>" title="Copy"><i class="fas fa-copy"></i></button><% } %></div></div>
+                        <div class="info"><div class="k">Employee ID</div><div class="v has-copy"><span><%= mentor.employeeId || 'Not provided' %></span><% if (mentor.employeeId) { %><button type="button" class="copy-btn" data-copy="<%= mentor.employeeId %>" title="Copy"><i class="fas fa-copy"></i></button><% } %></div></div>
                         <div class="info"><div class="k">LinkedIn</div>
-                            <div class="v"><% if (linkedin) { %><a href="<%= linkedin %>" target="_blank" rel="noopener noreferrer" style="color:var(--primary-h);"><i class="fab fa-linkedin"></i> View Profile</a><% } else { %>Not provided<% } %></div></div>
+                            <div class="v"><% if (linkedin) { %><a href="<%= linkedin %>" target="_blank" rel="noopener noreferrer" class="link"><i class="fab fa-linkedin"></i> View profile</a><% } else { %>Not provided<% } %></div></div>
                     </div>
                 </div>
             </div>
@@ -275,7 +197,7 @@
             <div class="card">
                 <div class="card-head">
                     <div class="sec-title t-info"><div class="sec-ico"><i class="fas fa-briefcase"></i></div>
-                        <div><h3>Professional Information</h3><p>Current employment details</p></div></div>
+                        <div><h3>Professional information</h3><p>Current employment details</p></div></div>
                 </div>
                 <div class="card-body">
                     <div class="info-grid">
@@ -283,12 +205,12 @@
                         <div class="info"><div class="k">Designation</div><div class="v"><%= mentor.designation || 'Not provided' %></div></div>
                         <div class="info"><div class="k">Department</div><div class="v"><%= mentor.department || 'Not provided' %></div></div>
                         <div class="info"><div class="k">Experience</div><div class="v"><%= mentor.yearsOfExperience != null ? mentor.yearsOfExperience : 0 %> years</div></div>
-                        <div class="info"><div class="k">Office Location</div><div class="v"><%= mentor.officeLocation || 'Not provided' %></div></div>
-                        <div class="info"><div class="k">Hourly Rate</div><div class="v"><%= mentor.hourlyRate ? '₹' + mentor.hourlyRate : 'Not specified' %></div></div>
+                        <div class="info"><div class="k">Office location</div><div class="v"><%= mentor.officeLocation || 'Not provided' %></div></div>
+                        <div class="info"><div class="k">Hourly rate</div><div class="v"><%= mentor.hourlyRate ? '₹' + mentor.hourlyRate : 'Not specified' %></div></div>
                     </div>
 
                     <% if (mentor.languages && mentor.languages.length) { %>
-                        <div style="margin-top:18px;">
+                        <div class="langs">
                             <div class="label">Languages</div>
                             <div class="chips"><% mentor.languages.forEach(function (l) { %><span class="chip"><%= l %></span><% }) %></div>
                         </div>
@@ -298,8 +220,8 @@
 
             <% if (mentor.bio) { %>
             <div class="card">
-                <div class="card-head"><div class="sec-title t-purple"><div class="sec-ico"><i class="fas fa-align-left"></i></div><div><h3>About Mentor</h3></div></div></div>
-                <div class="card-body"><p style="white-space:pre-line;line-height:1.75;color:#cdd5ee;"><%= mentor.bio %></p></div>
+                <div class="card-head"><div class="sec-title t-purple"><div class="sec-ico"><i class="fas fa-align-left"></i></div><div><h3>About the mentor</h3></div></div></div>
+                <div class="card-body"><p class="prose"><%= mentor.bio %></p></div>
             </div>
             <% } %>
         </div>
@@ -309,18 +231,19 @@
             <div class="card">
                 <div class="card-head">
                     <div class="sec-title t-warn"><div class="sec-ico"><i class="fas fa-file-shield"></i></div>
-                        <div><h3>Verification Documents</h3><p>Inspect each file carefully. Uploaded does not mean genuine.</p></div></div>
+                        <div><h3>Verification documents</h3><p>Inspect each file carefully. Uploaded does not mean genuine.</p></div></div>
                 </div>
-                <div class="card-body" style="display:grid;gap:16px;">
-                    <div class="md-doc-warn"><i class="fas fa-magnifying-glass"></i><span>Look for mismatched fonts, pasted or blurry text, wrong letterhead or signatory, and name / company / date that disagree with the profile. Documents can be edited in minutes, so use the checklist on the right.</span></div>
+                <div class="card-body docs-body">
+                    <div class="md-doc-warn"><i class="fas fa-magnifying-glass"></i><span>Look for mismatched fonts, pasted or blurry text, wrong letterhead or signatory, and name, company or date that disagree with the profile. Documents can be edited in minutes, so use the checklist on the right.</span></div>
                     <div class="docs">
                         <% docList.forEach(function (d) { %>
                             <div class="md-doc">
                                 <% if (d.url && d.img) { %>
-                                    <button type="button" class="md-doc-thumb" data-preview="<%= d.url %>" title="Preview">
-                                        <img src="<%= d.url %>" alt="<%= d.t %>" loading="lazy">
+                                    <a class="md-doc-thumb" href="<%= d.url %>" target="_blank" rel="noopener noreferrer" title="Open in new tab">
+                                        <img src="<%= d.url %>" alt="<%= d.t %>" loading="lazy" referrerpolicy="no-referrer">
                                         <span class="badge b-info tag"><i class="dot"></i>Uploaded</span>
-                                    </button>
+                                        <span class="hint"><i class="fas fa-up-right-from-square"></i> Open full image</span>
+                                    </a>
                                 <% } else { %>
                                     <div class="md-doc-thumb">
                                         <i class="fas <%= d.i %>"></i>
@@ -335,8 +258,7 @@
                                     </div>
                                     <% if (d.url) { %>
                                         <div class="md-doc-row">
-                                            <% if (d.img) { %><button type="button" class="btn btn-ghost btn-sm" data-preview="<%= d.url %>"><i class="fas fa-expand"></i> Preview</button><% } %>
-                                            <a href="<%= d.url %>" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm"><i class="fas fa-up-right-from-square"></i> Open</a>
+                                            <a href="<%= d.url %>" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm"><i class="fas fa-up-right-from-square"></i> Open in new tab</a>
                                         </div>
                                     <% } else { %>
                                         <span class="muted small">Mentor has not uploaded this document.</span>
@@ -352,7 +274,7 @@
         <!-- Activity -->
         <div class="md-pane" id="pane-activity">
             <div class="card">
-                <div class="card-head"><div><h3>Admin Activity</h3><p>Every review and decision on this mentor</p></div></div>
+                <div class="card-head"><div><h3>Admin activity</h3><p>Every review and decision on this mentor</p></div></div>
                 <div class="card-body">
                     <% if (auditRows.length) { %>
                         <% auditRows.forEach(function (a) {
@@ -364,26 +286,26 @@
                                     <b><%= a.adminName || a.adminEmail %></b>
                                     <span class="muted"> &middot; <%= auditText[a.action] || a.action %></span>
                                     <div class="muted small"><%= dt(a.createdAt) %> &middot; <%= a.adminEmail %></div>
-                                    <% if (a.reason) { %><div class="small" style="color:#fca5a5;margin-top:4px;">Reason: <%= a.reason %></div><% } %>
+                                    <% if (a.reason) { %><div class="small text-bad">Reason: <%= a.reason %></div><% } %>
                                 </div>
                             </div>
                         <% }) %>
                     <% } else { %>
-                        <div class="empty" style="padding:24px 0;"><i class="fas fa-clock-rotate-left"></i><h4>No admin activity yet</h4></div>
+                        <div class="empty"><i class="fas fa-clock-rotate-left"></i><h4>No admin activity yet</h4></div>
                     <% } %>
                 </div>
             </div>
 
             <div class="card">
-                <div class="card-head"><div><h3>Account Timeline</h3></div></div>
+                <div class="card-head"><div><h3>Account timeline</h3></div></div>
                 <div class="card-body timeline">
                     <div class="tl"><i class="fas fa-user-plus"></i><div><b>Registered</b><div class="muted small"><%= dt(mentor.createdAt) %> · <%= ago(mentor.createdAt) %></div></div></div>
                     <div class="tl"><i class="fas fa-pen"></i><div><b>Profile last updated</b><div class="muted small"><%= dt(mentor.updatedAt) %> · <%= ago(mentor.updatedAt) %></div></div></div>
                     <div class="tl"><i class="fas fa-right-to-bracket"></i><div><b>Last login</b><div class="muted small"><%= mentor.lastLoginAt ? dt(mentor.lastLoginAt) : 'Never logged in' %></div></div></div>
                     <div class="tl"><i class="fas fa-shield-halved"></i><div>
-                        <b>Current verification: <span style="text-transform:capitalize;"><%= mentor.status %></span></b>
-                        <div class="muted small">Method: <span style="text-transform:capitalize;"><%= mentor.verificationMethod || 'pending' %></span> · Account: <span style="text-transform:capitalize;"><%= mentor.accountStatus || 'pending' %></span></div>
-                        <% if (mentor.rejectionReason) { %><div class="small" style="color:#fca5a5;margin-top:4px;">Reason: <%= mentor.rejectionReason %></div><% } %>
+                        <b>Current verification: <span class="cap"><%= mentor.status %></span></b>
+                        <div class="muted small">Method: <span class="cap"><%= mentor.verificationMethod || 'pending' %></span> · Account: <span class="cap"><%= mentor.accountStatus || 'pending' %></span></div>
+                        <% if (mentor.rejectionReason) { %><div class="small text-bad">Reason: <%= mentor.rejectionReason %></div><% } %>
                     </div></div>
                 </div>
             </div>
@@ -395,47 +317,43 @@
 
         <!-- Decision panel -->
         <div class="card">
-            <div class="card-head"><h3>Verification Decision</h3><%- include('partials/status-badge', { st: mentor.status }) %></div>
+            <div class="card-head"><h3>Verification decision</h3><%- include('partials/status-badge', { st: mentor.status }) %></div>
             <div class="card-body md-decision">
 
                 <% if (mentor.status !== 'approved') { %>
                     <div class="md-ready <%= canApprove ? 'yes' : 'no' %>" id="readyBox">
                         <i class="fas <%= canApprove ? 'fa-circle-check' : 'fa-lock' %>"></i>
-                        <span id="readyText">
-                            <% if (!docsOk) { %>Required documents are missing. Approval is locked.
-                            <% } else if (!review.complete) { %>Approval is locked until you finish and save the manual checklist (<%= reqDone %>/<%= reqChecks.length %> done).
-                            <% } else { %>Manual checklist complete. You can approve this mentor.<% } %>
-                        </span>
+                        <span id="readyText"><% if (!docsOk) { %>Required documents are missing. Approval is locked.<% } else if (!review.complete) { %>Approval is locked until you finish and save the manual checklist (<%= reqDone %>/<%= reqChecks.length %> done).<% } else { %>Manual checklist complete. You can approve this mentor.<% } %></span>
                     </div>
                 <% } %>
 
                 <% if (mentor.status === 'pending') { %>
-                    <button class="btn btn-ok" id="approveBtn" data-action="approve" data-id="<%= mentor._id %>" data-name="<%= mentor.name %>" <%= canApprove ? '' : 'disabled' %>><i class="fas fa-check"></i> Approve Mentor</button>
-                    <button class="btn btn-bad" data-action="reject" data-id="<%= mentor._id %>" data-name="<%= mentor.name %>"><i class="fas fa-xmark"></i> Reject Mentor</button>
+                    <button class="btn btn-ok" id="approveBtn" data-action="approve" data-id="<%= mentor._id %>" data-name="<%= mentor.name %>" <%= canApprove ? '' : 'disabled' %>><i class="fas fa-check"></i> Approve mentor</button>
+                    <button class="btn btn-bad" data-action="reject" data-id="<%= mentor._id %>" data-name="<%= mentor.name %>"><i class="fas fa-xmark"></i> Reject mentor</button>
                 <% } else if (mentor.status === 'approved') { %>
                     <div class="md-ready yes"><i class="fas fa-circle-check"></i> This mentor is approved and active.</div>
-                    <button class="btn btn-ghost" data-action="pending" data-id="<%= mentor._id %>" data-name="<%= mentor.name %>"><i class="fas fa-rotate-left"></i> Move back to Pending</button>
-                    <button class="btn btn-bad" data-action="reject" data-id="<%= mentor._id %>" data-name="<%= mentor.name %>"><i class="fas fa-ban"></i> Revoke &amp; Reject</button>
+                    <button class="btn btn-ghost" data-action="pending" data-id="<%= mentor._id %>" data-name="<%= mentor.name %>"><i class="fas fa-rotate-left"></i> Move back to pending</button>
+                    <button class="btn btn-bad" data-action="reject" data-id="<%= mentor._id %>" data-name="<%= mentor.name %>"><i class="fas fa-ban"></i> Revoke &amp; reject</button>
                 <% } else { %>
                     <div class="md-ready no"><i class="fas fa-circle-xmark"></i> This mentor was rejected.</div>
                     <% if (mentor.rejectionReason) { %>
-                        <div class="reject-box"><div class="small" style="color:#f87171;font-weight:600;">Rejection reason</div><div style="margin-top:4px;color:#cdd5ee;"><%= mentor.rejectionReason %></div></div>
+                        <div class="reject-box"><div class="small text-bad"><b>Rejection reason</b></div><div class="prose"><%= mentor.rejectionReason %></div></div>
                     <% } %>
-                    <button class="btn btn-ok" id="approveBtn" data-action="approve" data-id="<%= mentor._id %>" data-name="<%= mentor.name %>" <%= canApprove ? '' : 'disabled' %>><i class="fas fa-check"></i> Approve Now</button>
-                    <button class="btn btn-ghost" data-action="pending" data-id="<%= mentor._id %>" data-name="<%= mentor.name %>"><i class="fas fa-rotate-left"></i> Move back to Pending</button>
+                    <button class="btn btn-ok" id="approveBtn" data-action="approve" data-id="<%= mentor._id %>" data-name="<%= mentor.name %>" <%= canApprove ? '' : 'disabled' %>><i class="fas fa-check"></i> Approve now</button>
+                    <button class="btn btn-ghost" data-action="pending" data-id="<%= mentor._id %>" data-name="<%= mentor.name %>"><i class="fas fa-rotate-left"></i> Move back to pending</button>
                 <% } %>
 
-                <a href="/admin/mentors" class="btn btn-ghost"><i class="fas fa-arrow-left"></i> Back to Mentors</a>
+                <a href="/admin/mentors" class="btn btn-ghost"><i class="fas fa-arrow-left"></i> Back to mentors</a>
             </div>
         </div>
 
         <!-- Manual verification (the real gate) -->
         <div class="card">
             <div class="card-head">
-                <div><h3>Manual Verification</h3><p id="rvCount"><%= reqDone %> of <%= reqChecks.length %> required checks done</p></div>
+                <div><h3>Manual verification</h3><p id="rvCount"><%= reqDone %> of <%= reqChecks.length %> required checks done</p></div>
             </div>
-            <div class="card-body" style="padding-top:12px;">
-                <div class="progress" style="margin:0 0 12px;"><i id="rvBar" style="width: <%= Math.round((reqDone / reqChecks.length) * 100) %>%; background: <%= review.complete ? 'var(--ok)' : 'var(--warn)' %>;"></i></div>
+            <div class="card-body rv-body">
+                <div class="progress flush"><i id="rvBar" data-w="<%= reqPct %>" data-ok="<%= review.complete ? '1' : '0' %>"></i></div>
 
                 <form id="reviewForm" data-url="/admin/mentors/<%= mentor._id %>/review" data-docs-ok="<%= docsOk ? '1' : '0' %>">
                     <% reviewChecks.forEach(function (c) { %>
@@ -451,196 +369,16 @@
                     <textarea class="textarea rv-notes" name="notes" rows="3" maxlength="1000" placeholder="Private admin notes (what you checked, who you spoke to...)"><%= review.notes %></textarea>
 
                     <div class="rv-foot">
-                        <span class="rv-meta" id="rvMeta">
-                            <% if (review.reviewedAt) { %>Last saved by <b><%= review.reviewedBy && review.reviewedBy.name %></b><br><%= dt(review.reviewedAt) %><% } else { %>Not saved yet<% } %>
-                        </span>
+                        <span class="rv-meta" id="rvMeta"><% if (review.reviewedAt) { %>Last saved by <b><%= review.reviewedBy && review.reviewedBy.name %></b><br><%= dt(review.reviewedAt) %><% } else { %>Not saved yet<% } %></span>
                         <button type="submit" class="btn btn-primary btn-sm" id="rvSave"><i class="fas fa-floppy-disk"></i> Save review</button>
                     </div>
                 </form>
             </div>
         </div>
-
-        <!-- Automatic signals -->
-        <div class="card">
-            <div class="card-head">
-                <div><h3>Automatic Signals</h3><p>Hints only. These do not prove anything.</p></div>
-            </div>
-            <div class="card-body" style="padding-top:12px;">
-                <% signals.forEach(function (s) { %>
-                    <div class="sig">
-                        <i class="fas <%= toneIcon[s.tone] %> <%= s.tone %>"></i>
-                        <span><%= s.t %><% if (s.hint) { %><small><%= s.hint %></small><% } %></span>
-                    </div>
-                <% }) %>
-            </div>
-        </div>
-
-        <!-- Contact -->
-        <div class="card">
-            <div class="card-head"><h3>Contact</h3></div>
-            <div class="card-body" style="padding-top:12px;">
-                <div class="md-contact">
-                    <span class="ic"><i class="fas fa-envelope"></i></span>
-                    <div><small>Email</small><b><%= mentor.email || '—' %></b></div>
-                    <% if (mentor.email) { %>
-                        <button class="btn btn-ghost btn-sm btn-icon" data-copy="<%= mentor.email %>" title="Copy"><i class="fas fa-copy"></i></button>
-                        <a class="btn btn-ghost btn-sm btn-icon" href="mailto:<%= mentor.email %>" title="Send email"><i class="fas fa-paper-plane"></i></a>
-                    <% } %>
-                </div>
-                <div class="md-contact">
-                    <span class="ic"><i class="fas fa-briefcase"></i></span>
-                    <div><small>Work email</small><b><%= mentor.workEmail || '—' %></b></div>
-                    <% if (mentor.workEmail) { %>
-                        <button class="btn btn-ghost btn-sm btn-icon" data-copy="<%= mentor.workEmail %>" title="Copy"><i class="fas fa-copy"></i></button>
-                    <% } %>
-                </div>
-                <div class="md-contact">
-                    <span class="ic"><i class="fas fa-phone"></i></span>
-                    <div><small>Mobile</small><b><%= phone || '—' %></b></div>
-                    <% if (phone) { %>
-                        <button class="btn btn-ghost btn-sm btn-icon" data-copy="<%= phone %>" title="Copy"><i class="fas fa-copy"></i></button>
-                        <a class="btn btn-ghost btn-sm btn-icon" href="tel:<%= telHref %>" title="Call"><i class="fas fa-phone-volume"></i></a>
-                    <% } %>
-                </div>
-                <% if (linkedin) { %>
-                <div class="md-contact">
-                    <span class="ic"><i class="fab fa-linkedin"></i></span>
-                    <div><small>LinkedIn</small><b>Profile</b></div>
-                    <a class="btn btn-ghost btn-sm btn-icon" href="<%= linkedin %>" target="_blank" rel="noopener noreferrer" title="Open"><i class="fas fa-up-right-from-square"></i></a>
-                </div>
-                <% } %>
-            </div>
-        </div>
     </aside>
 </div>
 
-<!-- Image lightbox -->
-<div class="md-lightbox" id="lightbox">
-    <button type="button" class="md-lb-close" aria-label="Close"><i class="fas fa-xmark"></i></button>
-    <img id="lightboxImg" alt="Document preview">
-</div>
-
-<script>
-(function () {
-    /* ---------- Tabs ---------- */
-    var tabs = document.querySelectorAll('.md-tab');
-    var panes = document.querySelectorAll('.md-pane');
-    var names = ['overview', 'documents', 'activity'];
-
-    function show(name) {
-        tabs.forEach(function (t) { t.classList.toggle('active', t.dataset.tab === name); });
-        panes.forEach(function (p) { p.classList.toggle('active', p.id === 'pane-' + name); });
-        if (history.replaceState) history.replaceState(null, '', '#' + name);
-    }
-    tabs.forEach(function (t) { t.addEventListener('click', function () { show(t.dataset.tab); }); });
-    var hash = location.hash.replace('#', '');
-    if (names.indexOf(hash) > -1) show(hash);
-
-    /* ---------- Lightbox ---------- */
-    var lb = document.getElementById('lightbox');
-    var lbImg = document.getElementById('lightboxImg');
-    document.querySelectorAll('[data-preview]').forEach(function (b) {
-        b.addEventListener('click', function () { lbImg.src = b.dataset.preview; lb.classList.add('show'); });
-    });
-    function closeLb() { lb.classList.remove('show'); lbImg.removeAttribute('src'); }
-    lb.addEventListener('click', function (e) {
-        if (e.target === lb || e.target.closest('.md-lb-close')) closeLb();
-    });
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeLb(); });
-
-    /* ---------- Manual review form ---------- */
-    var form = document.getElementById('reviewForm');
-    if (!form) return;
-
-    var boxes = form.querySelectorAll('input[type="checkbox"]');
-    var saveBtn = document.getElementById('rvSave');
-    var bar = document.getElementById('rvBar');
-    var count = document.getElementById('rvCount');
-    var meta = document.getElementById('rvMeta');
-    var approveBtn = document.getElementById('approveBtn');
-    var readyBox = document.getElementById('readyBox');
-    var readyText = document.getElementById('readyText');
-    var docsOk = form.dataset.docsOk === '1';
-    var dirty = false;
-
-    function required() { return Array.prototype.filter.call(boxes, function (b) { return b.dataset.required === '1'; }); }
-
-    function refresh() {
-        var req = required();
-        var done = req.filter(function (b) { return b.checked; }).length;
-        var pct = req.length ? Math.round(done / req.length * 100) : 0;
-        bar.style.width = pct + '%';
-        bar.style.background = done === req.length ? 'var(--ok)' : 'var(--warn)';
-        count.textContent = done + ' of ' + req.length + ' required checks done';
-        boxes.forEach(function (b) { b.closest('.rv-item').classList.toggle('on', b.checked); });
-        return done === req.length;
-    }
-
-    function setApprove(enabled, text) {
-        if (approveBtn) approveBtn.disabled = !enabled;
-        if (readyBox) {
-            readyBox.className = 'md-ready ' + (enabled ? 'yes' : 'no');
-            readyBox.querySelector('i').className = 'fas ' + (enabled ? 'fa-circle-check' : 'fa-lock');
-            readyText.textContent = text;
-        }
-    }
-
-    function toast(type, msg) {
-        if (window.adminToast) return window.adminToast(type, msg);
-        if (window.toast) return window.toast(type, msg);
-        alert(msg);
-    }
-
-    boxes.forEach(function (b) {
-        b.addEventListener('change', function () {
-            dirty = true;
-            refresh();
-            // any change invalidates approval until it is saved again
-            setApprove(false, 'You changed the checklist. Save the review to unlock approval.');
-        });
-    });
-    form.querySelector('textarea').addEventListener('input', function () { dirty = true; });
-
-    window.addEventListener('beforeunload', function (e) {
-        if (dirty) { e.preventDefault(); e.returnValue = ''; }
-    });
-
-    form.addEventListener('submit', function (e) {
-        e.preventDefault();
-        var checks = {};
-        boxes.forEach(function (b) { checks[b.name] = b.checked; });
-
-        saveBtn.disabled = true;
-        saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving';
-
-        fetch(form.dataset.url, {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ checks: checks, notes: form.querySelector('textarea').value })
-        })
-        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
-        .then(function (res) {
-            if (!res.ok || !res.d.success) throw new Error(res.d.message || 'Could not save.');
-            dirty = false;
-            meta.innerHTML = 'Last saved by <b>' + (res.d.reviewedBy || 'you') + '</b><br>' + new Date(res.d.reviewedAt).toLocaleString('en-GB');
-            var unlocked = res.d.complete && docsOk;
-            setApprove(unlocked, unlocked
-                ? 'Manual checklist complete. You can approve this mentor.'
-                : (!docsOk ? 'Required documents are missing. Approval is locked.'
-                           : 'Approval is locked until all required checks are done and saved.'));
-            toast(res.d.complete ? 'success' : 'info', res.d.message);
-        })
-        .catch(function (err) { toast('error', err.message || 'Could not save.'); })
-        .finally(function () {
-            saveBtn.disabled = false;
-            saveBtn.innerHTML = '<i class="fas fa-floppy-disk"></i> Save review';
-        });
-    });
-
-    refresh();
-})();
-</script>
+<script src="/admin/js/mentor-details.js"></script>
 
 <% } %>
 

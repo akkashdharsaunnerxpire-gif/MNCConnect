@@ -12,7 +12,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import socket from "../../socket";
+import {socket} from "../../utils/socket";
 import useMentorSessions from "../../hooks/useMentorSessions";
 import {
   assignPaymentToMentor,

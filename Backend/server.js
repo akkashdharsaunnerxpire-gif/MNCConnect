@@ -5,9 +5,28 @@ const http = require("http");
 const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
 
+// tiny cookie parser: works with any version, no "cookie" package needed
+const parseCookies = (header = "") =>
+  String(header)
+    .split(";")
+    .reduce((acc, part) => {
+      const index = part.indexOf("=");
+      if (index < 0) return acc;
+
+      const key = part.slice(0, index).trim();
+      const value = part.slice(index + 1).trim();
+      if (!key) return acc;
+
+      try {
+        acc[key] = decodeURIComponent(value);
+      } catch {
+        acc[key] = value;
+      }
+      return acc;
+    }, {});
+
 const { registerChat } = require("./models/ChatMessage");
 
-// After creating your Socket.IO instance:
 // ---- never let one bad handler kill the whole server ----
 process.on("uncaughtException", (err) => {
   console.error("Uncaught exception:", err);
@@ -52,9 +71,47 @@ const io = new Server(server, {
   transports: ["websocket", "polling"],
 });
 
+// ================= COOKIE-BASED SOCKET AUTH =================
+// IMPORTANT: this must be registered BEFORE registerChat / initMeetings,
+// so every socket is authenticated before any other handler runs.
+// The browser sends the HttpOnly cookie "mnc_token" automatically
+// (client needs withCredentials: true). Identity comes from the token,
+// so a client can NEVER spoof it.
+
+io.use((socket, next) => {
+  try {
+    const cookies = parseCookies(socket.handshake.headers.cookie || "");
+    const token = cookies.mnc_token;
+
+    if (!token) {
+      return next(new Error("Authentication required"));
+    }
+
+    if (!process.env.JWT_SECRET) {
+      console.error("JWT_SECRET is missing");
+      return next(new Error("Authentication configuration error"));
+    }
+
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+
+    if (!payload?.id || !["mentor", "fresher"].includes(payload.role)) {
+      return next(new Error("Invalid token payload"));
+    }
+
+    socket.data.user = {
+      id: String(payload.id),
+      role: String(payload.role),
+    };
+
+    return next();
+  } catch (err) {
+    console.error("Socket auth failed:", err.message);
+    return next(new Error("Invalid or expired session"));
+  }
+});
+
 // ================= ONLINE USERS =================
 // Map<userId(string), Set<socketId>>
-registerChat(io);
 
 const onlineEmployees = new Map(); // freshers
 const onlineMentors = new Map(); // mentors
@@ -62,6 +119,8 @@ const onlineMentors = new Map(); // mentors
 app.set("io", io);
 app.set("onlineEmployees", onlineEmployees);
 app.set("onlineMentors", onlineMentors);
+
+registerChat(io);
 
 // Initialize meetings (meeting rooms listen for their own events)
 initMeetings(io);
@@ -122,30 +181,6 @@ const markOnline = (socket, role, rawId) => {
   );
   return id;
 };
-
-// ================= JWT HANDSHAKE AUTH =================
-// The client passes the token via socket.handshake.auth.token.
-// The server derives identity from the token - a client can NEVER spoof it.
-
-io.use((socket, next) => {
-  const token = socket.handshake.auth?.token;
-  if (!token) return next(new Error("Authentication required"));
-
-  try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
-    if (!payload?.id || !payload?.role) {
-      return next(new Error("Invalid token payload"));
-    }
-    socket.data.user = {
-      id: String(payload.id),
-      role: String(payload.role),
-    };
-    return next();
-  } catch (err) {
-    console.error("Socket auth failed:", err.message);
-    return next(new Error("Invalid or expired token"));
-  }
-});
 
 // ================= SOCKET CONNECTION =================
 

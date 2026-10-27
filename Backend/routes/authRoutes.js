@@ -12,6 +12,7 @@ const {
   sendFresherOtp,
   applyReferral,
   markWelcomeBonusSeen,
+  logout, // NEW
 } = require("../controllers/authController");
 
 const {
@@ -38,6 +39,7 @@ router.post("/fresher/verify-otp", verifyFresherOtp);
 router.post("/fresher/login", loginFresher);
 router.post("/fresher/forgot-password", forgotPasswordFresher);
 router.post("/fresher/reset-password/:token", resetPasswordFresher);
+router.post("/logout", logout);
 
 // ---------- mentor ----------
 router.post(

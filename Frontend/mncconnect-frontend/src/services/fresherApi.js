@@ -1,7 +1,9 @@
 // src/services/fresherApi.js
-import { clearFresherSession } from "../utils/auth";
+import { clearSession, getStoredUser } from "../utils/auth";
 
-export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+// must include /api (backend mounts routes at /api/...)
+export const API_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 export const ENDPOINTS = {
   createOrder: "/payments/create-order",
@@ -30,36 +32,29 @@ export const priceFor = (minutes) => (minutes / 30) * PRICE_PER_30_MIN;
 
 export const DURATIONS = [30, 60, 90, 120, 150, 180, 210, 240];
 export const durationLabel = (m) =>
-  m < 60 ? `${m} min` : m % 60 === 0 ? `${m / 60} hr` : `${Math.floor(m / 60)} hr 30 min`;
+  m < 60
+    ? `${m} min`
+    : m % 60 === 0
+      ? `${m / 60} hr`
+      : `${Math.floor(m / 60)} hr 30 min`;
 
-export const getToken = () => localStorage.getItem("fresher_token") || "";
+// Auth is cookie based now (HttpOnly mnc_token). JS cannot read it.
+// Kept only so old imports do not break; always empty.
+export const getToken = () => "";
 
-export const getUser = () => {
-  for (const key of ["user", "currentUser", "userData", "authUser"]) {
-    try {
-      const parsed = JSON.parse(localStorage.getItem(key) || "null");
-      if (parsed) return parsed.user || parsed;
-    } catch {
-      /* next */
-    }
-  }
-  return {};
-};
+// Logged-in user comes from the session marker saved by saveSession()
+export const getUser = () => getStoredUser() || {};
 
 export const getUserId = () => {
-  try {
-    const part = getToken().split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    return JSON.parse(atob(part)).id || "";
-  } catch {
-    return getUser()._id || getUser().id || "";
-  }
+  const u = getUser();
+  return String(u.id || u._id || "");
 };
 
 // only one redirect at a time (many requests can fail together)
 let redirectingToLogin = false;
 
 const sessionExpired = () => {
-  clearFresherSession(); // clear FIRST, so /login does not bounce back to /Home
+  clearSession(); // clear FIRST, so /login does not bounce back to /Home
   if (!redirectingToLogin && window.location.pathname !== "/login") {
     redirectingToLogin = true;
     window.location.replace("/login");
@@ -67,22 +62,23 @@ const sessionExpired = () => {
 };
 
 export async function api(path, { method = "GET", body, token } = {}) {
-  const usingOwnToken = token === undefined; // true = the stored fresher token
-  const t = token ?? getToken();
+  const isForm = typeof FormData !== "undefined" && body instanceof FormData;
 
   const res = await fetch(`${API_URL}${path}`, {
     method,
+    credentials: "include", // sends the HttpOnly mnc_token cookie
     headers: {
-      "Content-Type": "application/json",
-      ...(t ? { Authorization: `Bearer ${t}` } : {}),
+      ...(body && !isForm ? { "Content-Type": "application/json" } : {}),
+      // optional explicit token (only if a caller passes one)
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: body ? JSON.stringify(body) : undefined,
+    body: body ? (isForm ? body : JSON.stringify(body)) : undefined,
   });
 
   const data = await res.json().catch(() => ({}));
 
-  // token rejected by the server -> clear it and go to login (breaks the redirect loop)
-  if (res.status === 401 && usingOwnToken && t) {
+  // cookie missing / expired -> clear UI session and go to login
+  if (res.status === 401 && token === undefined) {
     sessionExpired();
     const err = new Error("Session expired. Please login again.");
     err.status = 401;
@@ -112,7 +108,11 @@ export const timeAgo = (value) => {
   const d = Math.floor(h / 24);
   return d < 7
     ? `${d} day${d > 1 ? "s" : ""} ago`
-    : new Date(t).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+    : new Date(t).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
 };
 
 const MONTHS = [
@@ -133,7 +133,8 @@ export const toApiTime = (hhmm) => {
 };
 
 // India time, same as the server
-export const startFrom = (isoDate, hhmm) => new Date(`${isoDate}T${hhmm}:00+05:30`);
+export const startFrom = (isoDate, hhmm) =>
+  new Date(`${isoDate}T${hhmm}:00+05:30`);
 
 export const fmtClock = (ms) => {
   const s = Math.max(0, Math.floor(ms / 1000));

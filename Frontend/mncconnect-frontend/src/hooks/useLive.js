@@ -3,7 +3,7 @@
 // Joins the "user:<id>" room so backend emitToUser() / notify() reach this tab.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import socket from "../socket";
+import {socket} from "../utils/socket";
 
 export default function useLive({ fetcher, events = [], pollMs = 0, userId }) {
   const [data, setData] = useState(null);

@@ -1,109 +1,91 @@
+
 const jwt = require("jsonwebtoken");
 
 const Fresher = require("../models/Fresher");
 const Mentor = require("../models/Mentor");
 
+const AUTH_COOKIE_NAME = "mnc_token";
+
 const protect = async (req, res, next) => {
   try {
-    const authHeader =
-      req.headers.authorization;
+    if (!process.env.JWT_SECRET) {
+      console.error("JWT_SECRET is not configured.");
 
-    if (
-      !authHeader ||
-      !authHeader.startsWith("Bearer ")
-    ) {
-      return res.status(401).json({
+      return res.status(500).json({
         success: false,
-        message:
-          "Authentication required.",
+        message: "Authentication service is not configured.",
       });
     }
 
-    const token =
-      authHeader.split(" ")[1];
+    // Read JWT from the HttpOnly cookie
+    const token = req.cookies?.[AUTH_COOKIE_NAME];
 
-    const decoded =
-      jwt.verify(
-        token,
-        process.env.JWT_SECRET
-      );
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     if (
-      !decoded.id ||
-      !decoded.role
+      !decoded?.id ||
+      !["fresher", "mentor", "admin"].includes(decoded.role)
     ) {
       return res.status(401).json({
         success: false,
-        message:
-          "Invalid authentication token.",
+        message: "Invalid authentication token.",
       });
     }
 
     let user = null;
 
-    // Fresher
     if (decoded.role === "fresher") {
-      user =
-        await Fresher.findById(
-          decoded.id
-        );
-    }
-
-    // Mentor
-    if (decoded.role === "mentor") {
-      user =
-        await Mentor.findById(
-          decoded.id
-        );
-    }
-
-    // Admin
-    // Keep your existing admin logic here
-    if (decoded.role === "admin") {
-      // Your existing admin lookup
+      user = await Fresher.findById(decoded.id);
+    } else if (decoded.role === "mentor") {
+      user = await Mentor.findById(decoded.id);
+    } else if (decoded.role === "admin") {
+      // IMPORTANT:
+      // Add your actual admin lookup here.
+      // Do not allow admin access without validating the admin account.
     }
 
     if (!user) {
       return res.status(401).json({
         success: false,
-        message:
-          "User account not found.",
+        message: "User account not found or not authorized.",
       });
     }
 
     req.user = user;
     req.user.role = decoded.role;
-    req.user.id = decoded.id;
+    req.user.id = String(decoded.id);
 
-    next();
+    return next();
   } catch (error) {
-    console.error(
-      "Auth middleware error:",
-      error
-    );
+    if (error.name !== "JsonWebTokenError" &&
+        error.name !== "TokenExpiredError") {
+      console.error("Auth middleware error:", error);
+    }
 
     return res.status(401).json({
       success: false,
-      message:
-        "Invalid or expired token.",
+      message: "Invalid or expired session.",
     });
   }
 };
 
 const authorize = (...roles) => {
   return (req, res, next) => {
-    if (
-      !req.user ||
-      !roles.includes(req.user.role)
-    ) {
+    if (!req.user || !roles.includes(req.user.role)) {
       return res.status(403).json({
         success: false,
-        message:
-          "You are not authorized to access this resource.",
+        message: "You are not authorized to access this resource.",
       });
     }
 
-    next();
+    return next();
   };
 };
 

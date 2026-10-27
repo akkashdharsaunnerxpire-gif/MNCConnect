@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import useMentorSessions from "../../hooks/useMentorSessions";
 import { inr, api, ENDPOINTS, EVENTS } from "../../services/mentorApi";
-import socket from "../../socket";
+import {socket} from "../../utils/socket";
 import ChatPanel from "../../Commoncomponents/Chatpanel";
 import SessionDetailsModal from "../../Commoncomponents/SessionDetailsModal";
 

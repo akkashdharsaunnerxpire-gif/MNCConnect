@@ -2,6 +2,7 @@ import axios from "axios";
 
 const API = axios.create({
   baseURL: import.meta.env.VITE_API_URL,
+  withCredentials: true,
 });
 
 // ---- Loading handlers (App.jsx la irundhu register aagum) ----
@@ -13,11 +14,6 @@ export const registerLoadingHandlers = (start, stop) => {
 
 // ---- Request: JWT + loading start ----
 API.interceptors.request.use((req) => {
-  const token = localStorage.getItem("token");
-  if (token) {
-    req.headers.Authorization = `Bearer ${token}`;
-  }
-
   // Background calls ku: API.get(url, { silent: true })
   if (!req.silent) loadingHandlers.start();
   return req;

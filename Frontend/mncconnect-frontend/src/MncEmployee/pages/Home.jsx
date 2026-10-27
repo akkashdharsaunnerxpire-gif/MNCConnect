@@ -32,7 +32,7 @@ import {
   ShieldCheck,
   AlertTriangle,
 } from "lucide-react";
-import socket from "../../socket";
+import {socket} from "../../utils/socket";
 import useLive from "../../hooks/useLive";
 import useMentorSessions from "../../hooks/useMentorSessions";
 import { api, ENDPOINTS, EVENTS, inr, timeAgo } from "../../services/mentorApi";

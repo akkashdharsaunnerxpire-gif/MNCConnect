@@ -3,207 +3,148 @@
    Path: public/admin/js/admin.js
    ========================================================== */
 (function () {
-  const $ = (s, r = document) => r.querySelector(s);
-  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  'use strict';
 
-  // ---------- Mobile sidebar ----------
-  const sidebar = $("#sidebar");
-  const overlay = $("#overlay");
-  const setSidebar = (open) => {
-    if (!sidebar) return;
-    sidebar.classList.toggle("open", open);
-    overlay && overlay.classList.toggle("show", open);
-  };
-  const menuBtn = $("#menuBtn");
-  menuBtn && menuBtn.addEventListener("click", () => setSidebar(!sidebar.classList.contains("open")));
-  overlay && overlay.addEventListener("click", () => setSidebar(false));
+  function $(id) { return document.getElementById(id); }
 
-  // ---------- Toast ----------
-  window.toast = function (message, type) {
-    const wrap = $("#toasts");
-    if (!wrap) return alert(message);
-    const el = document.createElement("div");
-    el.className = "toast " + (type || "info");
-    const icon = type === "ok" ? "fa-circle-check" : type === "bad" ? "fa-circle-xmark" : "fa-circle-info";
-    el.innerHTML = '<i class="fas ' + icon + '"></i><span></span>';
-    el.querySelector("span").textContent = message;
+  /* ---------- 1. Apply data-* values (keeps EJS free of inline style="<%= %>") ---------- */
+  function applyData() {
+    document.querySelectorAll('[data-w]').forEach(function (el) {
+      el.style.width = el.dataset.w + '%';
+      if (el.dataset.ok !== undefined) el.style.background = el.dataset.ok === '1' ? 'var(--ok)' : 'var(--warn)';
+    });
+    document.querySelectorAll('[data-h]').forEach(function (el) { el.style.height = el.dataset.h + '%'; });
+    document.querySelectorAll('[data-bg]').forEach(function (el) { el.style.background = el.dataset.bg; });
+  }
+  // Small delay so the CSS transition animates from 0
+  window.addEventListener('load', function () { requestAnimationFrame(applyData); });
+
+  /* ---------- 2. Toast ---------- */
+  function toast(type, msg) {
+    var wrap = $('toasts');
+    if (!wrap) return;
+    var map = { success: 'ok', ok: 'ok', error: 'bad', bad: 'bad', info: '' };
+    var icon = { ok: 'fa-circle-check', bad: 'fa-circle-xmark', '': 'fa-circle-info' };
+    var cls = map[type] !== undefined ? map[type] : '';
+    var el = document.createElement('div');
+    el.className = 'toast ' + cls;
+    var i = document.createElement('i');
+    i.className = 'fas ' + icon[cls];
+    var s = document.createElement('span');
+    s.textContent = msg; // textContent = no XSS
+    el.appendChild(i); el.appendChild(s);
     wrap.appendChild(el);
-    setTimeout(() => el.remove(), 4000);
-  };
+    setTimeout(function () { el.remove(); }, 4200);
+  }
+  window.adminToast = toast;
 
-  // ---------- Confirm modal (promise based) ----------
-  const modal = $("#modal");
-  window.confirmModal = function (opts) {
-    return new Promise((resolve) => {
-      if (!modal) return resolve({ ok: window.confirm(opts.message || "Are you sure?"), reason: "" });
+  /* ---------- 3. Sidebar (mobile) ---------- */
+  var sidebar = $('sidebar'), overlay = $('overlay'), menuBtn = $('menuBtn');
+  function closeSide() { if (sidebar) sidebar.classList.remove('open'); if (overlay) overlay.classList.remove('show'); }
+  if (menuBtn) menuBtn.addEventListener('click', function () { sidebar.classList.add('open'); overlay.classList.add('show'); });
+  if (overlay) overlay.addEventListener('click', closeSide);
 
-      $("#modalTitle").textContent = opts.title || "Are you sure?";
-      $("#modalMsg").textContent = opts.message || "";
-      const reasonWrap = $("#modalReasonWrap");
-      const reasonInput = $("#modalReason");
-      const okBtn = $("#modalOk");
-      const cancelBtn = $("#modalCancel");
+  /* ---------- 4. Confirm modal ---------- */
+  var modal = $('modal'), mTitle = $('modalTitle'), mMsg = $('modalMsg'),
+      mReasonWrap = $('modalReasonWrap'), mReason = $('modalReason'),
+      mCancel = $('modalCancel'), mOk = $('modalOk');
+  var pending = null;
 
-      reasonWrap.style.display = opts.reason ? "block" : "none";
-      reasonInput.value = "";
-      okBtn.textContent = opts.confirmText || "Confirm";
-      okBtn.className = "btn " + (opts.danger ? "btn-bad" : "btn-ok");
-      modal.classList.add("show");
-      opts.reason && setTimeout(() => reasonInput.focus(), 50);
+  function openModal(opts) {
+    pending = opts;
+    mTitle.textContent = opts.title;
+    mMsg.textContent = opts.message;
+    mReasonWrap.style.display = opts.reason ? 'block' : 'none';
+    mReason.value = '';
+    mOk.className = 'btn ' + (opts.danger ? 'btn-bad' : 'btn-ok');
+    mOk.textContent = opts.okText || 'Confirm';
+    mOk.disabled = false;
+    modal.classList.add('show');
+    (opts.reason ? mReason : mOk).focus();
+  }
+  function closeModal() { if (modal) modal.classList.remove('show'); pending = null; }
 
-      const close = (ok) => {
-        modal.classList.remove("show");
-        okBtn.removeEventListener("click", onOk);
-        cancelBtn.removeEventListener("click", onCancel);
-        modal.removeEventListener("click", onBack);
-        document.removeEventListener("keydown", onKey);
-        resolve({ ok, reason: reasonInput.value.trim() });
-      };
-      const onOk = () => close(true);
-      const onCancel = () => close(false);
-      const onBack = (e) => { if (e.target === modal) close(false); };
-      const onKey = (e) => { if (e.key === "Escape") close(false); };
+  if (modal) {
+    mCancel.addEventListener('click', closeModal);
+    modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeModal(); closeSide(); } });
 
-      okBtn.addEventListener("click", onOk);
-      cancelBtn.addEventListener("click", onCancel);
-      modal.addEventListener("click", onBack);
-      document.addEventListener("keydown", onKey);
+    mOk.addEventListener('click', function () {
+      if (!pending) return;
+      var reason = mReason.value.trim();
+      if (pending.reason && reason.length < 5) {
+        toast('error', 'Please write a reason (at least 5 characters).');
+        mReason.focus();
+        return;
+      }
+      mOk.disabled = true;
+      mOk.textContent = 'Please wait...';
+      pending.run(reason).then(closeModal).catch(function () { mOk.disabled = false; mOk.textContent = pending ? pending.okText : 'Confirm'; });
     });
-  };
-
-  // ---------- API helper ----------
-  async function api(url, method, body) {
-    const res = await fetch(url, {
-      method: method,
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      credentials: "same-origin",
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.status === 401) {
-      window.location.href = "/admin/login";
-      throw new Error("Session expired");
-    }
-    if (!res.ok || !data.success) throw new Error(data.message || "Request failed");
-    return data;
   }
 
-  const ACTIONS = {
-    approve: { title: "Approve mentor?", confirmText: "Approve", danger: false, reason: false },
-    reject: { title: "Reject mentor?", confirmText: "Reject", danger: true, reason: true },
-    pending: { title: "Move back to pending?", confirmText: "Move to pending", danger: false, reason: false },
+  /* ---------- 5. Mentor actions (approve / reject / pending) ---------- */
+  function call(method, url, body) {
+    return fetch(url, {
+      method: method,
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        if (r.status === 401) { location.href = '/admin/login'; throw new Error('Session expired'); }
+        if (!r.ok || d.success === false) throw new Error(d.message || 'Something went wrong.');
+        return d;
+      });
+    });
+  }
+
+  var actions = {
+    approve: { title: 'Approve mentor?', verb: 'approved', ok: 'Approve', danger: false, reason: false },
+    reject: { title: 'Reject mentor?', verb: 'rejected', ok: 'Reject', danger: true, reason: true },
+    pending: { title: 'Move back to pending?', verb: 'moved to pending', ok: 'Move to pending', danger: false, reason: false }
   };
 
-  // ---------- Click actions ----------
-  document.addEventListener("click", async (e) => {
-    // Copy to clipboard
-    const copyBtn = e.target.closest("[data-copy]");
+  document.addEventListener('click', function (e) {
+    var copyBtn = e.target.closest('[data-copy]');
     if (copyBtn) {
-      try {
-        await navigator.clipboard.writeText(copyBtn.dataset.copy);
-        toast("Copied to clipboard", "ok");
-      } catch (_) {
-        toast("Copy failed", "bad");
-      }
+      if (navigator.clipboard) navigator.clipboard.writeText(copyBtn.dataset.copy).then(function () { toast('success', 'Copied'); });
       return;
     }
 
-    const btn = e.target.closest("[data-action]");
-    if (!btn) return;
-    const action = btn.dataset.action;
-    const id = btn.dataset.id;
-    const name = btn.dataset.name || "this item";
+    var btn = e.target.closest('[data-action]');
+    if (!btn || btn.disabled) return;
+    var a = actions[btn.dataset.action];
+    if (!a) return;
 
-    try {
-      // Mentor approve / reject / pending
-      if (ACTIONS[action]) {
-        const cfg = ACTIONS[action];
-        const res = await confirmModal({
-          title: cfg.title,
-          message: "Mentor: " + name,
-          confirmText: cfg.confirmText,
-          danger: cfg.danger,
-          reason: cfg.reason,
-        });
-        if (!res.ok) return;
-        btn.disabled = true;
-        const data = await api("/admin/mentors/" + encodeURIComponent(id) + "/" + action, "PATCH", { reason: res.reason });
-        toast(data.message, "ok");
-        setTimeout(() => location.reload(), 700);
-        return;
+    var id = btn.dataset.id, name = btn.dataset.name || 'this mentor';
+    openModal({
+      title: a.title,
+      message: name + ' will be ' + a.verb + '.',
+      okText: a.ok,
+      danger: a.danger,
+      reason: a.reason,
+      run: function (reason) {
+        return call('PATCH', '/admin/mentors/' + encodeURIComponent(id) + '/' + btn.dataset.action, a.reason ? { reason: reason } : {})
+          .then(function (d) {
+            toast('success', d.message || 'Done');
+            setTimeout(function () { location.reload(); }, 700);
+          })
+          .catch(function (err) { toast('error', err.message); throw err; });
       }
-
-      // User activate / deactivate
-      if (action === "toggle-user") {
-        const make = btn.dataset.next === "deactivate" ? "deactivate" : "activate";
-        const res = await confirmModal({
-          title: make === "deactivate" ? "Deactivate user?" : "Activate user?",
-          message: name,
-          confirmText: make === "deactivate" ? "Deactivate" : "Activate",
-          danger: make === "deactivate",
-        });
-        if (!res.ok) return;
-        btn.disabled = true;
-        const data = await api("/admin/users/" + encodeURIComponent(id) + "/toggle", "PATCH");
-        toast(data.message, "ok");
-        setTimeout(() => location.reload(), 600);
-      }
-    } catch (err) {
-      btn.disabled = false;
-      toast(err.message || "Something went wrong", "bad");
-    }
+    });
   });
 
-  // ---------- Bulk selection (mentors) ----------
-  const checkAll = $("#checkAll");
-  const bulkBar = $("#bulkBar");
-  const selected = () => $$(".row-check:checked").map((c) => c.value);
-  const refreshBulk = () => {
-    if (!bulkBar) return;
-    const n = selected().length;
-    $("#bulkCount").textContent = n;
-    bulkBar.classList.toggle("show", n > 0);
-  };
-  checkAll && checkAll.addEventListener("change", () => {
-    $$(".row-check").forEach((c) => (c.checked = checkAll.checked));
-    refreshBulk();
+  /* ---------- 6. Misc ---------- */
+  document.querySelectorAll('[data-autosubmit]').forEach(function (el) {
+    el.addEventListener('change', function () { if (el.form) el.form.submit(); });
   });
-  $$(".row-check").forEach((c) => c.addEventListener("change", refreshBulk));
-
-  $$("[data-bulk]").forEach((b) =>
-    b.addEventListener("click", async () => {
-      const action = b.dataset.bulk;
-      const ids = selected();
-      if (!ids.length) return;
-      const cfg = ACTIONS[action];
-      const res = await confirmModal({
-        title: cfg.title.replace("mentor", ids.length + " mentor(s)"),
-        message: "This will update all selected mentors.",
-        confirmText: cfg.confirmText,
-        danger: cfg.danger,
-        reason: cfg.reason,
-      });
-      if (!res.ok) return;
-      b.disabled = true;
-      try {
-        const data = await api("/admin/mentors/bulk", "POST", { ids, action, reason: res.reason });
-        toast(data.message, data.failed ? "info" : "ok");
-        setTimeout(() => location.reload(), 800);
-      } catch (err) {
-        b.disabled = false;
-        toast(err.message, "bad");
-      }
-    })
-  );
-
-  // ---------- Filters ----------
-  $$("[data-autosubmit]").forEach((el) => el.addEventListener("change", () => el.form && el.form.submit()));
 
   // Press "/" to focus search
-  document.addEventListener("keydown", (e) => {
-    const t = e.target.tagName;
-    if (e.key === "/" && t !== "INPUT" && t !== "TEXTAREA") {
-      const s = $("input[name=search]");
+  document.addEventListener('keydown', function (e) {
+    var t = e.target.tagName;
+    if (e.key === '/' && t !== 'INPUT' && t !== 'TEXTAREA' && t !== 'SELECT') {
+      var s = document.querySelector('.search-box .input');
       if (s) { e.preventDefault(); s.focus(); }
     }
   });

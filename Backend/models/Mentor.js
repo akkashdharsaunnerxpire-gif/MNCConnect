@@ -14,20 +14,26 @@ const mentorSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
-      lowercase: true,  
+      lowercase: true,
       trim: true,
       index: true,
     },
-     
+
+    // Dial code only, e.g. "+91", "+1", "+971"
     countryCode: {
       type: String,
+      trim: true,
       default: "+91",
+      match: [/^\+\d{1,4}$/, "Invalid country code"],
     },
 
+    // Full number stored as countryCode + national digits, e.g. "+919876543210"
+    // (same format as the Fresher model, so duplicate checks work across both)
     mobile: {
       type: String,
       required: true,
       trim: true,
+      match: [/^\+\d{7,18}$/, "Mobile must include country code, e.g. +919876543210"],
     },
 
     password: {
@@ -78,11 +84,14 @@ const mentorSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+
     gender: {
-  type: String,
-  enum: ["male", "female", "other"],
-  required: true,
-},
+      type: String,
+      enum: ["male", "female", "other"],
+      lowercase: true,
+      trim: true,
+      required: true,
+    },
 
     department: {
       type: String,
@@ -96,15 +105,15 @@ const mentorSchema = new mongoose.Schema(
       default: "",
     },
 
-    languages: {
+    // NEW: registration form sends skills, but schema did not have it
+    skills: {
       type: [String],
       default: [],
     },
 
-    hourlyRate: {
-      type: Number,
-      min: 0,
-      default: 0,
+    languages: {
+      type: [String],
+      default: [],
     },
 
     bio: {
@@ -114,7 +123,7 @@ const mentorSchema = new mongoose.Schema(
       default: "",
     },
 
-    // Verification documents
+    // Verification documents (private - never send these to public APIs)
     offerLetter: {
       type: String,
       default: "",
@@ -126,6 +135,22 @@ const mentorSchema = new mongoose.Schema(
     },
 
     additionalProof: {
+      type: String,
+      default: "",
+    },
+
+    // Cloudinary public ids (needed to delete the files later)
+    offerLetterPublicId: {
+      type: String,
+      default: "",
+    },
+
+    employeeIdProofPublicId: {
+      type: String,
+      default: "",
+    },
+
+    additionalProofPublicId: {
       type: String,
       default: "",
     },
@@ -165,7 +190,8 @@ const mentorSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
-        passwordResetToken: {
+
+    passwordResetToken: {
       type: String,
       default: undefined,
       select: false,

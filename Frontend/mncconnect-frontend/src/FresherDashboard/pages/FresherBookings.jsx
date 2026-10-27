@@ -19,7 +19,7 @@ import {
 import useLive from "../../hooks/useLive";
 import ReviewModal from "../pages/Reviewmodal";
 import ChatPanel from "../../Commoncomponents/Chatpanel";
-import socket from "../../socket";
+import {socket} from "../../utils/socket";
 import {
   api,
   ENDPOINTS,

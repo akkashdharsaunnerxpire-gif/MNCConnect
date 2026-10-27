@@ -1,9 +1,9 @@
 // src/FresherDashboard/pages/Welcomebonus.jsx
 //
 // Rendered by Header.jsx (not inside <Routes>).
-// Plays ONCE per account: server flag `welcomeBonusSeen` (+ localStorage as a
-// fast guard). Every new user gets it. Only the "Add to wallet" button closes
-// it (no skip, no auto-claim).
+// Plays ONCE per account. The ONLY source of truth is the database flag
+// `welcomeBonusSeen` (read from /auth/me). No localStorage, so a different
+// browser / device / account can never replay it.
 //
 // To replay while testing, add  ?replayBonus=1  to the URL.
 
@@ -16,7 +16,7 @@ import {
   useTransform,
 } from "framer-motion";
 import { Gift, Sparkles, Wallet } from "lucide-react";
-import { api, getUserId } from "../../services/fresherApi"; // <- fix the path if needed
+import { api } from "../../services/fresherApi"; // <- fix the path if needed
 
 const WELCOME_BONUS = 25;
 const COLORS = ["#8b5cf6", "#6366f1", "#0ea5e9", "#10b981", "#f59e0b", "#f43f5e"];
@@ -301,15 +301,15 @@ const GiftBox = ({ open }) => {
 /* ------------------------------------------------------------------
    MAIN
 ------------------------------------------------------------------ */
-const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
-  const userId = getUserId();
-  const storageKey = `mc_welcome_bonus_seen_${userId}`;
-
+const WelcomeBonus = ({ targetRef, fallbackRef, onHold, onLand }) => {
   // idle | gift | shake | open | fly | impact | done
   const [phase, setPhase] = useState("idle");
   const [amount, setAmount] = useState(0);
   const [burst, setBurst] = useState(false);
   const [dest, setDest] = useState({ cx: 0, cy: 0, sx: 0, sy: 0, dx: 0, dy: 0, my: 0, spin: 0 });
+
+  // fresh copy of the user straight from the DB (never a stale prop / cache)
+  const [serverUser, setServerUser] = useState(null);
 
   const decidedRef = useRef(false);
   const rafRef = useRef(0);
@@ -424,31 +424,38 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
   );
 
   // ---------------------------------------------------------
-  // 1) should this user see it? ONLY if never seen (server + local)
+  // 0) read the user from the DB (/auth/me)
   // ---------------------------------------------------------
   useEffect(() => {
-    if (!user || !userId || decidedRef.current) return;
+    let cancelled = false;
+    api("/auth/me")
+      .then((d) => {
+        if (!cancelled) setServerUser(d?.user || d || null);
+      })
+      .catch((err) => console.error("WelcomeBonus: /auth/me failed:", err.message));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ---------------------------------------------------------
+  // 1) should this user see it?  DB flag only.
+  // ---------------------------------------------------------
+  useEffect(() => {
+    if (!serverUser || decidedRef.current) return;
     decidedRef.current = true;
 
     const replay =
       typeof window !== "undefined" && window.location.search.includes("replayBonus");
 
-    let seenLocal = true;
-    try {
-      seenLocal = Boolean(localStorage.getItem(storageKey));
-    } catch {
-      seenLocal = true;
-    }
-
-    // strict: only `welcomeBonusSeen === false` (new users) can see it.
-    // old users (migrated to true) or a missing field never see it.
-    const neverSeenOnServer = user.welcomeBonusSeen === false;
-    const wallet = Number(user.walletBalance) || 0;
+    // only a brand-new account has welcomeBonusSeen === false
+    const neverSeenOnServer = serverUser.welcomeBonusSeen === false;
+    const wallet = Number(serverUser.walletBalance) || 0;
 
     const eligible =
       wallet >= WELCOME_BONUS &&
-      user.welcomeBonusClaimed !== false &&
-      (replay || (neverSeenOnServer && !seenLocal));
+      serverUser.welcomeBonusClaimed !== false &&
+      (replay || neverSeenOnServer);
 
     if (!eligible) return;
 
@@ -456,8 +463,7 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
     // navbar shows the balance WITHOUT the bonus until the coin lands
     cb.current.onHold?.(Math.max(wallet - WELCOME_BONUS, 0));
     setPhase("gift");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, userId]);
+  }, [serverUser]);
 
   // ---------------------------------------------------------
   // 2) actions
@@ -468,14 +474,11 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
     setPhase("shake");
   };
 
-  // mark as seen the moment the user claims (never plays again)
+  // save in the DB the moment the user claims (never plays again, on any device)
   const markSeen = () => {
-    try {
-      localStorage.setItem(storageKey, "1");
-    } catch {
-      /* ignore */
-    }
-    api("/auth/welcome-bonus-seen", { method: "PATCH" }).catch(() => {});
+    api("/auth/welcome-bonus-seen", { method: "PATCH" }).catch((err) =>
+      console.error("welcome-bonus-seen failed:", err.message)
+    );
   };
 
   const startFly = () => {
@@ -666,7 +669,7 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
               }}
               {...panProps}
             >
-              {/* light rays: the mask sits on a STATIC wrapper, only the inner layer rotates (smooth) */}
+              {/* light rays */}
               <motion.div
                 className="pointer-events-none absolute"
                 style={{
@@ -691,7 +694,7 @@ const WelcomeBonus = ({ user, targetRef, fallbackRef, onHold, onLand }) => {
                 />
               </motion.div>
 
-              {/* soft golden halo behind the coin (plain gradient, no blur filter) */}
+              {/* soft golden halo behind the coin */}
               <motion.div
                 className="pointer-events-none absolute rounded-full"
                 style={{
