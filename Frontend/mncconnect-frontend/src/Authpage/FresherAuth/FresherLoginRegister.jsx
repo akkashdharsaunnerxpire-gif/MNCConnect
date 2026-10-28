@@ -6,7 +6,6 @@ import {
   LockKeyhole,
   Mail,
   CheckCircle2,
-  Wallet,
   AlertCircle,
   Eye,
   EyeOff,
@@ -21,6 +20,7 @@ import {
 } from "lucide-react";
 import { saveSession } from "../../utils/auth";
 import { LoadingContext } from "../../context/LoadingContext";
+import { useAuth } from "../../context/AuthContext";
 import { reconnectSocket } from "../../utils/socket";
 import { COUNTRY_CODES } from "../../data/countryCodes";
 
@@ -52,14 +52,12 @@ const shouldShowIntro = () => {
 export default function LoginRegister() {
   const navigate = useNavigate();
   const { start, stop } = useContext(LoadingContext);
+  const { refresh } = useAuth();
 
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState(initialForm);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-
-  const [showReward, setShowReward] = useState(false);
-  const [walletAmount, setWalletAmount] = useState(25);
 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -237,15 +235,27 @@ export default function LoginRegister() {
           return;
         }
 
-        // server already set the cookie -> save the UI session + connect socket
         if (data.user) {
           saveSession({ ...data.user, role: "fresher" });
           reconnectSocket();
         }
 
-        setSuccess("Account created successfully!");
-        setWalletAmount(data.user?.walletBalance || 25);
-        setTimeout(() => setShowReward(true), 500);
+        // update AuthContext BEFORE navigating
+        const me = await refresh();
+        if (!me) {
+          throw new Error(
+            "Account created, but the session could not be started. Please login.",
+          );
+        }
+
+        // reward popup is shown on the next page
+        navigate("/Home", {
+          replace: true,
+          state: {
+            showWelcomeReward: true,
+            walletAmount: data.user?.walletBalance ?? 25,
+          },
+        });
         return;
       }
 
@@ -255,19 +265,24 @@ export default function LoginRegister() {
         reconnectSocket();
       }
 
+      // update AuthContext BEFORE navigating
+      const me = await refresh();
+      if (!me) {
+        // login API said OK but /auth/me says not logged in
+        // = cookie was not saved / not sent (see checklist)
+        throw new Error(
+          "Login worked but your session was not saved. Please enable cookies and try again.",
+        );
+      }
+
       setSuccess("Login successful!");
-      window.setTimeout(() => navigate("/Home", { replace: true }), 600);
+      navigate("/Home", { replace: true });
     } catch (authError) {
       console.error("Authentication error:", authError);
       setError(authError.message || "Unable to connect to the server.");
     } finally {
       stop();
     }
-  };
-
-  const continueAfterWallet = () => {
-    setShowReward(false);
-    navigate("/Home", { replace: true });
   };
 
   const inputClass =
@@ -399,7 +414,10 @@ export default function LoginRegister() {
             </div>
 
             {error && (
-              <div className="mt-5 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <div
+                role="alert"
+                className="mt-5 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+              >
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 {error}
               </div>
@@ -618,35 +636,6 @@ export default function LoginRegister() {
           </div>
         </section>
       </main>
-
-      {showReward && (
-        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-900/50 px-5">
-          <div className="w-full max-w-md rounded-[30px] border border-slate-200 bg-white p-8 text-center shadow-2xl">
-            <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-emerald-50">
-              <Wallet className="h-10 w-10 text-emerald-500" />
-            </div>
-            <p className="mt-5 text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">
-              Welcome wallet
-            </p>
-            <h2 className="mt-3 text-3xl font-black">
-              Your journey starts with a reward.
-            </h2>
-            <p className="mt-5 text-6xl font-black text-emerald-600">
-              ₹{walletAmount}
-            </p>
-            <p className="mt-3 text-sm text-slate-600">
-              Your welcome wallet balance has been credited.
-            </p>
-            <button
-              type="button"
-              onClick={continueAfterWallet}
-              className="mt-7 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-blue-500 to-cyan-400 px-5 py-4 text-sm font-bold text-white transition hover:brightness-110"
-            >
-              Enter MNCConnect <ArrowRight className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      )}
 
       {showIntro && (
         <div className="pointer-events-none fixed inset-0 z-[10000] overflow-hidden">

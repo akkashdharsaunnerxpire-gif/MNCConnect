@@ -1,13 +1,20 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+} from "react";
 import { socket } from "../utils/socket";
 
-const API_URL = import.meta.env.VITE_API_URL;
+// must match the URL used in the login pages (includes /api)
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 const AuthContext = createContext({
   user: null,
   role: null,
   loading: true,
-  refresh: async () => {},
+  refresh: async () => null,
   logout: async () => {},
 });
 
@@ -20,14 +27,30 @@ export function AuthProvider({ children }) {
   // Identity comes ONLY from the HttpOnly cookie, via the server.
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/auth/me`, { credentials: "include" });
+      const res = await fetch(`${API_URL}/auth/me`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+
       if (!res.ok) {
         setUser(null);
         return null;
       }
+
       const data = await res.json();
-      setUser(data?.user || null);
-      return data?.user || null;
+      const u = data?.user || null;
+
+      if (!u) {
+        setUser(null);
+        return null;
+      }
+
+      // role can come from user.role OR top-level data.role
+      const role = u.role || data?.role || null;
+      const normalized = { ...u, role };
+
+      setUser(normalized);
+      return normalized;
     } catch {
       setUser(null);
       return null;
