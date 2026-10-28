@@ -6,13 +6,28 @@ const {
 } = require("../utils/companyImages");
 const { syncCompaniesFromMentors } = require("../utils/companySync");
 
+// "Other" lets the admin type a custom category in the form.
 const CATEGORIES = [
   "Technology",
+  "IT Services",
   "Finance",
   "Consulting",
   "Product",
   "Design",
   "Marketing",
+  "Healthcare",
+  "Pharma",
+  "E-commerce",
+  "Retail",
+  "Manufacturing",
+  "Automotive",
+  "Telecom",
+  "Education",
+  "Media",
+  "Energy",
+  "Logistics",
+  "Real Estate",
+  "Other",
 ];
 
 const redirectWith = (res, type, text) =>
@@ -195,7 +210,8 @@ exports.saveCompany = async (req, res) => {
   const uploadedNow = [];
 
   try {
-    const { id, name, industry, category, originalName } = req.body;
+    const { id, name, industry, category, customCategory, originalName } =
+      req.body;
 
     const cleanName = String(name || "").trim();
     const original = String(originalName || "").trim();
@@ -262,8 +278,18 @@ exports.saveCompany = async (req, res) => {
       doc.industry = String(industry).trim();
     }
 
-    if (category !== undefined && CATEGORIES.includes(category)) {
-      doc.category = category;
+    const pickedCategory = String(category || "").trim();
+
+    if (pickedCategory === "Other") {
+      // admin typed a custom category
+      const custom = String(customCategory || "")
+        .trim()
+        .replace(/\s+/g, " ")
+        .slice(0, 40);
+
+      doc.category = custom || "Other";
+    } else if (CATEGORIES.includes(pickedCategory)) {
+      doc.category = pickedCategory;
     }
 
     // ---- images ----

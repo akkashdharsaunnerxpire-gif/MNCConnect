@@ -1,51 +1,89 @@
 <%
   const c = locals.c || {};
+  const uid = c._id || 'new-' + Math.random().toString(36).slice(2, 8);
+
+  // "Other" must always exist in the dropdown
+  const options = categories.includes('Other') ? categories : categories.concat(['Other']);
+
+  // A saved category that is not in the list is a custom one:
+  // select "Other" and put the saved text in the custom box.
+  const current = c.category || 'Technology';
+  const isKnown = options.includes(current);
+  const selected = isKnown ? current : 'Other';
+  const customValue = isKnown ? '' : current;
+  const showOther = selected === 'Other';
 %>
 <form class="co-form" method="POST" action="/admin/companies" enctype="multipart/form-data">
   <% if (c._id) { %>
-  <input type="hidden" name="id" value="<%= c._id %>">
-<% } %>
+    <input type="hidden" name="id" value="<%= c._id %>">
+  <% } %>
 
-<% if (locals.originalName) { %>
-  <input
-    type="hidden"
-    name="originalName"
-    value="<%= locals.originalName %>"
-  >
-<% } %>
+  <% if (locals.originalName) { %>
+    <input type="hidden" name="originalName" value="<%= locals.originalName %>">
+  <% } %>
 
   <div class="co-field">
-    <label class="co-label" for="f-name-<%= c._id || 'new' %>">
-  Company name
-</label>
+    <label class="co-label" for="f-name-<%= uid %>">Company name</label>
     <input
-      id="f-name-<%= c._id || 'new' %>"
+      id="f-name-<%= uid %>"
       type="text"
       name="name"
       value="<%= c.name || '' %>"
+      maxlength="80"
+      required
+      autocomplete="off"
     >
   </div>
 
   <div class="co-row">
     <div class="co-field">
-      <label class="co-label">Industry</label>
-      <input type="text" name="industry" value="<%= c.industry || 'Technology' %>" placeholder="e.g. IT Services">
+      <label class="co-label" for="f-ind-<%= uid %>">Industry</label>
+      <input id="f-ind-<%= uid %>" type="text" name="industry"
+             value="<%= c.industry || 'Technology' %>" placeholder="e.g. IT Services" maxlength="60">
     </div>
 
     <div class="co-field">
-      <label class="co-label">Category</label>
-      <select name="category">
-        <% categories.forEach(function (cat) { %>
-          <option value="<%= cat %>" <%= (c.category || 'Technology') === cat ? 'selected' : '' %>><%= cat %></option>
+      <label class="co-label" for="f-cat-<%= uid %>">Category</label>
+      <select
+        id="f-cat-<%= uid %>"
+        name="category"
+        onchange="var box=this.closest('form').querySelector('[data-other-box]');var inp=box.querySelector('input');box.style.display=this.value==='Other'?'':'none';inp.required=this.value==='Other';if(this.value==='Other')inp.focus();"
+      >
+        <% options.forEach(function (cat) { %>
+          <% if (selected === cat) { %>
+            <option value="<%= cat %>" selected><%= cat %></option>
+          <% } else { %>
+            <option value="<%= cat %>"><%= cat %></option>
+          <% } %>
         <% }) %>
       </select>
     </div>
   </div>
 
+  <!-- Shown only when category = Other -->
+  <div class="co-field" data-other-box style="display:<%= showOther ? 'grid' : 'none' %>">
+    <label class="co-label" for="f-other-<%= uid %>">
+      Type category <em>e.g. Aerospace, Gaming, Agriculture</em>
+    </label>
+    <% if (showOther) { %>
+      <input id="f-other-<%= uid %>" type="text" name="customCategory"
+             value="<%= customValue %>" maxlength="40"
+             placeholder="Enter your category" autocomplete="off" required>
+    <% } else { %>
+      <input id="f-other-<%= uid %>" type="text" name="customCategory"
+             value="" maxlength="40"
+             placeholder="Enter your category" autocomplete="off">
+    <% } %>
+  </div>
+
   <div class="co-field">
     <span class="co-label">Logo <em>Square &middot; PNG / JPG / WEBP &middot; max 3 MB</em></span>
     <label class="co-drop co-drop--logo">
-      <img class="co-drop__img" src="<%= c.logo || '' %>" alt="Logo preview" <%- c.logo ? '' : 'hidden' %>>
+      <% if (c.logo) { %>
+        <img class="co-drop__img" src="<%= c.logo %>" alt="Logo preview">
+      <% } else { %>
+        <img class="co-drop__img" src="" alt="Logo preview" hidden>
+      <% } %>
       <span class="co-drop__text">
         <i class="fas fa-cloud-arrow-up"></i>
         <b><%= c.logo ? 'Replace logo' : 'Upload logo' %></b>
@@ -58,7 +96,11 @@
   <div class="co-field">
     <span class="co-label">Cover image <em>Wide &middot; PNG / JPG / WEBP &middot; max 3 MB</em></span>
     <label class="co-drop co-drop--cover">
-      <img class="co-drop__img" src="<%= c.coverImage || '' %>" alt="Cover preview" <%- c.coverImage ? '' : 'hidden' %>>
+      <% if (c.coverImage) { %>
+        <img class="co-drop__img" src="<%= c.coverImage %>" alt="Cover preview">
+      <% } else { %>
+        <img class="co-drop__img" src="" alt="Cover preview" hidden>
+      <% } %>
       <span class="co-drop__text">
         <i class="fas fa-cloud-arrow-up"></i>
         <b><%= c.coverImage ? 'Replace cover' : 'Upload cover' %></b>

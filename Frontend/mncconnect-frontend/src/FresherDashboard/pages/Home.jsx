@@ -29,11 +29,25 @@ import {
 const categories = [
   "All Companies",
   "Technology",
+  "IT Services",
   "Finance",
   "Consulting",
   "Product",
   "Design",
   "Marketing",
+  "Healthcare",
+  "Pharma",
+  "E-commerce",
+  "Retail",
+  "Manufacturing",
+  "Automotive",
+  "Telecom",
+  "Education",
+  "Media",
+  "Energy",
+  "Logistics",
+  "Real Estate",
+  "Other",
 ];
 
 const SORT_OPTIONS = ["Popular", "Rating", "Employees", "Online now"];
@@ -68,8 +82,19 @@ const hashIndex = (text = "", mod = AVATAR_COLORS.length) => {
   return h % mod;
 };
 
+// Categories that have their own chip. Anything else (custom text typed by
+// the admin, e.g. "Aerospace") is shown under the "Other" chip.
+const KNOWN_CATEGORIES = categories
+  .filter((c) => c !== "All Companies" && c !== "Other")
+  .map((c) => c.toLowerCase());
+
 const matchesCategory = (company, category) => {
   if (category === "All Companies") return true;
+
+  if (category === "Other") {
+    const cat = (company.category || "").toLowerCase().trim();
+    return cat === "other" || !KNOWN_CATEGORIES.includes(cat);
+  }
 
   const key = category.toLowerCase();
 

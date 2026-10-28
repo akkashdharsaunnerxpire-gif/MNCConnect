@@ -144,8 +144,8 @@
 
   <h1>Companies</h1>
   <p class="co-sub">
-    Every company your employees registered with. Upload a logo and a cover image once,
-    and it is shown for all employees of that company.
+    Every company your employees registered with is added here automatically.
+    Upload a logo and a cover image once, and it is shown for all employees of that company.
   </p>
 
   <% if (msg) { %>
@@ -167,11 +167,11 @@
     </div>
     <div class="co-stat co-stat--warn">
       <div class="co-stat__icon"><i class="fas fa-image"></i></div>
-      <div><b><%= stats.partial %></b><span class="lbl">Images missing</span></div>
+      <div><b><%= stats.partial %></b><span class="lbl">One image missing</span></div>
     </div>
     <div class="co-stat co-stat--new">
       <div class="co-stat__icon"><i class="fas fa-plus"></i></div>
-      <div><b><%= stats.isNew %></b><span class="lbl">Not added yet</span></div>
+      <div><b><%= stats.isNew %></b><span class="lbl">No images yet</span></div>
     </div>
   </div>
 
@@ -183,8 +183,8 @@
     </div>
     <div class="co-chips" id="co-chips">
       <button type="button" class="co-chip is-active" data-filter="all">All (<%= stats.total %>)</button>
-      <button type="button" class="co-chip" data-filter="new">Not added (<%= stats.isNew %>)</button>
-      <button type="button" class="co-chip" data-filter="partial">Missing images (<%= stats.partial %>)</button>
+      <button type="button" class="co-chip" data-filter="new">No images (<%= stats.isNew %>)</button>
+      <button type="button" class="co-chip" data-filter="partial">One missing (<%= stats.partial %>)</button>
       <button type="button" class="co-chip" data-filter="complete">Completed (<%= stats.complete %>)</button>
     </div>
   </div>
@@ -249,9 +249,9 @@
                 <% if (r.status === 'complete') { %>
                   <span class="co-badge co-badge--complete">Updated</span>
                 <% } else if (r.status === 'partial') { %>
-                  <span class="co-badge co-badge--partial">Images missing</span>
+                  <span class="co-badge co-badge--partial">One image missing</span>
                 <% } else { %>
-                  <span class="co-badge co-badge--new">Not added</span>
+                  <span class="co-badge co-badge--new">No images</span>
                 <% } %>
               </td>
 
