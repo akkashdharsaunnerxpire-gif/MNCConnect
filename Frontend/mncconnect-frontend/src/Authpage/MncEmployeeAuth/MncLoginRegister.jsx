@@ -14,6 +14,7 @@ import {
   Home,
   Eye,
   EyeOff,
+  AlertCircle,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { COUNTRY_CODES } from "../../data/countryCodes"; // <-- adjust path to your folder
@@ -185,6 +186,8 @@ export default function MncLoginRegister() {
   const [preview, setPreview] = useState(null);
   const [validationAttempted, setValidationAttempted] = useState(false);
   const [errors, setErrors] = useState({});
+  // Error that comes from the server while REGISTERING (shown on the register page)
+  const [submitError, setSubmitError] = useState("");
   const [cropState, setCropState] = useState({
     cropX: 0.18,
     cropY: 0.14,
@@ -218,19 +221,12 @@ export default function MncLoginRegister() {
   // EFFECTS
   // ==========================================================================
   useEffect(() => {
+    // Only SUCCESS messages travel to the login page.
+    // Registration errors (like "email already registered") stay on the register page.
     if (location.state?.registrationSuccess) {
       showToast(
         "🎉 Registration successful! Your account is pending verification.",
         "success",
-        5000,
-      );
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
-
-    if (location.state?.alreadyRegistered) {
-      showToast(
-        "This email is already registered. Please login with your password.",
-        "error",
         5000,
       );
       window.history.replaceState({}, document.title, window.location.pathname);
@@ -292,6 +288,8 @@ export default function MncLoginRegister() {
       if (field === "confirmationAccepted") delete rest.confirmation;
       return rest;
     });
+    // typing a new email clears the server "already registered" banner
+    if (field === "email") setSubmitError("");
   };
 
   const setObjectUrl = (file) => {
@@ -513,6 +511,7 @@ export default function MncLoginRegister() {
     if (!validateStep(step)) return;
     setValidationAttempted(false);
     setErrors({});
+    setSubmitError("");
     setStep((prev) => Math.min(prev + 1, 3));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -521,6 +520,7 @@ export default function MncLoginRegister() {
     setStep((prev) => Math.max(prev - 1, 1));
     setValidationAttempted(false);
     setErrors({});
+    setSubmitError("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -529,6 +529,7 @@ export default function MncLoginRegister() {
     if (!validateStep(3) || isSubmitting) return;
 
     setIsSubmitting(true);
+    setSubmitError("");
 
     try {
       const formData = new FormData();
@@ -582,16 +583,26 @@ export default function MncLoginRegister() {
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        // Already registered (maybe from another browser / device):
-        // do NOT trap the user here, send them to login with email prefilled.
+        // Email already registered: STAY on the register page and show the
+        // error in red on the email field (step 1). No redirect to login.
         if (response.status === 409) {
-          navigate("/mentor/login", {
-            replace: true,
-            state: {
-              email: profile.email.trim(),
-              alreadyRegistered: true,
-            },
-          });
+          const msg =
+            data.message ||
+            "This email is already registered. Please use a different email or login.";
+
+          setStep(1);
+          setValidationAttempted(true);
+          setErrors({ email: msg });
+          setSubmitError(msg);
+          showToast(msg, "error", 5000);
+
+          window.scrollTo({ top: 0, behavior: "smooth" });
+          setTimeout(() => {
+            document.querySelector("[data-validation-error]")?.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+            });
+          }, 150);
           return;
         }
 
@@ -603,11 +614,12 @@ export default function MncLoginRegister() {
         } else if (response.status === 500) {
           errorMessage = "Server error. Please try again later.";
         }
+        setSubmitError(errorMessage);
         showToast(errorMessage, "error", 5000);
         return;
       }
-      setIsRegistered(true);
 
+      // Registration success -> go to login page with a GREEN success message
       navigate("/mentor/login", {
         replace: true,
         state: {
@@ -623,6 +635,7 @@ export default function MncLoginRegister() {
         error.message === "Failed to fetch"
           ? "Cannot connect to server. Please check if the backend is running."
           : error.message || "Unable to submit registration. Please try again.";
+      setSubmitError(message);
       showToast(message, "error", 5000);
     } finally {
       setIsSubmitting(false);
@@ -722,6 +735,34 @@ export default function MncLoginRegister() {
                   </div>
 
                   <div className="px-4 py-5 sm:px-7 sm:py-7 lg:px-8 lg:py-8">
+                    {/* Registration error banner (RED, register page only) */}
+                    {submitError && (
+                      <div
+                        role="alert"
+                        className="mb-6 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 animate-fadeIn"
+                      >
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-red-500 text-white">
+                          <AlertCircle className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-red-600">
+                            Registration error
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-red-700">
+                            {submitError}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSubmitError("")}
+                          className="shrink-0 rounded-lg p-1 text-red-400 transition-colors hover:bg-red-100 hover:text-red-600"
+                          aria-label="Dismiss"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
+
                     {step === 1 && (
                       <div className="mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 text-white shadow-[0_12px_30px_rgba(15,23,42,.12)]">
                         <div className="flex items-start gap-3 p-4 sm:p-5">
@@ -1133,10 +1174,10 @@ function MentorLogin({ showToast }) {
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  // Green notice is ONLY for a successful registration.
+  // Register errors never come here any more.
   const [notice, setNotice] = useState(() => {
-    if (location.state?.alreadyRegistered) {
-      return "This email is already registered. Please login with your password.";
-    }
     if (!location.state?.registered) return "";
     if (location.state?.registrationSuccess) {
       return "🎉 Registration successful! Your account is pending verification.";
@@ -1147,7 +1188,7 @@ function MentorLogin({ showToast }) {
   });
 
   useEffect(() => {
-    if (location.state?.registered || location.state?.alreadyRegistered) {
+    if (location.state?.registered) {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, [location.state]);
@@ -1254,8 +1295,12 @@ function MentorLogin({ showToast }) {
           </div>
         )}
         {error && (
-          <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-600">
-            {error}
+          <div
+            role="alert"
+            className="mb-5 flex items-start gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-600"
+          >
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{error}</span>
           </div>
         )}
 
