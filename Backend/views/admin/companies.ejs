@@ -1,0 +1,407 @@
+<%- include('partials/layout-start', {
+  title: locals.title || 'Companies',
+  active: locals.active || 'companies'
+}) %>
+
+<style>
+  .co-wrap { max-width: 1100px; margin: 0 auto; padding: 24px 16px 60px; color: #e2e8f0; }
+  .co-wrap h1 { font-size: 1.6rem; margin: 0 0 4px; color: #f8fafc; letter-spacing: -.01em; }
+  .co-sub { color: #94a3b8; font-size: .9rem; margin: 0 0 18px; max-width: 640px; line-height: 1.5; }
+
+  /* alerts */
+  .co-alert { display: flex; gap: 10px; align-items: center; padding: 11px 14px; border-radius: 10px; margin: 12px 0; font-size: .9rem; overflow-wrap: anywhere; }
+  .co-alert--ok { background: rgba(16,185,129,.12); color: #6ee7b7; border: 1px solid rgba(16,185,129,.35); }
+  .co-alert--err { background: rgba(239,68,68,.12); color: #fca5a5; border: 1px solid rgba(239,68,68,.35); }
+
+  /* stats */
+  .co-stats { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 20px 0; }
+  .co-stat { display: flex; align-items: center; gap: 14px; background: linear-gradient(180deg, #131c2e, #0f1626); border: 1px solid #243047; border-radius: 14px; padding: 14px 16px; }
+  .co-stat__icon { width: 40px; height: 40px; flex: none; display: grid; place-items: center; border-radius: 10px; font-size: .95rem; background: rgba(148,163,184,.12); color: #cbd5e1; }
+  .co-stat b { display: block; font-size: 1.5rem; color: #f8fafc; line-height: 1.1; font-weight: 700; }
+  .co-stat span.lbl { font-size: .76rem; color: #94a3b8; }
+  .co-stat--ok .co-stat__icon { background: rgba(16,185,129,.15); color: #34d399; }
+  .co-stat--warn .co-stat__icon { background: rgba(245,158,11,.15); color: #fbbf24; }
+  .co-stat--new .co-stat__icon { background: rgba(139,92,246,.18); color: #a78bfa; }
+
+  /* toolbar */
+  .co-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .co-searchbox { position: relative; flex: 1 1 240px; max-width: 340px; }
+  .co-searchbox i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #64748b; font-size: .85rem; }
+  .co-search { width: 100%; box-sizing: border-box; padding: 10px 12px 10px 34px; color: #f1f5f9; background: #0f172a; border: 1px solid #334155; border-radius: 10px; font-size: .9rem; }
+  .co-search:focus { outline: none; border-color: #8b5cf6; box-shadow: 0 0 0 3px rgba(139,92,246,.25); }
+  .co-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .co-chip { padding: 7px 13px; border-radius: 999px; border: 1px solid #334155; background: #0f172a; color: #cbd5e1; font-size: .8rem; cursor: pointer; transition: .15s; }
+  .co-chip:hover { border-color: #7c3aed; }
+  .co-chip.is-active { background: #7c3aed; border-color: #7c3aed; color: #fff; }
+
+  /* table */
+  .co-card { background: #111827; border: 1px solid #243047; border-radius: 14px; overflow-x: auto; }
+  .co-table { width: 100%; border-collapse: collapse; font-size: .9rem; color: #e2e8f0; min-width: 720px; }
+  .co-table thead th { background: #0f1626; color: #8392a8; font-weight: 600; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; }
+  .co-table th, .co-table td { text-align: left; padding: 13px 14px; border-bottom: 1px solid #1c2740; vertical-align: middle; }
+  .co-table tbody tr:last-child td { border-bottom: 0; }
+  .co-table tbody tr { transition: background .15s; }
+  .co-table tbody tr:hover { background: rgba(124,58,237,.05); }
+
+  .co-company { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .co-avatar { width: 40px; height: 40px; flex: none; border-radius: 10px; display: grid; place-items: center; font-weight: 700; font-size: .9rem; color: #c4b5fd; background: rgba(139,92,246,.15); border: 1px solid rgba(139,92,246,.3); overflow: hidden; }
+  .co-avatar img { width: 100%; height: 100%; object-fit: contain; padding: 4px; background: #fff; }
+  .co-name { font-weight: 600; color: #f8fafc; overflow-wrap: anywhere; }
+  .co-meta { color: #8392a8; font-size: .78rem; margin-top: 2px; }
+
+  .co-emp { display: inline-flex; align-items: center; gap: 6px; color: #cbd5e1; }
+  .co-emp i { color: #64748b; font-size: .78rem; }
+
+  .co-thumb { border: 1px solid #334155; border-radius: 8px; background: #0f172a; display: block; }
+  .co-thumb--logo { width: 40px; height: 40px; object-fit: contain; padding: 3px; background: #fff; }
+  .co-thumb--cover { width: 96px; height: 40px; object-fit: cover; }
+  .co-no { display: inline-block; font-size: .72rem; color: #94a3b8; background: rgba(148,163,184,.08); border: 1px dashed #3b4a63; border-radius: 6px; padding: 6px 9px; }
+
+  .co-badge { display: inline-flex; align-items: center; gap: 6px; font-size: .72rem; font-weight: 600; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
+  .co-badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .co-badge--complete { background: rgba(16,185,129,.15); color: #6ee7b7; }
+  .co-badge--partial { background: rgba(245,158,11,.15); color: #fbbf24; }
+  .co-badge--new { background: rgba(139,92,246,.18); color: #c4b5fd; }
+
+  /* buttons */
+  .co-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 9px 16px; border: 0; border-radius: 10px; background: linear-gradient(180deg, #8b5cf6, #7c3aed); color: #fff; font-weight: 600; font-size: .85rem; cursor: pointer; transition: .15s; font-family: inherit; }
+  .co-btn:hover { filter: brightness(1.1); }
+  .co-btn--block { width: 100%; padding: 11px 16px; font-size: .9rem; }
+  .co-btn--ghost { background: transparent; border: 1px solid #475569; color: #e2e8f0; }
+  .co-btn--ghost:hover { background: #1e293b; filter: none; }
+  .co-btn--link-danger { background: transparent; color: #f87171; padding: 6px 0; font-weight: 500; }
+  .co-btn--link-danger:hover { color: #fca5a5; filter: none; }
+
+  .co-empty { padding: 40px 12px; text-align: center; color: #94a3b8; }
+  .co-empty i { font-size: 1.8rem; color: #334155; display: block; margin-bottom: 10px; }
+
+  /* ---------- modal (centered) ---------- */
+  dialog.co-dialog {
+    position: fixed;
+    inset: 0;
+    margin: auto;
+    width: min(480px, calc(100vw - 24px));
+    max-height: calc(100vh - 32px);
+    padding: 0;
+    border: 1px solid #2b3a55;
+    border-radius: 16px;
+    background: #111827;
+    color: #e2e8f0;
+    box-shadow: 0 30px 80px rgba(0,0,0,.6);
+    overflow: hidden;
+  }
+  dialog.co-dialog[open] { display: flex; flex-direction: column; animation: co-pop .18s ease-out; }
+  dialog.co-dialog::backdrop { background: rgba(2,6,23,.72); backdrop-filter: blur(3px); }
+  @keyframes co-pop { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+
+  .co-dialog__head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid #243047; background: #0f1626; }
+  .co-dialog__title { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .co-dialog__title h3 { margin: 0; font-size: 1.02rem; color: #f8fafc; overflow-wrap: anywhere; }
+  .co-dialog__title small { display: block; color: #8392a8; font-size: .75rem; margin-top: 2px; }
+  .co-x { width: 32px; height: 32px; flex: none; display: grid; place-items: center; background: transparent; border: 0; border-radius: 8px; color: #94a3b8; font-size: 1.3rem; cursor: pointer; line-height: 1; }
+  .co-x:hover { background: #1e293b; color: #fff; }
+  .co-dialog__body { padding: 18px 20px; overflow-y: auto; }
+  .co-dialog__foot { padding: 12px 20px 16px; border-top: 1px solid #243047; }
+  .co-dialog__foot form { margin: 0; }
+
+  /* ---------- form ---------- */
+  .co-form { display: grid; gap: 14px; margin: 0; }
+  .co-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .co-field { display: grid; gap: 6px; min-width: 0; }
+  .co-label { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: .8rem; font-weight: 600; color: #cbd5e1; }
+  .co-label em { font-style: normal; font-weight: 400; font-size: .72rem; color: #8392a8; }
+  .co-field input[type="text"], .co-field select {
+    width: 100%; box-sizing: border-box; padding: 10px 12px; color: #f1f5f9; background: #0b1222;
+    border: 1px solid #334155; border-radius: 10px; font-size: .9rem; font-family: inherit; color-scheme: dark;
+  }
+  .co-field input[type="text"]:focus, .co-field select:focus { outline: none; border-color: #8b5cf6; box-shadow: 0 0 0 3px rgba(139,92,246,.25); }
+  .co-field input[readonly] { background: #172033; color: #94a3b8; cursor: not-allowed; }
+
+  /* upload boxes */
+  .co-drop { position: relative; display: flex; align-items: center; justify-content: center; gap: 14px; padding: 14px; border: 1.5px dashed #3b4a63; border-radius: 12px; background: #0b1222; cursor: pointer; transition: .15s; overflow: hidden; }
+  .co-drop:hover, .co-drop.is-over { border-color: #8b5cf6; background: rgba(139,92,246,.06); }
+  .co-drop--logo { justify-content: flex-start; min-height: 76px; }
+  .co-drop--cover { min-height: 92px; }
+  .co-drop__input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+  .co-drop__img { flex: none; border: 1px solid #334155; border-radius: 10px; background: #fff; object-fit: contain; }
+  .co-drop--logo .co-drop__img { width: 52px; height: 52px; padding: 4px; }
+  .co-drop--cover .co-drop__img { width: 120px; height: 62px; object-fit: cover; padding: 0; }
+  .co-drop__img[hidden] { display: none; }
+  .co-drop__text { display: grid; gap: 2px; justify-items: start; color: #cbd5e1; font-size: .85rem; min-width: 0; }
+  .co-drop--cover .co-drop__text { justify-items: start; }
+  .co-drop__text i { color: #8b5cf6; font-size: 1.1rem; }
+  .co-drop__text b { font-weight: 600; }
+  .co-drop__file { color: #8392a8; font-size: .74rem; overflow-wrap: anywhere; }
+
+  @media (max-width: 700px) {
+    .co-wrap { padding: 18px 10px 40px; }
+    .co-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .co-row { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="co-wrap">
+
+  <h1>Companies</h1>
+  <p class="co-sub">
+    Every company your employees registered with. Upload a logo and a cover image once,
+    and it is shown for all employees of that company.
+  </p>
+
+  <% if (msg) { %>
+    <div class="co-alert co-alert--ok" role="status"><i class="fas fa-circle-check"></i> <%= msg %></div>
+  <% } %>
+  <% if (err) { %>
+    <div class="co-alert co-alert--err" role="alert"><i class="fas fa-circle-exclamation"></i> <%= err %></div>
+  <% } %>
+
+  <!-- Stats -->
+  <div class="co-stats">
+    <div class="co-stat">
+      <div class="co-stat__icon"><i class="fas fa-building"></i></div>
+      <div><b><%= stats.total %></b><span class="lbl">Total companies</span></div>
+    </div>
+    <div class="co-stat co-stat--ok">
+      <div class="co-stat__icon"><i class="fas fa-circle-check"></i></div>
+      <div><b><%= stats.complete %></b><span class="lbl">Logo + cover done</span></div>
+    </div>
+    <div class="co-stat co-stat--warn">
+      <div class="co-stat__icon"><i class="fas fa-image"></i></div>
+      <div><b><%= stats.partial %></b><span class="lbl">Images missing</span></div>
+    </div>
+    <div class="co-stat co-stat--new">
+      <div class="co-stat__icon"><i class="fas fa-plus"></i></div>
+      <div><b><%= stats.isNew %></b><span class="lbl">Not added yet</span></div>
+    </div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="co-toolbar">
+    <div class="co-searchbox">
+      <i class="fas fa-magnifying-glass"></i>
+      <input id="co-search" class="co-search" type="search" placeholder="Search company name...">
+    </div>
+    <div class="co-chips" id="co-chips">
+      <button type="button" class="co-chip is-active" data-filter="all">All (<%= stats.total %>)</button>
+      <button type="button" class="co-chip" data-filter="new">Not added (<%= stats.isNew %>)</button>
+      <button type="button" class="co-chip" data-filter="partial">Missing images (<%= stats.partial %>)</button>
+      <button type="button" class="co-chip" data-filter="complete">Completed (<%= stats.complete %>)</button>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="co-card">
+    <% if (rows.length === 0) { %>
+      <div class="co-empty">
+        <i class="fas fa-building"></i>
+        No companies yet. No employee has registered with a company name.
+      </div>
+    <% } else { %>
+      <table class="co-table">
+        <thead>
+          <tr>
+            <th>Company</th>
+            <th>Employees</th>
+            <th>Logo</th>
+            <th>Cover</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="co-body">
+          <% rows.forEach(function (r, i) { %>
+            <tr data-status="<%= r.status %>" data-name="<%= r.name.toLowerCase() %>">
+              <td>
+                <div class="co-company">
+                  <div class="co-avatar">
+                    <% if (r.hasLogo) { %>
+                      <img src="<%= r.doc.logo %>" alt="" loading="lazy">
+                    <% } else { %>
+                      <%= String(r.name).trim().charAt(0).toUpperCase() %>
+                    <% } %>
+                  </div>
+                  <div>
+                    <div class="co-name"><%= r.name %></div>
+                    <div class="co-meta"><%= r.doc ? (r.doc.industry || 'Technology') + ' · ' + (r.doc.category || 'Technology') : 'No profile yet' %></div>
+                  </div>
+                </div>
+              </td>
+
+              <td><span class="co-emp"><i class="fas fa-user-group"></i> <%= r.employees %></span></td>
+
+              <td>
+                <% if (r.hasLogo) { %>
+                  <img class="co-thumb co-thumb--logo" src="<%= r.doc.logo %>" alt="<%= r.name %> logo" loading="lazy">
+                <% } else { %>
+                  <span class="co-no">No logo</span>
+                <% } %>
+              </td>
+
+              <td>
+                <% if (r.hasCover) { %>
+                  <img class="co-thumb co-thumb--cover" src="<%= r.doc.coverImage %>" alt="<%= r.name %> cover" loading="lazy">
+                <% } else { %>
+                  <span class="co-no">No cover</span>
+                <% } %>
+              </td>
+
+              <td>
+                <% if (r.status === 'complete') { %>
+                  <span class="co-badge co-badge--complete">Updated</span>
+                <% } else if (r.status === 'partial') { %>
+                  <span class="co-badge co-badge--partial">Images missing</span>
+                <% } else { %>
+                  <span class="co-badge co-badge--new">Not added</span>
+                <% } %>
+              </td>
+
+              <td style="text-align:right; white-space:nowrap">
+                <button type="button"
+                        class="co-btn <%= r.status === 'complete' ? 'co-btn--ghost' : '' %>"
+                        data-open="dlg-<%= i %>">
+                  <i class="fas <%= r.status === 'complete' ? 'fa-pen' : 'fa-upload' %>"></i>
+                  <%= r.status === 'complete' ? 'Edit' : 'Upload' %>
+                </button>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+
+      <div id="co-none" class="co-empty" style="display:none">
+        <i class="fas fa-magnifying-glass"></i>
+        No company matches your search.
+      </div>
+    <% } %>
+  </div>
+
+</div>
+
+<!-- One modal per registered company -->
+<% rows.forEach(function (r, i) { %>
+  <dialog class="co-dialog" id="dlg-<%= i %>">
+    <div class="co-dialog__head">
+      <div class="co-dialog__title">
+        <div class="co-avatar">
+          <% if (r.hasLogo) { %>
+            <img src="<%= r.doc.logo %>" alt="">
+          <% } else { %>
+            <%= String(r.name).trim().charAt(0).toUpperCase() %>
+          <% } %>
+        </div>
+        <div>
+          <h3><%= r.name %></h3>
+          <small><%= r.employees %> employee<%= r.employees === 1 ? '' : 's' %> registered</small>
+        </div>
+      </div>
+      <button type="button" class="co-x" aria-label="Close" data-close>&times;</button>
+    </div>
+
+    <div class="co-dialog__body">
+      <%- include('companyform', {
+        c: r.doc || { name: r.name },
+        originalName: r.name,
+        lockName: false,
+        categories: categories
+      }) %>
+    </div>
+
+    <% if (r.doc) { %>
+      <div class="co-dialog__foot">
+        <form method="POST" action="/admin/companies/<%= r.doc._id %>/delete"
+              onsubmit="return confirm('Delete this company? Its images will also be removed.');">
+          <button type="submit" class="co-btn co-btn--link-danger">
+            <i class="fas fa-trash"></i> Delete company
+          </button>
+        </form>
+      </div>
+    <% } %>
+  </dialog>
+<% }) %>
+
+<script>
+  (function () {
+    /* ---------- search + filter ---------- */
+    var search = document.getElementById('co-search');
+    var chips = document.querySelectorAll('#co-chips .co-chip');
+    var rows = document.querySelectorAll('#co-body tr');
+    var none = document.getElementById('co-none');
+    var filter = 'all';
+
+    function apply() {
+      var q = ((search && search.value) || '').toLowerCase().trim();
+      var shown = 0;
+      rows.forEach(function (tr) {
+        var okStatus = filter === 'all' || tr.dataset.status === filter;
+        var okName = !q || tr.dataset.name.indexOf(q) !== -1;
+        var show = okStatus && okName;
+        tr.style.display = show ? '' : 'none';
+        if (show) shown++;
+      });
+      if (none) none.style.display = shown ? 'none' : 'block';
+    }
+
+    if (search) search.addEventListener('input', apply);
+
+    chips.forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        chips.forEach(function (c) { c.classList.remove('is-active'); });
+        chip.classList.add('is-active');
+        filter = chip.dataset.filter;
+        apply();
+      });
+    });
+
+    /* ---------- open / close modals ---------- */
+    document.querySelectorAll('[data-open]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var d = document.getElementById(btn.dataset.open);
+        if (d && d.showModal) d.showModal();
+      });
+    });
+
+    document.querySelectorAll('dialog.co-dialog').forEach(function (d) {
+      d.addEventListener('click', function (e) {
+        if (e.target === d) d.close();           // click on backdrop
+      });
+      var x = d.querySelector('[data-close]');
+      if (x) x.addEventListener('click', function () { d.close(); });
+    });
+
+    /* ---------- live image preview + size check ---------- */
+    var MAX = 3 * 1024 * 1024;
+
+    document.querySelectorAll('.co-drop__input').forEach(function (input) {
+      input.addEventListener('change', function () {
+        var box = input.closest('.co-drop');
+        var img = box.querySelector('.co-drop__img');
+        var label = box.querySelector('.co-drop__file');
+        var file = input.files && input.files[0];
+
+        if (!file) { label.textContent = 'No file chosen'; return; }
+
+        if (file.size > MAX) {
+          alert('Image is larger than 3 MB. Please choose a smaller file.');
+          input.value = '';
+          label.textContent = 'No file chosen';
+          return;
+        }
+
+        label.textContent = file.name;
+        img.src = URL.createObjectURL(file);
+        img.hidden = false;
+      });
+
+      // highlight on drag over
+      var zone = input.closest('.co-drop');
+      ['dragenter', 'dragover'].forEach(function (ev) {
+        zone.addEventListener(ev, function () { zone.classList.add('is-over'); });
+      });
+      ['dragleave', 'drop'].forEach(function (ev) {
+        zone.addEventListener(ev, function () { zone.classList.remove('is-over'); });
+      });
+    });
+  })();
+</script>
+
+<%- include('partials/layout-end') %>

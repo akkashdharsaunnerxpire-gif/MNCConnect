@@ -1,0 +1,74 @@
+<%
+  const c = locals.c || {};
+%>
+<form class="co-form" method="POST" action="/admin/companies" enctype="multipart/form-data">
+  <% if (c._id) { %>
+  <input type="hidden" name="id" value="<%= c._id %>">
+<% } %>
+
+<% if (locals.originalName) { %>
+  <input
+    type="hidden"
+    name="originalName"
+    value="<%= locals.originalName %>"
+  >
+<% } %>
+
+  <div class="co-field">
+    <label class="co-label" for="f-name-<%= c._id || 'new' %>">
+  Company name
+</label>
+    <input
+      id="f-name-<%= c._id || 'new' %>"
+      type="text"
+      name="name"
+      value="<%= c.name || '' %>"
+    >
+  </div>
+
+  <div class="co-row">
+    <div class="co-field">
+      <label class="co-label">Industry</label>
+      <input type="text" name="industry" value="<%= c.industry || 'Technology' %>" placeholder="e.g. IT Services">
+    </div>
+
+    <div class="co-field">
+      <label class="co-label">Category</label>
+      <select name="category">
+        <% categories.forEach(function (cat) { %>
+          <option value="<%= cat %>" <%= (c.category || 'Technology') === cat ? 'selected' : '' %>><%= cat %></option>
+        <% }) %>
+      </select>
+    </div>
+  </div>
+
+  <div class="co-field">
+    <span class="co-label">Logo <em>Square &middot; PNG / JPG / WEBP &middot; max 3 MB</em></span>
+    <label class="co-drop co-drop--logo">
+      <img class="co-drop__img" src="<%= c.logo || '' %>" alt="Logo preview" <%- c.logo ? '' : 'hidden' %>>
+      <span class="co-drop__text">
+        <i class="fas fa-cloud-arrow-up"></i>
+        <b><%= c.logo ? 'Replace logo' : 'Upload logo' %></b>
+        <small class="co-drop__file">No file chosen</small>
+      </span>
+      <input class="co-drop__input" type="file" name="logo" accept="image/png,image/jpeg,image/webp,image/avif">
+    </label>
+  </div>
+
+  <div class="co-field">
+    <span class="co-label">Cover image <em>Wide &middot; PNG / JPG / WEBP &middot; max 3 MB</em></span>
+    <label class="co-drop co-drop--cover">
+      <img class="co-drop__img" src="<%= c.coverImage || '' %>" alt="Cover preview" <%- c.coverImage ? '' : 'hidden' %>>
+      <span class="co-drop__text">
+        <i class="fas fa-cloud-arrow-up"></i>
+        <b><%= c.coverImage ? 'Replace cover' : 'Upload cover' %></b>
+        <small class="co-drop__file">No file chosen</small>
+      </span>
+      <input class="co-drop__input" type="file" name="coverImage" accept="image/png,image/jpeg,image/webp,image/avif">
+    </label>
+  </div>
+
+  <button type="submit" class="co-btn co-btn--block">
+    <i class="fas fa-check"></i> Save company
+  </button>
+</form>

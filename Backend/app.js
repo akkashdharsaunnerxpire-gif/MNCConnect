@@ -16,6 +16,10 @@ const mentorPanelRoutes = require("./routes/mentorPanelRoutes");
 const fresherBookingRoutes = require("./routes/fresherBookingRoutes");
 const instructionRoutes = require("./routes/instructionRoutes");
 const chatRoutes = require("./routes/chatRoutes");
+const {
+  adminRouter: adminCompanyRoutes,
+  publicRouter: publicCompanyRoutes,
+} = require("./routes/companyRoutes");
 
 
 const app = express();
@@ -163,7 +167,8 @@ app.use("/api", mentorPanelRoutes);
 
 // Meeting instructions (used by both mentor and fresher)
 app.use("/api/instructions", instructionRoutes);
-
+app.use("/company", publicCompanyRoutes);
+app.use("/admin/companies", adminCompanyRoutes);
 app.use("/admin", adminRoutes);
 
 // ================= DEV ROUTE CHECK =================

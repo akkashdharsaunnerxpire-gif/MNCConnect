@@ -18,10 +18,13 @@ import {
   RotateCcw,
 } from "lucide-react";
 
-// Import company catalog
-import companyCatalog from "../mncLogos/Companylogos";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+// Company logo / cover now come from the backend (admin uploads) — no local catalog.
+import {
+  API_URL,
+  normalizeCompanyName,
+  gradientFor,
+  fetchCompanyProfiles,
+} from "../../utils/companyProfiles";
 
 const categories = [
   "All Companies",
@@ -46,17 +49,6 @@ const AVATAR_COLORS = [
 // ============================================================
 // HELPERS
 // ============================================================
-
-const normalizeCompanyName = (name = "") =>
-  String(name).toLowerCase().trim().replace(/\s+/g, "").replace(/[._-]/g, "");
-
-const findCompanyDetails = (companyName) => {
-  const normalizedName = normalizeCompanyName(companyName);
-
-  return companyCatalog.find(
-    (company) => normalizeCompanyName(company.name) === normalizedName,
-  );
-};
 
 const initialsOf = (name = "") =>
   String(name)
@@ -91,75 +83,99 @@ const matchesCategory = (company, category) => {
 // GROUP EMPLOYEES BY COMPANY
 // ============================================================
 
-const groupMentorsByCompany = (mentors) => {
-  const grouped = {};
+const groupMentorsByCompany = (mentors, profiles = {}) => {
+  const grouped = new Map();
 
   mentors.forEach((mentor) => {
-    const companyName = mentor.companyName?.trim();
+    const registeredName = String(
+      mentor.companyName || mentor.currentCompany || ""
+    ).trim();
 
-    if (!companyName) return;
+    if (!registeredName) return;
 
-    const normalizedName = normalizeCompanyName(companyName);
+    const key = normalizeCompanyName(registeredName);
+    const profile = profiles[key];
 
-    if (!grouped[normalizedName]) {
-      grouped[normalizedName] = { companyName, mentors: [] };
+    // If an admin profile exists, use its current name as the group identity.
+    const groupKey = profile ? normalizeCompanyName(profile.name) : key;
+
+    if (!grouped.has(groupKey)) {
+      grouped.set(groupKey, {
+        companyName: profile?.name || registeredName,
+        profile,
+        mentors: [],
+        registeredNames: new Set(),
+      });
     }
 
-    grouped[normalizedName].mentors.push(mentor);
+    const group = grouped.get(groupKey);
+
+    group.mentors.push(mentor);
+    group.registeredNames.add(registeredName);
   });
 
-  return Object.values(grouped);
+  return Array.from(grouped.values()).map((group) => ({
+    ...group,
+    registeredNames: Array.from(group.registeredNames),
+  }));
 };
 
 // ============================================================
 // BUILD COMPANY DATA
+// profiles = { [normalizedName]: { logo, coverImage, industry, category } }
 // ============================================================
 
-const buildCompanyData = (apiData) => {
+const buildCompanyData = (apiData, profiles = {}) => {
   if (!Array.isArray(apiData)) return [];
 
-  // CASE 1: API already returns company objects
+  const profileOf = (companyName) =>
+    profiles[normalizeCompanyName(companyName)];
+
   const looksLikeCompanyData =
     apiData.length > 0 &&
     apiData.some(
       (item) =>
         item.mentorCount !== undefined ||
         item.onlineCount !== undefined ||
-        item.averageRating !== undefined,
+        item.averageRating !== undefined
     );
 
   if (looksLikeCompanyData) {
     return apiData.map((company) => {
-      const details = findCompanyDetails(company.companyName);
+      const registeredName = company.companyName || company.name || "";
+
+      const profile = profileOf(registeredName);
 
       return {
         ...company,
-        logo: details?.logo || null,
-        companyImage: details?.companyImage || null,
+        // Admin-edited name takes priority.
+        companyName: profile?.name || registeredName,
+        logo: profile?.logo || null,
+        companyImage: profile?.coverImage || null,
         mentors: company.mentors || [],
         mentorCount: company.mentorCount || company.mentors?.length || 0,
         onlineCount: company.onlineCount || 0,
         averageRating: company.averageRating || 0,
         ratingCount: company.ratingCount ?? null,
-        industry: company.industry || details?.industry || "Technology",
-        category: company.category || details?.category || "Industry",
+        industry: profile?.industry || company.industry || "Technology",
+        category: profile?.category || company.category || "Technology",
       };
     });
   }
 
-  // CASE 2: API returns individual mentors
-  return groupMentorsByCompany(apiData).map((company) => {
-    const details = findCompanyDetails(company.companyName);
-
+  return groupMentorsByCompany(apiData, profiles).map((company) => {
+    const profile = company.profile;
     const onlineMentors = company.mentors.filter(
       (mentor) =>
         mentor.isOnline === true ||
         mentor.online === true ||
-        mentor.status === "online",
+        mentor.status === "online"
     );
 
     const ratings = company.mentors
-      .map((mentor) => Number(mentor.averageRating) || Number(mentor.rating) || 0)
+      .map(
+        (mentor) => Number(mentor.averageRating) || Number(mentor.rating) || 0
+      )
       .filter((rating) => rating > 0);
 
     const averageRating = ratings.length
@@ -167,23 +183,92 @@ const buildCompanyData = (apiData) => {
       : 0;
 
     return {
-      companyName: company.companyName,
-      logo: details?.logo || null,
-      companyImage: details?.companyImage || null,
+      companyName: profile?.name || company.companyName,
+      registeredNames: company.registeredNames,
+      logo: profile?.logo || null,
+      companyImage: profile?.coverImage || null,
       mentors: company.mentors,
       mentorCount: company.mentors.length,
       onlineCount: onlineMentors.length,
       averageRating,
       ratingCount: ratings.length || null,
-      industry: details?.industry || "Technology",
-      category: details?.category || "Industry",
+      industry: profile?.industry || "Technology",
+      category: profile?.category || "Technology",
     };
   });
 };
 
+// ============================================================
+// MERGE COMPANIES
+// Two registered spellings (e.g. INFOYSIS + CapeStart) can point to the
+// same admin profile. Merge them into ONE card instead of dropping one.
+// ============================================================
+
+const mergeCompanies = (list = []) => {
+  const merged = new Map();
+
+  list.forEach((company) => {
+    const key = normalizeCompanyName(company.companyName);
+    if (!key) return;
+
+    const existing = merged.get(key);
+
+    if (!existing) {
+      merged.set(key, { ...company, mentors: [...(company.mentors || [])] });
+      return;
+    }
+
+    // employees: add only the ones we haven't seen yet
+    const seenIds = new Set(
+      existing.mentors.map((m) => String(m._id || m.id || ""))
+    );
+
+    (company.mentors || []).forEach((m) => {
+      const id = String(m._id || m.id || "");
+      if (!id || !seenIds.has(id)) {
+        existing.mentors.push(m);
+        if (id) seenIds.add(id);
+      }
+    });
+
+    // weighted average rating
+    const prevRated = existing.ratingCount || 0;
+    const nextRated = company.ratingCount || 0;
+    const totalRated = prevRated + nextRated;
+
+    existing.averageRating = totalRated
+      ? ((existing.averageRating || 0) * prevRated +
+          (company.averageRating || 0) * nextRated) /
+        totalRated
+      : Math.max(existing.averageRating || 0, company.averageRating || 0);
+
+    existing.ratingCount = totalRated || null;
+    existing.onlineCount =
+      (existing.onlineCount || 0) + (company.onlineCount || 0);
+
+    existing.registeredNames = Array.from(
+      new Set([
+        ...(existing.registeredNames || []),
+        ...(company.registeredNames || []),
+      ])
+    );
+
+    // keep a logo / cover if the first entry didn't have one
+    existing.logo = existing.logo || company.logo || null;
+    existing.companyImage = existing.companyImage || company.companyImage || null;
+
+    existing.mentorCount =
+      existing.mentors.length ||
+      (existing.mentorCount || 0) + (company.mentorCount || 0);
+  });
+
+  return Array.from(merged.values());
+};
+
 // "View" ALWAYS booking page-ku mattum. Meeting room-ku direct link kidayadhu.
 // Already book pannina company-um thirumba book panna idhu thaan vazhi.
-const sessionLink = (company) => `/Home/sessionboard/${encodeURIComponent(company.companyName || "")}`;
+const sessionLink = (company) =>
+  `/Home/sessionboard/${encodeURIComponent(company.companyName || "")}`;
 
 // ============================================================
 // MAIN COMPONENT
@@ -209,29 +294,21 @@ const BrowseMentors = () => {
       setLoading(true);
       setError("");
 
-      const response = await fetch(`${API_URL}/mentor/companies`);
+      // company list + admin-uploaded logo/cover, fetched together
+      const [response, profiles] = await Promise.all([
+        fetch(`${API_URL}/mentor/companies`),
+        fetchCompanyProfiles(),
+      ]);
       const data = await response.json();
 
       if (!response.ok) {
         throw new Error(data.message || "Failed to load companies");
       }
 
-      const finalCompanies = buildCompanyData(data.companies || []);
+      const finalCompanies = buildCompanyData(data.companies || [], profiles);
 
-      // Remove duplicates
-      const unique = [];
-      const seen = new Set();
-
-      finalCompanies.forEach((company) => {
-        const name = company.companyName?.trim().toLowerCase();
-
-        if (name && !seen.has(name)) {
-          seen.add(name);
-          unique.push(company);
-        }
-      });
-
-      setCompanies(unique);
+      // Merge spellings that belong to the same company profile
+      setCompanies(mergeCompanies(finalCompanies));
     } catch (err) {
       console.error("Company fetch error:", err);
       setError(err.message || "Something went wrong");
@@ -265,18 +342,32 @@ const BrowseMentors = () => {
   const categoryCounts = useMemo(
     () =>
       Object.fromEntries(
-        categories.map((c) => [c, companies.filter((co) => matchesCategory(co, c)).length]),
+        categories.map((c) => [
+          c,
+          companies.filter((co) => matchesCategory(co, c)).length,
+        ])
       ),
-    [companies],
+    [companies]
   );
 
-  const totals = useMemo(
-    () => ({
+  const totals = useMemo(() => {
+    const rated = companies.filter((c) => Number(c.averageRating) > 0);
+
+    return {
       companies: companies.length,
       employees: companies.reduce((sum, c) => sum + (c.mentorCount || 0), 0),
       online: companies.reduce((sum, c) => sum + (c.onlineCount || 0), 0),
-    }),
-    [companies],
+      avgRating: rated.length
+        ? rated.reduce((sum, c) => sum + Number(c.averageRating), 0) /
+          rated.length
+        : 0,
+    };
+  }, [companies]);
+
+  // only companies that already have an admin-uploaded logo go in the strip
+  const logoCompanies = useMemo(
+    () => companies.filter((c) => c.logo),
+    [companies]
   );
 
   const filteredCompanies = useMemo(() => {
@@ -299,9 +390,11 @@ const BrowseMentors = () => {
     const byEmployees = (a, b) => (b.mentorCount || 0) - (a.mentorCount || 0);
     const byOnline = (a, b) => (b.onlineCount || 0) - (a.onlineCount || 0);
 
-    if (sort === "Rating") data.sort((a, b) => (b.averageRating || 0) - (a.averageRating || 0));
+    if (sort === "Rating")
+      data.sort((a, b) => (b.averageRating || 0) - (a.averageRating || 0));
     else if (sort === "Employees") data.sort(byEmployees);
-    else if (sort === "Online now") data.sort((a, b) => byOnline(a, b) || byEmployees(a, b));
+    else if (sort === "Online now")
+      data.sort((a, b) => byOnline(a, b) || byEmployees(a, b));
     else data.sort((a, b) => byEmployees(a, b) || byOnline(a, b)); // Popular
 
     return data;
@@ -315,10 +408,30 @@ const BrowseMentors = () => {
   };
 
   const activeFilters = [];
-  if (search.trim()) activeFilters.push({ key: "search", label: `“${search.trim()}”`, clear: () => setSearch("") });
-  if (activeCategory !== "All Companies") activeFilters.push({ key: "cat", label: activeCategory, clear: () => setActiveCategory("All Companies") });
-  if (onlineOnly) activeFilters.push({ key: "online", label: "Online now", clear: () => setOnlineOnly(false) });
-  if (sort !== "Popular") activeFilters.push({ key: "sort", label: `Sort: ${sort}`, clear: () => setSort("Popular") });
+  if (search.trim())
+    activeFilters.push({
+      key: "search",
+      label: `“${search.trim()}”`,
+      clear: () => setSearch(""),
+    });
+  if (activeCategory !== "All Companies")
+    activeFilters.push({
+      key: "cat",
+      label: activeCategory,
+      clear: () => setActiveCategory("All Companies"),
+    });
+  if (onlineOnly)
+    activeFilters.push({
+      key: "online",
+      label: "Online now",
+      clear: () => setOnlineOnly(false),
+    });
+  if (sort !== "Popular")
+    activeFilters.push({
+      key: "sort",
+      label: `Sort: ${sort}`,
+      clear: () => setSort("Popular"),
+    });
 
   const dash = loading || error ? "–" : null;
 
@@ -352,19 +465,28 @@ const BrowseMentors = () => {
             <BadgeCheck size={14} /> Learn from the best
           </span>
 
-          <h1 className="mc-rise mt-5 text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl" style={{ animationDelay: "60ms" }}>
+          <h1
+            className="mc-rise mt-5 text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl"
+            style={{ animationDelay: "60ms" }}
+          >
             Browse{" "}
             <span className="bg-gradient-to-r from-violet-600 via-indigo-600 to-sky-500 bg-clip-text text-transparent">
               MNC Employees
             </span>
           </h1>
 
-          <p className="mc-rise mx-auto mt-4 max-w-xl text-base text-slate-500 sm:text-lg" style={{ animationDelay: "120ms" }}>
+          <p
+            className="mc-rise mx-auto mt-4 max-w-xl text-base text-slate-500 sm:text-lg"
+            style={{ animationDelay: "120ms" }}
+          >
             Book 1:1 sessions with verified professionals from the world's leading companies.
           </p>
 
           {/* search */}
-          <div className="mc-rise mx-auto mt-8 max-w-2xl" style={{ animationDelay: "180ms" }}>
+          <div
+            className="mc-rise mx-auto mt-8 max-w-2xl"
+            style={{ animationDelay: "180ms" }}
+          >
             <label
               htmlFor="company-search"
               className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3.5 shadow-lg shadow-slate-200/60 transition focus-within:border-violet-400 focus-within:ring-4 focus-within:ring-violet-100"
@@ -400,40 +522,66 @@ const BrowseMentors = () => {
           </div>
 
           {/* live stats */}
-          <div className="mc-rise mx-auto mt-8 grid max-w-3xl grid-cols-2 gap-3 md:grid-cols-4" style={{ animationDelay: "240ms" }}>
-            <StatPill icon={<BriefcaseBusiness size={18} />} value={dash ?? totals.companies} label="Companies" />
-            <StatPill icon={<Users size={18} />} value={dash ?? totals.employees} label="MNC employees" />
-            <StatPill icon={<span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 motion-safe:animate-ping" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" /></span>} value={dash ?? totals.online} label="Online now" />
-            <StatPill icon={<ShieldCheck size={18} />} value={companyCatalog?.length || 0} label="Companies supported" />
+          <div
+            className="mc-rise mx-auto mt-8 grid max-w-3xl grid-cols-2 gap-3 md:grid-cols-4"
+            style={{ animationDelay: "240ms" }}
+          >
+            <StatPill
+              icon={<BriefcaseBusiness size={18} />}
+              value={dash ?? totals.companies}
+              label="Companies"
+            />
+            <StatPill
+              icon={<Users size={18} />}
+              value={dash ?? totals.employees}
+              label="MNC employees"
+            />
+            <StatPill
+              icon={
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 motion-safe:animate-ping" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                </span>
+              }
+              value={dash ?? totals.online}
+              label="Online now"
+            />
+            <StatPill
+              icon={<Star size={18} />}
+              value={dash ?? (totals.avgRating ? totals.avgRating.toFixed(1) : "–")}
+              label="Avg. rating"
+            />
           </div>
         </div>
       </section>
 
       {/* ======================================================
-          TRUSTED LOGOS
+          TRUSTED LOGOS (only companies that have a logo)
       ====================================================== */}
-      {companyCatalog?.length > 0 && (
+      {logoCompanies.length > 0 && (
         <section className="border-b border-slate-100 bg-slate-50/50">
           <div className="mx-auto flex max-w-[1400px] items-center gap-6 overflow-x-auto px-5 py-4 mc-no-scrollbar sm:px-8">
             <span className="shrink-0 text-xs font-semibold uppercase tracking-wider text-slate-400">
               Employees from
             </span>
             <div className="flex items-center gap-5">
-              {companyCatalog.slice(0, 10).map((company, index) => (
+              {logoCompanies.slice(0, 10).map((company) => (
                 <div
-                  key={`${company.name}-${index}`}
-                  title={company.name}
+                  key={company.companyName}
+                  title={company.companyName}
                   className="flex h-8 w-8 shrink-0 items-center justify-center opacity-60 grayscale transition duration-200 hover:scale-110 hover:opacity-100 hover:grayscale-0"
                 >
-                  {company.logo ? (
-                    <img src={company.logo} alt={company.name} className="max-h-full max-w-full object-contain" />
-                  ) : (
-                    <span className="text-[10px] font-bold text-slate-500">{initialsOf(company.name)}</span>
-                  )}
+                  <img
+                    src={company.logo}
+                    alt={company.companyName}
+                    className="max-h-full max-w-full object-contain"
+                  />
                 </div>
               ))}
-              {companyCatalog.length > 10 && (
-                <span className="shrink-0 text-xs font-medium text-slate-400">+{companyCatalog.length - 10} more</span>
+              {logoCompanies.length > 10 && (
+                <span className="shrink-0 text-xs font-medium text-slate-400">
+                  +{logoCompanies.length - 10} more
+                </span>
               )}
             </div>
           </div>
@@ -445,7 +593,11 @@ const BrowseMentors = () => {
       ====================================================== */}
       <main className="mx-auto max-w-[1400px] px-5 py-8 sm:px-8 sm:py-10">
         {/* category chips */}
-        <div className="mc-no-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Company category">
+        <div
+          className="mc-no-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1 pb-1"
+          role="tablist"
+          aria-label="Company category"
+        >
           {categories.map((item) => {
             const active = activeCategory === item;
             return (
@@ -463,7 +615,11 @@ const BrowseMentors = () => {
               >
                 {item}
                 {!loading && (
-                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
+                      active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
+                    }`}
+                  >
                     {categoryCounts[item] ?? 0}
                   </span>
                 )}
@@ -479,8 +635,15 @@ const BrowseMentors = () => {
               "Loading companies…"
             ) : (
               <>
-                Showing <span className="font-semibold text-slate-900">{filteredCompanies.length}</span> of{" "}
-                <span className="font-semibold text-slate-900">{companies.length}</span> companies
+                Showing{" "}
+                <span className="font-semibold text-slate-900">
+                  {filteredCompanies.length}
+                </span>{" "}
+                of{" "}
+                <span className="font-semibold text-slate-900">
+                  {companies.length}
+                </span>{" "}
+                companies
               </>
             )}
           </p>
@@ -493,8 +656,16 @@ const BrowseMentors = () => {
               onClick={() => setOnlineOnly((v) => !v)}
               className="inline-flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-violet-300"
             >
-              <span className={`relative h-5 w-9 rounded-full transition ${onlineOnly ? "bg-emerald-500" : "bg-slate-200"}`}>
-                <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${onlineOnly ? "left-[18px]" : "left-0.5"}`} />
+              <span
+                className={`relative h-5 w-9 rounded-full transition ${
+                  onlineOnly ? "bg-emerald-500" : "bg-slate-200"
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
+                    onlineOnly ? "left-[18px]" : "left-0.5"
+                  }`}
+                />
               </span>
               Online now
             </button>
@@ -507,12 +678,18 @@ const BrowseMentors = () => {
                 className="cursor-pointer bg-transparent font-medium text-slate-800 outline-none"
               >
                 {SORT_OPTIONS.map((option) => (
-                  <option key={option} value={option}>{option}</option>
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
                 ))}
               </select>
             </label>
 
-            <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1" role="group" aria-label="View">
+            <div
+              className="inline-flex rounded-xl border border-slate-200 bg-white p-1"
+              role="group"
+              aria-label="View"
+            >
               {[
                 { id: "grid", icon: LayoutGrid, label: "Grid view" },
                 { id: "list", icon: List, label: "List view" },
@@ -523,7 +700,11 @@ const BrowseMentors = () => {
                   onClick={() => setView(id)}
                   aria-label={label}
                   aria-pressed={view === id}
-                  className={`rounded-lg p-1.5 transition ${view === id ? "bg-violet-50 text-violet-700" : "text-slate-400 hover:text-slate-700"}`}
+                  className={`rounded-lg p-1.5 transition ${
+                    view === id
+                      ? "bg-violet-50 text-violet-700"
+                      : "text-slate-400 hover:text-slate-700"
+                  }`}
                 >
                   <Icon size={17} />
                 </button>
@@ -546,7 +727,11 @@ const BrowseMentors = () => {
                 <X size={12} className="opacity-60 transition group-hover:opacity-100" />
               </button>
             ))}
-            <button type="button" onClick={clearAll} className="text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-900 hover:underline">
+            <button
+              type="button"
+              onClick={clearAll}
+              className="text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-900 hover:underline"
+            >
               Clear all
             </button>
           </div>
@@ -555,9 +740,16 @@ const BrowseMentors = () => {
         {/* content */}
         <div className="mt-6">
           {loading ? (
-            <div className={view === "grid" ? "grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" : "space-y-3"} aria-busy="true">
+            <div
+              className={
+                view === "grid"
+                  ? "grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                  : "space-y-3"
+              }
+              aria-busy="true"
+            >
               {Array.from({ length: 8 }).map((_, i) =>
-                view === "grid" ? <SkeletonCard key={i} /> : <SkeletonRow key={i} />,
+                view === "grid" ? <SkeletonCard key={i} /> : <SkeletonRow key={i} />
               )}
             </div>
           ) : error ? (
@@ -581,7 +773,9 @@ const BrowseMentors = () => {
                 <Building2 size={28} />
               </div>
               <h2 className="mt-5 text-xl font-semibold">No companies found</h2>
-              <p className="mt-2 text-sm text-slate-500">Try a different search or remove a filter.</p>
+              <p className="mt-2 text-sm text-slate-500">
+                Try a different search or remove a filter.
+              </p>
               <button
                 type="button"
                 onClick={clearAll}
@@ -611,10 +805,26 @@ const BrowseMentors = () => {
       ====================================================== */}
       <section className="mx-auto max-w-[1400px] px-5 pb-14 sm:px-8">
         <div className="grid gap-4 rounded-3xl border border-slate-200 bg-gradient-to-br from-violet-50/60 via-white to-sky-50/60 p-5 sm:grid-cols-2 sm:p-6 lg:grid-cols-4">
-          <Feature icon={<Award size={20} />} title="Learn from the top 1%" desc="Industry-leading professionals" />
-          <Feature icon={<Users size={20} />} title="1:1 personalised sessions" desc="Guidance built around you" />
-          <Feature icon={<BarChart3 size={20} />} title="Accelerate your career" desc="Real, practical insight" />
-          <Feature icon={<ShieldCheck size={20} />} title="Verified MNC employees" desc="Background verified" />
+          <Feature
+            icon={<Award size={20} />}
+            title="Learn from the top 1%"
+            desc="Industry-leading professionals"
+          />
+          <Feature
+            icon={<Users size={20} />}
+            title="1:1 personalised sessions"
+            desc="Guidance built around you"
+          />
+          <Feature
+            icon={<BarChart3 size={20} />}
+            title="Accelerate your career"
+            desc="Real, practical insight"
+          />
+          <Feature
+            icon={<ShieldCheck size={20} />}
+            title="Verified MNC employees"
+            desc="Background verified"
+          />
         </div>
       </section>
     </div>
@@ -628,14 +838,18 @@ const BrowseMentors = () => {
 const StatPill = ({ icon, value, label }) => (
   <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3.5 text-left shadow-sm backdrop-blur transition hover:-translate-y-0.5 hover:shadow-md">
     <div className="flex h-5 items-center text-violet-600">{icon}</div>
-    <p className="mt-2 text-2xl font-semibold tracking-tight tabular-nums text-slate-900">{value}</p>
+    <p className="mt-2 text-2xl font-semibold tracking-tight tabular-nums text-slate-900">
+      {value}
+    </p>
     <p className="text-xs text-slate-500">{label}</p>
   </div>
 );
 
 const Feature = ({ icon, title, desc }) => (
   <div className="flex items-center gap-4 rounded-2xl p-3 transition hover:bg-white">
-    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-700">{icon}</div>
+    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
+      {icon}
+    </div>
     <div className="min-w-0">
       <h4 className="text-sm font-semibold text-slate-900">{title}</h4>
       <p className="mt-0.5 text-xs text-slate-500">{desc}</p>
@@ -648,7 +862,9 @@ const Logo = ({ company, size = "h-14 w-14", rounded = "rounded-2xl" }) => {
   const name = company.companyName || "";
 
   return (
-    <div className={`flex ${size} shrink-0 items-center justify-center overflow-hidden ${rounded} border border-slate-200 bg-white shadow-md`}>
+    <div
+      className={`flex ${size} shrink-0 items-center justify-center overflow-hidden ${rounded} border border-slate-200 bg-white shadow-md`}
+    >
       {company.logo && !failed ? (
         <img
           src={company.logo}
@@ -659,6 +875,33 @@ const Logo = ({ company, size = "h-14 w-14", rounded = "rounded-2xl" }) => {
       ) : (
         <span className="text-base font-bold text-violet-600">{initialsOf(name)}</span>
       )}
+    </div>
+  );
+};
+
+// Cover image with graceful fallback: broken/missing image => gradient + initials
+const CoverImage = ({ company }) => {
+  const [failed, setFailed] = useState(false);
+  const name = company.companyName || "";
+
+  if (company.companyImage && !failed) {
+    return (
+      <img
+        src={company.companyImage}
+        alt={`${name} office`}
+        onError={() => setFailed(true)}
+        className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+      />
+    );
+  }
+
+  return (
+    <div
+      className={`flex h-full w-full items-center justify-center bg-gradient-to-br ${gradientFor(name)}`}
+    >
+      <span className="text-5xl font-bold tracking-tight text-white/70">
+        {initialsOf(name)}
+      </span>
     </div>
   );
 };
@@ -676,7 +919,9 @@ const MiniAvatar = ({ mentor }) => {
       className="h-8 w-8 rounded-full border-2 border-white object-cover"
     />
   ) : (
-    <span className={`flex h-8 w-8 items-center justify-center rounded-full border-2 border-white text-[11px] font-semibold ${AVATAR_COLORS[hashIndex(name)]}`}>
+    <span
+      className={`flex h-8 w-8 items-center justify-center rounded-full border-2 border-white text-[11px] font-semibold ${AVATAR_COLORS[hashIndex(name)]}`}
+    >
       {initialsOf(name)}
     </span>
   );
@@ -722,16 +967,23 @@ const OnlineBadge = ({ count }) =>
   );
 
 const RatingText = ({ company }) => {
-  const rating = Number(company.averageRating) > 0 ? Number(company.averageRating).toFixed(1) : null;
+  const rating =
+    Number(company.averageRating) > 0
+      ? Number(company.averageRating).toFixed(1)
+      : null;
 
   return rating ? (
     <span className="inline-flex items-center gap-1 text-sm font-semibold text-slate-800">
       <Star size={14} className="fill-amber-400 text-amber-400" />
       {rating}
-      {company.ratingCount ? <span className="font-normal text-slate-400">({company.ratingCount})</span> : null}
+      {company.ratingCount ? (
+        <span className="font-normal text-slate-400">({company.ratingCount})</span>
+      ) : null}
     </span>
   ) : (
-    <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">New</span>
+    <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">
+      New
+    </span>
   );
 };
 
@@ -750,17 +1002,7 @@ const CompanyCard = ({ company, index }) => {
       style={{ animationDelay: `${Math.min(index, 12) * 40}ms` }}
     >
       <div className="relative h-32 overflow-hidden bg-slate-100">
-        {company.companyImage ? (
-          <img
-            src={company.companyImage}
-            alt={`${name} office`}
-            className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-violet-100 to-sky-100">
-            <Building2 size={40} className="text-violet-300" />
-          </div>
-        )}
+        <CoverImage company={company} />
         <div className="absolute inset-0 bg-gradient-to-t from-slate-900/35 to-transparent" />
         <div className="absolute right-3 top-3">
           <OnlineBadge count={company.onlineCount || 0} />
@@ -783,7 +1025,9 @@ const CompanyCard = ({ company, index }) => {
         <div className="mt-4 flex items-center gap-2 text-sm text-slate-600">
           <Users size={15} className="text-slate-400" />
           <span>
-            <span className="font-semibold text-slate-900">{company.mentorCount || 0}</span>{" "}
+            <span className="font-semibold text-slate-900">
+              {company.mentorCount || 0}
+            </span>{" "}
             {(company.mentorCount || 0) === 1 ? "employee" : "employees"}
           </span>
         </div>
@@ -792,7 +1036,10 @@ const CompanyCard = ({ company, index }) => {
           <AvatarStack mentors={company.mentors} total={company.mentorCount || 0} />
           <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-violet-700">
             View
-            <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
+            <ArrowRight
+              size={16}
+              className="transition-transform group-hover:translate-x-1"
+            />
           </span>
         </div>
       </div>
@@ -824,16 +1071,26 @@ const CompanyRow = ({ company, index }) => {
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
         <span className="inline-flex items-center gap-2 text-sm text-slate-600">
           <Users size={15} className="text-slate-400" />
-          <span className="font-semibold text-slate-900">{company.mentorCount || 0}</span> employees
+          <span className="font-semibold text-slate-900">
+            {company.mentorCount || 0}
+          </span>{" "}
+          employees
         </span>
         <RatingText company={company} />
         <OnlineBadge count={company.onlineCount || 0} />
-        <AvatarStack mentors={company.mentors} total={company.mentorCount || 0} max={3} />
+        <AvatarStack
+          mentors={company.mentors}
+          total={company.mentorCount || 0}
+          max={3}
+        />
       </div>
 
       <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-violet-700 sm:ml-2">
         View
-        <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
+        <ArrowRight
+          size={16}
+          className="transition-transform group-hover:translate-x-1"
+        />
       </span>
     </Link>
   );
@@ -844,7 +1101,10 @@ const CompanyRow = ({ company, index }) => {
 // ============================================================
 
 const SkeletonCard = () => (
-  <div className="animate-pulse overflow-hidden rounded-2xl border border-slate-100 bg-white" aria-hidden="true">
+  <div
+    className="animate-pulse overflow-hidden rounded-2xl border border-slate-100 bg-white"
+    aria-hidden="true"
+  >
     <div className="h-32 bg-slate-100" />
     <div className="relative px-5 pb-5 pt-9">
       <div className="absolute -top-7 left-5 h-14 w-14 rounded-2xl border border-white bg-slate-200" />
@@ -854,7 +1114,10 @@ const SkeletonCard = () => (
       <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4">
         <div className="flex -space-x-2">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="h-8 w-8 rounded-full border-2 border-white bg-slate-100" />
+            <div
+              key={i}
+              className="h-8 w-8 rounded-full border-2 border-white bg-slate-100"
+            />
           ))}
         </div>
         <div className="h-4 w-12 rounded bg-slate-100" />
@@ -864,7 +1127,10 @@ const SkeletonCard = () => (
 );
 
 const SkeletonRow = () => (
-  <div className="flex animate-pulse items-center gap-4 rounded-2xl border border-slate-100 bg-white p-4" aria-hidden="true">
+  <div
+    className="flex animate-pulse items-center gap-4 rounded-2xl border border-slate-100 bg-white p-4"
+    aria-hidden="true"
+  >
     <div className="h-14 w-14 rounded-xl bg-slate-100" />
     <div className="flex-1 space-y-2">
       <div className="h-4 w-1/3 rounded bg-slate-100" />

@@ -1,23 +1,60 @@
     </div><!-- /content -->
-</div><!-- /main -->
+  </div><!-- /main -->
 
-<div class="toast-wrap" id="toasts"></div>
+  <!-- Toast notifications -->
+  <div class="toast-wrap" id="toasts" aria-live="polite" aria-atomic="false"></div>
 
-<div class="modal-back" id="modal">
+  <!-- Confirmation modal -->
+  <div
+    class="modal-back"
+    id="modal"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="modalTitle"
+    aria-describedby="modalMsg"
+    aria-hidden="true"
+  >
     <div class="modal">
-        <h3 id="modalTitle">Are you sure?</h3>
-        <p id="modalMsg"></p>
-        <div id="modalReasonWrap" style="display:none">
-            <label class="label" for="modalReason">Reason (shown to admins only)</label>
-            <textarea id="modalReason" class="textarea" placeholder="e.g. Offer letter is not readable"></textarea>
-        </div>
-        <div class="modal-foot">
-            <button type="button" class="btn btn-ghost" id="modalCancel">Cancel</button>
-            <button type="button" class="btn btn-ok" id="modalOk">Confirm</button>
-        </div>
-    </div>
-</div>
+      <h3 id="modalTitle">Are you sure?</h3>
 
-<script src="/admin/js/admin.js"></script>
+      <p id="modalMsg"></p>
+
+      <!-- Optional reason field -->
+      <div id="modalReasonWrap" style="display:none">
+        <label class="label" for="modalReason">
+          Reason (shown to admins only)
+        </label>
+
+        <textarea
+          id="modalReason"
+          class="textarea"
+          placeholder="e.g. Offer letter is not readable"
+          rows="3"
+        ></textarea>
+      </div>
+
+      <div class="modal-foot">
+        <button
+          type="button"
+          class="btn btn-ghost"
+          id="modalCancel"
+        >
+          Cancel
+        </button>
+
+        <button
+          type="button"
+          class="btn btn-ok"
+          id="modalOk"
+        >
+          Confirm
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Admin panel JavaScript -->
+  <script src="/admin/js/admin.js"></script>
 </body>
 </html>
+```
