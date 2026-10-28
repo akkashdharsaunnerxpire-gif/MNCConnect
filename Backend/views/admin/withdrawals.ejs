@@ -1,0 +1,104 @@
+<%- include('partials/layout-start') %>
+
+<%
+  const fmt = (n) => Number(n || 0).toLocaleString('en-IN');
+  const stBadge = (s) => (s === 'paid' ? 'b-ok' : s === 'rejected' ? 'b-bad' : 'b-warn');
+  const stLabel = (s) => (s === 'requested' ? 'To pay' : s === 'paid' ? 'Paid' : 'Rejected');
+  const tabs = [
+    { k: 'requested', l: 'To pay (' + sums.requested.count + ')' },
+    { k: 'paid', l: 'Paid' },
+    { k: 'rejected', l: 'Rejected' },
+    { k: 'all', l: 'All' }
+  ];
+%>
+
+<div class="grid g-3 mb">
+    <div class="card stat t-primary"><div><small>Waiting to be paid</small><h3>₹<%= fmt(sums.requested.total) %></h3></div><div class="stat-ico"><i class="fas fa-hourglass-half"></i></div></div>
+    <div class="card stat t-ok"><div><small>Total paid to mentors</small><h3>₹<%= fmt(sums.paid.total) %></h3></div><div class="stat-ico"><i class="fas fa-indian-rupee-sign"></i></div></div>
+    <div class="card stat t-bad"><div><small>Rejected</small><h3><%= fmt(sums.rejected.count) %></h3></div><div class="stat-ico"><i class="fas fa-circle-xmark"></i></div></div>
+</div>
+
+<div class="tabs">
+    <% tabs.forEach(function (t) { %>
+        <a href="/admin/withdrawals?status=<%= t.k %>" class="<%= status === t.k ? 'active' : '' %>"><%= t.l %></a>
+    <% }) %>
+</div>
+
+<div class="card">
+    <% if (withdrawals.length) { %>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr><th>Mentor</th><th>UPI ID</th><th>Amount</th><th>Status</th><th>Requested</th><th>Action</th></tr>
+            </thead>
+            <tbody>
+            <% withdrawals.forEach(function (w) { %>
+                <tr>
+                    <td>
+                        <b><%= w.mentor ? w.mentor.name : 'Deleted mentor' %></b><br>
+                        <span class="muted small"><%= w.mentor ? w.mentor.email : '' %></span>
+                    </td>
+                    <td class="mono">
+                        <%= w.upiId %>
+                        <button type="button" onclick="copyText('<%= w.upiId %>')" style="margin-left:6px;cursor:pointer;">Copy</button>
+                    </td>
+                    <td><b>₹<%= fmt(w.amount) %></b></td>
+                    <td><span class="badge <%= stBadge(w.status) %>"><i class="dot"></i><%= stLabel(w.status) %></span></td>
+                    <td class="muted small"><%= new Date(w.createdAt).toLocaleString('en-GB') %></td>
+                    <td>
+                        <% if (w.status === 'requested') { %>
+                            <button type="button" onclick="act('<%= w._id %>','paid')" style="cursor:pointer;">Mark paid</button>
+                            <button type="button" onclick="act('<%= w._id %>','reject')" style="cursor:pointer;">Reject</button>
+                        <% } else { %>
+                            <span class="muted small"><%= w.note || '—' %></span>
+                        <% } %>
+                    </td>
+                </tr>
+            <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <%- include('partials/pagination') %>
+    <% } else { %>
+        <div class="empty"><i class="fas fa-wallet"></i><h4>No withdrawal requests</h4><p>Requests from mentors will appear here.</p></div>
+    <% } %>
+</div>
+
+<p class="muted small" style="margin-top:14px;">
+    Steps: 1) Copy the UPI ID and pay the amount from your bank / GPay. 2) Click "Mark paid" and enter the UPI reference (UTR).
+    Never mark paid before the money is actually sent.
+</p>
+
+<script>
+    function copyText(t) {
+        navigator.clipboard.writeText(t).then(function () { alert('UPI ID copied'); });
+    }
+
+    async function act(id, kind) {
+        var body = {};
+        if (kind === 'paid') {
+            var utr = prompt('Enter the UPI transaction / UTR number you paid with:');
+            if (!utr) return;
+            body.utr = utr.trim();
+        } else {
+            var reason = prompt('Reason for rejecting (the mentor will see this):');
+            if (!reason) return;
+            body.reason = reason.trim();
+        }
+
+        try {
+            var res = await fetch('/admin/withdrawals/' + id + '/' + kind, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            var data = await res.json().catch(function () { return {}; });
+            alert(data.message || (res.ok ? 'Done' : 'Failed'));
+            if (res.ok) location.reload();
+        } catch (e) {
+            alert('Network error. Please try again.');
+        }
+    }
+</script>
+
+<%- include('partials/layout-end') %>

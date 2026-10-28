@@ -1,15 +1,15 @@
 // models/Payment.js
-// One document per Razorpay order. Amounts are stored in RUPEES.
+// One document per Razorpay order (or wallet payment). Amounts are stored in RUPEES.
 //
 // Lifecycle:
 //   created  -> order created, user is at the checkout
 //   paid     -> signature verified (money is held by the platform)
 //   failed   -> checkout failed / signature invalid
-//   refunded -> refunded manually from the Razorpay dashboard
+//   refunded -> refunded (Razorpay refund API, wallet refund, or manually from the dashboard)
 //
 // A paid payment belongs to a mentor once the mentor accepts the session
-// request (mentor + sessionStatus "upcoming"). The mentor's share becomes
-// withdrawable automatically after sessionEndsAt has passed.
+// (mentor + sessionStatus "upcoming"). When the session is confirmed / auto-confirmed
+// sessionStatus becomes "completed" and the mentor's share becomes withdrawable.
 
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
@@ -42,6 +42,10 @@ const paymentSchema = new Schema(
     payerContact: { type: String, default: "" },
     paidAt: { type: Date, default: null },
 
+    // ---------- Refund ----------
+    refundMethod: { type: String, enum: ["", "wallet", "original"], default: "" },
+    refundedAt: { type: Date, default: null },
+
     // ---------- People ----------
     fresher: { type: Schema.Types.ObjectId, ref: "Fresher", default: null, index: true },
     fresherName: { type: String, default: "" },
@@ -57,13 +61,16 @@ const paymentSchema = new Schema(
     sessionEndsAt: { type: Date, default: null },
     sessionStatus: {
       type: String,
-      enum: ["unassigned", "upcoming", "cancelled"],
+      enum: ["unassigned", "upcoming", "completed", "cancelled"],
       default: "unassigned",
     },
+    // when the mentor's share became withdrawable
+    releasedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
 
 paymentSchema.index({ mentor: 1, status: 1, paidAt: -1 });
+paymentSchema.index({ mentor: 1, status: 1, sessionStatus: 1 });
 
 module.exports = mongoose.model("Payment", paymentSchema);

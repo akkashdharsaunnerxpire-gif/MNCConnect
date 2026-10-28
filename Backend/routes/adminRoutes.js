@@ -5,6 +5,7 @@ const rateLimit = require("express-rate-limit");
 const router = express.Router();
 
 const ctrl = require("../controllers/adminController");
+const withdrawals = require("../controllers/adminWithdrawalController");
 const Mentor = require("../models/Mentor");
 const { loginLimiter, sameOriginOnly } = require("../middleware/adminSecurity");
 
@@ -113,6 +114,11 @@ router.patch("/mentors/:id/pending", ctrl.resetMentor);
 
 // Payments
 router.get("/payments", ctrl.listPayments);
+
+// Mentor withdrawals (manual UPI payout)
+router.get("/withdrawals", withdrawals.listWithdrawals);
+router.patch("/withdrawals/:wid/paid", withdrawals.markPaid);
+router.patch("/withdrawals/:wid/reject", withdrawals.markRejected);
 
 // Users / freshers: enable ONLY after these controller functions exist
 // router.get("/users", ctrl.listUsers);

@@ -9,10 +9,7 @@ const router = express.Router();
 // ---------- wallet ----------
 router.get("/wallet/me", requireAuth("mentor"), panel.getWallet);
 router.post("/wallet/withdraw", requireAuth("mentor"), panel.requestWithdrawal);
-
-// admin marks a withdrawal paid / rejected -> mentor sees it live
-// NOTE: make sure requireAuth supports the "admin" role in middleware/panelAuth.js
-router.patch("/wallet/withdrawals/:id", requireAuth("admin"), panel.updateWithdrawalStatus);
+// admin payout (mark paid / reject) is in routes/adminRoutes.js -> /admin/withdrawals
 
 // ---------- mentor profile stats ----------
 router.get("/mentor/profile/stats", requireAuth("mentor"), panel.getProfileStats);

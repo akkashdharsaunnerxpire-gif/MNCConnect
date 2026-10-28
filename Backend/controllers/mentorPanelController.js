@@ -9,13 +9,12 @@ const Mentor = require("../models/Mentor");
 const Fresher = require("../models/Fresher");
 const Booking = require("../models/Booking");
 
-const { computeWallet } = require("../utils/wallet");
+const { computeWallet, round2, PLATFORM_FEE_PERCENT } = require("../utils/wallet");
 const { notify, emitToUser, serializeNotification } = require("../utils/realtime");
 
 const MIN_WITHDRAWAL = 500;
 const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 const fail = (res, status, message) => res.status(status).json({ success: false, message });
-  
 
 const loadWallet = async (mentorId) => {
   const payments = await Payment.find({ mentor: mentorId, status: "paid" })
@@ -49,7 +48,13 @@ const loadWallet = async (mentorId) => {
 exports.getWallet = async (req, res) => {
   try {
     const { payments, withdrawals, wallet } = await loadWallet(req.user.id);
-    return res.json({ success: true, wallet, payments, withdrawals });
+    return res.json({
+      success: true,
+      wallet,
+      payments,
+      withdrawals,
+      mentorSharePercent: 100 - PLATFORM_FEE_PERCENT,
+    });
   } catch (error) {
     console.error("getWallet error:", error.message);
     return fail(res, 500, "Unable to load wallet.");
@@ -59,8 +64,8 @@ exports.getWallet = async (req, res) => {
 // POST /api/wallet/withdraw  { amount, upiId }   (mentor)
 exports.requestWithdrawal = async (req, res) => {
   try {
-    const amount = Number(req.body?.amount);
-    const upiId = String(req.body?.upiId || "").trim();
+    const amount = round2(req.body?.amount);
+    const upiId = String(req.body?.upiId || "").trim().toLowerCase();
 
     if (!Number.isFinite(amount) || amount < MIN_WITHDRAWAL) {
       return fail(res, 400, `Minimum withdrawal is ${rupees(MIN_WITHDRAWAL)}.`);
@@ -69,7 +74,13 @@ exports.requestWithdrawal = async (req, res) => {
       return fail(res, 400, "Enter a valid UPI ID.");
     }
 
-    // one pending request at a time (stops double-click / two-tab abuse)
+    // only an active, approved mentor can withdraw
+    const mentor = await Mentor.findById(req.user.id).select("accountStatus verificationStatus").lean();
+    if (!mentor || mentor.accountStatus !== "active" || mentor.verificationStatus !== "approved") {
+      return fail(res, 403, "Your account is not active for withdrawals.");
+    }
+
+    // one pending request at a time (the unique index in Withdrawal.js is the final guard)
     const pending = await Withdrawal.exists({ mentor: req.user.id, status: "requested" });
     if (pending) {
       return fail(res, 409, "You already have a withdrawal request being processed.");
@@ -80,11 +91,15 @@ exports.requestWithdrawal = async (req, res) => {
       return fail(res, 400, "Amount is more than your available balance.");
     }
 
-    const withdrawal = await Withdrawal.create({
-      mentor: req.user.id,
-      amount: Math.round(amount),
-      upiId,
-    });
+    let withdrawal;
+    try {
+      withdrawal = await Withdrawal.create({ mentor: req.user.id, amount, upiId });
+    } catch (e) {
+      if (e.code === 11000) {
+        return fail(res, 409, "You already have a withdrawal request being processed.");
+      }
+      throw e;
+    }
 
     notify({
       user: req.user.id,
@@ -106,43 +121,8 @@ exports.requestWithdrawal = async (req, res) => {
   }
 };
 
-// PATCH /api/wallet/withdrawals/:id  { status: "paid" | "rejected", note }   (admin)
-exports.updateWithdrawalStatus = async (req, res) => {
-  try {
-    const { status, note } = req.body || {};
-
-    if (!mongoose.Types.ObjectId.isValid(req.params.id)) return fail(res, 400, "Invalid id.");
-    if (!["paid", "rejected"].includes(status)) {
-      return fail(res, 400, "Status must be paid or rejected.");
-    }
-
-    // only a still-"requested" one can be processed (prevents double processing)
-    const w = await Withdrawal.findOneAndUpdate(
-      { _id: req.params.id, status: "requested" },
-      { $set: { status, note: String(note || "").slice(0, 300), processedAt: new Date() } },
-      { new: true }
-    );
-    if (!w) return fail(res, 404, "Request not found or already processed.");
-
-    notify({
-      user: w.mentor,
-      role: "mentor",
-      title: status === "paid" ? "Withdrawal paid" : "Withdrawal rejected",
-      message:
-        status === "paid"
-          ? `${rupees(w.amount)} has been sent to ${w.upiId}.`
-          : `Your request for ${rupees(w.amount)} was rejected.${w.note ? " " + w.note : ""}`,
-      type: "payment",
-      link: "/mentor/earnings",
-    });
-    emitToUser(String(w.mentor), "wallet:updated", { withdrawalId: w._id, status });
-
-    return res.json({ success: true, withdrawal: w });
-  } catch (error) {
-    console.error("updateWithdrawalStatus error:", error.message);
-    return fail(res, 500, "Unable to update withdrawal.");
-  }
-};
+// NOTE: admin "mark paid / reject" now lives in controllers/adminWithdrawalController.js
+// (the admin panel uses a session login, not the mentor/fresher JWT).
 
 /* ============================================================
    REVIEWS
@@ -181,7 +161,6 @@ exports.replyToReview = async (req, res) => {
   }
 };
 
-// POST /api/reviews   { mentorId, requestGroupId, rating, comment }   (fresher)
 // POST /api/reviews   { requestGroupId, rating, comment }   (fresher)
 exports.createReview = async (req, res) => {
   try {
