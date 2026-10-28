@@ -288,18 +288,20 @@ const MyBookings = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [now]);
 
-  const view = (b) => {
+   const view = (b) => {
     const starts = new Date(b.startsAt).getTime();
     const ends = new Date(b.endsAt).getTime();
     const opens = starts - 5 * 60000;
     const left = timerOf(b);
     const finished = Boolean(finishedIds[b.requestGroupId]);
 
+    // money went back to the fresher -> always "Refunded" (even if a review was written)
+    if (["disputed", "expired", "missed", "cancelled"].includes(b.status))
+      return { key: "refunded", label: "Refunded", tone: "slate" };
+
     if (DONE_STATUSES.includes(b.status)) {
       if (b.reviewed)
         return { key: "done", label: "Completed", tone: "emerald" };
-      if (b.status === "disputed")
-        return { key: "refunded", label: "Refunded", tone: "slate" };
       return { key: "review", label: "Review required", tone: "red" };
     }
 
@@ -309,8 +311,6 @@ const MyBookings = () => {
         label: b.direct ? "Waiting for your mentor" : "Waiting for an employee",
         tone: "amber",
       };
-    if (b.status === "expired" || b.status === "missed")
-      return { key: "refunded", label: "Refunded", tone: "slate" };
 
     // live meeting timer running
     if (left !== null && left > 0)

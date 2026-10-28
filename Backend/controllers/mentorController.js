@@ -459,8 +459,56 @@ const UpdateMentorProfile = async (req, res) => {
   }
 };
 
+// ============================================================================
+// DEPARTMENTS OF A COMPANY (used by the booking form)
+// GET /api/mentor/company-departments/:companyName
+// ============================================================================
+
+const getCompanyDepartments = async (req, res) => {
+  try {
+    const company = normalize(req.params.companyName);
+
+    if (!company) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Company name is required" });
+    }
+
+    const mentors = await Mentor.find({
+      verificationStatus: "approved",
+      accountStatus: "active",
+    })
+      .select("currentCompany designation")
+      .lean();
+
+    // normalized designation -> first spelling seen
+    // ("software engineer" and "Software Engineer" become ONE entry)
+    const seen = new Map();
+
+    for (const m of mentors) {
+      if (!valuesMatch(m.currentCompany, company)) continue;
+
+      const role = String(m.designation || "").trim().replace(/\s+/g, " ");
+      const key = normalize(role);
+
+      if (key && !seen.has(key)) seen.set(key, role);
+    }
+
+    const departments = [...seen.values()].sort((a, b) => a.localeCompare(b));
+
+    // key stays "departments" so the frontend does not change
+    return res.status(200).json({ success: true, departments });
+  } catch (error) {
+    console.error("getCompanyDepartments error:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to load roles" });
+  }
+};
+
 module.exports = {
   getMentorProfile,
   getMentorsByCompany,
   UpdateMentorProfile,
+  getCompanyDepartments,
 };

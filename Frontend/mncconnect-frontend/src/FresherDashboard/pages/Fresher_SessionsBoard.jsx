@@ -18,11 +18,13 @@ const SESSION_TYPES = [
   { value: "any_queries", label: "Any queries" },
 ];
 
-const ROLE_OPTIONS = [
-  "Software Engineer", "Frontend Developer", "Backend Developer", "Full Stack Developer", "Data Analyst",
-  "Data Scientist", "DevOps Engineer", "Cloud Engineer", "UI/UX Designer", "Product Manager", "QA Engineer", "Other",
+// The backend matches the fresher's own gender with the mentor's gender,
+// so the fresher must pick one of these (no "No preference").
+const GENDER_OPTIONS = [
+  { value: "", label: "Select your gender" },
+  { value: "male", label: "Male" },
+  { value: "female", label: "Female" },
 ];
-const GENDER_OPTIONS = [{ value: "", label: "No preference" }, { value: "male", label: "Male" }, { value: "female", label: "Female" }];
 const LANGUAGE_OPTIONS = ["English", "Tamil", "Hindi", "Malayalam", "Telugu", "Kannada"];
 
 const MIN_LEAD_MIN = 15;
@@ -33,13 +35,23 @@ const todayISO = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
-const EMPTY_FORM = {
-  sessionType: SESSION_TYPES[0].value, reason: "", date: "", time: "",
-  role: "", otherRole: "", gender: "", language: "", minutes: 60,
+// gender comes from the saved profile when it is male/female, else the fresher picks it
+const makeEmptyForm = (user) => {
+  const g = String(user?.gender || "").trim().toLowerCase();
+  return {
+    sessionType: SESSION_TYPES[0].value,
+    reason: "",
+    date: "",
+    time: "",
+    role: "", // = department of the mentors of this company
+    gender: g === "male" || g === "female" ? g : "",
+    language: "",
+    minutes: 60,
+  };
 };
 
 const inputCls =
-  "h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
+  "h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-400";
 
 const Label = ({ children }) => <label className="mb-2 block text-sm font-medium text-slate-700">{children}</label>;
 
@@ -64,7 +76,7 @@ export default function SessionBoard() {
     setRebook(location.state?.rebook || null);
   }, [location.state]);
 
-  const [f, setF] = useState(EMPTY_FORM);
+  const [f, setF] = useState(() => makeEmptyForm(user));
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
   const [stage, setStage] = useState(null); // paying | sending | waiting | accepted | expired | error
@@ -72,11 +84,51 @@ export default function SessionBoard() {
   const [notifiedCount, setNotifiedCount] = useState(0);
   const [error, setError] = useState("");
 
+  // roles = departments of the approved mentors registered for THIS company
+  const [departments, setDepartments] = useState([]);
+  const [deptLoading, setDeptLoading] = useState(true);
+  const [deptError, setDeptError] = useState("");
+
   const reqIdRef = useRef(null);
   const paymentIdRef = useRef(null);
 
   const price = priceFor(f.minutes);
   const type = SESSION_TYPES.find((t) => t.value === f.sessionType) || SESSION_TYPES[0];
+
+  /* ---------- load the roles (departments) of this company ---------- */
+  useEffect(() => {
+    if (!companyName) {
+      setDepartments([]);
+      setDeptLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setDeptLoading(true);
+    setDeptError("");
+
+    api(`/mentor/company-departments/${encodeURIComponent(companyName)}`)
+      .then((r) => {
+        if (cancelled) return;
+        setDepartments(Array.isArray(r?.departments) ? r.departments : []);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setDepartments([]);
+        setDeptError(e.message || "Could not load roles");
+      })
+      .finally(() => {
+        if (!cancelled) setDeptLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [companyName]);
+
+  // a selected role that is not in the (new) list any more -> clear it
+  useEffect(() => {
+    if (deptLoading) return;
+    setF((p) => (p.role && !departments.includes(p.role) ? { ...p, role: "" } : p));
+  }, [departments, deptLoading]);
 
   /* ---------- validation ---------- */
   const problems = useMemo(() => {
@@ -85,14 +137,16 @@ export default function SessionBoard() {
     if (!f.date || !f.time) p.push("Choose a date and time");
     else if (startFrom(f.date, f.time).getTime() < Date.now() + MIN_LEAD_MIN * 60000)
       p.push(`Choose a time at least ${MIN_LEAD_MIN} minutes from now`);
-    // role / language / gender only matter when the request goes to everyone
+    // role / gender / language only matter when the request goes to everyone
     if (!rebook) {
-      if (!f.role) p.push("Select a role");
-      if (f.role === "Other" && !f.otherRole.trim()) p.push("Enter your role");
+      if (!deptLoading && departments.length === 0)
+        p.push(deptError || `No ${companyName} employees have registered yet`);
+      else if (!f.role) p.push("Select a role");
+      if (!f.gender) p.push("Select your gender");
       if (!f.language) p.push("Select your language before paying");
     }
     return p;
-  }, [f, rebook]);
+  }, [f, rebook, departments, deptLoading, deptError, companyName]);
 
   /* ---------- live booking updates ---------- */
   const applyBooking = useCallback((b) => {
@@ -129,9 +183,9 @@ export default function SessionBoard() {
             sessionType: type.label,
             sessionTypeValue: type.value,
             reason: f.reason.trim(),
-            role: f.role,
-            otherRole: f.role === "Other" ? f.otherRole.trim() : "",
-            gender: f.gender,
+            role: f.role, // department
+            otherRole: "",
+            gender: f.gender, // the fresher's own gender
             language: f.language,
             duration: f.minutes,
             amount: price,
@@ -146,7 +200,10 @@ export default function SessionBoard() {
     } catch (e) {
       setError(e.message);
       setStage("error");
-      paymentIdRef.current = e.status && e.status !== 402 ? null : paymentIdRef.current; // 4xx = server refunded
+      // 4xx (except 402 "payment not verified") = the server already refunded -> nothing to retry.
+      // 5xx / network = the payment is still safe, keep the id so "Retry" works.
+      const s = Number(e.status) || 0;
+      if (s >= 400 && s < 500 && s !== 402) paymentIdRef.current = null;
     }
   }, [companyName, user, type, f, price, rebook]);
 
@@ -210,7 +267,7 @@ export default function SessionBoard() {
   // Already book pannina apram vera session book panna: form + state full reset
   const bookAnother = () => {
     closeAll();
-    setF(EMPTY_FORM);
+    setF(makeEmptyForm(user));
     setNotifiedCount(0);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -226,7 +283,7 @@ export default function SessionBoard() {
     ...(rebook
       ? [["Mentor", rebook.mentorName || "Selected mentor"]]
       : [
-          ["Role", f.role === "Other" ? f.otherRole || "Other" : f.role || "Not selected"],
+          ["Role", f.role || "Not selected"],
           ["Language", f.language || "Not selected"],
         ]),
   ];
@@ -335,17 +392,24 @@ export default function SessionBoard() {
                 <div className="mt-5 grid gap-4 sm:grid-cols-2">
                   <div>
                     <Label>Role you want guidance for</Label>
-                    <select value={f.role} onChange={(e) => set("role", e.target.value)} className={inputCls}>
-                      <option value="">Select role</option>
-                      {ROLE_OPTIONS.map((r) => <option key={r}>{r}</option>)}
+                    <select
+                      value={f.role}
+                      onChange={(e) => set("role", e.target.value)}
+                      disabled={deptLoading || departments.length === 0}
+                      className={inputCls}
+                    >
+                      <option value="">
+                        {deptLoading ? "Loading roles…" : departments.length ? "Select role" : "No roles available"}
+                      </option>
+                      {departments.map((r) => <option key={r} value={r}>{r}</option>)}
                     </select>
+                    <p className="mt-1.5 text-xs text-slate-400">
+                      {!deptLoading && departments.length === 0
+                        ? deptError || `No ${companyName} employees have registered yet.`
+                        : `Roles of ${companyName} employees on MNCConnect.`}
+                    </p>
                   </div>
-                  {f.role === "Other" && (
-                    <div>
-                      <Label>Enter your role</Label>
-                      <input value={f.otherRole} onChange={(e) => set("otherRole", e.target.value)} className={inputCls} placeholder="Role" />
-                    </div>
-                  )}
+
                   <div>
                     <Label>Preferred language</Label>
                     <select value={f.language} onChange={(e) => set("language", e.target.value)} className={inputCls}>
@@ -354,11 +418,13 @@ export default function SessionBoard() {
                     </select>
                     <p className="mt-1.5 text-xs text-slate-400">Only employees who speak this language get your request.</p>
                   </div>
+
                   <div>
-                    <Label>Gender preference</Label>
+                    <Label>Your gender</Label>
                     <select value={f.gender} onChange={(e) => set("gender", e.target.value)} className={inputCls}>
                       {GENDER_OPTIONS.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
                     </select>
+                    <p className="mt-1.5 text-xs text-slate-400">You are matched with an employee of the same gender.</p>
                   </div>
                 </div>
               </div>
@@ -382,7 +448,7 @@ export default function SessionBoard() {
                     </>
                   )}
                   <p><b className="text-slate-900">3.</b> You both get an alert 5 minutes before. Read the instructions first. Your camera turns on and the timer starts only after both of you accept.</p>
-                  <p><b className="text-slate-900">4.</b> If nobody accepts before your start time, you are refunded automatically.</p>
+                  <p><b className="text-slate-900">4.</b> If nobody accepts before your start time, or the session does not start, you are refunded automatically.</p>
                   <p><b className="text-slate-900">5.</b> After the session, confirm and leave your review inside the meeting.</p>
                 </div>
               </div>
@@ -450,7 +516,7 @@ export default function SessionBoard() {
                 : `${rebook.mentorName || "Your mentor"} is not online right now. They will see your request when they come online, before your start time.`
               : notifiedCount > 0
                 ? `Sent to ${notifiedCount} online ${companyName} employee${notifiedCount > 1 ? "s" : ""}. The first one to accept gets your session.`
-                : `No ${companyName} employee is online right now. We'll offer it to anyone who comes online before your start time.`}
+                : `No matching ${companyName} employee is online right now. We'll offer it to anyone matching who comes online before your start time.`}
           </p>
           <div className="mt-5 flex items-center justify-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm font-semibold text-blue-700">
             <Loader2 size={16} className="animate-spin" /> {rebook ? `Waiting for ${rebook.mentorName || "your mentor"} to accept…` : "Waiting for an employee to accept…"}

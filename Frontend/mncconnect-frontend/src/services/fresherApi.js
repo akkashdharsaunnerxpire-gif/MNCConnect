@@ -17,6 +17,7 @@ export const ENDPOINTS = {
   notificationRead: (id) => `/fresher/notifications/${id}/read`,
   notificationsReadAll: "/fresher/notifications/read-all",
   companies: "/mentor/companies",
+  companyDepartments: (name) => `/mentor/company-departments/${encodeURIComponent(name)}`,
 };
 
 export const EVENTS = {
