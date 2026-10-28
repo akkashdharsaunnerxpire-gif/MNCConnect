@@ -1,5 +1,5 @@
 <%
-  const _page = locals.currentPage || "";
+  const _page = locals.currentPage || locals.active || "";
   const _admin = locals.admin || { name: "Admin", role: "admin" };
 
   const _nav = [
@@ -21,6 +21,7 @@
       href: "/admin/companies",
       icon: "fa-building",
       label: "Companies",
+      badge: locals.companyNewCount,
     },
     {
       k: "payments",
@@ -37,7 +38,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <title><%= locals.pageTitle || "Admin" %> · MNCConnect Admin</title>
+  <title><%= locals.pageTitle || locals.title || "Admin" %> · MNCConnect Admin</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -83,13 +84,16 @@
         <a
           href="<%= n.href %>"
           class="<%= _page === n.k ? 'active' : '' %>"
-          <%= _page === n.k ? 'aria-current="page"' : '' %>
+          <%- _page === n.k ? 'aria-current="page"' : '' %>
         >
           <i class="fas <%= n.icon %>"></i>
 
           <span><%= n.label %></span>
 
-          <% if (Number(n.badge) > 0) { %>
+          <% if (n.k === "companies") { %>
+            <%# always rendered so live polling can update it; hidden when 0 %>
+            <span class="count" data-co-badge <%- Number(n.badge) > 0 ? "" : "hidden" %>><%= Number(n.badge) || 0 %></span>
+          <% } else if (Number(n.badge) > 0) { %>
             <span class="count"><%= n.badge %></span>
           <% } %>
         </a>
@@ -124,7 +128,7 @@
       </button>
 
       <div>
-       <%= locals.title || 'Dashboard' %>
+        <h2><%= locals.title || "Dashboard" %></h2>
         <p><%= locals.pageSubtitle || "" %></p>
       </div>
 

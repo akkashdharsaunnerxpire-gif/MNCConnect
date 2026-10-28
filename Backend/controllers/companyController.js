@@ -388,3 +388,52 @@ exports.publicList = async (req, res) => {
     });
   }
 };
+
+
+let lastSync = 0;
+
+const countNewCompanies = async () => {
+  // throttle: max once per 20s so polling stays cheap
+  if (Date.now() - lastSync > 20000) {
+    lastSync = Date.now();
+    try {
+      await syncCompaniesFromMentors();
+    } catch (e) {
+      console.error("Company sync failed:", e.message);
+    }
+  }
+
+  const empty = (f) => ({
+    $or: [{ [f]: { $exists: false } }, { [f]: "" }, { [f]: null }],
+  });
+
+  return Company.countDocuments({ $and: [empty("logo"), empty("coverImage")] });
+};
+
+// GET /admin/companies/new-count  (polling)
+exports.newCountApi = async (req, res) => {
+  try {
+    res.set("Cache-Control", "no-store");
+    return res.json({ count: await countNewCompanies() });
+  } catch (e) {
+    return res.json({ count: 0 });
+  }
+};
+
+// middleware: sidebar badge on every admin page
+exports.injectCompanyBadge = async (req, res, next) => {
+  // only for page loads, not login/logout/polling/assets
+  const skip =
+    req.method !== "GET" ||
+    /^\/(login|logout|new-count|css|js|img)/.test(req.path) ||
+    req.path.startsWith("/companies/new-count");
+
+  if (skip) return next();
+
+  try {
+    res.locals.companyNewCount = await countNewCompanies();
+  } catch (e) {
+    res.locals.companyNewCount = 0;
+  }
+  next();
+};

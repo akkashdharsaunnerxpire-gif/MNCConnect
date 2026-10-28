@@ -52,7 +52,7 @@ adminRouter.post("/", (req, res, next) => {
 }, ctrl.saveCompany);
 
 adminRouter.post("/:id/delete", ctrl.deleteCompany);
-
+adminRouter.get("/new-count", ctrl.newCountApi);
 const publicRouter = express.Router();
 publicRouter.get("/public", ctrl.publicList);
 

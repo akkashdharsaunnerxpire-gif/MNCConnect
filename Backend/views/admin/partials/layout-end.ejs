@@ -34,27 +34,109 @@
       </div>
 
       <div class="modal-foot">
-        <button
-          type="button"
-          class="btn btn-ghost"
-          id="modalCancel"
-        >
-          Cancel
-        </button>
-
-        <button
-          type="button"
-          class="btn btn-ok"
-          id="modalOk"
-        >
-          Confirm
-        </button>
+        <button type="button" class="btn btn-ghost" id="modalCancel">Cancel</button>
+        <button type="button" class="btn btn-ok" id="modalOk">Confirm</button>
       </div>
     </div>
   </div>
 
   <!-- Admin panel JavaScript -->
   <script src="/admin/js/admin.js"></script>
+
+  <!-- Companies: live badge + sound + notification -->
+  <style>
+    .co-toast {
+      position: fixed; right: 18px; bottom: 18px; z-index: 9999;
+      display: flex; gap: 10px; align-items: center;
+      background: #1e1b4b; color: #fff; border: 1px solid #7c3aed;
+      padding: 12px 16px; border-radius: 12px; font-size: .9rem;
+      box-shadow: 0 10px 30px rgba(0,0,0,.5); cursor: pointer;
+      animation: co-toast-in .25s ease-out;
+    }
+    @keyframes co-toast-in {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: none; }
+    }
+    [data-co-badge][hidden] { display: none !important; }
+  </style>
+
+  <script>
+  (function () {
+    var KEY = "co_last_count";
+    var POLL_MS = 30000;
+    var badge = document.querySelector("[data-co-badge]");
+    var ctx;
+
+    // browsers block sound until the user clicks once
+    function unlock() {
+      try {
+        ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+        if (ctx.state === "suspended") ctx.resume();
+      } catch (e) {}
+      if ("Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission();
+      }
+    }
+    document.addEventListener("click", unlock, { once: true });
+
+    function beep() {
+      if (!ctx) return;
+      [880, 1175].forEach(function (freq, i) {
+        var o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = "sine"; o.frequency.value = freq;
+        o.connect(g); g.connect(ctx.destination);
+        var t = ctx.currentTime + i * 0.18;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+        o.start(t); o.stop(t + 0.17);
+      });
+    }
+
+    function toast(text) {
+      var d = document.createElement("div");
+      d.className = "co-toast";
+      d.innerHTML = '<i class="fas fa-building"></i><span></span>';
+      d.lastChild.textContent = text;
+      d.onclick = function () { location.href = "/admin/companies"; };
+      document.body.appendChild(d);
+      setTimeout(function () { d.remove(); }, 6000);
+    }
+
+    function notify(text) {
+      if ("Notification" in window && Notification.permission === "granted") {
+        var n = new Notification("MNCConnect Admin", { body: text });
+        n.onclick = function () { window.focus(); location.href = "/admin/companies"; };
+      }
+    }
+
+    function render(count) {
+      if (!badge) return;
+      badge.textContent = count;
+      badge.hidden = count <= 0;
+    }
+
+    async function check() {
+      try {
+        var r = await fetch("/admin/companies/new-count", { credentials: "same-origin" });
+        if (!r.ok) return;
+        var count = (await r.json()).count || 0;
+        var stored = localStorage.getItem(KEY);
+        render(count);
+
+        // alert only when the count goes UP
+        if (stored !== null && count > Number(stored)) {
+          var diff = count - Number(stored);
+          var msg = diff + " new compan" + (diff === 1 ? "y" : "ies") + " registered. Upload logo & cover.";
+          beep(); toast(msg); notify(msg);
+        }
+        localStorage.setItem(KEY, String(count));
+      } catch (e) {}
+    }
+
+    check();
+    setInterval(check, POLL_MS);
+  })();
+  </script>
 </body>
 </html>
-```

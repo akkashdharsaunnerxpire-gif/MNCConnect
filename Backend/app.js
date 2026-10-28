@@ -20,6 +20,8 @@ const {
   adminRouter: adminCompanyRoutes,
   publicRouter: publicCompanyRoutes,
 } = require("./routes/companyRoutes");
+const { injectCompanyBadge } = require("./controllers/companyController");
+
 
 
 const app = express();
@@ -168,6 +170,8 @@ app.use("/api", mentorPanelRoutes);
 // Meeting instructions (used by both mentor and fresher)
 app.use("/api/instructions", instructionRoutes);
 app.use("/company", publicCompanyRoutes);
+
+app.use("/admin", injectCompanyBadge);          // ✅ before admin routes
 app.use("/admin/companies", adminCompanyRoutes);
 app.use("/admin", adminRoutes);
 
@@ -179,7 +183,7 @@ if (!isProd) {
     if (layer.route) {
       Object.keys(layer.route.methods).forEach((m) =>
         listed.push(`${m.toUpperCase()} /api${layer.route.path}`)
-      );
+      );  
     }
   });
   console.log(
