@@ -14,7 +14,7 @@ import {
   Star,
   MessageSquare,
 } from "lucide-react";
-import {socket} from "../utils/socket";
+import { socket } from "../utils/socket";
 import ReviewModal from "../FresherDashboard/pages/Reviewmodal";
 import MeetingInstructionsGate from "../Commoncomponents/MeetingInstructionsGate";
 import SessionCompletionModal from "../Commoncomponents/SessionCompletionModal";
@@ -93,7 +93,8 @@ const tuneSenders = async (peer) => {
 const sendSignal = (data) => socket.emit("meeting:signal", { data });
 
 /* ---------- Fresher: last 1 minute, stars + feedback REQUIRED ---------- */
-const ReviewGate = ({ booking, token, onDone }) => {
+// auth = HttpOnly cookie (credentials: "include"), no token / localStorage
+const ReviewGate = ({ booking, onDone }) => {
   const [rating, setRating] = useState(0);
   const [hover, setHover] = useState(0);
   const [comment, setComment] = useState("");
@@ -109,7 +110,8 @@ const ReviewGate = ({ booking, token, onDone }) => {
     try {
       const res = await fetch(`${API_URL}/reviews`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           requestGroupId: booking.requestGroupId,
           rating,
@@ -207,8 +209,6 @@ export default function MeetingRoom() {
   const { bookingId } = useParams();
   const navigate = useNavigate();
   const isMentor = useLocation().pathname.startsWith("/mentor");
-  const token =
-    localStorage.getItem(isMentor ? "mnc_mentor_token" : "fresher_token") || "";
 
   /* ---------- chat ---------- */
   const [chatOpen, setChatOpen] = useState(false);
@@ -372,8 +372,10 @@ export default function MeetingRoom() {
   );
 
   /* ---------- join + socket listeners ---------- */
+  // The server identifies the user from the HttpOnly cookie sent with the
+  // socket handshake (socket.user), so no token is sent from the browser.
   const join = useCallback(() => {
-    socket.emit("meeting:join", { bookingId, token }, (res) => {
+    socket.emit("meeting:join", { bookingId }, (res) => {
       if (!res?.ok) {
         if (res?.code === "NOT_OPEN") {
           setOpensAt(res.opensAt);
@@ -397,7 +399,7 @@ export default function MeetingRoom() {
       setClock({ ...res.state, at: Date.now() });
       setInstructionsAccepted(res.state.instructions || { mentor: false, fresher: false });
     });
-  }, [bookingId, token, isMentor]);
+  }, [bookingId]);
 
   useEffect(() => {
     unmounted.current = false;
@@ -511,12 +513,12 @@ export default function MeetingRoom() {
 
   useEffect(() => {
     fetch(`${API_URL}${ENDPOINTS.booking(bookingId)}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: "include",
     })
       .then((r) => r.json())
       .then((d) => d.booking && setBooking(d.booking))
       .catch(() => {});
-  }, [bookingId, token, phase]);
+  }, [bookingId, phase]);
 
   const currentRemaining = clock.running
     ? Math.max(0, clock.remainingMs - (Date.now() - clock.at))
@@ -837,7 +839,6 @@ export default function MeetingRoom() {
         variant="panel"
         open={chatOpen}
         bookingId={bookingId}
-        token={token}
         role={isMentor ? "mentor" : "fresher"}
         title={isMentor ? "Chat with fresher" : "Chat with employee"}
         onClose={closeChat}
@@ -847,7 +848,7 @@ export default function MeetingRoom() {
       />
 
       {showReviewGate && (
-        <ReviewGate booking={booking} token={token} onDone={() => setReviewDone(true)} />
+        <ReviewGate booking={booking} onDone={() => setReviewDone(true)} />
       )}
       {showSuccessConfirm && (
         <SuccessConfirmModal onYes={() => answerSuccess(true)} onNo={() => answerSuccess(false)} />

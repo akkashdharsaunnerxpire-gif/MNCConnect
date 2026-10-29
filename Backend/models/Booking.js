@@ -77,6 +77,9 @@ const bookingSchema = new Schema(
       enum: ["", "refunded", "failed"],
       default: "",
     },
+    // scheduler retry limit for failed refunds
+    refundAttempts: { type: Number, default: 0 },
+    lastRefundAttemptAt: { type: Date, default: null },
 
     reminderSent: { type: Boolean, default: false },
     reviewed: { type: Boolean, default: false },
@@ -115,7 +118,5 @@ bookingSchema.index(
 
 // Improve queries filtering by status and notification state
 bookingSchema.index({ status: 1, notified: 1 });
-
-module.exports = mongoose.model("Booking", bookingSchema);
 
 module.exports = mongoose.model("Booking", bookingSchema);

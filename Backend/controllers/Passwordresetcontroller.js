@@ -1,106 +1,130 @@
-// controllers/passwordResetController.js
-//
-// POST /api/auth/mentor/forgot-password        { email }
-// POST /api/auth/mentor/reset-password/:token  { password }
-//
-// Security notes:
-//  - The raw token is only ever sent by email. Only its SHA-256 hash is stored.
-//  - The response never reveals whether an email is registered.
-//  - Token expires in 30 minutes and works only once.
-//  - A 60 second cooldown stops people from spamming reset emails.
-
+// controllers/Passwordresetcontroller.js
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
-
 const Mentor = require("../models/Mentor");
-const { sendMail, resetPasswordEmail, passwordChangedEmail } = require("../utils/mailer");
+const {
+  sendMail,
+  resetPasswordEmail,
+  passwordChangedEmail,
+} = require("../utils/mailer");
 
-const RESET_TTL_MS = 30 * 60 * 1000; // 30 minutes
-const COOLDOWN_MS = 60 * 1000; // 1 minute between emails
+const normalizeEmail = (email) =>
+  String(email || "")
+    .trim()
+    .toLowerCase();
 
-const GENERIC_MESSAGE =
-  "If an account exists with this email, a password reset link has been sent. Please check your inbox and spam folder.";
+const validatePassword = (password) =>
+  typeof password === "string" &&
+  password.length >= 8 &&
+  password.length <= 128;
 
-const hashToken = (token) => crypto.createHash("sha256").update(token).digest("hex");
+const RESET_EXPIRY_MIN = 30;
+const CLIENT_URL = (
+  process.env.CLIENT_URL ||
+  process.env.SITE_URL ||
+  "http://localhost:5173"
+).replace(/\/$/, "");
 
-// ============================================================
-// FORGOT PASSWORD
-// ============================================================
+const hashToken = (t) => crypto.createHash("sha256").update(t).digest("hex");
 
+// POST /api/auth/mentor/forgot-password
 exports.forgotPasswordMentor = async (req, res) => {
   try {
-    const email = String((req.body && req.body.email) || "").trim().toLowerCase();
+    const email = normalizeEmail(req.body?.email);
+    if (!email) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Email is required." });
+    }
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).json({
+    const mentor = await Mentor.findOne({ email });
+    console.log(
+      "[forgot-mentor] email:",
+      email,
+      "| found:",
+      Boolean(mentor),
+      "| status:",
+      mentor?.accountStatus,
+    );
+
+    // 1) Email not registered -> clear error
+    if (!mentor) {
+      return res.status(404).json({
         success: false,
-        message: "Please provide a valid email address.",
+        message: "This email is not registered. Please check your email or register first.",
       });
     }
 
-    const mentor = await Mentor.findOne({ email }).select("+passwordResetExpires");
-
-    if (mentor) {
-      // Cooldown: a link was issued less than 60 seconds ago
-      const issuedAgo = mentor.passwordResetExpires
-        ? RESET_TTL_MS - (mentor.passwordResetExpires.getTime() - Date.now())
-        : Infinity;
-
-      if (issuedAgo < COOLDOWN_MS) {
-        return res.status(200).json({ success: true, message: GENERIC_MESSAGE });
-      }
-
-      const token = crypto.randomBytes(32).toString("hex");
-      mentor.passwordResetToken = hashToken(token);
-      mentor.passwordResetExpires = new Date(Date.now() + RESET_TTL_MS);
-      await mentor.save({ validateBeforeSave: false });
-
-      // CLIENT_URL = your frontend (http://localhost:5173 locally, the Render frontend URL in production)
-     const base = String(
-  process.env.CLIENT_URL || "http://localhost:5173"
-).replace(/\/+$/, "");
-      const resetUrl = `${base}/mentor/reset-password/${token}`;
-
-      const content = resetPasswordEmail(mentor, resetUrl, RESET_TTL_MS / 60000);
-      const result = await sendMail({ to: mentor.email, toName: mentor.name, ...content });
-
-      if (!result.success) {
-        console.error("Reset email not sent:", result.error);
-        // The link is useless if it never reached the mentor
-        mentor.passwordResetToken = undefined;
-        mentor.passwordResetExpires = undefined;
-        await mentor.save({ validateBeforeSave: false });
-      }
+    // 2) Suspended account -> cannot reset
+    if (mentor.accountStatus === "suspended") {
+      return res.status(403).json({
+        success: false,
+        message: "This account is suspended. Please contact MNCConnect support.",
+      });
     }
 
-    // Same answer whether or not the account exists
-    return res.status(200).json({ success: true, message: GENERIC_MESSAGE });
-  } catch (error) {
-    console.error("Forgot password error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Unable to process the request. Please try again.",
+    // 3) Create token + save hashed version
+    const rawToken = crypto.randomBytes(32).toString("hex");
+
+    await Mentor.updateOne(
+      { _id: mentor._id },
+      {
+        $set: {
+          passwordResetToken: hashToken(rawToken),
+          passwordResetExpires: new Date(
+            Date.now() + RESET_EXPIRY_MIN * 60 * 1000,
+          ),
+        },
+      },
+    );
+
+    // 4) Send mail
+    const resetUrl = `${CLIENT_URL}/mentor/reset-password/${rawToken}`;
+    const content = resetPasswordEmail(mentor, resetUrl, RESET_EXPIRY_MIN);
+    const result = await sendMail({
+      to: mentor.email,
+      toName: mentor.name,
+      ...content,
     });
+    console.log("[forgot-mentor] sendMail result:", result);
+
+    // 5) Mail failed -> tell the user (and remove the unused token)
+    if (!result.success) {
+      console.error("Reset mail failed:", result.error);
+      await Mentor.updateOne(
+        { _id: mentor._id },
+        { $unset: { passwordResetToken: "", passwordResetExpires: "" } },
+      );
+      return res.status(500).json({
+        success: false,
+        message: "Unable to send the reset email right now. Please try again later.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Password reset link has been sent to your email.",
+    });
+  } catch (error) {
+    console.error("Mentor forgot password error:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Unable to process the request." });
   }
 };
 
-// ============================================================
-// RESET PASSWORD
-// ============================================================
-
+// POST /api/auth/mentor/reset-password/:token
 exports.resetPasswordMentor = async (req, res) => {
   try {
     const { token } = req.params;
-    const password = req.body && req.body.password;
+    const { password } = req.body;
 
-    if (!token || !/^[a-f0-9]{64}$/.test(token)) {
-      return res.status(400).json({
-        success: false,
-        message: "This reset link is invalid. Please request a new one.",
-      });
+    if (!token) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Reset token is missing." });
     }
-
-    if (typeof password !== "string" || password.length < 8 || password.length > 128) {
+    if (!validatePassword(password)) {
       return res.status(400).json({
         success: false,
         message: "Password must be between 8 and 128 characters.",
@@ -108,34 +132,37 @@ exports.resetPasswordMentor = async (req, res) => {
     }
 
     const mentor = await Mentor.findOne({
-      passwordResetToken: hashToken(token),
+      passwordResetToken: hashToken(String(token)),
       passwordResetExpires: { $gt: new Date() },
-    }).select("+password +passwordResetToken +passwordResetExpires");
+    }).select("+passwordResetToken +passwordResetExpires");
 
     if (!mentor) {
       return res.status(400).json({
         success: false,
-        message: "This reset link is invalid or has expired. Please request a new one.",
+        message: "This reset link is invalid or has expired.",
       });
     }
 
-    mentor.password = await bcrypt.hash(password, 12);
-    mentor.passwordResetToken = undefined;
-    mentor.passwordResetExpires = undefined;
-    await mentor.save({ validateBeforeSave: false });
+    const hashed = await bcrypt.hash(password, 12);
 
-    // Security notification (failure here must not affect the reset)
-    sendMail({ to: mentor.email, toName: mentor.name, ...passwordChangedEmail(mentor) }).catch(() => {});
+    await Mentor.updateOne(
+      { _id: mentor._id },
+      {
+        $set: { password: hashed },
+        $unset: { passwordResetToken: "", passwordResetExpires: "" },
+      },
+    );
 
-    return res.status(200).json({
-      success: true,
-      message: "Password reset successful. You can now log in with your new password.",
-    });
+    const content = passwordChangedEmail(mentor);
+    sendMail({ to: mentor.email, toName: mentor.name, ...content });
+
+    return res
+      .status(200)
+      .json({ success: true, message: "Password changed successfully." });
   } catch (error) {
-    console.error("Reset password error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Unable to reset password. Please try again.",
-    });
+    console.error("Mentor reset password error:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Unable to reset password." });
   }
 };

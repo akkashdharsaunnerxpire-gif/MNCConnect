@@ -6,6 +6,7 @@ const session = require("express-session");
 const cookieParser = require("cookie-parser");
 const path = require("path");
 const mongoose = require("mongoose");
+const { MongoStore } = require("connect-mongo");
 
 const authRoutes = require("./routes/authRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
@@ -22,8 +23,6 @@ const {
 } = require("./routes/companyRoutes");
 const { injectCompanyBadge } = require("./controllers/companyController");
 
-
-
 const app = express();
 
 app.disable("x-powered-by");
@@ -37,7 +36,7 @@ app.use(
   helmet({
     crossOriginResourcePolicy: false,
     contentSecurityPolicy: false,
-  })
+  }),
 );
 
 // ================= CORS =================
@@ -50,7 +49,7 @@ const allowedOrigins = [
       "https://mncconnect-backend.onrender.com",
       "http://localhost:5173",
       "http://localhost:5174",
-    ].filter(Boolean)
+    ].filter(Boolean),
   ),
 ];
 
@@ -61,27 +60,27 @@ app.use(
   cors((req, callback) => {
     const origin = req.header("Origin");
     const sameOrigin = origin === `${req.protocol}://${req.get("host")}`;
-    
+
     const allowed =
-    !origin ||
-    origin === "null" ||
-    sameOrigin ||
-    allowedOrigins.includes(origin);
-    
+      !origin ||
+      origin === "null" ||
+      sameOrigin ||
+      allowedOrigins.includes(origin);
+
     if (!allowed) {
       console.log("CORS blocked origin:", origin);
       const err = new Error(`CORS blocked for origin: ${origin}`);
       err.status = 403;
       return callback(err);
     }
-    
+
     callback(null, {
       origin: true,
       credentials: true,
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
     });
-  })
+  }),
 );
 
 // ================= BODY PARSER =================
@@ -93,44 +92,31 @@ app.use(cookieParser());
 
 // ================= SESSION =================
 
-let store;
-try {
-  const MongoStore = require("connect-mongo");
-  store = (MongoStore.default || MongoStore).create({
-    clientPromise: mongoose.connection
-    .asPromise()
-    .then((conn) => conn.getClient())
-    .catch((err) => {
-      console.error("Session store Mongo connection failed:", err.message);
-      throw err;
-    }),
-    collectionName: "sessions",
-  });
-} catch (error) {
-  console.warn(
-    "connect-mongo is not installed - sessions use MemoryStore. Run: npm i connect-mongo"
-  );
-}
-
 if (isProd && !process.env.SESSION_SECRET) {
-  console.warn("SESSION_SECRET is not set - using an insecure default!");
+  throw new Error("SESSION_SECRET is required in production");
 }
 
 app.use(
   session({
-    secret: process.env.SESSION_SECRET || "mncconnect-secret",
-    store,
+    secret:
+      process.env.SESSION_SECRET ||
+      "mncconnect-local-dev-secret",
     resave: false,
     saveUninitialized: false,
+
+    store: MongoStore.create({
+      mongoUrl: process.env.MONGO_URI,
+      collectionName: "sessions",
+    }),
+
     cookie: {
-      secure: isProd,
       httpOnly: true,
+      secure: isProd,
       sameSite: isProd ? "none" : "lax",
-      maxAge: 1000 * 60 * 60 * 8,
+      maxAge: 24 * 60 * 60 * 1000,
     },
   })
 );
-
 // ================= STATIC FILES =================
 
 app.use("/public", express.static(path.join(__dirname, "public")));
@@ -144,7 +130,9 @@ app.set("views", path.join(__dirname, "views"));
 // ================= HEALTH CHECK =================
 
 app.get("/", (req, res) => {
-  res.status(200).json({ success: true, message: "MNCConnect Backend is running" });
+  res
+    .status(200)
+    .json({ success: true, message: "MNCConnect Backend is running" });
 });
 
 app.get("/health", (req, res) => {
@@ -171,7 +159,7 @@ app.use("/api", mentorPanelRoutes);
 app.use("/api/instructions", instructionRoutes);
 app.use("/company", publicCompanyRoutes);
 
-app.use("/admin", injectCompanyBadge);          // ✅ before admin routes
+app.use("/admin", injectCompanyBadge); // ✅ before admin routes
 app.use("/admin/companies", adminCompanyRoutes);
 app.use("/admin", adminRoutes);
 
@@ -182,17 +170,17 @@ if (!isProd) {
   (fresherBookingRoutes.stack || []).forEach((layer) => {
     if (layer.route) {
       Object.keys(layer.route.methods).forEach((m) =>
-        listed.push(`${m.toUpperCase()} /api${layer.route.path}`)
-      );  
+        listed.push(`${m.toUpperCase()} /api${layer.route.path}`),
+      );
     }
   });
   console.log(
     "Booking routes mounted:\n  " +
-      (listed.join("\n  ") || "NONE - check routes/fresherBookingRoutes.js")
+      (listed.join("\n  ") || "NONE - check routes/fresherBookingRoutes.js"),
   );
   if (!listed.some((l) => l.includes("/session/session-requests/"))) {
     console.warn(
-      "PATCH /api/session/session-requests/:requestGroupId is NOT handled by bookingController"
+      "PATCH /api/session/session-requests/:requestGroupId is NOT handled by bookingController",
     );
   }
 }

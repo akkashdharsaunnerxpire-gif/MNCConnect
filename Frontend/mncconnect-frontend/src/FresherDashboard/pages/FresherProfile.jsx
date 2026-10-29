@@ -25,12 +25,13 @@ import {
   Trash2,
   LogOut as LogOutIcon,
 } from "lucide-react";
-import { clearSession } from "../../utils/auth";
-import { socket } from "../../utils/socket";
+import { useAuth } from "../../context/AuthContext";
+import { performLogout } from "../../utils/logout";
 
 /* =========================================================================
    API LAYER  (cookie based: the HttpOnly "mnc_token" cookie is sent
    automatically because every request uses credentials: "include")
+   NOTHING is stored in localStorage / sessionStorage.
 ========================================================================= */
 
 // must include /api (backend mounts auth at /api/auth)
@@ -41,7 +42,6 @@ const ENDPOINTS = {
   ME: `${API_BASE_URL}/auth/me`,
   UPDATE: `${API_BASE_URL}/auth/update`,
   AVATAR: `${API_BASE_URL}/auth/avatar`,
-  LOGOUT: `${API_BASE_URL}/auth/logout`,
 };
 
 const jsonHeaders = { "Content-Type": "application/json" };
@@ -115,54 +115,6 @@ async function apiRemoveAvatar() {
   const data = await res.json().catch(() => ({}));
   return data?.user ?? data;
 }
-
-// Tells the server to clear the HttpOnly cookie
-async function apiLogout() {
-  try {
-    await fetch(ENDPOINTS.LOGOUT, {
-      method: "POST",
-      credentials: "include",
-    });
-  } catch (err) {
-    console.error("Logout request failed:", err);
-  }
-}
-
-/* =========================================================================
-   LOCAL STORAGE (profile cache)
-========================================================================= */
-
-const STORAGE_KEY = "fresher_profile_data";
-
-const saveToLocalStorage = (data) => {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    return true;
-  } catch (error) {
-    console.error("Error saving:", error);
-    return false;
-  }
-};
-
-const getFromLocalStorage = () => {
-  try {
-    const data = localStorage.getItem(STORAGE_KEY);
-    return data ? JSON.parse(data) : null;
-  } catch (error) {
-    console.error("Error reading:", error);
-    return null;
-  }
-};
-
-const clearLocalStorage = () => {
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-    return true;
-  } catch (error) {
-    console.error("Error clearing:", error);
-    return false;
-  }
-};
 
 /* =========================================================================
    AVATAR
@@ -853,6 +805,7 @@ const AddInterestModal = ({ isOpen, onClose, onAdd, existingInterests }) => (
 
 const FresherProfile = () => {
   const navigate = useNavigate();
+  const { refresh } = useAuth();
 
   const [user, setUser] = useState(null);
   const [status, setStatus] = useState("loading");
@@ -886,83 +839,40 @@ const FresherProfile = () => {
      LOGOUT
      1. server clears the HttpOnly cookie (JS cannot do this itself)
      2. realtime socket is closed -> user goes OFFLINE on the server
-     3. UI session marker + cached profile are removed
+     3. AuthContext is refreshed (it becomes "logged out")
   ======================================================================= */
 
   const handleLogout = async () => {
-    await apiLogout();
-
+    await performLogout();
     try {
-      socket.emit("employee-offline");
-      socket.disconnect();
+      await refresh();
     } catch {
       /* ignore */
     }
-
-    clearSession();
-    clearLocalStorage();
-
     navigate("/", { replace: true });
   };
 
   /* =======================================================================
-     LOAD USER
+     LOAD USER (always from the server, nothing cached in the browser)
   ======================================================================= */
 
   const loadUser = useCallback(async () => {
     setStatus("loading");
 
     try {
-      const localData = getFromLocalStorage();
-
-      if (localData) {
-        setUser(localData);
-        setStatus("ready");
-
-        try {
-          const apiData = await apiGetCurrentUser();
-
-          if (apiData) {
-            const mergedData = { ...localData, ...apiData };
-            setUser(mergedData);
-            saveToLocalStorage(mergedData);
-          }
-        } catch (apiErr) {
-          // cookie expired / missing -> session is no longer valid
-          if (apiErr.message === "UNAUTHENTICATED") {
-            clearSession();
-            clearLocalStorage();
-            setStatus("unauthenticated");
-            return;
-          }
-          console.log("API sync failed, using local data only");
-        }
-
-        return;
-      }
-
       const data = await apiGetCurrentUser();
 
-      const userData = {
+      setUser({
         ...data,
         education: data.education || [],
         career: data.career || [],
         skills: data.skills || [],
         interests: data.interests || [],
-      };
-
-      saveToLocalStorage(userData);
-      setUser(userData);
+      });
       setStatus("ready");
     } catch (err) {
       console.error("Error loading user:", err);
-
-      if (err.message === "UNAUTHENTICATED") {
-        clearSession();
-        setStatus("unauthenticated");
-      } else {
-        setStatus("error");
-      }
+      setStatus(err.message === "UNAUTHENTICATED" ? "unauthenticated" : "error");
     }
   }, []);
 
@@ -970,9 +880,19 @@ const FresherProfile = () => {
     loadUser();
   }, [loadUser]);
 
-  const updateUserAndSave = (updatedUser) => {
-    setUser(updatedUser);
-    saveToLocalStorage(updatedUser);
+  // optimistic update -> save to backend -> roll back if it fails
+  const persist = async (patch, successMsg, type = "success") => {
+    const previous = user;
+    setUser({ ...user, ...patch });
+
+    try {
+      const updated = await apiUpdateCurrentUser(patch);
+      setUser((prev) => ({ ...prev, ...updated }));
+      showToast(type, successMsg);
+    } catch (err) {
+      setUser(previous);
+      showToast("error", err.message || "Could not save. Please try again.");
+    }
   };
 
   /* =======================================================================
@@ -984,53 +904,34 @@ const FresherProfile = () => {
 
     setUploading(true);
 
+    // instant preview
+    const reader = new FileReader();
+    reader.onloadend = () => setPreviewImage(reader.result);
+    reader.readAsDataURL(file);
+
     try {
-      // Instant preview
-      const reader = new FileReader();
-
-      reader.onloadend = () => {
-        const imageUrl = reader.result;
-        setPreviewImage(imageUrl);
-
-        setUser((prev) => {
-          const updatedUser = { ...prev, avatar: imageUrl };
-          saveToLocalStorage(updatedUser);
-          return updatedUser;
-        });
-      };
-
-      reader.readAsDataURL(file);
-
-      // Upload to backend
       const updated = await apiUploadAvatar(file);
 
       if (updated) {
-        setUser((prev) => {
-          const mergedUser = {
-            ...prev,
-            ...updated,
-            avatar:
-              updated.avatar ||
-              updated.profilePic ||
-              updated.profileImage ||
-              updated.photo ||
-              updated.photoUrl ||
-              prev.avatar,
-          };
+        const url =
+          updated.avatar ||
+          updated.profilePic ||
+          updated.profileImage ||
+          updated.photo ||
+          updated.photoUrl;
 
-          saveToLocalStorage(mergedUser);
-          return mergedUser;
-        });
+        setUser((prev) => ({ ...prev, ...updated }));
+        if (url) setPreviewImage(null); // real url is available now
 
         showToast("success", "Profile photo updated successfully!");
       }
     } catch (err) {
       console.error("Upload failed:", err);
-      showToast("error", err.message || "Could not upload photo. Please try again.");
+      showToast(
+        "error",
+        err.message || "Could not upload photo. Please try again.",
+      );
       setPreviewImage(null);
-
-      const localData = getFromLocalStorage();
-      if (localData) setUser(localData);
     } finally {
       setUploading(false);
     }
@@ -1041,13 +942,11 @@ const FresherProfile = () => {
       const updated = await apiRemoveAvatar();
 
       const mergedUser = { ...user, ...updated };
-
       PROFILE_IMAGE_KEYS.forEach((key) => {
         delete mergedUser[key];
       });
 
       setUser(mergedUser);
-      saveToLocalStorage(mergedUser);
       setPreviewImage(null);
 
       showToast("success", "Profile photo removed.");
@@ -1074,72 +973,60 @@ const FresherProfile = () => {
   };
 
   /* =======================================================================
-     CRUD
+     CRUD (saved on the server)
   ======================================================================= */
 
-  const handleAddEducation = (education) => {
-    updateUserAndSave({
-      ...user,
-      education: [...(user.education || []), education],
-    });
-    showToast("success", "Education added successfully!");
-  };
+  const handleAddEducation = (education) =>
+    persist(
+      { education: [...(user.education || []), education] },
+      "Education added successfully!",
+    );
 
-  const handleDeleteEducation = (id) => {
-    updateUserAndSave({
-      ...user,
-      education: (user.education || []).filter((edu) => edu.id !== id),
-    });
-    showToast("info", "Education removed");
-  };
+  const handleDeleteEducation = (id) =>
+    persist(
+      { education: (user.education || []).filter((edu) => edu.id !== id) },
+      "Education removed",
+      "info",
+    );
 
-  const handleAddCareer = (career) => {
-    updateUserAndSave({
-      ...user,
-      career: [...(user.career || []), career],
-    });
-    showToast("success", "Career experience added successfully!");
-  };
+  const handleAddCareer = (career) =>
+    persist(
+      { career: [...(user.career || []), career] },
+      "Career experience added successfully!",
+    );
 
-  const handleDeleteCareer = (id) => {
-    updateUserAndSave({
-      ...user,
-      career: (user.career || []).filter((career) => career.id !== id),
-    });
-    showToast("info", "Career experience removed");
-  };
+  const handleDeleteCareer = (id) =>
+    persist(
+      { career: (user.career || []).filter((c) => c.id !== id) },
+      "Career experience removed",
+      "info",
+    );
 
-  const handleAddSkills = (newSkills) => {
-    updateUserAndSave({
-      ...user,
-      skills: [...(user.skills || []), ...newSkills],
-    });
-    showToast("success", "Skills added successfully!");
-  };
+  const handleAddSkills = (newSkills) =>
+    persist(
+      { skills: [...(user.skills || []), ...newSkills] },
+      "Skills added successfully!",
+    );
 
-  const handleDeleteSkill = (skill) => {
-    updateUserAndSave({
-      ...user,
-      skills: (user.skills || []).filter((s) => s !== skill),
-    });
-    showToast("info", "Skill removed");
-  };
+  const handleDeleteSkill = (skill) =>
+    persist(
+      { skills: (user.skills || []).filter((s) => s !== skill) },
+      "Skill removed",
+      "info",
+    );
 
-  const handleAddInterests = (newInterests) => {
-    updateUserAndSave({
-      ...user,
-      interests: [...(user.interests || []), ...newInterests],
-    });
-    showToast("success", "Interests added successfully!");
-  };
+  const handleAddInterests = (newInterests) =>
+    persist(
+      { interests: [...(user.interests || []), ...newInterests] },
+      "Interests added successfully!",
+    );
 
-  const handleDeleteInterest = (interest) => {
-    updateUserAndSave({
-      ...user,
-      interests: (user.interests || []).filter((i) => i !== interest),
-    });
-    showToast("info", "Interest removed");
-  };
+  const handleDeleteInterest = (interest) =>
+    persist(
+      { interests: (user.interests || []).filter((i) => i !== interest) },
+      "Interest removed",
+      "info",
+    );
 
   /* =======================================================================
      SAVE PROFILE
@@ -1150,21 +1037,12 @@ const FresherProfile = () => {
 
     try {
       const updated = await apiUpdateCurrentUser(payload);
-      const mergedUser = { ...user, ...updated };
-
-      setUser(mergedUser);
-      saveToLocalStorage(mergedUser);
+      setUser({ ...user, ...updated });
       setEditOpen(false);
 
       showToast("success", "Your changes have been saved!");
     } catch (err) {
-      const updatedUser = { ...user, ...payload };
-
-      setUser(updatedUser);
-      saveToLocalStorage(updatedUser);
-      setEditOpen(false);
-
-      showToast("info", "Saved locally.");
+      showToast("error", err.message || "Could not save changes.");
     } finally {
       setSaving(false);
     }

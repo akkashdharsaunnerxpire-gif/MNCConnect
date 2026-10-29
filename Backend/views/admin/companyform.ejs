@@ -13,7 +13,7 @@
   const customValue = isKnown ? '' : current;
   const showOther = selected === 'Other';
 %>
-<form class="co-form" method="POST" action="/admin/companies" enctype="multipart/form-data">
+<form class="co-form" method="POST" action="/admin/companies" enctype="multipart/form-data" data-loading-form>
   <% if (c._id) { %>
     <input type="hidden" name="id" value="<%= c._id %>">
   <% } %>
@@ -110,7 +110,80 @@
     </label>
   </div>
 
-  <button type="submit" class="co-btn co-btn--block">
-    <i class="fas fa-check"></i> Save company
+  <button type="submit" class="co-btn co-btn--block" data-submit-btn>
+    <i class="fas fa-check" data-idle-icon></i>
+    <span class="co-btn__spinner" aria-hidden="true"></span>
+    <span class="co-btn__label" data-label>Save company</span>
   </button>
 </form>
+
+<style>
+  /* spinner + loading state of the Save button */
+  .co-btn__spinner {
+    display: none;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255, 255, 255, .45);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: co-spin .7s linear infinite;
+    flex-shrink: 0;
+  }
+  .co-btn.is-loading { cursor: wait; opacity: .85; pointer-events: none; }
+  .co-btn.is-loading .co-btn__spinner { display: inline-block; }
+  .co-btn.is-loading [data-idle-icon] { display: none; }
+  @keyframes co-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .co-btn__spinner { animation-duration: 1.6s; }
+  }
+</style>
+
+<script>
+  /* Save button loading state (runs once even if this partial is included many times) */
+  (function () {
+    if (window.__coLoadingInit) return;
+    window.__coLoadingInit = true;
+
+    function setLoading(form, on) {
+      var btn = form.querySelector('[data-submit-btn]');
+      if (!btn) return;
+      var label = btn.querySelector('[data-label]');
+
+      if (on) {
+        if (label && !btn.dataset.idleText) btn.dataset.idleText = label.textContent;
+        btn.classList.add('is-loading');
+        btn.disabled = true;
+        btn.setAttribute('aria-busy', 'true');
+        if (label) label.textContent = 'Saving…';
+      } else {
+        btn.classList.remove('is-loading');
+        btn.disabled = false;
+        btn.removeAttribute('aria-busy');
+        if (label && btn.dataset.idleText) label.textContent = btn.dataset.idleText;
+      }
+    }
+
+    // "submit" only fires AFTER the browser validation passed
+    document.addEventListener('submit', function (e) {
+      var form = e.target;
+      if (!form || !form.matches || !form.matches('[data-loading-form]')) return;
+
+      // second click while saving -> ignore
+      if (form.dataset.submitting === '1') {
+        e.preventDefault();
+        return;
+      }
+
+      form.dataset.submitting = '1';
+      setLoading(form, true);
+    });
+
+    // back button / bfcache restores the page -> reset the button
+    window.addEventListener('pageshow', function () {
+      document.querySelectorAll('[data-loading-form]').forEach(function (form) {
+        form.dataset.submitting = '';
+        setLoading(form, false);
+      });
+    });
+  })();
+</script>

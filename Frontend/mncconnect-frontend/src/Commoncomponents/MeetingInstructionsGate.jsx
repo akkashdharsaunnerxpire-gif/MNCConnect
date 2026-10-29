@@ -1,7 +1,7 @@
 // src/Commoncomponents/MeetingInstructionsGate.jsx
 import React, { useEffect, useState } from "react";
 import { CheckCircle2, Loader2, ChevronDown, AlertTriangle } from "lucide-react";
-import {socket} from "../utils/socket";
+import { socket } from "../utils/socket";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
@@ -27,11 +27,6 @@ export default function MeetingInstructionsGate({
   const [checked, setChecked] = useState(alreadyAccepted);
   const [submitting, setSubmitting] = useState(alreadyAccepted);
 
-  const token =
-    localStorage.getItem("mnc_mentor_token") ||
-    localStorage.getItem("fresher_token") ||
-    "";
-
   // server-la already accept pannirundha (refresh), locked state-la kaattu
   useEffect(() => {
     if (alreadyAccepted) {
@@ -45,8 +40,9 @@ export default function MeetingInstructionsGate({
     setLoading(true);
     setError("");
 
+    // auth = HttpOnly cookie (no token in JS, no localStorage)
     fetch(`${API_URL}/instructions?lang=${lang}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: "include",
     })
       .then((r) => r.json())
       .then((d) => {
@@ -64,7 +60,7 @@ export default function MeetingInstructionsGate({
     return () => {
       cancelled = true;
     };
-  }, [lang, token]);
+  }, [lang]);
 
   const submit = () => {
     if (!checked || submitting) return;

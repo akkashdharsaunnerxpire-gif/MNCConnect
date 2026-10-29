@@ -1,20 +1,25 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 import {
   User, Mail, Phone, MapPin, BriefcaseBusiness, Code2, Award, Star, Edit3,
   Share2, FileText, Building, ShieldCheck, Menu, Stethoscope, Download, X,
-  Plus, Loader2, Check, AlertTriangle
+  Plus, Loader2, Check, AlertTriangle, LogOut
 } from "lucide-react";
 import { FaLinkedin } from "react-icons/fa";
 
 import useLive from "../../hooks/useLive";
 import useMentorSessions from "../../hooks/useMentorSessions";
 import { api, EVENTS, ENDPOINTS } from "../../services/mentorApi";
+import { useAuth } from "../../context/AuthContext";
+import { performLogout } from "../../utils/logout";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 const MentorProfile = () => {
+  const navigate = useNavigate();
+  const { refresh } = useAuth();
+
   const [mentor, setMentor] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -23,6 +28,7 @@ const MentorProfile = () => {
 
   const [editOpen, setEditOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [toast, setToast] = useState(null);
 
   const toastTimerRef = useRef(null);
@@ -34,6 +40,23 @@ const MentorProfile = () => {
   };
 
   useEffect(() => () => window.clearTimeout(toastTimerRef.current), []);
+
+  /* ---------- LOGOUT (mentor) ----------
+     1. server clears the HttpOnly cookie
+     2. socket is closed (mentor goes offline)
+     3. AuthContext refreshed -> logged out
+     4. redirect to mentor login                                    */
+  const handleLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    await performLogout();
+    try {
+      await refresh();
+    } catch {
+      /* ignore */
+    }
+    navigate("/mentor/login", { replace: true });
+  };
 
   /* ---------- SAME data sources as Home page ---------- */
 
@@ -61,36 +84,36 @@ const MentorProfile = () => {
 
   /* ---------- mentor profile ---------- */
 
- const fetchMentorProfile = async () => {
-  try {
-    setLoading(true);
-    setError("");
+  const fetchMentorProfile = async () => {
+    try {
+      setLoading(true);
+      setError("");
 
-    // identity comes from the cookie session, not localStorage
-    const me = await axios.get(`${API_URL}/auth/me`, { withCredentials: true });
-    const email = me.data?.user?.email;
-    if (!email) throw new Error("Session expired. Please login again.");
+      // identity comes from the cookie session, not localStorage
+      const me = await axios.get(`${API_URL}/auth/me`, { withCredentials: true });
+      const email = me.data?.user?.email;
+      if (!email) throw new Error("Session expired. Please login again.");
 
-    const response = await axios.get(
-      `${API_URL}/mentor/${encodeURIComponent(email)}`,
-      { withCredentials: true }
-    );
-    if (response.data?.success) {
-      setMentor(response.data.mentor);
-    } else {
-      setError(response.data?.message || "Unable to load mentor profile.");
+      const response = await axios.get(
+        `${API_URL}/mentor/${encodeURIComponent(email)}`,
+        { withCredentials: true }
+      );
+      if (response.data?.success) {
+        setMentor(response.data.mentor);
+      } else {
+        setError(response.data?.message || "Unable to load mentor profile.");
+      }
+    } catch (err) {
+      console.error("Mentor profile error:", err);
+      setError(err?.response?.data?.message || err.message || "Unable to load mentor profile.");
+    } finally {
+      setLoading(false);
     }
-  } catch (err) {
-    console.error("Mentor profile error:", err);
-    setError(err?.response?.data?.message || err.message || "Unable to load mentor profile.");
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
-useEffect(() => {
-  fetchMentorProfile();
-}, []);
+  useEffect(() => {
+    fetchMentorProfile();
+  }, []);
 
   const apiUpdateMentor = async (email, formValues) => {
     const { offerLetterFile, employeeIdProofFile, additionalProofFile, languages, ...rest } = formValues;
@@ -117,7 +140,7 @@ useEffect(() => {
   const handleSaveProfile = async (formValues) => {
     setSaving(true);
     try {
-     const data = await apiUpdateMentor(mentor.email, formValues);
+      const data = await apiUpdateMentor(mentor.email, formValues);
       if (data?.success === false) throw new Error(data?.message || "Failed to save changes");
 
       const { offerLetterFile, employeeIdProofFile, additionalProofFile, ...plainValues } = formValues;
@@ -200,7 +223,12 @@ useEffect(() => {
           <ShieldCheck size={48} className="mx-auto text-red-500" />
           <h2 className="mt-4 text-lg sm:text-xl font-bold text-slate-900">Profile unavailable</h2>
           <p className="mt-2 text-sm text-slate-500 break-words">{error || "Mentor data could not be loaded."}</p>
-          <Link to="/mentor/home" className="inline-block px-6 py-3 mt-6 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700">Back to Home</Link>
+          <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
+            <Link to="/mentor/home" className="inline-block px-6 py-3 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700">Back to Home</Link>
+            <button onClick={handleLogout} disabled={loggingOut} className="inline-block px-6 py-3 text-sm font-semibold text-red-600 border border-red-200 rounded-xl hover:bg-red-50 disabled:opacity-60">
+              {loggingOut ? "Logging out…" : "Logout"}
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -253,6 +281,16 @@ useEffect(() => {
               <Edit3 size={18} className="shrink-0" />
               <span>Settings</span>
             </Link>
+
+            {/* MENTOR LOGOUT */}
+            <button
+              onClick={handleLogout}
+              disabled={loggingOut}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-red-500 hover:bg-red-50 disabled:opacity-60 text-left"
+            >
+              {loggingOut ? <Loader2 size={18} className="shrink-0 animate-spin" /> : <LogOut size={18} className="shrink-0" />}
+              <span>{loggingOut ? "Logging out…" : "Logout"}</span>
+            </button>
           </nav>
 
           <div className="mt-4 rounded-2xl bg-gradient-to-br from-blue-600 to-sky-500 p-4 text-white">

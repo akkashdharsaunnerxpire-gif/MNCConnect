@@ -1,5 +1,11 @@
 // src/Routes/FresherRoutes.jsx
-import React from "react";
+//
+// Mounted in App.jsx as  <Route path="/*" element={<FresherRoutes />} />
+// (App.jsx's "/", "/auth" and "/mentor/*" are more specific, so they win first.)
+//
+//   PUBLIC     /login  /forgot-password  /reset-password/:token
+//   PROTECTED  /Home/...  (fresher cookie required)
+import React, { lazy } from "react";
 import {
   Routes,
   Route,
@@ -21,7 +27,28 @@ import MeetingRoom from "../Commoncomponents/Meetingroom";
 import SuspenseLoader from "../Commoncomponents/SuspenseLoader";
 import { useAuth } from "../context/AuthContext";
 
-// The server (via cookie) decides. While it answers, show the loader.
+// Fresher auth pages (lazy, only loaded when opened)
+const Login = lazy(() => import("../Authpage/FresherAuth/FresherLoginRegister"));
+const Forgetpassword = lazy(
+  () => import("../Authpage/FresherAuth/Forgetpassword"),
+);
+const FresherResetPassword = lazy(
+  () => import("../Authpage/FresherAuth/FresherResetPassword"),
+);
+
+// ================= GUARDS =================
+
+// PUBLIC login page: already-logged-in fresher goes straight to /Home
+const FresherLoginRoute = () => {
+  const { role, loading } = useAuth();
+
+  if (loading) return <SuspenseLoader />;
+  if (role === "fresher") return <Navigate to="/Home" replace />;
+
+  return <Login />;
+};
+
+// PROTECTED dashboard: the server (via cookie) decides.
 const FresherProtectedRoute = () => {
   const { role, loading } = useAuth();
 
@@ -58,8 +85,8 @@ const SessionBoardRoute = () => {
   return <SessionBoard key={location.key} />;
 };
 
-// Shows which path failed to match, then goes Home
-const UnknownRoute = () => {
+// Unknown path inside /Home -> log it, then go Home
+const UnknownHomeRoute = () => {
   const location = useLocation();
   console.warn(
     "[FresherRoutes] No route matched:",
@@ -69,10 +96,18 @@ const UnknownRoute = () => {
   return <Navigate to="/Home" replace />;
 };
 
+// ================= ROUTES =================
+
 const FresherRoutes = () => {
   return (
     <Routes>
-      <Route element={<FresherProtectedRoute />}>
+      {/* ---------- PUBLIC (no login needed) ---------- */}
+      <Route path="login" element={<FresherLoginRoute />} />
+      <Route path="forgot-password" element={<Forgetpassword />} />
+      <Route path="reset-password/:token" element={<FresherResetPassword />} />
+
+      {/* ---------- PROTECTED (/Home/...) ---------- */}
+      <Route path="Home" element={<FresherProtectedRoute />}>
         {/* Full-screen meeting room (no header) */}
         <Route path="meeting/:bookingId" element={<MeetingRoom />} />
 
@@ -92,9 +127,12 @@ const FresherRoutes = () => {
           <Route path="profile" element={<FresherProfile />} />
           <Route path="mnc-logos" element={<Mnclogos />} />
           <Route path=":companyName" element={<SessionBoardRoute />} />
-          <Route path="*" element={<UnknownRoute />} />
+          <Route path="*" element={<UnknownHomeRoute />} />
         </Route>
       </Route>
+
+      {/* ---------- anything else -> landing ---------- */}
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 };

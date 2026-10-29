@@ -25,6 +25,8 @@ import {
 } from "lucide-react";
 import Auth from "../Authpage/Auth";
 import { useNavigate } from "react-router-dom";
+/* NavAvatar.jsx must sit in the same folder as this file */
+import NavAvatar, { NAV_AVATAR_CSS, useAutoLite } from "../assets/Navavatar";
 
 /* ==========================================================
    DATA
@@ -282,11 +284,19 @@ export default function Landing() {
   const isMobile = useMediaQuery("(max-width: 768px)");
   const reduceMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
 
+  /* auto performance mode: phones, weak CPUs, or measured low FPS */
+  const lite = useAutoLite();
+
   const [persona, setPersona] = useState("fresher");
   const [menuOpen, setMenuOpen] = useState(false);
   const [videoOpen, setVideoOpen] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [loginHover, setLoginHover] = useState(false);
+
+  /* avatar click -> points at Log in (2.4s), auth modal does NOT open */
+  const [pointing, setPointing] = useState(false);
+  const pointTimer = useRef(0);
 
   const [heroRole, setHeroRole] = useState(0);
   const [notifIndex, setNotifIndex] = useState(0);
@@ -312,6 +322,15 @@ export default function Landing() {
   const fresherMode = persona === "fresher";
   const activeRole = heroRoles[heroRole];
   const heroMentor = mentors[activeRole.mentor];
+
+  /* ---------- avatar click handler ---------- */
+  const onAvatarClick = () => {
+    window.clearTimeout(pointTimer.current);
+    setPointing(true);
+    pointTimer.current = window.setTimeout(() => setPointing(false), 2400);
+  };
+
+  useEffect(() => () => window.clearTimeout(pointTimer.current), []);
 
   /* ---------- scroll progress + navbar state (one passive listener) ---------- */
   useEffect(() => {
@@ -403,7 +422,7 @@ export default function Landing() {
 
   /* ---------- hero 3D pointer parallax (mouse only, writes CSS vars) ---------- */
   const onHeroMove = (event) => {
-    if (isMobile || reduceMotion || event.pointerType !== "mouse") return;
+    if (lite || isMobile || reduceMotion || event.pointerType !== "mouse") return;
     const zone = heroZoneRef.current;
     if (!zone) return;
 
@@ -491,10 +510,16 @@ export default function Landing() {
     setShowAuthModal(true);
   };
 
+  /* Log in looks "called out" while hovered or while the boy points at it */
+  const loginHighlighted = pointing || loginHover;
+
   /* ========================================================== */
   return (
-    <div className="landing-root min-h-screen overflow-x-clip bg-white text-slate-900">
-      <style>{LANDING_CSS}</style>
+    <div
+      data-lite={lite ? "1" : "0"}
+      className="landing-root min-h-screen overflow-x-clip bg-white text-slate-900"
+    >
+      <style>{LANDING_CSS + NAV_AVATAR_CSS}</style>
 
       {/* Scroll progress */}
       <div
@@ -510,7 +535,7 @@ export default function Landing() {
       <div className="mobile-hide pointer-events-none fixed left-[-10%] top-[10%] z-0 h-[500px] w-[500px] rounded-full bg-indigo-500/10 blur-[140px]" />
       <div className="mobile-hide pointer-events-none fixed right-[-10%] top-[25%] z-0 h-[600px] w-[600px] rounded-full bg-emerald-400/10 blur-[150px]" />
 
-      {!isMobile && !reduceMotion && (
+      {!lite && !reduceMotion && (
         <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
           <div className="grid-scan absolute left-0 right-0 h-48 bg-gradient-to-b from-transparent via-indigo-400/10 to-transparent" />
           {[...Array(6)].map((_, i) => (
@@ -568,10 +593,32 @@ export default function Landing() {
             ))}
           </div>
 
-          <div className="hidden items-center gap-3 md:flex">
+          {/* Desktop (>=1024px only): avatar sits on the nav edge.
+              Click -> he points at Log in. Auth modal stays closed. */}
+          <div className="hidden items-center gap-3 self-stretch md:flex">
+            {!isMobile && (
+              <div className="avatar-slot relative hidden w-[68px] self-stretch lg:block">
+                <NavAvatar
+                  excited={loginHover}
+                  pointing={pointing}
+                  lite={lite}
+                  reduceMotion={reduceMotion}
+                  onClick={onAvatarClick}
+                />
+              </div>
+            )}
+
             <button
-              className="px-4 py-2 text-sm font-semibold text-slate-600 transition hover:text-indigo-600"
+              className={`login-btn rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                loginHighlighted
+                  ? "login-called bg-indigo-50 text-indigo-600 ring-2 ring-indigo-400"
+                  : "text-slate-600 hover:text-indigo-600"
+              }`}
               onClick={openAuth}
+              onMouseEnter={() => setLoginHover(true)}
+              onMouseLeave={() => setLoginHover(false)}
+              onFocus={() => setLoginHover(true)}
+              onBlur={() => setLoginHover(false)}
             >
               Log in
             </button>
@@ -584,9 +631,10 @@ export default function Landing() {
             </button>
           </div>
 
+          {/* Mobile / small screens: no avatar, just the menu button */}
           <button
             onClick={() => setMenuOpen(!menuOpen)}
-            className="rounded-xl border border-slate-200 bg-white p-2.5 md:hidden"
+            className="ml-auto rounded-xl border border-slate-200 bg-white p-2.5 md:hidden"
             aria-label="Toggle menu"
             aria-expanded={menuOpen}
           >
@@ -771,7 +819,7 @@ export default function Landing() {
                       <div key={heroMentor.name} className="swap-in contents">
                         <VideoPerson
                           image={heroMentor.image}
-                          videoSrc={isMobile ? undefined : DEMO_VIDEO_URL}
+                          videoSrc={lite ? undefined : DEMO_VIDEO_URL}
                           name={heroMentor.name}
                           role={`Mentor • ${heroMentor.company} ${heroMentor.role}`}
                           mentor
@@ -911,7 +959,7 @@ export default function Landing() {
       {/* ===================== PERSONA ===================== */}
       <section
         id="section-2"
-        className="cv-auto relative z-10 scroll-mt-20 px-5 py-24 sm:px-8 md:py-28 lg:px-12"
+        className="relative z-10 scroll-mt-20 px-5 py-24 sm:px-8 md:py-28 lg:px-12"
       >
         <div className="mx-auto max-w-[1400px]">
           <Reveal>
@@ -1344,7 +1392,7 @@ export default function Landing() {
       <div id="section-4" className="relative z-10 h-0 scroll-mt-24" aria-hidden="true" />
 
       {/* ===================== FINAL CTA ===================== */}
-      <section className="cv-auto relative z-10 overflow-hidden px-5 py-28 sm:px-8 md:py-32 lg:px-12">
+      <section className="relative z-10 overflow-hidden px-5 py-28 sm:px-8 md:py-32 lg:px-12">
         <div className="mobile-hide absolute left-1/2 top-1/2 h-[500px] w-[900px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-indigo-500/10 blur-[130px]" />
 
         <div className="relative mx-auto max-w-5xl text-center">
@@ -1711,7 +1759,7 @@ function HowItWorks() {
   return (
     <section
       id="section-3"
-      className="cv-auto relative z-10 scroll-mt-20 border-y border-slate-200 bg-slate-50/70 px-5 py-24 sm:px-8 md:py-28 lg:px-12"
+      className="relative z-10 scroll-mt-20 border-y border-slate-200 bg-slate-50/70 px-5 py-24 sm:px-8 md:py-28 lg:px-12"
     >
       <div className="mx-auto max-w-[1400px]">
         <Reveal>
@@ -1896,12 +1944,30 @@ function SectionHeading({ eyebrow, number, title, gradient, description }) {
    - no backdrop-filter on phones
    - infinite animations are switched off on phones, off-screen and
      when the user prefers reduced motion
+   - avatar + lite-mode CSS lives in NavAvatar.jsx (NAV_AVATAR_CSS)
    ========================================================== */
 const LANDING_CSS = `
-.landing-root { -webkit-tap-highlight-color: transparent; }
-html { scroll-behavior: smooth; }
+/* ---------- page-level: no sideways drag + slim scrollbar ---------- */
+html, body {
+  max-width: 100%;
+  overflow-x: clip;            /* clips without creating a scroll container */
+  overscroll-behavior-x: none;
+}
+html {
+  scroll-behavior: smooth;
+  scrollbar-width: thin;                              /* Firefox */
+  scrollbar-color: #a5b4fc transparent;
+}
+html::-webkit-scrollbar { width: 6px; height: 6px; } /* Chrome / Edge / Safari */
+html::-webkit-scrollbar-track { background: transparent; }
+html::-webkit-scrollbar-thumb { background: #a5b4fc; border-radius: 999px; }
+html::-webkit-scrollbar-thumb:hover { background: #6366f1; }
 
-.cv-auto { content-visibility: auto; contain-intrinsic-size: 1px 900px; }
+.landing-root { -webkit-tap-highlight-color: transparent; max-width: 100vw; }
+
+/* content-visibility removed: it made the scroll thumb jump because
+   off-screen sections were sized by a guess. Sections now render normally. */
+.cv-auto { content-visibility: visible; }
 
 .cyber-grid {
   background-image:
@@ -1923,6 +1989,11 @@ html { scroll-behavior: smooth; }
 }
 .nav-link:hover { color: #4f46e5; }
 .nav-link:hover::after { transform: scaleX(1); }
+
+/* ---------- Log in highlight (hover or avatar pointing) ---------- */
+.login-btn { position: relative; }
+@keyframes loginNudge { 0%,100% { transform: scale(1); } 50% { transform: scale(1.07); } }
+.login-called { animation: loginNudge .55s ease-in-out infinite; }
 
 /* ---------- reveal on scroll ---------- */
 .reveal { opacity: 0; transform: translate3d(0, 22px, 0); transition: opacity .7s cubic-bezier(.22,1,.36,1), transform .7s cubic-bezier(.22,1,.36,1); }
@@ -2122,7 +2193,8 @@ html { scroll-behavior: smooth; }
   html { scroll-behavior: auto; }
   .reveal { opacity: 1; transform: none; transition: none; }
   .float-a, .float-b, .float-c, .pulse-glow::after, .marquee-track, .grid-scan, .particle,
-  .ring-a, .ring-b, .orbit-dot, .live-pulse, .eq-bar, .hero-gradient, .swap-in, .bar-grow { animation: none !important; }
+  .ring-a, .ring-b, .orbit-dot, .live-pulse, .eq-bar, .hero-gradient, .swap-in, .bar-grow,
+  .login-called { animation: none !important; }
   .hero-stage, .hero-stage > div, .tilt, .mentor-card, .step-line { transition: none !important; }
 }
 `;

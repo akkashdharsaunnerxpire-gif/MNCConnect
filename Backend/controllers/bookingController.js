@@ -29,6 +29,10 @@ const OPEN_BEFORE_MS = 5 * 60 * 1000;
 const STRICT_MATCH = process.env.STRICT_MENTOR_MATCH === "true";
 const PLATFORM_FEE_PERCENT = Number(process.env.PLATFORM_FEE_PERCENT || 25);
 
+// failed refunds are retried at most this many times, this far apart
+const MAX_REFUND_ATTEMPTS = 5;
+const REFUND_RETRY_GAP_MS = 30 * 60 * 1000;
+
 // accepted session, but the timer never started this long after startsAt -> "missed" + refund
 const NO_SHOW_GRACE_MS =
   (Number(process.env.NO_SHOW_GRACE_MIN) || 15) * 60 * 1000;
@@ -271,6 +275,16 @@ const refundPayment = async (payment, reason = "", options = {}) => {
   const amount = Number(before.amount) || 0;
 
   try {
+    const p = await getRazorpay().payments.fetch(before.razorpayPaymentId);
+    console.error("RAZORPAY PAYMENT STATE:", {
+      id: p.id,
+      status: p.status,
+      captured: p.captured,
+      method: p.method,
+      amount: p.amount,
+      amount_refunded: p.amount_refunded,
+      refund_status: p.refund_status,
+    });
     if (toWallet) {
       if (!before.fresher) {
         await unlock();
@@ -296,12 +310,34 @@ const refundPayment = async (payment, reason = "", options = {}) => {
     });
     return "refunded";
   } catch (error) {
-    const desc = error?.error?.description || error.message || "";
+    const rz = error?.error || {};
+    const desc = rz.description || error.message || "";
+
     // Razorpay says it is already refunded -> keep our record as refunded
     if (!toWallet && /already.*refund|fully refunded/i.test(desc))
       return "refunded";
 
-    console.error("REFUND FAILED:", desc);
+    console.error("REFUND FAILED:", {
+      payment: before.razorpayPaymentId,
+      amount,
+      statusCode: error?.statusCode,
+      code: rz.code,
+      field: rz.field,
+      reason: rz.reason,
+      description: desc,
+    });
+
+    // remember WHY it failed (visible in the database)
+    await Payment.updateOne(
+      { _id: before._id },
+      {
+        $set: {
+          refundError: String(desc).slice(0, 300),
+          refundFailedAt: new Date(),
+        },
+      },
+    ).catch(() => {});
+
     await unlock();
     return "failed";
   }
@@ -1233,18 +1269,38 @@ exports.startSchedulers = (app) => {
       }
 
       // 4) retry refunds that failed earlier
+      //    (max MAX_REFUND_ATTEMPTS tries, REFUND_RETRY_GAP_MS apart, so it can never spam)
       const failedRefunds = await Booking.find({
         status: { $in: ["expired", "missed", "cancelled", "disputed"] },
         refundStatus: "failed",
         razorpayPaymentId: { $ne: "" },
+        refundAttempts: { $not: { $gte: MAX_REFUND_ATTEMPTS } },
+        $or: [
+          { lastRefundAttemptAt: null },
+          {
+            lastRefundAttemptAt: {
+              $lte: new Date(now.getTime() - REFUND_RETRY_GAP_MS),
+            },
+          },
+        ],
       }).limit(10);
+
       for (const b of failedRefunds) {
+        await Booking.updateOne(
+          { _id: b._id },
+          {
+            $inc: { refundAttempts: 1 },
+            $set: { lastRefundAttemptAt: new Date() },
+          },
+        );
+
         const payment = await Payment.findOne({
           razorpayPaymentId: b.razorpayPaymentId,
         });
         const result = await refundPayment(payment, "Retry: session refund", {
           to: b.status === "disputed" ? "wallet" : "auto",
         });
+
         if (result === "refunded") {
           await Booking.updateOne(
             { _id: b._id },

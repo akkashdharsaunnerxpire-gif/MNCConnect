@@ -1,9 +1,21 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { LayoutDashboard, UserPlus, CalendarDays, Wallet, Star, Bell, UserCircle, LogOut } from "lucide-react";
-import {socket} from "../../utils/socket";
+import {
+  LayoutDashboard,
+  UserPlus,
+  CalendarDays,
+  Wallet,
+  Star,
+  Bell,
+  UserCircle,
+  LogOut,
+  Loader2,
+} from "lucide-react";
+import { socket } from "../../utils/socket";
 import { api, ENDPOINTS, EVENTS, NOTIFICATIONS_CHANGED } from "../../services/mentorApi";
 import useMentorSessions from "../../hooks/useMentorSessions";
+import { useAuth } from "../../context/AuthContext";
+import { performLogout } from "../../utils/logout";
 
 const navItems = [
   { name: "Home", path: "/mentor/home", icon: LayoutDashboard },
@@ -13,12 +25,30 @@ const navItems = [
   { name: "Reviews", path: "/mentor/reviews", icon: Star },
 ];
 
+/* Defined OUTSIDE the header so it is not re-created on every render */
+const CountBadge = ({ count, active }) =>
+  count > 0 ? (
+    <span
+      aria-label={`${count} upcoming`}
+      className={`flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold ${
+        active ? "bg-blue-600 text-white" : "bg-blue-100 text-blue-700"
+      }`}
+    >
+      {count > 99 ? "99+" : count}
+    </span>
+  ) : null;
+
 const MentorHeader = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user, refresh } = useAuth();
+
+  // id comes from the cookie-based session (AuthContext), not localStorage
+  const userId = user?.id || user?._id || user?.mentor?.id || user?.mentor?._id || null;
 
   const [connected, setConnected] = useState(socket.connected);
   const [unread, setUnread] = useState(0);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   /* Sessions count: only Upcoming (finished / cancelled / awaiting are NOT counted) */
   const { sessions } = useMentorSessions();
@@ -43,7 +73,6 @@ const MentorHeader = () => {
   /* live unread badge + join the personal room so pushes reach every page */
   useEffect(() => {
     let alive = true;
-    const userId = localStorage.getItem("mentorId");
 
     const load = () =>
       api(`${ENDPOINTS.notifications}?limit=1`)
@@ -67,38 +96,42 @@ const MentorHeader = () => {
       socket.off("connect", onConnect);
       window.removeEventListener(NOTIFICATIONS_CHANGED, load);
     };
-  }, []);
+  }, [userId]);
 
   const isActive = (path) => location.pathname.toLowerCase() === path;
 
   // badge number for each nav item (only Sessions has one)
   const badgeFor = (path) => (path === "/mentor/sessions" ? upcomingCount : 0);
 
-  const handleLogout = () => {
-    const mentorId = localStorage.getItem("mentorId");
-    if (mentorId && socket.connected) socket.emit("mentor-offline", mentorId);
-    socket.disconnect();
-    localStorage.removeItem("mnc_mentor_token");
-    localStorage.removeItem("mnc_mentor_user");
-    navigate("/mentor/login", { replace: true });
+  /* =======================================================================
+     LOGOUT  (same flow as the Fresher profile)
+     1. server clears the HttpOnly cookie (JS cannot do this itself)
+     2. realtime socket is closed -> mentor goes OFFLINE on the server
+     3. AuthContext is refreshed (it becomes "logged out")
+  ======================================================================= */
+  const handleLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+
+    try {
+      await performLogout();
+    } catch {
+      /* ignore: we still leave the page below */
+    }
+
+    try {
+      await refresh();
+    } catch {
+      /* ignore */
+    }
+
+    navigate("/", { replace: true });
   };
 
   const iconBtn = (active) =>
     `relative flex h-10 w-10 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
       active ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
     }`;
-
-  const CountBadge = ({ count, active }) =>
-    count > 0 ? (
-      <span
-        aria-label={`${count} upcoming`}
-        className={`flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold ${
-          active ? "bg-blue-600 text-white" : "bg-blue-100 text-blue-700"
-        }`}
-      >
-        {count > 99 ? "99+" : count}
-      </span>
-    ) : null;
 
   return (
     <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur">
@@ -120,7 +153,9 @@ const MentorHeader = () => {
             const active = isActive(path);
             return (
               <Link
-                key={path} to={path} aria-current={active ? "page" : undefined}
+                key={path}
+                to={path}
+                aria-current={active ? "page" : undefined}
                 className={`relative flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                   active ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
                 }`}
@@ -128,7 +163,9 @@ const MentorHeader = () => {
                 <Icon size={17} />
                 <span>{name}</span>
                 <CountBadge count={badgeFor(path)} active={active} />
-                {active && <span className="absolute bottom-0 left-1/2 h-0.5 w-5 -translate-x-1/2 rounded-full bg-blue-600" />}
+                {active && (
+                  <span className="absolute bottom-0 left-1/2 h-0.5 w-5 -translate-x-1/2 rounded-full bg-blue-600" />
+                )}
               </Link>
             );
           })}
@@ -139,12 +176,20 @@ const MentorHeader = () => {
             role="status"
             aria-label={connected ? "You are online" : "Reconnecting"}
             className={`mr-1 flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold ${
-              connected ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"
+              connected
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-amber-200 bg-amber-50 text-amber-700"
             }`}
           >
             <span className="relative flex h-2 w-2">
-              {connected && <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 motion-safe:animate-ping" />}
-              <span className={`relative inline-flex h-2 w-2 rounded-full ${connected ? "bg-emerald-500" : "bg-amber-500"}`} />
+              {connected && (
+                <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 motion-safe:animate-ping" />
+              )}
+              <span
+                className={`relative inline-flex h-2 w-2 rounded-full ${
+                  connected ? "bg-emerald-500" : "bg-amber-500"
+                }`}
+              />
             </span>
             {connected ? "Online" : "Reconnecting…"}
           </div>
@@ -167,10 +212,13 @@ const MentorHeader = () => {
           </Link>
 
           <button
-            type="button" onClick={handleLogout} aria-label="Logout"
-            className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-500 transition hover:bg-red-50 hover:text-red-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+            type="button"
+            onClick={handleLogout}
+            disabled={loggingOut}
+            aria-label="Logout"
+            className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-500 transition hover:bg-red-50 hover:text-red-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <LogOut size={19} />
+            {loggingOut ? <Loader2 size={19} className="animate-spin" /> : <LogOut size={19} />}
           </button>
         </div>
       </div>
@@ -181,7 +229,9 @@ const MentorHeader = () => {
             const active = isActive(path);
             return (
               <Link
-                key={path} to={path} aria-current={active ? "page" : undefined}
+                key={path}
+                to={path}
+                aria-current={active ? "page" : undefined}
                 className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium transition ${
                   active ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
                 }`}

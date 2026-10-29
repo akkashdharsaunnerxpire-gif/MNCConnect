@@ -24,51 +24,26 @@ export default function ForgotPassword() {
     setSuccess(false);
     setIsLoading(true);
 
-    try {
-      // Check if endpoint exists - use existing or create placeholder
-      const response = await fetch(`${API_URL}/auth/mentor/forgot-password`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email }),
-      });
+   try {
+  const response = await fetch(`${API_URL}/auth/mentor/forgot-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: email.trim() }),
+  });
 
-      // If endpoint doesn't exist yet (404), simulate success for now
-      if (response.status === 404) {
-        console.warn('Forgot password endpoint not yet implemented. This is a placeholder.');
-        // Simulate success for frontend testing
-        setTimeout(() => {
-          setSuccess(true);
-          setIsLoading(false);
-        }, 1000);
-        return;
-      }
+  const data = await response.json().catch(() => ({}));
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        setError(data.message || 'Failed to send reset link. Please try again.');
-        setIsLoading(false);
-        return;
-      }
-
-      setSuccess(true);
-      setIsLoading(false);
-    } catch (error) {
-      console.error('Forgot password error:', error);
-      if (error.message === 'Failed to fetch') {
-        // Simulate success for frontend testing if backend not running
-        console.warn('Backend not available. Simulating success for development.');
-        setTimeout(() => {
-          setSuccess(true);
-          setIsLoading(false);
-        }, 1000);
-        return;
-      }
-      setError('An unexpected error occurred. Please try again.');
-      setIsLoading(false);
-    }
+  if (!response.ok) {
+    setError(data.message || 'Failed to send reset link. Please try again.');
+    return;
+  }
+  setSuccess(true);
+} catch (err) {
+  console.error('Forgot password error:', err);
+  setError('Unable to connect to the server. Please try again.');
+} finally {
+  setIsLoading(false);
+}
   };
 
   return (

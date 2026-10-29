@@ -11,7 +11,7 @@ const auditSchema = new mongoose.Schema(
       // login_success, login_failed, logout, review_saved,
       // mentor_approve, mentor_reject, mentor_pending, bulk_*, export_mentors, user_toggle
     },
-    mentor: { type: mongoose.Schema.Types.ObjectId, ref: "Mentor", index: true },
+    mentor: { type: mongoose.Schema.Types.ObjectId, ref: "Mentor", required: true },
     mentorName: String,
     adminEmail: { type: String, index: true },
     adminName: String,

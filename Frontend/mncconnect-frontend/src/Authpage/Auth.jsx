@@ -89,7 +89,7 @@ function PathCard({ path, index, onChoose }) {
       onClick={() => onChoose(path.to)}
       onPointerMove={onMove}
       onPointerLeave={onLeave}
-      className={`auth-card auth-in group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left outline-none ${path.tone.hoverBorder}`}
+      className={`auth-card auth-in group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 text-left outline-none ${path.tone.hoverBorder}`}
       style={{
         animationDelay: `${180 + index * 110}ms`,
         "--glow": path.tone.glow,
@@ -99,7 +99,7 @@ function PathCard({ path, index, onChoose }) {
 
       <div className="relative flex items-center justify-between">
         <div
-          className={`auth-icon flex h-11 w-11 items-center justify-center rounded-xl text-white shadow-lg ${path.tone.solid}`}
+          className={`auth-icon flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-lg ${path.tone.solid}`}
         >
           <Icon className="h-5 w-5" />
         </div>
@@ -107,7 +107,7 @@ function PathCard({ path, index, onChoose }) {
         <ChevronRight className="auth-arrow h-5 w-5 text-slate-400" />
       </div>
 
-      <p className={`relative mt-6 text-xs font-bold ${path.tone.text}`}>
+      <p className={`relative mt-4 text-xs font-bold ${path.tone.text}`}>
         {path.step}
       </p>
 
@@ -115,11 +115,11 @@ function PathCard({ path, index, onChoose }) {
         {path.title}
       </h3>
 
-      <p className="relative mt-2 text-sm leading-6 text-slate-600">
+      <p className="relative mt-1.5 text-sm leading-6 text-slate-600">
         {path.text}
       </p>
 
-      <ul className="relative mt-4 space-y-2 border-t border-slate-100 pt-4">
+      <ul className="relative mt-3 space-y-1.5 border-t border-slate-100 pt-3">
         {path.perks.map((perk) => (
           <li
             key={perk}
@@ -134,7 +134,7 @@ function PathCard({ path, index, onChoose }) {
       </ul>
 
       <span
-        className={`relative mt-5 inline-flex items-center gap-1 text-xs font-bold ${path.tone.text}`}
+        className={`relative mt-4 inline-flex items-center gap-1 text-xs font-bold ${path.tone.text}`}
       >
         Continue
         <ChevronRight className="auth-cta-arrow h-3.5 w-3.5" />
@@ -152,7 +152,7 @@ export default function Auth({ closeModal }) {
   };
 
   return (
-   <div className="w-full overflow-x-hidden bg-white px-5 py-6 sm:px-8 sm:py-8">
+    <div className="auth-root w-full overflow-x-hidden bg-white px-5 py-5 sm:px-8 sm:py-6">
       <style>{AUTH_CSS}</style>
 
       <div className="mx-auto max-w-3xl">
@@ -165,21 +165,21 @@ export default function Auth({ closeModal }) {
           </div>
 
           <p
-            className="auth-in mt-4 text-xs font-bold uppercase tracking-widest text-indigo-600"
+            className="auth-in mt-3 text-xs font-bold uppercase tracking-widest text-indigo-600"
             style={{ animationDelay: "60ms" }}
           >
             MNC CONNECT
           </p>
 
           <h2
-            className="auth-in mt-2 text-3xl font-black text-slate-950"
+            className="auth-in mt-1.5 text-3xl font-black text-slate-950"
             style={{ animationDelay: "100ms" }}
           >
             Choose your path
           </h2>
 
           <p
-            className="auth-in mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-500"
+            className="auth-in mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500"
             style={{ animationDelay: "140ms" }}
           >
             Freshers connect with industry. MNC employees build professional
@@ -187,7 +187,7 @@ export default function Auth({ closeModal }) {
           </p>
         </div>
 
-        <div className="mt-8 grid gap-4 sm:grid-cols-2">
+        <div className="mt-6 grid gap-4 sm:grid-cols-2">
           {paths.map((path, index) => (
             <PathCard
               key={path.key}
@@ -199,7 +199,7 @@ export default function Auth({ closeModal }) {
         </div>
 
         <div
-          className="auth-in mt-7 flex items-center justify-center gap-2 border-t border-slate-100 pt-5"
+          className="auth-in mt-5 flex items-center justify-center gap-2 border-t border-slate-100 pt-4"
           style={{ animationDelay: "420ms" }}
         >
           <ShieldCheck className="h-4 w-4 text-emerald-500" />
@@ -214,6 +214,18 @@ export default function Auth({ closeModal }) {
 
 /* Only transform + opacity are animated. Heavy effects are off on phones. */
 const AUTH_CSS = `
+/* Hide the ugly scrollbar on whatever modal wrapper holds this screen.
+   The wrapper can still scroll with wheel / touch on very small screens. */
+:has(> .auth-root) {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+:has(> .auth-root)::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 @keyframes authIn {
   from { opacity: 0; transform: translate3d(0, 14px, 0); }
   to { opacity: 1; transform: none; }

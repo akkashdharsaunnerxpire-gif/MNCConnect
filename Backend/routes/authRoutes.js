@@ -12,7 +12,7 @@ const {
   sendFresherOtp,
   applyReferral,
   markWelcomeBonusSeen,
-  logout, // NEW
+  logout,
 } = require("../controllers/authController");
 
 const {
@@ -20,17 +20,21 @@ const {
   resetPasswordMentor,
 } = require("../controllers/Passwordresetcontroller");
 
-const { protect, authorize } = require("../middleware/authMiddleware");
-
 const {
   forgotPasswordFresher,
   resetPasswordFresher,
 } = require("../controllers/fresherPasswordResetController");
 
+const { protect, authorize } = require("../middleware/authMiddleware");
+
 const {
   uploadMentorFiles,
   handleMulterError,
 } = require("../middleware/uploadMiddleware");
+
+// ---------- common (fresher + mentor) ----------
+// Same "mnc_token" cookie for both roles, so ONE logout route works for both.
+router.post("/logout", logout);
 
 // ---------- fresher ----------
 router.post("/fresher/register", registerFresher);
@@ -39,22 +43,20 @@ router.post("/fresher/verify-otp", verifyFresherOtp);
 router.post("/fresher/login", loginFresher);
 router.post("/fresher/forgot-password", forgotPasswordFresher);
 router.post("/fresher/reset-password/:token", resetPasswordFresher);
-router.post("/logout", logout);
 
 // ---------- mentor ----------
 router.post(
   "/mentor/register",
   uploadMentorFiles,
   handleMulterError,
-  registerMentor
+  registerMentor,
 );
 router.post("/mentor/login", loginMentor);
 router.post("/mentor/forgot-password", forgotPasswordMentor);
-router.post("/mentor/reset-password/:token", resetPasswordMentor);
-
+router.post("/mentor/reset-password/:token",resetPasswordMentor );
 // ---------- logged-in user ----------
 router.get("/me", protect, getMe);
-router.post("/apply-referral", protect, applyReferral); // already vera edathula irundha idha remove pannunga
+router.post("/apply-referral", protect, applyReferral);
 router.patch("/welcome-bonus-seen", protect, markWelcomeBonusSeen);
 
 // ---------- admin ----------
@@ -62,7 +64,7 @@ router.put(
   "/admin/mentors/:id/verification",
   protect,
   authorize("admin"),
-  updateMentorVerification
+  updateMentorVerification,
 );
 
 module.exports = router;

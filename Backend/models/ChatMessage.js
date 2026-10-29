@@ -7,7 +7,6 @@ const chatSchema = new mongoose.Schema(
     bookingId: {
       type: String,
       required: true,
-      index: true,
     },
     senderRole: {
       type: String,
@@ -27,7 +26,6 @@ const chatSchema = new mongoose.Schema(
     recipientId: {
       type: String,
       default: null,
-      index: true,
     },
     text: {
       type: String,
@@ -47,6 +45,11 @@ const chatSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// history query: { bookingId } sorted by createdAt (latest first)
+chatSchema.index({ bookingId: 1, createdAt: -1 });
+// markDeliveredForUser: pending messages of one user
+chatSchema.index({ recipientRole: 1, recipientId: 1, deliveredAt: 1 });
+
 const ChatMessage =
   mongoose.models.ChatMessage ||
   mongoose.model("ChatMessage", chatSchema);
@@ -57,26 +60,52 @@ const chatRoom = (bookingKey) => `chat:${bookingKey}`;
 const userRoom = (role, id) => `user:${role}:${id}`;
 const peerRoleOf = (role) => (role === "mentor" ? "fresher" : "mentor");
 
-// ---------------- PRESENCE HELPERS ----------------
+// ---------------- PRESENCE (in-memory counter) ----------------
+// "role:id" -> number of connected sockets (tabs / pages).
+// No fetchSockets() calls, so it is instant and has no network cost.
+// NOTE: single server instance only. For multiple instances use Redis.
 
 const OFFLINE_GRACE_MS = 2000;
+const onlineCount = new Map();
 
-// user has at least one connected socket (any tab / any page)
-async function isUserOnline(io, role, id) {
+const keyOf = (role, id) => `${role}:${String(id)}`;
+
+const isUserOnline = (role, id) => {
   if (!role || !id) return false;
-  const sockets = await io.in(userRoom(role, String(id))).fetchSockets();
-  return sockets.length > 0;
+  return (onlineCount.get(keyOf(role, id)) || 0) > 0;
+};
+
+const getOnlineMap = (mentorId, fresherId) => ({
+  mentor: isUserOnline("mentor", mentorId),
+  fresher: isUserOnline("fresher", fresherId),
+});
+
+// Count this socket once. Returns true if the user just came online
+// (this was their first socket).
+function trackOnline(socket, role, id) {
+  if (socket.data.onlineKey) return false; // already counted
+  const k = keyOf(role, id);
+  socket.data.onlineKey = { role, userId: String(id) };
+  const n = (onlineCount.get(k) || 0) + 1;
+  onlineCount.set(k, n);
+  return n === 1;
 }
 
-async function getOnlineMap(io, mentorId, fresherId) {
-  const [mentor, fresher] = await Promise.all([
-    isUserOnline(io, "mentor", mentorId),
-    isUserOnline(io, "fresher", fresherId),
-  ]);
-  return { mentor, fresher };
+// Remove this socket from the counter. Returns the user if it was counted.
+function untrackOnline(socket) {
+  const info = socket.data.onlineKey;
+  if (!info) return null;
+  socket.data.onlineKey = null;
+
+  const k = keyOf(info.role, info.userId);
+  const n = (onlineCount.get(k) || 1) - 1;
+  if (n <= 0) onlineCount.delete(k);
+  else onlineCount.set(k, n);
+
+  return info;
 }
 
-// Tell every open chat of this user's bookings about the new online state.
+// Tell every OPEN chat of this user's bookings about the new online state.
 async function broadcastPresence(io, role, userId) {
   try {
     const bookings = await Booking.find({ [role]: userId })
@@ -85,16 +114,15 @@ async function broadcastPresence(io, role, userId) {
       .lean();
 
     for (const b of bookings) {
-      const online = await getOnlineMap(
-        io,
-        String(b.mentor || ""),
-        String(b.fresher || ""),
-      );
+      const room = chatRoom(String(b._id));
 
-      io.to(chatRoom(String(b._id))).emit("chat:presence", {
+      // nobody has this chat open -> nothing to emit
+      if (!io.sockets.adapter.rooms.has(room)) continue;
+
+      io.to(room).emit("chat:presence", {
         bookingId: String(b._id),
         requestGroupId: String(b.requestGroupId || ""),
-        online,
+        online: getOnlineMap(String(b.mentor || ""), String(b.fresher || "")),
       });
     }
   } catch (err) {
@@ -140,7 +168,9 @@ async function getChatUser(token, bookingId) {
       }
     : { requestGroupId: bookingId };
 
-  const booking = await Booking.findOne(query).lean();
+  const booking = await Booking.findOne(query)
+    .select("_id requestGroupId mentor fresher")
+    .lean();
 
   if (!booking) return null;
 
@@ -210,7 +240,13 @@ async function markDeliveredForUser(io, role, userId) {
   }
 }
 
-// ---------------- CHAT HISTORY ----------------
+// ---------------- CHAT HISTORY (paginated) ----------------
+// GET /chat/:bookingId                -> latest 50 messages
+// GET /chat/:bookingId?before=<ISO>   -> 50 messages older than that time
+// Response: { success, messages (oldest -> newest), hasMore }
+
+const DEFAULT_PAGE = 50;
+const MAX_PAGE = 100;
 
 async function getChatHistory(req, res) {
   try {
@@ -228,14 +264,30 @@ async function getChatHistory(req, res) {
       });
     }
 
-    const messages = await ChatMessage.find({
-      bookingId: user.bookingKey,
-    })
-      .sort({ createdAt: 1 })
-      .limit(300)
+    const limit = Math.min(
+      Math.max(parseInt(req.query.limit, 10) || DEFAULT_PAGE, 1),
+      MAX_PAGE,
+    );
+
+    const filter = { bookingId: user.bookingKey };
+
+    if (req.query.before) {
+      const before = new Date(req.query.before);
+      if (!Number.isNaN(before.getTime())) {
+        filter.createdAt = { $lt: before };
+      }
+    }
+
+    // fetch one extra to know if older messages still exist
+    const rows = await ChatMessage.find(filter)
+      .sort({ createdAt: -1 })
+      .limit(limit + 1)
       .lean();
 
-    return res.json({ success: true, messages });
+    const hasMore = rows.length > limit;
+    const messages = rows.slice(0, limit).reverse();
+
+    return res.json({ success: true, messages, hasMore });
   } catch (error) {
     console.error("Chat history error:", error.message);
 
@@ -261,14 +313,17 @@ function registerChat(io) {
     // even when the chat window is closed.
     const authUser = socket.data.user;
     if (authUser?.id && authUser?.role) {
-      socket.join(userRoom(authUser.role, authUser.id));
+      const uid = String(authUser.id);
+      socket.join(userRoom(authUser.role, uid));
 
-      markDeliveredForUser(io, authUser.role, authUser.id).catch((err) =>
+      markDeliveredForUser(io, authUser.role, uid).catch((err) =>
         console.error("markDeliveredForUser failed:", err.message),
       );
 
-      // user is now online -> update any open chat of their bookings
-      broadcastPresence(io, authUser.role, String(authUser.id));
+      // only the FIRST socket of a user changes presence
+      if (trackOnline(socket, authUser.role, uid)) {
+        broadcastPresence(io, authUser.role, uid);
+      }
     }
 
     // ---------- JOIN ----------
@@ -307,7 +362,9 @@ function registerChat(io) {
         // count as "online" for this user.
         if (!socket.data.user) {
           await socket.join(userRoom(user.role, user.userId));
-          broadcastPresence(io, user.role, user.userId);
+          if (trackOnline(socket, user.role, user.userId)) {
+            broadcastPresence(io, user.role, user.userId);
+          }
         }
 
         // pending incoming messages have now reached this user's device
@@ -315,7 +372,9 @@ function registerChat(io) {
           bookingId: user.bookingKey,
           senderRole: { $ne: user.role },
           deliveredAt: null,
-        }).select("_id");
+        })
+          .select("_id")
+          .lean();
 
         if (pending.length) {
           const ids = pending.map((m) => m._id);
@@ -337,18 +396,11 @@ function registerChat(io) {
             });
         }
 
-        // who is online right now? (me = true, peer = checked)
-        const peerOnline = await isUserOnline(
-          io,
-          user.peerRole,
-          user.peerId,
-        );
-
         return ack?.({
           ok: true,
           online: {
             [user.role]: true,
-            [user.peerRole]: peerOnline,
+            [user.peerRole]: isUserOnline(user.peerRole, user.peerId),
           },
         });
       } catch (error) {
@@ -374,12 +426,8 @@ function registerChat(io) {
           });
         }
 
-        // Is the other person connected anywhere (any tab / page)?
-        const recipientOnline = await isUserOnline(
-          io,
-          user.peerRole,
-          user.peerId,
-        );
+        // instant in-memory check (no DB / network)
+        const recipientOnline = isUserOnline(user.peerRole, user.peerId);
 
         const msg = await ChatMessage.create({
           bookingId: user.bookingKey,
@@ -430,14 +478,12 @@ function registerChat(io) {
           return ack?.({ ok: true, updated: 0 });
         }
 
-        const filter = {
+        const targets = await ChatMessage.find({
           _id: { $in: requestedIds },
           bookingId: user.bookingKey,
           senderRole: { $ne: user.role },
           readAt: null,
-        };
-
-        const targets = await ChatMessage.find(filter)
+        })
           .select("_id")
           .lean();
 
@@ -448,14 +494,17 @@ function registerChat(io) {
         const ids = targets.map((m) => m._id);
         const now = new Date();
 
-        // read also means delivered
-        await ChatMessage.updateMany(
-          { _id: { $in: ids }, deliveredAt: null },
-          { $set: { deliveredAt: now } },
-        );
+        // ONE update: read also means delivered
         await ChatMessage.updateMany(
           { _id: { $in: ids }, readAt: null },
-          { $set: { readAt: now } },
+          [
+            {
+              $set: {
+                deliveredAt: { $ifNull: ["$deliveredAt", now] },
+                readAt: now,
+              },
+            },
+          ],
         );
 
         io.to(chatRoom(user.bookingKey))
@@ -492,28 +541,14 @@ function registerChat(io) {
 
     // ---------- DISCONNECT ----------
     socket.on("disconnect", () => {
-      const me =
-        authUser?.id && authUser?.role
-          ? { role: authUser.role, userId: String(authUser.id) }
-          : (() => {
-              const first = Object.values(socket.data.chat || {})[0];
-              return first
-                ? { role: first.role, userId: first.userId }
-                : null;
-            })();
-
+      const me = untrackOnline(socket);
       if (!me) return;
 
       // small grace period so page change / refresh doesn't flicker
       // "Offline". If the user reconnected meanwhile, they stay online.
-      setTimeout(async () => {
-        try {
-          const stillOnline = await isUserOnline(io, me.role, me.userId);
-          if (!stillOnline) {
-            await broadcastPresence(io, me.role, me.userId);
-          }
-        } catch (err) {
-          console.error("presence on disconnect failed:", err.message);
+      setTimeout(() => {
+        if (!isUserOnline(me.role, me.userId)) {
+          broadcastPresence(io, me.role, me.userId);
         }
       }, OFFLINE_GRACE_MS);
     });

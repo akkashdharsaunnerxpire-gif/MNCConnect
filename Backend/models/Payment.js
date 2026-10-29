@@ -66,6 +66,8 @@ const paymentSchema = new Schema(
     },
     // when the mentor's share became withdrawable
     releasedAt: { type: Date, default: null },
+    refundError: { type: String, default: "" },
+refundFailedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

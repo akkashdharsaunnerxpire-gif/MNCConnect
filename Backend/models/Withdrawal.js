@@ -9,7 +9,7 @@ const { Schema } = mongoose;
 
 const withdrawalSchema = new Schema(
   {
-    mentor: { type: Schema.Types.ObjectId, ref: "Mentor", required: true, index: true },
+    mentor: { type: Schema.Types.ObjectId, ref: "Mentor", required: true,},
     amount: { type: Number, required: true, min: 1 },
     upiId: { type: String, required: true, trim: true },
     status: {

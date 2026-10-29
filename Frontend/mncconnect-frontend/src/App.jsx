@@ -16,26 +16,18 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import { registerLoadingHandlers } from "./api/axios";
 import { registerFetchHandlers } from "./api/fetchWithLoading";
 import { clearLegacyStorage } from "./utils/auth";
-// Lazy-loaded pages
+
+// ================= LAZY-LOADED PAGES =================
+
 const Landing = lazy(() => import("./Landingpages/Landing"));
 const Auth = lazy(() => import("./Authpage/Auth"));
 
-const Login = lazy(
-  () => import("./Authpage/FresherAuth/FresherLoginRegister")
-);
-
-const Forgetpassword = lazy(
-  () => import("./Authpage/FresherAuth/Forgetpassword")
-);
-
-const FresherResetPassword = lazy(
-  () => import("./Authpage/FresherAuth/FresherResetPassword")
-);
-
+// All mentor pages (login, register, forgot/reset password, dashboard)
 const MentorRoutes = lazy(() => import("./Routes/MentorRoutes"));
+
+// All fresher pages (login, forgot/reset password, /Home dashboard)
 const FresherRoutes = lazy(() => import("./Routes/FresherRoutes"));
 
-// Old keys from the previous localStorage-based login. Removed once per browser. 
 // ================= AUTH HELPERS =================
 
 const HomeRoute = () => {
@@ -48,28 +40,21 @@ const HomeRoute = () => {
   return <Landing />;
 };
 
-const FresherLoginRoute = () => {
-  const { role, loading } = useAuth();
-
-  if (loading) return <SuspenseLoader />;
-  if (role === "fresher") return <Navigate to="/Home" replace />;
-
-  return <Login />;
-};
-
 // ================= INNER APP =================
 
 function AppContent() {
   const { isLoading, start, stop } = useLoading();
 
+  // Old keys from the previous localStorage-based login. Removed once per browser.
   useEffect(() => {
-  clearLegacyStorage();
-}, []);
+    clearLegacyStorage();
+  }, []);
 
   useEffect(() => {
     registerLoadingHandlers(start, stop);
     registerFetchHandlers(start, stop);
   }, [start, stop]);
+
   return (
     <div className="min-h-screen bg-white font-sans text-gray-900">
       <LinearProgress isLoading={isLoading} />
@@ -79,24 +64,26 @@ function AppContent() {
         <Routes>
           <Route path="/" element={<HomeRoute />} />
           <Route path="/auth" element={<Auth />} />
-          <Route path="/login" element={<FresherLoginRoute />} />
-          <Route path="/forgot-password" element={<Forgetpassword />} />
+
+          {/* Legacy redirects */}
           <Route
-            path="/reset-password/:token"
-            element={<FresherResetPassword />}
+            path="/profile"
+            element={<Navigate to="/Home/profile" replace />}
           />
-
-          <Route path="/mentor/*" element={<MentorRoutes />} />
-          <Route path="/Home/*" element={<FresherRoutes />} />
-
-          <Route path="/profile" element={<Navigate to="/Home/profile" replace />} />
-          <Route path="/Mnclogos" element={<Navigate to="/Home/mnc-logos" replace />} />
+          <Route
+            path="/Mnclogos"
+            element={<Navigate to="/Home/mnc-logos" replace />}
+          />
           <Route
             path="/employee-profile"
             element={<Navigate to="/mentor/register" replace />}
           />
 
-          <Route path="*" element={<Navigate to="/" replace />} />
+          {/* Mentor side: everything under /mentor/... */}
+          <Route path="/mentor/*" element={<MentorRoutes />} />
+
+          {/* Fresher side: /login, /forgot-password, /reset-password/:token, /Home/... */}
+          <Route path="/*" element={<FresherRoutes />} />
         </Routes>
       </Suspense>
     </div>

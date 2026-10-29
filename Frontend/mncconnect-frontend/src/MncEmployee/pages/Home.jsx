@@ -23,7 +23,6 @@ import {
   VolumeX,
   Wallet,
   X,
-  UserRound,
   Briefcase,
   Globe,
   Users,
@@ -42,7 +41,6 @@ import {
   getDurationMinutes,
   getSessionConflict,
   normalizeSessionRequest,
-  persistAcceptedSession,
   respondToSessionRequest,
 } from "../../utils/sessionRequests";
 
@@ -50,59 +48,6 @@ const PLATFORM_FEE = 0.25;
 const CLAIM_WINDOW_SECONDS = 120;
 const CLAIM_WINDOW_MS = CLAIM_WINDOW_SECONDS * 1000;
 const JOIN_READY_MS = 2 * 60 * 1000;
-const SOUND_KEY = "mncconnect_request_sound";
-
-// 🔴 Skip tracking: which requests this mentor has skipped (not to be shown again)
-const SKIPPED_KEY = "mncconnect_skipped_requests";
-const SKIPPED_MAX_KEEP = 100; // keep last 100 skipped ids
-const SKIPPED_MAX_RETRY = 3; // after 3 skips on same id, permanently hide
-
-// ============ SKIPPED STORAGE HELPERS ============
-
-const readSkipped = () => {
-  try {
-    const raw = localStorage.getItem(SKIPPED_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-};
-
-const writeSkipped = (map) => {
-  try {
-    // Keep the most recent SKIPPED_MAX_KEEP entries by timestamp
-    const entries = Object.entries(map).sort((a, b) => b[1].t - a[1].t);
-    const trimmed = Object.fromEntries(entries.slice(0, SKIPPED_MAX_KEEP));
-    localStorage.setItem(SKIPPED_KEY, JSON.stringify(trimmed));
-  } catch {
-    /* storage full - ignore */
-  }
-};
-
-const isSkippedPermanently = (id) => {
-  const map = readSkipped();
-  const entry = map[String(id)];
-  return Boolean(entry && entry.c >= SKIPPED_MAX_RETRY);
-};
-
-const recordSkip = (id) => {
-  const map = readSkipped();
-  const key = String(id);
-  const prev = map[key];
-  map[key] = {
-    c: (prev?.c || 0) + 1,
-    t: Date.now(),
-  };
-  writeSkipped(map);
-};
-
-const clearSkip = (id) => {
-  const map = readSkipped();
-  delete map[String(id)];
-  writeSkipped(map);
-};
 
 // ============ CONSTANTS ============
 
@@ -203,7 +148,19 @@ const Home = () => {
   const [claimingId, setClaimingId] = useState(null);
   const [toast, setToast] = useState(null);
   const [tab, setTab] = useState("upcoming");
+  // sound preference lives in memory only (nothing in localStorage)
   const [soundOn, setSoundOn] = useState(true);
+
+  // Confirm modal state
+  const [confirmRequest, setConfirmRequest] = useState(null);
+
+  // "Scanning" pulse: briefly true right after a skip to show the transition
+  const [scanningBoost, setScanningBoost] = useState(false);
+
+  const toastTimer = useRef(null);
+  const soundRef = useRef(soundOn);
+  const seenIds = useRef(new Set()); // chime only for requests not seen before
+  const scanBoostTimer = useRef(null);
 
   useEffect(() => {
     soundRef.current = soundOn;
@@ -221,17 +178,6 @@ const Home = () => {
       alive = false;
     };
   }, []);
-
-  // Confirm modal state
-  const [confirmRequest, setConfirmRequest] = useState(null);
-
-  // "Scanning" pulse — briefly true right after a skip to show the transition
-  const [scanningBoost, setScanningBoost] = useState(false);
-
-  const toastTimer = useRef(null);
-  const soundRef = useRef(soundOn);
-  const seenIds = useRef(new Set()); // chime only for requests not seen before
-  const scanBoostTimer = useRef(null);
 
   /* ---------- live server data ---------- */
   const {
@@ -290,11 +236,6 @@ const Home = () => {
   useEffect(() => () => clearTimeout(scanBoostTimer.current), []);
 
   useEffect(() => {
-    soundRef.current = soundOn;
-    localStorage.setItem(SOUND_KEY, soundOn ? "on" : "off");
-  }, [soundOn]);
-
-  useEffect(() => {
     const base = document.title.replace(/^\(\d+\)\s*/, "");
     document.title = requests.length ? `(${requests.length}) ${base}` : base;
     return () => {
@@ -326,8 +267,6 @@ const Home = () => {
         receivedAt: Date.now(),
       };
       if (!req.id) return;
-
-      // 🔴 Never re-add a request the user has permanently skipped
 
       if (!seenIds.current.has(String(req.id))) {
         seenIds.current.add(String(req.id));
@@ -423,7 +362,6 @@ const Home = () => {
     [claimingId, navigate, reloadWallet, showToast],
   );
 
-  /* ---------- skip: remove + track + resume scanning ---------- */
   /* ---------- skip: notify backend + remove locally + resume scanning ---------- */
   const skip = useCallback(
     async (id) => {
@@ -453,12 +391,12 @@ const Home = () => {
 
       showToast("info", "Skipped. Scanning for new requests…");
 
-      // 3. Tell backend this mentor declined — so it NEVER comes back
+      // 3. Tell backend this mentor declined, so it never comes back
       try {
         await respondToSessionRequest(target, "rejected");
       } catch (e) {
         console.error("Skip (reject) failed:", e);
-        // Put the request back if the call failed — user can retry
+        // Put the request back if the call failed: user can retry
         setRequests((prev) =>
           prev.some((r) => String(r.id) === String(target.id))
             ? prev

@@ -1,5 +1,6 @@
 // src/Commoncomponents/ChatPanel.jsx
 import React, {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -17,7 +18,7 @@ import {
   Smile,
   X,
 } from "lucide-react";
-import {socket} from "../utils/socket";
+import { socket } from "../utils/socket";
 import EmojiPicker from "./EmojiPicker";
 import {
   playSendSound,
@@ -27,6 +28,7 @@ import {
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 const MAX_LEN = 1000;
+const PAGE_SIZE = 50;
 
 /* ---------------- helpers ---------------- */
 const fmtTime = (d) =>
@@ -87,7 +89,7 @@ const isEmojiOnly = (text = "") => {
  * ✓✓  grey = delivered
  * ✓✓  blue = read
  */
-const Ticks = ({ message }) => {
+const Ticks = memo(function Ticks({ message }) {
   if (message.readAt) {
     return (
       <CheckCheck size={16} className="text-[#53bdeb]" aria-label="Read" />
@@ -99,7 +101,7 @@ const Ticks = ({ message }) => {
     );
   }
   return <Check size={16} className="text-slate-400" aria-label="Sent" />;
-};
+});
 
 const initialsOf = (title = "") => {
   const name = title.replace(/^chat with\s+/i, "").trim();
@@ -109,6 +111,62 @@ const initialsOf = (title = "") => {
     (parts[0]?.[0] || "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")
   ).toUpperCase();
 };
+
+/* ---------------- one message row (memoized) ----------------
+ * Re-renders only when ITS message / grouping changes, so a new
+ * message or a tick update doesn't re-render the whole list. */
+const MessageRow = memo(function MessageRow({
+  m,
+  mine,
+  firstInGroup,
+  lastInGroup,
+}) {
+  const big = isEmojiOnly(m.text);
+
+  return (
+    <div
+      className={`flex w-full ${mine ? "justify-end" : "justify-start"} ${
+        firstInGroup ? "mt-3" : "mt-0.5"
+      }`}
+    >
+      <div
+        className={`max-w-[80%] px-3 py-1.5 text-sm text-slate-900 shadow-sm ${
+          mine
+            ? `bg-[#d9fdd3] ${
+                lastInGroup ? "rounded-2xl rounded-tr-md" : "rounded-2xl"
+              }`
+            : `bg-white ${
+                lastInGroup ? "rounded-2xl rounded-tl-md" : "rounded-2xl"
+              }`
+        }`}
+      >
+        <p
+          className={`whitespace-pre-wrap break-words ${
+            big ? "text-4xl leading-tight" : "leading-relaxed"
+          }`}
+        >
+          {m.text}
+        </p>
+        <div className="mt-0.5 flex items-center justify-end gap-1">
+          <span className="text-[10px] text-slate-500">
+            {fmtTime(m.createdAt)}
+          </span>
+          {mine && <Ticks message={m} />}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+const DayDivider = memo(function DayDivider({ label }) {
+  return (
+    <div className="my-3 flex justify-center">
+      <span className="rounded-full bg-white px-3 py-1 text-[11px] font-medium text-slate-500 shadow-sm">
+        {label}
+      </span>
+    </div>
+  );
+});
 
 /**
  * variant="modal"  -> centered popup (Sessions / My Bookings "Message" button)
@@ -143,6 +201,8 @@ export default function ChatPanel({
   const [err, setErr] = useState("");
   const [showJump, setShowJump] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
 
   const scrollRef = useRef(null);
   const textareaRef = useRef(null);
@@ -160,6 +220,8 @@ export default function ChatPanel({
   const stickToBottom = useRef(true);
   const forceScroll = useRef(false);
   const prevLength = useRef(0);
+  const loadingOlderRef = useRef(false);
+  const restoreScroll = useRef(null); // keeps position after loading older
 
   const addMessage = useCallback((m) => {
     setMessages((prev) =>
@@ -187,9 +249,12 @@ export default function ChatPanel({
     setJoined(false);
     setPeerOnline(false);
     setLoading(true);
+    setHasMore(false);
     initialScrollDone.current = false;
     stickToBottom.current = true;
     prevLength.current = 0;
+    restoreScroll.current = null;
+    loadingOlderRef.current = false;
     readSentRef.current = new Set();
     soundedRef.current = new Set();
 
@@ -200,15 +265,20 @@ export default function ChatPanel({
         .map(String)
         .includes(String(bookingId));
 
-    // 1. history
-    fetch(`${API_URL}/chat/${encodeURIComponent(bookingId)}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    // 1. history (latest page only)
+    fetch(
+      `${API_URL}/chat/${encodeURIComponent(bookingId)}?limit=${PAGE_SIZE}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
       .then((r) => r.json())
       .then((d) => {
         if (cancelled) return;
-        if (d.success) setMessages(d.messages || []);
-        else setErr(d.message || "Could not load chat.");
+        if (d.success) {
+          setMessages(d.messages || []);
+          setHasMore(Boolean(d.hasMore));
+        } else {
+          setErr(d.message || "Could not load chat.");
+        }
       })
       .catch(() => !cancelled && setErr("Could not load chat."))
       .finally(() => !cancelled && setLoading(false));
@@ -296,6 +366,51 @@ export default function ChatPanel({
     };
   }, [bookingId, token, role, peerRole, addMessage]);
 
+  /* ---------------- load older messages (scroll to top) ---------------- */
+  const loadOlder = useCallback(() => {
+    if (loadingOlderRef.current || !hasMore || !messages.length) return;
+
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+
+    const before = messages[0].createdAt;
+
+    fetch(
+      `${API_URL}/chat/${encodeURIComponent(
+        bookingId,
+      )}?limit=${PAGE_SIZE}&before=${encodeURIComponent(before)}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d.success) return;
+        const older = d.messages || [];
+
+        if (older.length) {
+          // remember position so the view doesn't jump after prepending
+          const el = scrollRef.current;
+          if (el) {
+            restoreScroll.current = {
+              height: el.scrollHeight,
+              top: el.scrollTop,
+            };
+          }
+
+          setMessages((prev) => {
+            const ids = new Set(prev.map((p) => String(p._id)));
+            return [...older.filter((m) => !ids.has(String(m._id))), ...prev];
+          });
+        }
+
+        setHasMore(Boolean(d.hasMore));
+      })
+      .catch(() => {})
+      .finally(() => {
+        loadingOlderRef.current = false;
+        setLoadingOlder(false);
+      });
+  }, [bookingId, token, hasMore, messages]);
+
   /* ---------------- scrolling ---------------- */
   const scrollToBottom = useCallback((smooth = false) => {
     const el = scrollRef.current;
@@ -314,6 +429,9 @@ export default function ChatPanel({
     const atBottom = distance < 80;
     stickToBottom.current = atBottom;
     setShowJump(!atBottom);
+
+    // near the top -> load the previous page
+    if (el.scrollTop < 60) loadOlder();
   };
 
   // useLayoutEffect = runs BEFORE paint, so the user never sees the top
@@ -324,6 +442,16 @@ export default function ChatPanel({
     if (!initialScrollDone.current) {
       scrollToBottom(false);
       initialScrollDone.current = true;
+      prevLength.current = messages.length;
+      return;
+    }
+
+    // Older messages were added on top: keep the same message in view.
+    if (restoreScroll.current) {
+      const { height, top } = restoreScroll.current;
+      restoreScroll.current = null;
+      const el = scrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight - height + top;
       prevLength.current = messages.length;
       return;
     }
@@ -603,59 +731,27 @@ export default function ChatPanel({
               </p>
             </div>
           ) : (
-            rows.map((row) => {
-              if (row.type === "day") {
-                return (
-                  <div key={row.key} className="my-3 flex justify-center">
-                    <span className="rounded-full bg-white px-3 py-1 text-[11px] font-medium text-slate-500 shadow-sm">
-                      {row.label}
-                    </span>
-                  </div>
-                );
-              }
-
-              const { m, mine, firstInGroup, lastInGroup } = row;
-              const big = isEmojiOnly(m.text);
-
-              return (
-                <div
-                  key={row.key}
-                  className={`flex w-full ${
-                    mine ? "justify-end" : "justify-start"
-                  } ${firstInGroup ? "mt-3" : "mt-0.5"}`}
-                >
-                  <div
-                    className={`max-w-[80%] px-3 py-1.5 text-sm text-slate-900 shadow-sm ${
-                      mine
-                        ? `bg-[#d9fdd3] ${
-                            lastInGroup
-                              ? "rounded-2xl rounded-tr-md"
-                              : "rounded-2xl"
-                          }`
-                        : `bg-white ${
-                            lastInGroup
-                              ? "rounded-2xl rounded-tl-md"
-                              : "rounded-2xl"
-                          }`
-                    }`}
-                  >
-                    <p
-                      className={`whitespace-pre-wrap break-words ${
-                        big ? "text-4xl leading-tight" : "leading-relaxed"
-                      }`}
-                    >
-                      {m.text}
-                    </p>
-                    <div className="mt-0.5 flex items-center justify-end gap-1">
-                      <span className="text-[10px] text-slate-500">
-                        {fmtTime(m.createdAt)}
-                      </span>
-                      {mine && <Ticks message={m} />}
-                    </div>
-                  </div>
+            <>
+              {loadingOlder && (
+                <div className="flex justify-center py-2 text-slate-400">
+                  <Loader2 className="animate-spin" size={16} />
                 </div>
-              );
-            })
+              )}
+
+              {rows.map((row) =>
+                row.type === "day" ? (
+                  <DayDivider key={row.key} label={row.label} />
+                ) : (
+                  <MessageRow
+                    key={row.key}
+                    m={row.m}
+                    mine={row.mine}
+                    firstInGroup={row.firstInGroup}
+                    lastInGroup={row.lastInGroup}
+                  />
+                ),
+              )}
+            </>
           )}
         </div>
 

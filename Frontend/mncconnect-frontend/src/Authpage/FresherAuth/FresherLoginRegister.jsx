@@ -18,7 +18,6 @@ import {
   Check,
   Globe,
 } from "lucide-react";
-import { saveSession } from "../../utils/auth";
 import { LoadingContext } from "../../context/LoadingContext";
 import { useAuth } from "../../context/AuthContext";
 import { reconnectSocket } from "../../utils/socket";
@@ -28,7 +27,11 @@ import { COUNTRY_CODES } from "../../data/countryCodes";
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 const INTRO_MS = 1300;
-const INTRO_KEY = "mnc_intro_seen";
+
+// Intro plays once per page load. Kept in memory only
+// (no localStorage / sessionStorage), so it resets on a full refresh.
+let introSeen = false;
+const shouldShowIntro = () => !introSeen;
 
 const initialForm = {
   name: "",
@@ -38,15 +41,6 @@ const initialForm = {
   password: "",
   confirmPassword: "",
   otp: "",
-};
-
-// show the intro only once per browser session
-const shouldShowIntro = () => {
-  try {
-    return !sessionStorage.getItem(INTRO_KEY);
-  } catch {
-    return true;
-  }
 };
 
 export default function LoginRegister() {
@@ -85,11 +79,7 @@ export default function LoginRegister() {
 
   useEffect(() => {
     if (!showIntro) return undefined;
-    try {
-      sessionStorage.setItem(INTRO_KEY, "1");
-    } catch {
-      /* ignore */
-    }
+    introSeen = true;
     const timer = window.setTimeout(() => setShowIntro(false), INTRO_MS);
     return () => window.clearTimeout(timer);
   }, [showIntro]);
@@ -235,10 +225,8 @@ export default function LoginRegister() {
           return;
         }
 
-        if (data.user) {
-          saveSession({ ...data.user, role: "fresher" });
-          reconnectSocket();
-        }
+        // the session is the HttpOnly cookie, nothing is saved in the browser
+        reconnectSocket();
 
         // update AuthContext BEFORE navigating
         const me = await refresh();
@@ -260,16 +248,13 @@ export default function LoginRegister() {
       }
 
       // ---------- LOGIN ----------
-      if (data.user) {
-        saveSession({ ...data.user, role: "fresher" });
-        reconnectSocket();
-      }
+      reconnectSocket();
 
       // update AuthContext BEFORE navigating
       const me = await refresh();
       if (!me) {
         // login API said OK but /auth/me says not logged in
-        // = cookie was not saved / not sent (see checklist)
+        // = cookie was not saved / not sent
         throw new Error(
           "Login worked but your session was not saved. Please enable cookies and try again.",
         );
@@ -575,6 +560,20 @@ export default function LoginRegister() {
                     }
                     className={`${inputClass} pr-12`}
                   />
+
+                  {/* Forgot password: LOGIN mode only */}
+                  {!isRegister && (
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => navigate("/forgot-password")}
+                        className="text-xs font-bold text-cyan-700 transition hover:text-cyan-800 hover:underline"
+                      >
+                        Forgot password?
+                      </button>
+                    </div>
+                  )}
+
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
