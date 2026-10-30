@@ -180,7 +180,7 @@ export const playSendSound = () => {
 };
 
 /**
- * RECEIVE: two bubble "pop-pop" notes (pitch glide up + soft overtone)
+ * RECEIVE (chat open): two bubble "pop-pop" notes
  */
 export const playReceiveSound = () => {
   try {
@@ -211,6 +211,72 @@ export const playReceiveSound = () => {
 
     bubble(0, jitter(620), jitter(940), 0.3);
     bubble(0.12, jitter(830), jitter(1260), 0.3);
+  } catch {
+    /* ignore audio errors */
+  }
+};
+
+/* ---------- which chats are open right now (so we don't double-play) ---------- */
+const activeChats = new Map(); // id -> open count
+
+export const setChatActive = (id, active) => {
+  if (!id) return;
+  const k = String(id);
+  const n = (activeChats.get(k) || 0) + (active ? 1 : -1);
+  if (n <= 0) activeChats.delete(k);
+  else activeChats.set(k, n);
+};
+
+export const isChatActive = (id) => !!id && activeChats.has(String(id));
+
+/**
+ * NOTIFICATION (WhatsApp style): bright two-note "ding-ding" with bell overtone.
+ * Used when a message arrives and that chat is NOT open.
+ */
+export const playNotificationSound = () => {
+  try {
+    const c = getCtx();
+    if (!c) return;
+    unlockAudio();
+
+    const ding = (start, f, vol) => {
+      tone(c, {
+        start,
+        dur: 0.38,
+        vol,
+        freq: jitter(f, 0.005),
+        type: "sine",
+        attack: 0.004,
+      });
+      // bell overtones
+      tone(c, {
+        start,
+        dur: 0.25,
+        vol: vol * 0.35,
+        freq: f * 2.01,
+        type: "sine",
+        attack: 0.003,
+      });
+      tone(c, {
+        start,
+        dur: 0.12,
+        vol: vol * 0.2,
+        freq: f * 3.99,
+        type: "triangle",
+        attack: 0.002,
+      });
+      // tiny click
+      noise(c, {
+        start,
+        dur: 0.008,
+        vol: vol * 0.3,
+        type: "highpass",
+        freq: 3500,
+      });
+    };
+
+    ding(0, 1175, 0.45); // D6
+    ding(0.13, 1568, 0.5); // G6
   } catch {
     /* ignore audio errors */
   }

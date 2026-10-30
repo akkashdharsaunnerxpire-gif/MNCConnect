@@ -1,58 +1,59 @@
+// models/ChatMessage.js
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 const Booking = require("./Booking");
 
 const chatSchema = new mongoose.Schema(
   {
-    bookingId: {
-      type: String,
-      required: true,
-    },
-    senderRole: {
-      type: String,
-      enum: ["mentor", "fresher"],
-      required: true,
-    },
-    senderId: {
-      type: String,
-      required: true,
-    },
+    bookingId: { type: String, required: true },
+    senderRole: { type: String, enum: ["mentor", "fresher"], required: true },
+    senderId: { type: String, required: true },
     // who should receive this message (used for delivered ticks)
-    recipientRole: {
-      type: String,
-      enum: ["mentor", "fresher"],
-      default: null,
-    },
-    recipientId: {
-      type: String,
-      default: null,
-    },
-    text: {
-      type: String,
-      required: true,
-      maxlength: 1000,
-      trim: true,
-    },
-    deliveredAt: {
-      type: Date,
-      default: null,
-    },
-    readAt: {
-      type: Date,
-      default: null,
-    },
+    recipientRole: { type: String, enum: ["mentor", "fresher"], default: null },
+    recipientId: { type: String, default: null },
+    text: { type: String, required: true, maxlength: 1000, trim: true },
+    deliveredAt: { type: Date, default: null },
+    readAt: { type: Date, default: null },
   },
   { timestamps: true },
 );
 
-// history query: { bookingId } sorted by createdAt (latest first)
 chatSchema.index({ bookingId: 1, createdAt: -1 });
-// markDeliveredForUser: pending messages of one user
 chatSchema.index({ recipientRole: 1, recipientId: 1, deliveredAt: 1 });
+// unread badge query: recipient + readAt
+chatSchema.index({ recipientRole: 1, recipientId: 1, readAt: 1 });
 
 const ChatMessage =
-  mongoose.models.ChatMessage ||
-  mongoose.model("ChatMessage", chatSchema);
+  mongoose.models.ChatMessage || mongoose.model("ChatMessage", chatSchema);
+
+// ---------------- LAST SEEN (saved in its own small collection) ----------------
+
+const presenceSchema = new mongoose.Schema({
+  key: { type: String, required: true, unique: true }, // "role:id"
+  lastSeenAt: { type: Date, default: null },
+});
+
+const UserPresence =
+  mongoose.models.UserPresence || mongoose.model("UserPresence", presenceSchema);
+
+const saveLastSeen = (role, id, at) =>
+  UserPresence.updateOne(
+    { key: `${role}:${String(id)}` },
+    { $set: { lastSeenAt: at } },
+    { upsert: true },
+  ).catch((err) => console.error("saveLastSeen failed:", err.message));
+
+const getLastSeen = async (role, id) => {
+  if (!role || !id) return null;
+  try {
+    const doc = await UserPresence.findOne({ key: `${role}:${String(id)}` })
+      .select("lastSeenAt")
+      .lean();
+    return doc?.lastSeenAt || null;
+  } catch {
+    return null;
+  }
+};
 
 // ---------------- ROOM HELPERS ----------------
 
@@ -61,9 +62,7 @@ const userRoom = (role, id) => `user:${role}:${id}`;
 const peerRoleOf = (role) => (role === "mentor" ? "fresher" : "mentor");
 
 // ---------------- PRESENCE (in-memory counter) ----------------
-// "role:id" -> number of connected sockets (tabs / pages).
-// No fetchSockets() calls, so it is instant and has no network cost.
-// NOTE: single server instance only. For multiple instances use Redis.
+// "role:id" -> number of connected sockets. Single server instance only.
 
 const OFFLINE_GRACE_MS = 2000;
 const onlineCount = new Map();
@@ -80,10 +79,9 @@ const getOnlineMap = (mentorId, fresherId) => ({
   fresher: isUserOnline("fresher", fresherId),
 });
 
-// Count this socket once. Returns true if the user just came online
-// (this was their first socket).
+// Returns true if the user just came online (first socket).
 function trackOnline(socket, role, id) {
-  if (socket.data.onlineKey) return false; // already counted
+  if (socket.data.onlineKey) return false;
   const k = keyOf(role, id);
   socket.data.onlineKey = { role, userId: String(id) };
   const n = (onlineCount.get(k) || 0) + 1;
@@ -91,7 +89,6 @@ function trackOnline(socket, role, id) {
   return n === 1;
 }
 
-// Remove this socket from the counter. Returns the user if it was counted.
 function untrackOnline(socket) {
   const info = socket.data.onlineKey;
   if (!info) return null;
@@ -105,8 +102,7 @@ function untrackOnline(socket) {
   return info;
 }
 
-// Tell every OPEN chat of this user's bookings about the new online state.
-async function broadcastPresence(io, role, userId) {
+async function broadcastPresence(io, role, userId, lastSeenAt = null) {
   try {
     const bookings = await Booking.find({ [role]: userId })
       .select("_id requestGroupId mentor fresher")
@@ -115,14 +111,14 @@ async function broadcastPresence(io, role, userId) {
 
     for (const b of bookings) {
       const room = chatRoom(String(b._id));
-
-      // nobody has this chat open -> nothing to emit
       if (!io.sockets.adapter.rooms.has(room)) continue;
 
       io.to(room).emit("chat:presence", {
         bookingId: String(b._id),
         requestGroupId: String(b.requestGroupId || ""),
         online: getOnlineMap(String(b.mentor || ""), String(b.fresher || "")),
+        // only the user whose state changed (used for "last seen")
+        ...(lastSeenAt ? { lastSeen: { [role]: lastSeenAt } } : {}),
       });
     }
   } catch (err) {
@@ -132,40 +128,37 @@ async function broadcastPresence(io, role, userId) {
 
 // ---------------- AUTH ----------------
 
+// Old way: JWT string. Kept as a fallback for clients that still send a token.
 function verifyAndDecode(token) {
   if (!token) throw new Error("Authentication token is missing");
-
-  if (!process.env.JWT_SECRET) {
-    throw new Error("JWT_SECRET is not configured");
-  }
+  if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET is not configured");
 
   const decoded = jwt.verify(token, process.env.JWT_SECRET);
   const role = decoded.role;
-  const userId = String(
-    decoded.id || decoded._id || decoded.userId || "",
-  );
+  const userId = String(decoded.id || decoded._id || decoded.userId || "");
 
   if (!["mentor", "fresher"].includes(role) || !userId) {
     throw new Error("Invalid authentication token");
   }
-
   return { role, userId };
 }
 
 // ---------------- BOOKING ACCESS ----------------
 
-async function getChatUser(token, bookingId) {
-  if (!bookingId) return null;
+/**
+ * identity = { role, userId }  (cookie login: req.user / socket.data.user)
+ *          | "<jwt string>"    (old Bearer token fallback)
+ */
+async function getChatUser(identity, bookingId) {
+  if (!bookingId || !identity) return null;
 
-  const { role, userId } = verifyAndDecode(token);
+  const { role, userId } =
+    typeof identity === "string" ? verifyAndDecode(identity) : identity;
+
+  if (!["mentor", "fresher"].includes(role) || !userId) return null;
 
   const query = mongoose.isValidObjectId(bookingId)
-    ? {
-        $or: [
-          { _id: bookingId },
-          { requestGroupId: bookingId },
-        ],
-      }
+    ? { $or: [{ _id: bookingId }, { requestGroupId: bookingId }] }
     : { requestGroupId: bookingId };
 
   const booking = await Booking.findOne(query)
@@ -176,16 +169,17 @@ async function getChatUser(token, bookingId) {
 
   const mentorId = String(booking.mentor || "");
   const fresherId = String(booking.fresher || "");
+  const uid = String(userId);
 
   const allowed =
-    (role === "mentor" && mentorId === userId) ||
-    (role === "fresher" && fresherId === userId);
+    (role === "mentor" && mentorId === uid) ||
+    (role === "fresher" && fresherId === uid);
 
   if (!allowed) return null;
 
   return {
     role,
-    userId,
+    userId: uid,
     bookingKey: String(booking._id),
     requestGroupId: String(booking.requestGroupId || ""),
     peerRole: peerRoleOf(role),
@@ -203,8 +197,6 @@ function toClient(msg, user) {
 }
 
 // ---------------- DELIVERED ON CONNECT ----------------
-// When a user connects (any page), all messages waiting for them
-// are marked "delivered" and the senders get a receipt.
 
 async function markDeliveredForUser(io, role, userId) {
   const pending = await ChatMessage.find({
@@ -243,19 +235,25 @@ async function markDeliveredForUser(io, role, userId) {
 // ---------------- CHAT HISTORY (paginated) ----------------
 // GET /chat/:bookingId                -> latest 50 messages
 // GET /chat/:bookingId?before=<ISO>   -> 50 messages older than that time
-// Response: { success, messages (oldest -> newest), hasMore }
+// Needs requireAuth("fresher", "mentor") on the route (sets req.user from the cookie).
 
 const DEFAULT_PAGE = 50;
 const MAX_PAGE = 100;
 
 async function getChatHistory(req, res) {
   try {
-    const authorization = req.headers.authorization || "";
-    const token = authorization.startsWith("Bearer ")
-      ? authorization.slice(7).trim()
-      : "";
+    // cookie login (req.user) first, Bearer token as fallback
+    let identity;
+    if (req.user?.id && req.user?.role) {
+      identity = { role: req.user.role, userId: String(req.user.id) };
+    } else {
+      const authorization = req.headers.authorization || "";
+      identity = authorization.startsWith("Bearer ")
+        ? authorization.slice(7).trim()
+        : "";
+    }
 
-    const user = await getChatUser(token, req.params.bookingId);
+    const user = await getChatUser(identity, req.params.bookingId);
 
     if (!user) {
       return res.status(403).json({
@@ -278,7 +276,6 @@ async function getChatHistory(req, res) {
       }
     }
 
-    // fetch one extra to know if older messages still exist
     const rows = await ChatMessage.find(filter)
       .sort({ createdAt: -1 })
       .limit(limit + 1)
@@ -291,17 +288,58 @@ async function getChatHistory(req, res) {
   } catch (error) {
     console.error("Chat history error:", error.message);
 
-    const authError = [
-      "JsonWebTokenError",
-      "TokenExpiredError",
-    ].includes(error.name);
+    const authError = ["JsonWebTokenError", "TokenExpiredError"].includes(
+      error.name,
+    );
 
     return res.status(authError ? 401 : 500).json({
       success: false,
-      message: authError
-        ? "Invalid or expired token"
-        : "Could not load chat",
+      message: authError ? "Invalid or expired token" : "Could not load chat",
     });
+  }
+}
+
+// ---------------- UNREAD COUNTS ----------------
+// GET /chat/unread -> { counts: { <requestGroupId>: n } } for the logged-in user
+
+async function getUnreadCounts(req, res) {
+  try {
+    if (!req.user?.id || !req.user?.role) {
+      return res.status(401).json({ success: false, message: "Login required" });
+    }
+
+    const rows = await ChatMessage.aggregate([
+      {
+        $match: {
+          recipientRole: req.user.role,
+          recipientId: String(req.user.id),
+          readAt: null,
+        },
+      },
+      { $group: { _id: "$bookingId", count: { $sum: 1 } } },
+    ]);
+
+    const ids = rows.map((r) => r._id).filter((id) => mongoose.isValidObjectId(id));
+    const bookings = ids.length
+      ? await Booking.find({ _id: { $in: ids } })
+          .select("_id requestGroupId")
+          .lean()
+      : [];
+
+    const keyById = new Map(
+      bookings.map((b) => [String(b._id), String(b.requestGroupId || "")]),
+    );
+
+    const counts = {};
+    rows.forEach((r) => {
+      const key = keyById.get(String(r._id));
+      if (key) counts[key] = r.count;
+    });
+
+    return res.json({ success: true, counts });
+  } catch (error) {
+    console.error("Unread counts error:", error.message);
+    return res.status(500).json({ success: false, message: "Could not load unread" });
   }
 }
 
@@ -309,8 +347,6 @@ async function getChatHistory(req, res) {
 
 function registerChat(io) {
   io.on("connection", (socket) => {
-    // Personal room: this user receives chat events on ANY page,
-    // even when the chat window is closed.
     const authUser = socket.data.user;
     if (authUser?.id && authUser?.role) {
       const uid = String(authUser.id);
@@ -320,7 +356,6 @@ function registerChat(io) {
         console.error("markDeliveredForUser failed:", err.message),
       );
 
-      // only the FIRST socket of a user changes presence
       if (trackOnline(socket, authUser.role, uid)) {
         broadcastPresence(io, authUser.role, uid);
       }
@@ -331,24 +366,24 @@ function registerChat(io) {
       try {
         const { bookingId, token } = payload;
 
-        if (!bookingId || !token) {
+        // cookie login: identity comes from the socket handshake
+        const identity = socket.data.user?.id
+          ? {
+              role: socket.data.user.role,
+              userId: String(socket.data.user.id),
+            }
+          : token;
+
+        if (!bookingId || !identity) {
           return ack?.({
             ok: false,
-            message: "Booking ID and token are required",
+            message: "Booking ID and login are required",
           });
         }
 
-        const user = await getChatUser(token, bookingId);
+        const user = await getChatUser(identity, bookingId);
 
         if (!user) {
-          return ack?.({ ok: false, message: "Not allowed" });
-        }
-
-        // the token must belong to the same user as the socket
-        if (
-          socket.data.user &&
-          String(socket.data.user.id) !== user.userId
-        ) {
           return ack?.({ ok: false, message: "Not allowed" });
         }
 
@@ -358,8 +393,7 @@ function registerChat(io) {
         const room = chatRoom(user.bookingKey);
         await socket.join(room);
 
-        // Safety: if the socket has no auth user, still make it
-        // count as "online" for this user.
+        // no auth user on the socket: still count it as online for this user
         if (!socket.data.user) {
           await socket.join(userRoom(user.role, user.userId));
           if (trackOnline(socket, user.role, user.userId)) {
@@ -367,7 +401,6 @@ function registerChat(io) {
           }
         }
 
-        // pending incoming messages have now reached this user's device
         const pending = await ChatMessage.find({
           bookingId: user.bookingKey,
           senderRole: { $ne: user.role },
@@ -396,19 +429,21 @@ function registerChat(io) {
             });
         }
 
+        const peerOnline = isUserOnline(user.peerRole, user.peerId);
+
         return ack?.({
           ok: true,
           online: {
             [user.role]: true,
-            [user.peerRole]: isUserOnline(user.peerRole, user.peerId),
+            [user.peerRole]: peerOnline,
           },
+          lastSeen: peerOnline
+            ? null
+            : await getLastSeen(user.peerRole, user.peerId),
         });
       } catch (error) {
         console.error("Chat join error:", error.message);
-        return ack?.({
-          ok: false,
-          message: "Chat unavailable",
-        });
+        return ack?.({ ok: false, message: "Chat unavailable" });
       }
     });
 
@@ -420,13 +455,9 @@ function registerChat(io) {
         const text = String(payload.text || "").trim();
 
         if (!user || !text || text.length > 1000) {
-          return ack?.({
-            ok: false,
-            message: "Cannot send message",
-          });
+          return ack?.({ ok: false, message: "Cannot send message" });
         }
 
-        // instant in-memory check (no DB / network)
         const recipientOnline = isUserOnline(user.peerRole, user.peerId);
 
         const msg = await ChatMessage.create({
@@ -441,8 +472,6 @@ function registerChat(io) {
 
         const message = toClient(msg, user);
 
-        // Chained .to() = each socket receives it only ONCE
-        // even if it is in more than one of these rooms.
         io.to(chatRoom(user.bookingKey))
           .to(userRoom(user.peerRole, user.peerId))
           .to(userRoom(user.role, user.userId))
@@ -451,10 +480,7 @@ function registerChat(io) {
         return ack?.({ ok: true, message });
       } catch (error) {
         console.error("Chat send error:", error.message);
-        return ack?.({
-          ok: false,
-          message: "Could not send message",
-        });
+        return ack?.({ ok: false, message: "Could not send message" });
       }
     });
 
@@ -478,6 +504,7 @@ function registerChat(io) {
           return ack?.({ ok: true, updated: 0 });
         }
 
+        // only messages sent by the OTHER person and still unread
         const targets = await ChatMessage.find({
           _id: { $in: requestedIds },
           bookingId: user.bookingKey,
@@ -494,17 +521,18 @@ function registerChat(io) {
         const ids = targets.map((m) => m._id);
         const now = new Date();
 
-        // ONE update: read also means delivered
+        // Two plain updates (an array / pipeline update throws
+        // "Cannot pass an array to query updates unless updatePipeline is set",
+        // so readAt was never saved and the unread badge stayed at 4).
+        // 1) a message that is being read must also count as delivered
+        await ChatMessage.updateMany(
+          { _id: { $in: ids }, deliveredAt: null },
+          { $set: { deliveredAt: now } },
+        );
+        // 2) mark as read
         await ChatMessage.updateMany(
           { _id: { $in: ids }, readAt: null },
-          [
-            {
-              $set: {
-                deliveredAt: { $ifNull: ["$deliveredAt", now] },
-                readAt: now,
-              },
-            },
-          ],
+          { $set: { readAt: now } },
         );
 
         io.to(chatRoom(user.bookingKey))
@@ -521,10 +549,7 @@ function registerChat(io) {
         return ack?.({ ok: true, updated: ids.length });
       } catch (error) {
         console.error("Chat read error:", error.message);
-        return ack?.({
-          ok: false,
-          message: "Could not update read receipt",
-        });
+        return ack?.({ ok: false, message: "Could not update read receipt" });
       }
     });
 
@@ -544,12 +569,14 @@ function registerChat(io) {
       const me = untrackOnline(socket);
       if (!me) return;
 
-      // small grace period so page change / refresh doesn't flicker
-      // "Offline". If the user reconnected meanwhile, they stay online.
-      setTimeout(() => {
-        if (!isUserOnline(me.role, me.userId)) {
-          broadcastPresence(io, me.role, me.userId);
-        }
+      const seenAt = new Date();
+
+      // small grace period so refresh / page change does not flicker.
+      // Still offline after that -> save "last seen" and tell the other person.
+      setTimeout(async () => {
+        if (isUserOnline(me.role, me.userId)) return;
+        await saveLastSeen(me.role, me.userId, seenAt);
+        broadcastPresence(io, me.role, me.userId, seenAt);
       }, OFFLINE_GRACE_MS);
     });
   });
@@ -559,5 +586,6 @@ module.exports = {
   ChatMessage,
   getChatUser,
   getChatHistory,
+  getUnreadCounts,
   registerChat,
 };

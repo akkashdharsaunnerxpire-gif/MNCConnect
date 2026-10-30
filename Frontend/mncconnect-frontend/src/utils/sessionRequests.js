@@ -14,8 +14,18 @@ const MINUTE_MS = 60 * 1000;
 const KEEP_ENDED_SESSIONS_MS = 24 * 60 * MINUTE_MS;
 
 const MONTHS = {
-  jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
-  jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+  jan: 0,
+  feb: 1,
+  mar: 2,
+  apr: 3,
+  may: 4,
+  jun: 5,
+  jul: 6,
+  aug: 7,
+  sep: 8,
+  oct: 9,
+  nov: 10,
+  dec: 11,
 };
 
 const pad = (n) => String(n).padStart(2, "0");
@@ -27,7 +37,12 @@ const parseDateParts = (date) => {
   const text = String(date || "").trim();
 
   const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (iso) return { year: Number(iso[1]), month: Number(iso[2]) - 1, day: Number(iso[3]) };
+  if (iso)
+    return {
+      year: Number(iso[1]),
+      month: Number(iso[2]) - 1,
+      day: Number(iso[3]),
+    };
 
   const named = text.match(/^([A-Za-z]+)\.?\s+(\d{1,2}),?\s*(\d{4})$/);
   if (!named) return null;
@@ -73,7 +88,7 @@ export const getSessionDateTime = (date, time) => {
   if (!d || !t) return null;
 
   const result = new Date(
-    `${d.year}-${pad(d.month + 1)}-${pad(d.day)}T${pad(t.hour)}:${pad(t.minute)}:00+05:30`
+    `${d.year}-${pad(d.month + 1)}-${pad(d.day)}T${pad(t.hour)}:${pad(t.minute)}:00+05:30`,
   );
 
   return Number.isNaN(result.getTime()) ? null : result;
@@ -87,14 +102,16 @@ export const getDurationMinutes = (duration) => {
   const hours = value.match(/(\d+(?:\.\d+)?)\s*(?:hrs?|hours?)\b/i);
   const mins = value.match(/(\d+)\s*(?:mins?|minutes?)\b/i);
 
-  const total = (hours ? Number(hours[1]) * 60 : 0) + (mins ? Number(mins[1]) : 0);
+  const total =
+    (hours ? Number(hours[1]) * 60 : 0) + (mins ? Number(mins[1]) : 0);
   if (total) return total;
 
   const numeric = Number(value);
   return numeric > 0 ? numeric : DEFAULT_DURATION_MINUTES;
 };
 
-export const formatDuration = (duration) => `${getDurationMinutes(duration)} mins`;
+export const formatDuration = (duration) =>
+  `${getDurationMinutes(duration)} mins`;
 
 export const formatTime = (value) =>
   new Intl.DateTimeFormat("en-IN", {
@@ -137,7 +154,9 @@ export const normalizeSessionRequest = (r) => {
 
 export const getAcceptedSessions = () => {
   try {
-    const parsed = JSON.parse(localStorage.getItem(ACCEPTED_SESSIONS_KEY) || "[]");
+    const parsed = JSON.parse(
+      localStorage.getItem(ACCEPTED_SESSIONS_KEY) || "[]",
+    );
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
@@ -152,7 +171,9 @@ export const getSessionInterval = (session) => {
     const serverEnd = toMs(session.endsAt);
     return {
       startMs: serverStart,
-      endMs: serverEnd ?? serverStart + getDurationMinutes(session.duration) * MINUTE_MS,
+      endMs:
+        serverEnd ??
+        serverStart + getDurationMinutes(session.duration) * MINUTE_MS,
     };
   }
 
@@ -160,7 +181,10 @@ export const getSessionInterval = (session) => {
   if (!start) return null;
 
   const startMs = start.getTime();
-  return { startMs, endMs: startMs + getDurationMinutes(session.duration) * MINUTE_MS };
+  return {
+    startMs,
+    endMs: startMs + getDurationMinutes(session.duration) * MINUTE_MS,
+  };
 };
 
 /**
@@ -174,7 +198,9 @@ export const getSessionConflict = (request, serverSessions = null) => {
   const requested = getSessionInterval(request);
   if (!requested) return null;
 
-  const pool = Array.isArray(serverSessions) ? serverSessions : getAcceptedSessions();
+  const pool = Array.isArray(serverSessions)
+    ? serverSessions
+    : getAcceptedSessions();
   const gapMs = SESSION_GAP_MINUTES * MINUTE_MS;
 
   for (const session of pool) {
@@ -219,7 +245,10 @@ export const persistAcceptedSession = (session) => {
       return !interval || interval.endMs > cutoff; // drop sessions that ended long ago
     });
 
-    localStorage.setItem(ACCEPTED_SESSIONS_KEY, JSON.stringify([...kept, session]));
+    localStorage.setItem(
+      ACCEPTED_SESSIONS_KEY,
+      JSON.stringify([...kept, session]),
+    );
     window.dispatchEvent(new Event(ACCEPTED_SESSIONS_EVENT));
   } catch (error) {
     console.error("Failed to save accepted session:", error);
@@ -249,12 +278,10 @@ export const respondToSessionRequest = async (request, status) => {
     `${API_URL}/session/session-requests/${requestGroupId}`,
     {
       method: "PATCH",
+      credentials: "include", // <-- ADD
       headers: authHeaders(),
-      body: JSON.stringify({
-        status, // "accepted" or "rejected"
-        mentorId: localStorage.getItem("mentorId"),
-      }),
-    }
+      body: JSON.stringify({ status }),
+    },
   );
 
   const data = await res.json().catch(() => ({}));

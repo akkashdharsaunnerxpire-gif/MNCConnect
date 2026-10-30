@@ -10,7 +10,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
     "@jitsi/react-sdk": "^1.4.4",
+    "@mui/material": "^9.5.0",
     "axios": "^1.19.0",
     "crypto": "^1.0.1",
     "framer-motion": "^13.1.1",

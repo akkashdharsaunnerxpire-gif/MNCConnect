@@ -13,6 +13,7 @@ const ORPHAN_ROOM_TTL_MS = 30 * 60 * 1000;
 const rooms = new Map();
 const channel = (id) => `meeting:${id}`;
 
+// Old way: JWT string sent from the browser. Only a fallback now.
 const verify = (token) => {
   try {
     const p = jwt.verify(String(token || ""), process.env.JWT_SECRET);
@@ -20,6 +21,16 @@ const verify = (token) => {
   } catch (_) {
     return null;
   }
+};
+
+// Cookie login: the socket handshake already identified the user
+// (socket.data.user, set from the HttpOnly cookie). No token needed from the browser.
+const identify = (socket, payload = {}) => {
+  const u = socket.data?.user || socket.user;
+  if (u && (u.id || u._id) && u.role) {
+    return { id: String(u.id || u._id), role: u.role };
+  }
+  return verify(payload.token); // fallback for old clients
 };
 
 const remainingOf = (r) =>
@@ -184,7 +195,8 @@ exports.initMeetings = (io) => {
   io.on("connection", (socket) => {
     socket.on("meeting:join", async (payload = {}, ack = () => {}) => {
       try {
-        const user = verify(payload.token);
+        // cookie login first (socket.data.user), JWT from the payload only as a fallback
+        const user = identify(socket, payload);
         if (!user) return ack({ ok: false, code: "AUTH", message: "Log in again." });
 
         const bookingId = String(payload.bookingId || "").trim();

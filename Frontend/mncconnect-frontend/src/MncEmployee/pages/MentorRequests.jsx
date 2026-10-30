@@ -12,7 +12,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import {socket} from "../../utils/socket";
+import { socket } from "../../utils/socket";
 import useMentorSessions from "../../hooks/useMentorSessions";
 import {
   assignPaymentToMentor,
@@ -27,7 +27,7 @@ import {
 } from "../../utils/sessionRequests";
 
 const FALLBACK_AVATAR = "https://i.pravatar.cc/150?img=12";
-
+import { api, ENDPOINTS } from "../../services/mentorApi";
 const TABS = [
   { label: "Pending", icon: Clock3 },
   { label: "Rejected", icon: XCircle },
@@ -64,7 +64,8 @@ const getRole = (role) => {
 
   if (value.includes("student")) return "Student";
   if (value.includes("fresher")) return "Fresher";
-  if (value.includes("developer") || value.includes("engineer")) return "Developer";
+  if (value.includes("developer") || value.includes("engineer"))
+    return "Developer";
   return "Other";
 };
 
@@ -97,15 +98,37 @@ const MentorRequests = () => {
   });
 
   // server sessions = source of truth for the 30-minute gap rule
-  const { sessions, loading: sessionsLoading, error: sessionsError } = useMentorSessions();
+  const {
+    sessions,
+    loading: sessionsLoading,
+    error: sessionsError,
+  } = useMentorSessions();
   const serverUpcoming = useMemo(
     () => sessions.filter((s) => s.status === "Upcoming"),
-    [sessions]
+    [sessions],
   );
+  const loadPending = useCallback(async () => {
+    try {
+      const d = await api(ENDPOINTS.mentorPending);
+      const list = (d.requests || []).map((r) => ({
+        ...normalizeSessionRequest(r),
+        status: "Pending",
+      }));
+      setRequests((prev) => {
+        const ids = new Set(prev.map((r) => String(r.id)));
+        return [...prev, ...list.filter((r) => !ids.has(String(r.id)))];
+      });
+    } catch (e) {
+      console.error("load pending:", e.message);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPending();
+  }, [loadPending]);
 
   /* ---------- live request feed ---------- */
   useEffect(() => {
-  
     const handleConnect = () => {
       setSocketConnected(true);
     };
@@ -118,11 +141,16 @@ const MentorRequests = () => {
     };
 
     const handleSessionRequest = (incoming) => {
-      const request = { ...normalizeSessionRequest(incoming), status: "Pending" };
+      const request = {
+        ...normalizeSessionRequest(incoming),
+        status: "Pending",
+      };
       if (!request.id) return;
 
       setRequests((prev) =>
-        prev.some((r) => String(r.id) === String(request.id)) ? prev : [request, ...prev]
+        prev.some((r) => String(r.id) === String(request.id))
+          ? prev
+          : [request, ...prev],
       );
     };
 
@@ -131,7 +159,9 @@ const MentorRequests = () => {
       const key = String(id ?? requestGroupId ?? "");
       if (!key) return;
       setRequests((prev) =>
-        prev.filter((r) => String(r.id) !== key && String(r.requestGroupId) !== key)
+        prev.filter(
+          (r) => String(r.id) !== key && String(r.requestGroupId) !== key,
+        ),
       );
     };
 
@@ -156,23 +186,42 @@ const MentorRequests = () => {
   /* ---------- filtering ---------- */
   const filteredRequests = useMemo(() => {
     const search = searchQuery.toLowerCase().trim();
-    const selectedDuration = filters.duration !== "All" ? getDurationMinutes(filters.duration) : null;
+    const selectedDuration =
+      filters.duration !== "All" ? getDurationMinutes(filters.duration) : null;
 
     return requests.filter((request) => {
       if (request.status !== activeTab) return false;
       if (request.type !== "Video Call") return false;
 
       if (search) {
-        const text = [request.name, request.role, request.company, request.message]
+        const text = [
+          request.name,
+          request.role,
+          request.company,
+          request.message,
+        ]
           .join(" ")
           .toLowerCase();
         if (!text.includes(search)) return false;
       }
 
-      if (filters.timing !== "All" && getTiming(request.time) !== filters.timing) return false;
-      if (filters.role !== "All" && getRole(request.role) !== filters.role) return false;
-      if (selectedDuration !== null && getDurationMinutes(request.duration) !== selectedDuration) return false;
-      if (filters.amount !== "All" && !matchesAmount(request.amount, filters.amount)) return false;
+      if (
+        filters.timing !== "All" &&
+        getTiming(request.time) !== filters.timing
+      )
+        return false;
+      if (filters.role !== "All" && getRole(request.role) !== filters.role)
+        return false;
+      if (
+        selectedDuration !== null &&
+        getDurationMinutes(request.duration) !== selectedDuration
+      )
+        return false;
+      if (
+        filters.amount !== "All" &&
+        !matchesAmount(request.amount, filters.amount)
+      )
+        return false;
 
       return true;
     });
@@ -217,7 +266,10 @@ const MentorRequests = () => {
 
     if (isAccept) {
       const serverReady = !sessionsLoading && !sessionsError;
-      const conflict = getSessionConflict(selectedRequest, serverReady ? serverUpcoming : null);
+      const conflict = getSessionConflict(
+        selectedRequest,
+        serverReady ? serverUpcoming : null,
+      );
 
       if (conflict) {
         setAcceptError(getConflictMessage(conflict));
@@ -231,7 +283,7 @@ const MentorRequests = () => {
     try {
       const result = await respondToSessionRequest(
         selectedRequest,
-        isAccept ? "accepted" : "rejected"
+        isAccept ? "accepted" : "rejected",
       );
 
       if (result.taken) {
@@ -248,7 +300,11 @@ const MentorRequests = () => {
       if (isAccept) {
         assignPaymentToMentor(result.requestGroupId);
 
-        const session = { ...selectedRequest, type: "Video Call", status: "Upcoming" };
+        const session = {
+          ...selectedRequest,
+          type: "Video Call",
+          status: "Upcoming",
+        };
         persistAcceptedSession(session); // fallback copy for the gap check
 
         removeRequest(selectedRequest.id);
@@ -260,8 +316,10 @@ const MentorRequests = () => {
 
       setRequests((prev) =>
         prev.map((r) =>
-          String(r.id) === String(selectedRequest.id) ? { ...r, status: "Rejected" } : r
-        )
+          String(r.id) === String(selectedRequest.id)
+            ? { ...r, status: "Rejected" }
+            : r,
+        ),
       );
       resetModal();
     } catch (error) {
@@ -272,20 +330,29 @@ const MentorRequests = () => {
     }
   };
 
-  const updateFilter = (key) => (value) => setFilters((prev) => ({ ...prev, [key]: value }));
+  const updateFilter = (key) => (value) =>
+    setFilters((prev) => ({ ...prev, [key]: value }));
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 sm:p-6 lg:p-8">
       <div className="mx-auto max-w-7xl">
         <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Mentor Requests</h1>
-            <p className="mt-1 text-sm text-slate-500">Fresher session requests assigned to you.</p>
+            <h1 className="text-2xl font-bold text-slate-900">
+              Mentor Requests
+            </h1>
+            <p className="mt-1 text-sm text-slate-500">
+              Fresher session requests assigned to you.
+            </p>
           </div>
 
           <div className="flex items-center gap-2 text-xs">
-            <span className={`h-2.5 w-2.5 rounded-full ${socketConnected ? "bg-emerald-500" : "bg-red-500"}`} />
-            <span className="text-slate-500">{socketConnected ? "Live" : "Offline"}</span>
+            <span
+              className={`h-2.5 w-2.5 rounded-full ${socketConnected ? "bg-emerald-500" : "bg-red-500"}`}
+            />
+            <span className="text-slate-500">
+              {socketConnected ? "Live" : "Offline"}
+            </span>
           </div>
         </div>
 
@@ -297,7 +364,9 @@ const MentorRequests = () => {
                 type="button"
                 onClick={() => setActiveTab(label)}
                 className={`flex items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2.5 text-sm font-medium transition ${
-                  activeTab === label ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                  activeTab === label
+                    ? "bg-slate-900 text-white"
+                    : "text-slate-600 hover:bg-slate-100"
                 }`}
               >
                 <Icon size={16} />
@@ -308,7 +377,10 @@ const MentorRequests = () => {
 
           <div className="flex gap-3">
             <div className="relative flex-1 lg:w-80">
-              <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Search
+                size={18}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+              />
               <input
                 type="text"
                 value={searchQuery}
@@ -345,10 +417,30 @@ const MentorRequests = () => {
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <FilterSelect label="Timing" value={filters.timing} options={TIMING_OPTIONS} onChange={updateFilter("timing")} />
-              <FilterSelect label="Role" value={filters.role} options={ROLE_OPTIONS} onChange={updateFilter("role")} />
-              <FilterSelect label="Duration" value={filters.duration} options={DURATION_OPTIONS} onChange={updateFilter("duration")} />
-              <FilterSelect label="Amount" value={filters.amount} options={AMOUNT_OPTIONS} onChange={updateFilter("amount")} />
+              <FilterSelect
+                label="Timing"
+                value={filters.timing}
+                options={TIMING_OPTIONS}
+                onChange={updateFilter("timing")}
+              />
+              <FilterSelect
+                label="Role"
+                value={filters.role}
+                options={ROLE_OPTIONS}
+                onChange={updateFilter("role")}
+              />
+              <FilterSelect
+                label="Duration"
+                value={filters.duration}
+                options={DURATION_OPTIONS}
+                onChange={updateFilter("duration")}
+              />
+              <FilterSelect
+                label="Amount"
+                value={filters.amount}
+                options={AMOUNT_OPTIONS}
+                onChange={updateFilter("amount")}
+              />
             </div>
           </div>
         )}
@@ -359,7 +451,9 @@ const MentorRequests = () => {
               <CalendarDays size={24} className="text-slate-400" />
             </div>
 
-            <h2 className="text-lg font-semibold text-slate-900">No requests</h2>
+            <h2 className="text-lg font-semibold text-slate-900">
+              No requests
+            </h2>
 
             <p className="mt-1 text-sm text-slate-500">
               New fresher requests will appear here automatically.
@@ -395,11 +489,18 @@ const MentorRequests = () => {
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
             <div className="mb-5 flex items-start justify-between">
               <div>
-                <h2 id="confirm-title" className="text-lg font-bold text-slate-900">
-                  {actionType === "accept" ? "Accept Request?" : "Reject Request?"}
+                <h2
+                  id="confirm-title"
+                  className="text-lg font-bold text-slate-900"
+                >
+                  {actionType === "accept"
+                    ? "Accept Request?"
+                    : "Reject Request?"}
                 </h2>
 
-                <p className="mt-1 text-sm text-slate-500">{selectedRequest.name}</p>
+                <p className="mt-1 text-sm text-slate-500">
+                  {selectedRequest.name}
+                </p>
               </div>
 
               <button
@@ -416,7 +517,10 @@ const MentorRequests = () => {
             {actionType === "accept" && (
               <div className="mb-5 rounded-xl border border-blue-100 bg-blue-50 p-4">
                 <div className="flex gap-3">
-                  <CalendarDays size={19} className="mt-0.5 shrink-0 text-blue-600" />
+                  <CalendarDays
+                    size={19}
+                    className="mt-0.5 shrink-0 text-blue-600"
+                  />
 
                   <div>
                     <p className="text-sm font-semibold text-blue-900">
@@ -424,8 +528,8 @@ const MentorRequests = () => {
                     </p>
 
                     <p className="mt-1 text-xs leading-5 text-blue-700">
-                      Every session must have at least {SESSION_GAP_MINUTES} minutes gap from the
-                      previous or next session.
+                      Every session must have at least {SESSION_GAP_MINUTES}{" "}
+                      minutes gap from the previous or next session.
                     </p>
                   </div>
                 </div>
@@ -433,7 +537,10 @@ const MentorRequests = () => {
             )}
 
             {acceptError && (
-              <div className="mb-5 rounded-xl border border-red-200 bg-red-50 p-4" role="alert">
+              <div
+                className="mb-5 rounded-xl border border-red-200 bg-red-50 p-4"
+                role="alert"
+              >
                 <p className="text-sm leading-5 text-red-700">{acceptError}</p>
               </div>
             )}
@@ -447,8 +554,12 @@ const MentorRequests = () => {
                 />
 
                 <div>
-                  <p className="font-semibold text-slate-900">{selectedRequest.name}</p>
-                  <p className="text-xs text-slate-500">{selectedRequest.role}</p>
+                  <p className="font-semibold text-slate-900">
+                    {selectedRequest.name}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {selectedRequest.role}
+                  </p>
                 </div>
               </div>
 
@@ -528,7 +639,9 @@ const MentorRequests = () => {
 
 const FilterSelect = ({ label, value, options, onChange }) => (
   <div>
-    <label className="mb-1.5 block text-xs font-medium text-slate-600">{label}</label>
+    <label className="mb-1.5 block text-xs font-medium text-slate-600">
+      {label}
+    </label>
 
     <select
       value={value}
@@ -563,10 +676,14 @@ const RequestCard = ({ request, onAccept, onReject }) => (
             </span>
           </div>
 
-          {request.company && <p className="mt-1 text-sm text-slate-500">{request.company}</p>}
+          {request.company && (
+            <p className="mt-1 text-sm text-slate-500">{request.company}</p>
+          )}
 
           {request.message && (
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">{request.message}</p>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
+              {request.message}
+            </p>
           )}
 
           <div className="mt-4 flex flex-wrap gap-3 text-xs text-slate-500">

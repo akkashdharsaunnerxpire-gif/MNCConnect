@@ -14,6 +14,7 @@ export const ENDPOINTS = {
   assignPayment: "/payments/assign-to-me",
   booking: (id) => `/bookings/${encodeURIComponent(id)}`,
   profileStats: "/mentor/profile/stats",
+  mentorPending: "/bookings/mentor/pending",
 };
 
 export const EVENTS = {

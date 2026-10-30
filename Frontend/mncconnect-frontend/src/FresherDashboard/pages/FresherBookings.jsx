@@ -1,5 +1,13 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+// src/FresherDashboard/pages/MyBookings.jsx
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Link, useNavigate } from "react-router-dom";
+import useChatNotificationSound from "../../hooks/useChatNotificationSound";
 import {
   CalendarDays,
   CheckCircle2,
@@ -19,7 +27,8 @@ import {
 import useLive from "../../hooks/useLive";
 import ReviewModal from "../pages/Reviewmodal";
 import ChatPanel from "../../Commoncomponents/Chatpanel";
-import {socket} from "../../utils/socket";
+import PersonDetailsModal from "../../Commoncomponents/Persondetailsmodal";
+import { socket } from "../../utils/socket";
 import {
   api,
   ENDPOINTS,
@@ -57,8 +66,8 @@ const NO_CHAT_STATUSES = ["pending", "expired", "missed", "cancelled"];
 const DONE_STATUSES = ["completed", "awaiting_confirmation", "disputed"];
 
 const MyBookings = () => {
+  useChatNotificationSound("fresher");
   const navigate = useNavigate();
-  const [unreadCounts, setUnreadCounts] = useState({});
   const userId = useMemo(() => getUserId(), []);
   const [now, setNow] = useState(Date.now());
   const [tab, setTab] = useState("upcoming");
@@ -66,7 +75,14 @@ const MyBookings = () => {
 
   // chat
   const [chatFor, setChatFor] = useState(null);
-  const token = localStorage.getItem("fresher_token") || "";
+
+  // MncEmployee (mentor) details modal
+  const [detailsFor, setDetailsFor] = useState(null);
+
+  // unread chat messages: requestGroupId -> count
+  const [unreadCounts, setUnreadCounts] = useState({});
+  const openChatId = useRef(null); // chat open right now (its messages are not "unread")
+  const seenMessageIds = useRef(new Set());
 
   // requestGroupId -> { remainingMs, running, at }
   const [timers, setTimers] = useState({});
@@ -110,14 +126,48 @@ const MyBookings = () => {
     setTimeout(reload, 2000);
   };
 
-  // Unread badge.
-  const seenMessageIds = useRef(new Set());
+  /* ---------- unread chat badge ---------- */
+
+  // Unread counts saved on the server. Covers messages that arrived while this
+  // user was offline / on another page / before a refresh.
+  const loadUnread = useCallback(() => {
+    api("/chat/unread")
+      .then((d) => {
+        if (!d?.counts) return;
+        const counts = { ...d.counts };
+        // the chat that is open right now is being read -> keep it at 0
+        if (openChatId.current) counts[openChatId.current] = 0;
+        setUnreadCounts(counts);
+      })
+      .catch(() => {});
+  }, []);
+
+  // on page open
+  useEffect(() => {
+    loadUnread();
+  }, [loadUnread]);
+
+  // after a socket reconnect / when the tab is used again
+  useEffect(() => {
+    const onFocus = () => document.visibilityState === "visible" && loadUnread();
+
+    socket.on("connect", loadUnread);
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+
+    return () => {
+      socket.off("connect", loadUnread);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [loadUnread]);
+
+  // live: new message from the mentor -> +1 (unless that chat is open)
   useEffect(() => {
     const onChatMessage = (message) => {
       if (message.senderRole === "fresher") return;
 
       const messageId = String(message._id || message.id || "");
-
       if (messageId) {
         if (seenMessageIds.current.has(messageId)) return;
         seenMessageIds.current.add(messageId);
@@ -125,21 +175,29 @@ const MyBookings = () => {
 
       const id = String(message.requestGroupId || message.bookingId || "");
       if (!id) return;
+      if (openChatId.current === id) return;
 
-      if (String(chatFor?.requestGroupId || "") === id) return;
-
-      setUnreadCounts((prev) => ({
-        ...prev,
-        [id]: (prev[id] || 0) + 1,
-      }));
+      setUnreadCounts((prev) => ({ ...prev, [id]: (prev[id] || 0) + 1 }));
     };
 
     socket.on("chat:message", onChatMessage);
+    return () => socket.off("chat:message", onChatMessage);
+  }, []);
 
-    return () => {
-      socket.off("chat:message", onChatMessage);
-    };
-  }, [chatFor]);
+  const openChat = (b) => {
+    const id = String(b.requestGroupId);
+    openChatId.current = id;
+    setUnreadCounts((prev) => ({ ...prev, [id]: 0 }));
+    setChatFor(b);
+  };
+
+  const closeChat = () => {
+    openChatId.current = null;
+    setChatFor(null);
+    loadUnread(); // sync with the server (messages are now marked read)
+  };
+
+  const closeDetails = useCallback(() => setDetailsFor(null), []);
 
   // Timer values that come with the list (if backend sends them)
   useEffect(() => {
@@ -288,7 +346,7 @@ const MyBookings = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [now]);
 
-   const view = (b) => {
+  const view = (b) => {
     const starts = new Date(b.startsAt).getTime();
     const ends = new Date(b.endsAt).getTime();
     const opens = starts - 5 * 60000;
@@ -474,12 +532,18 @@ const MyBookings = () => {
                 Boolean(b.mentor) &&
                 !NO_CHAT_STATUSES.includes(b.status) &&
                 v.key !== "pending";
+              // an employee accepted this booking -> fresher can see who it is
+              const canSeeMentor =
+                Boolean(b.mentor?.id) &&
+                b.status !== "pending" &&
+                v.key !== "pending";
               // past + session really happened + we know the mentor
               const sessionHappened =
                 ["completed", "awaiting_confirmation"].includes(b.status) ||
                 Boolean(finishedIds[b.requestGroupId]);
               const canRebook =
                 tab === "past" && sessionHappened && Boolean(b.mentor?.id);
+              const unread = unreadCounts[String(b.requestGroupId)] || 0;
 
               return (
                 <div
@@ -589,32 +653,32 @@ const MyBookings = () => {
                         </button>
                       )}
 
+                      {/* MncEmployee details (only after an employee accepted) */}
+                      {canSeeMentor && (
+                        <button
+                          type="button"
+                          onClick={() => setDetailsFor(b)}
+                          className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                        >
+                          <UserRound className="h-4 w-4" />
+                          MncEmployee details
+                        </button>
+                      )}
+
                       {/* MESSAGE (only after an employee accepted) */}
                       {canChat && (
                         <button
                           type="button"
-                          onClick={() => {
-                            setUnreadCounts((prev) => ({
-                              ...prev,
-                              [b.requestGroupId]: 0,
-                            }));
-
-                            setChatFor(b);
-                          }}
+                          onClick={() => openChat(b)}
                           className="relative flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                         >
-                          <span className="relative inline-flex">
-                            <MessageSquare className="h-4 w-4" />
-
-                            {(unreadCounts[b.requestGroupId] || 0) > 0 && (
-                              <span className="absolute -right-3 -top-3 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
-                                {unreadCounts[b.requestGroupId] > 99
-                                  ? "99+"
-                                  : unreadCounts[b.requestGroupId]}
-                              </span>
-                            )}
-                          </span>
+                          <MessageSquare className="h-4 w-4" />
                           Message
+                          {unread > 0 && (
+                            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-[11px] font-bold leading-none text-white">
+                              {unread > 99 ? "99+" : unread}
+                            </span>
+                          )}
                         </button>
                       )}
                     </div>
@@ -675,10 +739,20 @@ const MyBookings = () => {
         <ChatPanel
           variant="modal"
           bookingId={chatFor.requestGroupId}
-          token={token}
           role="fresher"
           title={`Chat with ${chatFor.mentor?.name || "employee"}`}
-          onClose={() => setChatFor(null)}
+          onClose={closeChat}
+        />
+      )}
+
+      {detailsFor && (
+        <PersonDetailsModal
+          key={detailsFor.requestGroupId}
+          title="MncEmployee details"
+          fetcher={() =>
+            api(`${ENDPOINTS.booking(detailsFor.requestGroupId)}/counterpart`)
+          }
+          onClose={closeDetails}
         />
       )}
     </div>

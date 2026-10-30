@@ -1,9 +1,11 @@
-// src/hooks/useLive.js  (replaces the earlier version; works for mentor AND fresher)
+// src/hooks/useLive.js  (works for mentor AND fresher)
 // Fetches data, then re-fetches on socket events / reconnect / optional polling.
-// Joins the "user:<id>" room so backend emitToUser() / notify() reach this tab.
+// The server already puts every cookie-logged-in socket into its own user room
+// (identified from the HttpOnly cookie), so nothing is read from localStorage.
+// `userId` is optional: pass it only if you still want to emit "join-user".
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {socket} from "../utils/socket";
+import { socket } from "../utils/socket";
 
 export default function useLive({ fetcher, events = [], pollMs = 0, userId }) {
   const [data, setData] = useState(null);
@@ -28,7 +30,6 @@ export default function useLive({ fetcher, events = [], pollMs = 0, userId }) {
   const eventKey = events.join("|");
 
   useEffect(() => {
-    const id = userId ?? localStorage.getItem("mentorId");
     let timer;
 
     const refresh = () => {
@@ -37,7 +38,7 @@ export default function useLive({ fetcher, events = [], pollMs = 0, userId }) {
     };
     const onConnect = () => {
       setConnected(true);
-      if (id) socket.emit("join-user", id);
+      if (userId) socket.emit("join-user", userId);
       load();
     };
     const onDisconnect = () => setConnected(false);

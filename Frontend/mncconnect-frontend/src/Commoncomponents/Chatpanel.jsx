@@ -24,6 +24,7 @@ import {
   playSendSound,
   playReceiveSound,
   unlockAudio,
+  setChatActive,
 } from "../utils/chatSounds";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
@@ -57,17 +58,25 @@ const dayLabel = (d) => {
   });
 };
 
-// my user id from the JWT (used to decide which messages are mine)
-const getMyId = (token) => {
-  try {
-    const payload = token.split(".")[1];
-    const json = JSON.parse(
-      atob(payload.replace(/-/g, "+").replace(/_/g, "/")),
-    );
-    return String(json.id || json._id || json.userId || "");
-  } catch {
-    return "";
-  }
+// WhatsApp style: "last seen today at 1:21 PM" / "yesterday at ..." / "28 Oct at ..."
+const formatLastSeen = (d) => {
+  if (!d) return "";
+  const x = new Date(d);
+  if (Number.isNaN(x.getTime())) return "";
+
+  const time = x.toLocaleTimeString("en-IN", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+
+  const label = dayLabel(x);
+  if (label === "Today") return `last seen today at ${time}`;
+  if (label === "Yesterday") return `last seen yesterday at ${time}`;
+  return `last seen ${x.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+  })} at ${time}`;
 };
 
 // true when message has only 1-6 emojis (no normal text) -> show it big
@@ -112,9 +121,6 @@ const initialsOf = (title = "") => {
   ).toUpperCase();
 };
 
-/* ---------------- one message row (memoized) ----------------
- * Re-renders only when ITS message / grouping changes, so a new
- * message or a tick update doesn't re-render the whole list. */
 const MessageRow = memo(function MessageRow({
   m,
   mine,
@@ -172,10 +178,12 @@ const DayDivider = memo(function DayDivider({ label }) {
  * variant="modal"  -> centered popup (Sessions / My Bookings "Message" button)
  * variant="panel"  -> right side panel (inside the meeting room). Keep it mounted
  *                     and toggle with `open` so new messages are still received.
+ *
+ * Auth = HttpOnly cookie (credentials: "include" + socket handshake cookie).
+ * The old `token` prop is accepted but no longer used.
  */
 export default function ChatPanel({
   bookingId,
-  token,
   role, // "mentor" | "fresher"
   title = "Chat",
   variant = "modal",
@@ -184,13 +192,9 @@ export default function ChatPanel({
   onIncoming,
 }) {
   const peerRole = role === "mentor" ? "fresher" : "mentor";
-  const myId = useMemo(() => getMyId(token), [token]);
 
-  // true = I sent it (right side), false = other person (left side)
-  const isMine = useCallback(
-    (m) => (myId ? String(m.senderId) === myId : m.senderRole === role),
-    [myId, role],
-  );
+  // mentor and fresher are different roles, so the sender role tells who sent it
+  const isMine = useCallback((m) => m.senderRole === role, [role]);
 
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
@@ -198,6 +202,11 @@ export default function ChatPanel({
   const [sending, setSending] = useState(false);
   const [joined, setJoined] = useState(false);
   const [peerOnline, setPeerOnline] = useState(false);
+  const [peerLastSeen, setPeerLastSeen] = useState(null);
+  const [visible, setVisible] = useState(
+    () =>
+      typeof document === "undefined" || document.visibilityState === "visible",
+  );
   const [err, setErr] = useState("");
   const [showJump, setShowJump] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
@@ -208,20 +217,23 @@ export default function ChatPanel({
   const textareaRef = useRef(null);
   const sendingRef = useRef(false);
   const readSentRef = useRef(new Set());
-  const soundedRef = useRef(new Set()); // message ids we already played sound for
+  const soundedRef = useRef(new Set());
   const incomingRef = useRef(onIncoming);
   incomingRef.current = onIncoming;
+
+  // latest `open` value for the socket handler (no need to re-subscribe)
+  const openRef = useRef(open);
+  openRef.current = open;
 
   const emojiPickerRef = useRef(null);
   const emojiBtnRef = useRef(null);
 
-  // scroll bookkeeping
   const initialScrollDone = useRef(false);
   const stickToBottom = useRef(true);
   const forceScroll = useRef(false);
   const prevLength = useRef(0);
   const loadingOlderRef = useRef(false);
-  const restoreScroll = useRef(null); // keeps position after loading older
+  const restoreScroll = useRef(null);
 
   const addMessage = useCallback((m) => {
     setMessages((prev) =>
@@ -241,6 +253,13 @@ export default function ChatPanel({
       events.forEach((ev) => window.removeEventListener(ev, handler));
   }, []);
 
+  /* ---------------- tell the app this chat is open (no notification sound) ---------------- */
+  useEffect(() => {
+    if (!bookingId || !open) return undefined;
+    setChatActive(bookingId, true);
+    return () => setChatActive(bookingId, false);
+  }, [bookingId, open]);
+
   /* ---------------- data + socket ---------------- */
   useEffect(() => {
     if (!bookingId) return undefined;
@@ -248,8 +267,11 @@ export default function ChatPanel({
 
     setJoined(false);
     setPeerOnline(false);
+    setPeerLastSeen(null);
     setLoading(true);
     setHasMore(false);
+    setMessages([]);
+    setErr("");
     initialScrollDone.current = false;
     stickToBottom.current = true;
     prevLength.current = 0;
@@ -258,17 +280,16 @@ export default function ChatPanel({
     readSentRef.current = new Set();
     soundedRef.current = new Set();
 
-    // does this event belong to this chat? (server sends both ids)
     const matches = (m) =>
       [m.bookingId, m.requestGroupId]
         .filter(Boolean)
         .map(String)
         .includes(String(bookingId));
 
-    // 1. history (latest page only)
+    // 1. history (latest page only) - cookie auth
     fetch(
       `${API_URL}/chat/${encodeURIComponent(bookingId)}?limit=${PAGE_SIZE}`,
-      { headers: { Authorization: `Bearer ${token}` } },
+      { credentials: "include" },
     )
       .then((r) => r.json())
       .then((d) => {
@@ -283,14 +304,15 @@ export default function ChatPanel({
       .catch(() => !cancelled && setErr("Could not load chat."))
       .finally(() => !cancelled && setLoading(false));
 
-    // 2. live
+    // 2. live - the server knows the user from the socket cookie
     const join = () => {
-      socket.emit("chat:join", { bookingId, token }, (res) => {
+      socket.emit("chat:join", { bookingId }, (res) => {
         if (cancelled) return;
         if (res?.ok) {
           setJoined(true);
           setErr("");
           setPeerOnline(Boolean(res.online?.[peerRole]));
+          setPeerLastSeen(res.lastSeen || null);
         } else {
           setErr(res?.message || "Chat unavailable.");
         }
@@ -303,17 +325,16 @@ export default function ChatPanel({
       addMessage(m);
 
       if (m.senderRole !== role) {
-        // play receive sound once per incoming message
         const id = String(m._id);
         if (!soundedRef.current.has(id)) {
           soundedRef.current.add(id);
-          playReceiveSound();
+          // panel closed -> the global notification hook plays the ding instead
+          if (openRef.current) playReceiveSound();
         }
         incomingRef.current?.(m);
       }
     };
 
-    // delivered / read updates for messages I sent
     const onReceipt = (r) => {
       const ids = new Set((r.messageIds || []).map(String));
       if (!ids.size) return;
@@ -335,10 +356,10 @@ export default function ChatPanel({
       );
     };
 
-    // other person came online / went offline
     const onPresence = (p) => {
       if (!matches(p)) return;
       setPeerOnline(Boolean(p.online?.[peerRole]));
+      if (p.lastSeen?.[peerRole]) setPeerLastSeen(p.lastSeen[peerRole]);
     };
 
     const onDisconnect = () => {
@@ -361,10 +382,9 @@ export default function ChatPanel({
       socket.off("chat:presence", onPresence);
       socket.off("connect", join);
       socket.off("disconnect", onDisconnect);
-      // tell the server I left so the other person sees me as offline
       socket.emit("chat:leave", { bookingId });
     };
-  }, [bookingId, token, role, peerRole, addMessage]);
+  }, [bookingId, role, peerRole, addMessage]);
 
   /* ---------------- load older messages (scroll to top) ---------------- */
   const loadOlder = useCallback(() => {
@@ -379,7 +399,7 @@ export default function ChatPanel({
       `${API_URL}/chat/${encodeURIComponent(
         bookingId,
       )}?limit=${PAGE_SIZE}&before=${encodeURIComponent(before)}`,
-      { headers: { Authorization: `Bearer ${token}` } },
+      { credentials: "include" },
     )
       .then((r) => r.json())
       .then((d) => {
@@ -387,7 +407,6 @@ export default function ChatPanel({
         const older = d.messages || [];
 
         if (older.length) {
-          // remember position so the view doesn't jump after prepending
           const el = scrollRef.current;
           if (el) {
             restoreScroll.current = {
@@ -409,7 +428,7 @@ export default function ChatPanel({
         loadingOlderRef.current = false;
         setLoadingOlder(false);
       });
-  }, [bookingId, token, hasMore, messages]);
+  }, [bookingId, hasMore, messages]);
 
   /* ---------------- scrolling ---------------- */
   const scrollToBottom = useCallback((smooth = false) => {
@@ -430,15 +449,12 @@ export default function ChatPanel({
     stickToBottom.current = atBottom;
     setShowJump(!atBottom);
 
-    // near the top -> load the previous page
     if (el.scrollTop < 60) loadOlder();
   };
 
-  // useLayoutEffect = runs BEFORE paint, so the user never sees the top
   useLayoutEffect(() => {
     if (!open || loading) return;
 
-    // First render after history loads: jump instantly, no animation.
     if (!initialScrollDone.current) {
       scrollToBottom(false);
       initialScrollDone.current = true;
@@ -446,7 +462,6 @@ export default function ChatPanel({
       return;
     }
 
-    // Older messages were added on top: keep the same message in view.
     if (restoreScroll.current) {
       const { height, top } = restoreScroll.current;
       restoreScroll.current = null;
@@ -459,15 +474,12 @@ export default function ChatPanel({
     if (messages.length === prevLength.current) return;
     prevLength.current = messages.length;
 
-    // New message: follow only if the user is already at the bottom
-    // (or the user just sent one).
     if (stickToBottom.current || forceScroll.current) {
       scrollToBottom(!forceScroll.current);
       forceScroll.current = false;
     }
   }, [messages, open, loading, scrollToBottom]);
 
-  // Panel variant stays mounted while hidden: jump to bottom when re-opened.
   useLayoutEffect(() => {
     if (open && !loading) {
       scrollToBottom(false);
@@ -476,10 +488,24 @@ export default function ChatPanel({
     }
   }, [open, loading, scrollToBottom]);
 
-  /* ---------------- read receipts ---------------- */
-  // Mark incoming messages as READ, only while the chat is actually open
+  /* ---------------- is this tab visible? (read only when the user can see it) ---------------- */
   useEffect(() => {
-    if (!open || !joined) return;
+    const update = () =>
+      setVisible(document.visibilityState === "visible" && document.hasFocus());
+    update();
+    document.addEventListener("visibilitychange", update);
+    window.addEventListener("focus", update);
+    window.addEventListener("blur", update);
+    return () => {
+      document.removeEventListener("visibilitychange", update);
+      window.removeEventListener("focus", update);
+      window.removeEventListener("blur", update);
+    };
+  }, []);
+
+  /* ---------------- read receipts (blue ticks) ---------------- */
+  useEffect(() => {
+    if (!open || !joined || !visible) return;
 
     const unread = messages
       .filter(
@@ -497,7 +523,7 @@ export default function ChatPanel({
         unread.forEach((id) => readSentRef.current.delete(id));
       }
     });
-  }, [messages, open, joined, isMine, bookingId]);
+  }, [messages, open, joined, visible, isMine, bookingId]);
 
   /* ---------------- modal: Esc to close ---------------- */
   useEffect(() => {
@@ -521,8 +547,6 @@ export default function ChatPanel({
       setShowEmoji(false);
     };
 
-    // capture phase: runs before the modal's Esc handler, so Esc closes
-    // only the picker first, and the chat stays open
     const onKey = (e) => {
       if (e.key === "Escape") {
         e.stopPropagation();
@@ -550,7 +574,6 @@ export default function ChatPanel({
     el.style.height = `${Math.min(el.scrollHeight, 112)}px`;
   };
 
-  // insert emoji at the cursor position (picker stays open for more)
   const insertEmoji = (emoji) => {
     const el = textareaRef.current;
 
@@ -580,7 +603,7 @@ export default function ChatPanel({
 
     if (!t || sendingRef.current || !socket.connected) return;
 
-    unlockAudio(); // send click/enter is a user gesture, so audio is allowed
+    unlockAudio();
 
     sendingRef.current = true;
     setSending(true);
@@ -592,8 +615,8 @@ export default function ChatPanel({
       setSending(false);
 
       if (res?.ok) {
-        playSendSound(); // swoosh + tick + pop after message is sent
-        forceScroll.current = true; // always follow my own message
+        playSendSound();
+        forceScroll.current = true;
         setText("");
         if (res.message) addMessage(res.message);
         requestAnimationFrame(() => {
@@ -659,7 +682,7 @@ export default function ChatPanel({
     ? "Connecting…"
     : peerOnline
       ? "Online"
-      : "Offline";
+      : formatLastSeen(peerLastSeen) || "Offline";
 
   const body = (
     <>
