@@ -1368,3 +1368,260 @@ exports.logout = (req, res) => {
     message: "Logged out successfully.",
   });
 };
+
+// ============================================================
+// UPLOAD PROFILE AVATAR
+// POST /api/auth/avatar
+// ============================================================
+
+exports.uploadProfileAvatar = async (req, res) => {
+  let uploadedPublicId = "";
+
+  try {
+    if (!req.user?.id || !["fresher", "mentor"].includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: "Invalid user.",
+      });
+    }
+
+    const file = req.file;
+
+    if (!file) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select a profile image.",
+      });
+    }
+
+    if (!file.mimetype.startsWith("image/")) {
+      return res.status(400).json({
+        success: false,
+        message: "Only image files are allowed.",
+      });
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      return res.status(400).json({
+        success: false,
+        message: "Maximum image size is 5MB.",
+      });
+    }
+
+    const Model =
+      req.user.role === "mentor" ? Mentor : Fresher;
+
+    const user = await Model.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
+    }
+
+    // Upload new image first
+    const result = await uploadFromBuffer(
+      file.buffer,
+      `profiles/${req.user.role}`,
+      `${req.user.role}_${user._id}_${Date.now()}`,
+      { resource_type: "image" }
+    );
+
+    uploadedPublicId = result.public_id;
+
+    const oldPublicId = user.profilePicPublicId;
+
+    // Save new image in MongoDB
+    user.profilePic = result.secure_url;
+    user.profilePicPublicId = result.public_id;
+
+    await user.save();
+
+    // Delete old image only after successful database update
+    if (oldPublicId && oldPublicId !== result.public_id) {
+      try {
+        await deleteFromCloudinary(oldPublicId);
+      } catch (deleteError) {
+        console.error(
+          "Old avatar deletion failed:",
+          deleteError.message
+        );
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Profile photo updated successfully.",
+      user: {
+        profilePic: user.profilePic,
+      },
+    });
+
+  } catch (error) {
+    console.error("Avatar upload error:", error);
+
+    // Clean up newly uploaded image if database update failed
+    if (uploadedPublicId) {
+      await deleteFromCloudinary(uploadedPublicId).catch(() => {});
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to upload profile photo.",
+    });
+  }
+};
+
+
+// ============================================================
+// REMOVE PROFILE AVATAR
+// DELETE /api/auth/avatar
+// ============================================================
+
+exports.removeProfileAvatar = async (req, res) => {
+  try {
+    if (!req.user?.id || !["fresher", "mentor"].includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: "Invalid user.",
+      });
+    }
+
+    const Model =
+      req.user.role === "mentor" ? Mentor : Fresher;
+
+    const user = await Model.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
+    }
+
+    const oldPublicId = user.profilePicPublicId;
+
+    user.profilePic = "";
+    user.profilePicPublicId = "";
+
+    await user.save();
+
+    if (oldPublicId) {
+      try {
+        await deleteFromCloudinary(oldPublicId);
+      } catch (error) {
+        console.error("Avatar deletion failed:", error.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: "Profile photo removed.",
+      user: {
+        profilePic: "",
+      },
+    });
+
+  } catch (error) {
+    console.error("Avatar removal error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to remove profile photo.",
+    });
+  }
+};
+
+// ============================================================
+// UPDATE FRESHER PROFILE
+// PATCH /api/auth/update
+// ============================================================
+
+exports.updateFresherProfile = async (req, res) => {
+  try {
+    if (!req.user?.id || req.user.role !== "fresher") {
+      return res.status(403).json({
+        success: false,
+        message: "Only freshers can update this profile.",
+      });
+    }
+
+    const fresher = await Fresher.findById(req.user.id);
+
+    if (!fresher || fresher.name === TEMP_NAME) {
+      return res.status(404).json({
+        success: false,
+        message: "Fresher account not found.",
+      });
+    }
+
+    // Only allow approved profile fields.
+    const allowedFields = [
+      "name",
+      "gender",
+      "dateOfBirth",
+      "location",
+      "nationality",
+      "mobile",
+      "bio",
+      "education",
+      "career",
+      "skills",
+      "interests",
+    ];
+
+    for (const field of allowedFields) {
+      if (Object.prototype.hasOwnProperty.call(req.body, field)) {
+        fresher[field] = req.body[field];
+      }
+    }
+
+    // Frontend uses "phone"; database uses "mobile".
+    if (
+      req.body.phone !== undefined &&
+      req.body.mobile === undefined
+    ) {
+      fresher.mobile = req.body.phone;
+    }
+
+    if (req.body.name !== undefined) {
+      const name = String(req.body.name).trim();
+
+      if (name.length < 2 || name.length > 50) {
+        return res.status(400).json({
+          success: false,
+          message: "Name must be between 2 and 50 characters.",
+        });
+      }
+
+      fresher.name = name;
+    }
+
+    await fresher.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Profile updated successfully.",
+      user: {
+        ...sanitizeFresher(fresher),
+        gender: fresher.gender || "",
+        dateOfBirth: fresher.dateOfBirth || "",
+        location: fresher.location || "",
+        nationality: fresher.nationality || "",
+        bio: fresher.bio || "",
+        education: fresher.education || [],
+        career: fresher.career || [],
+        skills: fresher.skills || [],
+        interests: fresher.interests || [],
+      },
+    });
+  } catch (error) {
+    console.error("Fresher profile update error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to update fresher profile.",
+    });
+  }
+};

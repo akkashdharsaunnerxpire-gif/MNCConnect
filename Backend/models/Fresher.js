@@ -97,6 +97,60 @@ const fresherSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    profilePicPublicId: {
+  type: String,
+  default: "",
+  select: false,
+},
+gender: {
+  type: String,
+  enum: ["male", "female", "other", "prefer not to say", ""],
+  default: "",
+},
+
+dateOfBirth: {
+  type: Date,
+  default: null,
+},
+
+location: {
+  type: String,
+  trim: true,
+  default: "",
+},
+
+nationality: {
+  type: String,
+  trim: true,
+  default: "",
+},
+
+bio: {
+  type: String,
+  trim: true,
+  maxlength: 2000,
+  default: "",
+},
+
+education: {
+  type: [mongoose.Schema.Types.Mixed],
+  default: [],
+},
+
+career: {
+  type: [mongoose.Schema.Types.Mixed],
+  default: [],
+},
+
+skills: {
+  type: [String],
+  default: [],
+},
+
+interests: {
+  type: [String],
+  default: [],
+},
   },
   {
     timestamps: true,

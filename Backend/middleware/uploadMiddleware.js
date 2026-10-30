@@ -170,7 +170,7 @@ const uploadSingleFileLocal =
 // ============================================================
 // PROFILE PICTURE
 // ============================================================
-
+const uploadAvatar = uploadToCloudinary.single("avatar");
 const uploadProfilePic =
   uploadToCloudinary.single(
     "employee_profileimage"
@@ -276,4 +276,5 @@ module.exports = {
   allowedExtensions,
 
   handleMulterError,
+  uploadAvatar
 };

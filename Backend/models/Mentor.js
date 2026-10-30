@@ -33,7 +33,10 @@ const mentorSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
-      match: [/^\+\d{7,18}$/, "Mobile must include country code, e.g. +919876543210"],
+      match: [
+        /^\+\d{7,18}$/,
+        "Mobile must include country code, e.g. +919876543210",
+      ],
     },
 
     password: {
@@ -202,10 +205,20 @@ const mentorSchema = new mongoose.Schema(
       default: undefined,
       select: false,
     },
+    profilePicPublicId: {
+      type: String,
+      default: "",
+      select: false,
+    },
+    profilePicPublicId: {
+      type: String,
+      default: "",
+      select: false,
+    },
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 module.exports = mongoose.model("Mentor", mentorSchema);

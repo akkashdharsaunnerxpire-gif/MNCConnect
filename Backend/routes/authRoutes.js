@@ -13,6 +13,9 @@ const {
   applyReferral,
   markWelcomeBonusSeen,
   logout,
+  uploadProfileAvatar,
+  removeProfileAvatar,
+    updateFresherProfile,
 } = require("../controllers/authController");
 
 const {
@@ -29,6 +32,7 @@ const { protect, authorize } = require("../middleware/authMiddleware");
 
 const {
   uploadMentorFiles,
+  uploadAvatar,
   handleMulterError,
 } = require("../middleware/uploadMiddleware");
 
@@ -43,6 +47,11 @@ router.post("/fresher/verify-otp", verifyFresherOtp);
 router.post("/fresher/login", loginFresher);
 router.post("/fresher/forgot-password", forgotPasswordFresher);
 router.post("/fresher/reset-password/:token", resetPasswordFresher);
+router.patch(
+  "/update",
+  protect,
+  updateFresherProfile
+);
 
 // ---------- mentor ----------
 router.post(
@@ -56,6 +65,19 @@ router.post("/mentor/forgot-password", forgotPasswordMentor);
 router.post("/mentor/reset-password/:token",resetPasswordMentor );
 // ---------- logged-in user ----------
 router.get("/me", protect, getMe);
+router.post(
+  "/avatar",
+  protect,
+  uploadAvatar,
+  handleMulterError,
+  uploadProfileAvatar
+);
+
+router.delete(
+  "/avatar",
+  protect,
+  removeProfileAvatar
+);
 router.post("/apply-referral", protect, applyReferral);
 router.patch("/welcome-bonus-seen", protect, markWelcomeBonusSeen);
 
