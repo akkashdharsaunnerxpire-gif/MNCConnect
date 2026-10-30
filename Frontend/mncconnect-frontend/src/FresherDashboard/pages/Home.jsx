@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import {
@@ -17,6 +17,8 @@ import {
   List,
   RotateCcw,
 } from "lucide-react";
+
+import { socket } from "../../utils/socket";
 
 // Company logo / cover now come from the backend (admin uploads) — no local catalog.
 import {
@@ -313,11 +315,14 @@ const BrowseMentors = () => {
   const searchRef = useRef(null);
 
   // ---------------- fetch ----------------
+  // silent = background refresh (no skeleton flash, no error screen)
 
-  const fetchCompanies = async () => {
+  const fetchCompanies = useCallback(async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
-      setError("");
+      if (!silent) {
+        setLoading(true);
+        setError("");
+      }
 
       // company list + admin-uploaded logo/cover, fetched together
       const [response, profiles] = await Promise.all([
@@ -334,17 +339,46 @@ const BrowseMentors = () => {
 
       // Merge spellings that belong to the same company profile
       setCompanies(mergeCompanies(finalCompanies));
+      setError("");
     } catch (err) {
       console.error("Company fetch error:", err);
-      setError(err.message || "Something went wrong");
+      if (!silent) setError(err.message || "Something went wrong");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  };
+  }, []);
 
+  // initial load + live presence updates
   useEffect(() => {
     fetchCompanies();
-  }, []);
+
+    let timer;
+    const refresh = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fetchCompanies({ silent: true }), 400);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+
+    socket.on("mentor-presence", refresh); // server emits when a mentor goes on/offline
+    socket.on("connect", refresh); // re-sync after reconnect
+    document.addEventListener("visibilitychange", onVisible);
+
+    if (!socket.connected) socket.connect();
+
+    // safety net: even if an event is missed, it self-heals within 15s
+    const poll = setInterval(() => fetchCompanies({ silent: true }), 15000);
+
+    return () => {
+      clearTimeout(timer);
+      clearInterval(poll);
+      socket.off("mentor-presence", refresh);
+      socket.off("connect", refresh);
+      document.removeEventListener("visibilitychange", onVisible);
+      // don't disconnect: the socket is shared across pages
+    };
+  }, [fetchCompanies]);
 
   // press "/" anywhere to jump into the search box
   useEffect(() => {
@@ -786,7 +820,7 @@ const BrowseMentors = () => {
               <p className="mt-2 text-sm leading-6 text-slate-500">{error}</p>
               <button
                 type="button"
-                onClick={fetchCompanies}
+                onClick={() => fetchCompanies()}
                 className="mt-6 inline-flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-violet-200 transition hover:bg-violet-700 active:scale-95"
               >
                 <RotateCcw size={15} /> Try again

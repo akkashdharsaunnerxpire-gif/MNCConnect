@@ -135,6 +135,13 @@ const PRESENCE = {
 const toKey = (id) =>
   id === undefined || id === null ? "" : String(id).trim();
 
+// NEW: broadcast mentor presence so fresher pages update without reload
+const offlineTimers = new Map(); // mentorId -> timeout (grace period for page refresh)
+
+const emitMentorPresence = (mentorId, isOnline) => {
+  io.emit("mentor-presence", { mentorId, isOnline });
+};
+
 // Remove this socket from a user's set
 const markOffline = (socket, role) => {
   const { map, label } = PRESENCE[role];
@@ -147,6 +154,19 @@ const markOffline = (socket, role) => {
     if (set.size === 0) {
       map.delete(id);
       console.log(`${label} ${id} is OFFLINE`);
+
+      // NEW: tell freshers, after a short grace period
+      if (role === "mentor") {
+        // 3s grace: a mentor refreshing the page should not flicker offline
+        clearTimeout(offlineTimers.get(id));
+        offlineTimers.set(
+          id,
+          setTimeout(() => {
+            offlineTimers.delete(id);
+            if (!map.has(id)) emitMentorPresence(id, false);
+          }, 3000),
+        );
+      }
     } else {
       console.log(`${label} ${id} still has ${set.size} socket(s) online`);
     }
@@ -175,6 +195,13 @@ const markOnline = (socket, role, rawId) => {
 
   socket.data.presence = socket.data.presence || {};
   socket.data.presence[role] = id;
+
+  // NEW: tell freshers a mentor just came online
+  if (role === "mentor") {
+    clearTimeout(offlineTimers.get(id)); // reconnected within grace period
+    offlineTimers.delete(id);
+    if (map.get(id).size === 1) emitMentorPresence(id, true); // first socket = just came online
+  }
 
   console.log(
     `${label} ${id} is ONLINE (${map.get(id).size} socket${map.get(id).size > 1 ? "s" : ""})`,

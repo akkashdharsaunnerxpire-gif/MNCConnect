@@ -39,77 +39,117 @@ const FINAL_WARNING_MS = 5 * 60 * 1000;
 const TIMER_POLL_MS = 3000;
 const TABS = ["Upcoming", "Awaiting Confirmation", "Completed", "Cancelled"];
 
-// Indeterminate progress: the exact time until confirmation is not predictable.
-const SessionFinalizingIndicator = () => (
-  <Box
-    sx={{
-      display: "flex",
-      alignItems: "center",
-      gap: 2,
-      width: "100%",
-      border: "1px solid",
-      borderColor: "#FDE68A",
-      borderRadius: "12px",
-      backgroundColor: "#FFFBEB",
-      padding: 2,
-    }}
-    role="status"
-    aria-live="polite"
-  >
+// Status only moves forward: Upcoming -> awaiting_confirmation -> Completed/Cancelled
+const STATUS_RANK = {
+  Upcoming: 0,
+  awaiting_confirmation: 1,
+  Completed: 2,
+  Cancelled: 2,
+};
+
+// booking.status (backend) -> status used by this page
+const mapBookingStatus = (status) => {
+  switch (String(status || "").toLowerCase()) {
+    case "awaiting_confirmation":
+      return "awaiting_confirmation";
+    case "completed":
+      return "Completed";
+    case "cancelled":
+    case "canceled":
+      return "Cancelled";
+    default:
+      return null;
+  }
+};
+
+/* ------------------------------------------------------------------ */
+/* Circular loader with label (MUI) – shown until the session becomes */
+/* Completed. Spinner is indeterminate (confirmation time is unknown),*/
+/* the label in the middle shows how long we have been waiting.       */
+/* ------------------------------------------------------------------ */
+const CircularProgressWithLabel = ({ label, size = 54, color = "#D97706" }) => (
+  <Box sx={{ position: "relative", display: "inline-flex", flexShrink: 0 }}>
+    <CircularProgress
+      variant="indeterminate"
+      size={size}
+      thickness={4}
+      aria-label="Waiting for session to complete"
+      sx={{ color }}
+    />
     <Box
       sx={{
-        position: "relative",
-        display: "inline-flex",
-        flexShrink: 0,
+        top: 0,
+        left: 0,
+        bottom: 0,
+        right: 0,
+        position: "absolute",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
       }}
     >
-      <CircularProgress
-        variant="indeterminate"
-        size={44}
-        thickness={4}
-        aria-label="Session finalization in progress"
-        sx={{ color: "#D97706" }}
-      />
-      <Box
+      <Typography
+        variant="caption"
+        component="div"
         sx={{
-          top: 0,
-          left: 0,
-          bottom: 0,
-          right: 0,
-          position: "absolute",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
+          color: "#92400E",
+          fontSize: "10px",
+          fontWeight: 700,
+          fontVariantNumeric: "tabular-nums",
         }}
       >
-        <Typography
-          component="span"
-          sx={{ color: "#92400E", fontSize: "11px", fontWeight: 700 }}
-        >
-          ...
-        </Typography>
-      </Box>
-    </Box>
-
-    <Box sx={{ minWidth: 0 }}>
-      <Typography
-        component="p"
-        sx={{ color: "#92400E", fontSize: "13px", fontWeight: 700 }}
-      >
-        Session finished — finalizing
-      </Typography>
-      <Typography
-        component="p"
-        sx={{ color: "#A16207", fontSize: "12px", lineHeight: 1.5 }}
-      >
-        Waiting for the fresher to confirm. Once confirmed, your session will
-        move to Completed and your earnings will be released. If there is no
-        response before the confirmation deadline, the system will finalize it
-        automatically according to the platform policy.
+        {label}
       </Typography>
     </Box>
   </Box>
 );
+
+const SessionFinalizingIndicator = ({
+  elapsedMs = 0,
+  title = "Session finished — finalizing",
+  description = "Waiting for the fresher to confirm. Once confirmed, your session will move to Completed and your earnings will be released. If there is no response before the confirmation deadline, the system will finalize it automatically according to the platform policy.",
+}) => {
+  const s = Math.max(0, Math.floor(elapsedMs / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  const label = h > 0 ? `${h}h ${pad(m)}m` : `${pad(m)}:${pad(sec)}`;
+
+  return (
+    <Box
+      sx={{
+        display: "flex",
+        alignItems: "center",
+        gap: 2,
+        width: "100%",
+        border: "1px solid",
+        borderColor: "#FDE68A",
+        borderRadius: "12px",
+        backgroundColor: "#FFFBEB",
+        padding: 2,
+      }}
+      role="status"
+      aria-live="polite"
+    >
+      <CircularProgressWithLabel label={label} />
+      <Box sx={{ minWidth: 0 }}>
+        <Typography
+          component="p"
+          sx={{ color: "#92400E", fontSize: "13px", fontWeight: 700 }}
+        >
+          {title}
+        </Typography>
+        <Typography
+          component="p"
+          sx={{ color: "#A16207", fontSize: "12px", lineHeight: 1.5 }}
+        >
+          {description}
+        </Typography>
+      </Box>
+    </Box>
+  );
+};
 
 const fmtDateTime = (d) =>
   d?.toLocaleString("en-IN", {
@@ -176,10 +216,19 @@ const MentorSessions = () => {
   const navigate = useNavigate();
   useChatNotificationSound("mentor");
 
-  const { sessions, loading, error, connected, reload } = useMentorSessions();
+  const {
+    sessions: serverSessions,
+    loading,
+    error,
+    connected,
+    reload,
+  } = useMentorSessions();
 
   // id -> { remainingMs, running, at }
   const [timers, setTimers] = useState({});
+  // id -> status seen from live booking data (moves the card instantly,
+  // without waiting for the sessions list to reload)
+  const [statusOverrides, setStatusOverrides] = useState({});
 
   const [activeTab, setActiveTab] = useState("Upcoming");
   const [search, setSearch] = useState("");
@@ -187,13 +236,53 @@ const MentorSessions = () => {
 
   // ---- unread chat messages: requestGroupId -> count ----
   const [unreadCounts, setUnreadCounts] = useState({});
-  const openChatId = useRef(null); // chat currently open (its messages are not "unread")
+  const openChatId = useRef(null);
   const seenMessageIds = useRef(new Set());
+
+  // keep latest reload without re-creating effects
+  const reloadRef = useRef(reload);
+  useEffect(() => {
+    reloadRef.current = reload;
+  }, [reload]);
+
+  // Apply status overrides on top of server data (status only moves forward)
+  const sessions = useMemo(
+    () =>
+      serverSessions.map((s) => {
+        const o = statusOverrides[String(s.id)];
+        if (!o) return s;
+        const serverRank = STATUS_RANK[s.status] ?? 0;
+        const overrideRank = STATUS_RANK[o] ?? 0;
+        return overrideRank > serverRank ? { ...s, status: o } : s;
+      }),
+    [serverSessions, statusOverrides],
+  );
+
+  const setOverride = useCallback((id, status) => {
+    if (!id || !status) return;
+    const key = String(id);
+    setStatusOverrides((prev) =>
+      prev[key] === status ? prev : { ...prev, [key]: status },
+    );
+  }, []);
 
   // 1-second clock
   useEffect(() => {
     const t = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(t);
+  }, []);
+
+  // Refresh the list when the user comes back to this tab / page
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === "visible") reloadRef.current?.();
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
   }, []);
 
   // unread counts that are already saved on the server (survives refresh)
@@ -241,11 +330,11 @@ const MentorSessions = () => {
     openChatId.current = null;
   }, []);
 
-  // ids of sessions that can have a live meeting
+  // ids of sessions that can still change (stops polling once Completed)
   const activeIds = useMemo(
     () =>
       sessions
-        .filter((s) => ["Upcoming", "Awaiting Confirmation"].includes(s.status))
+        .filter((s) => ["Upcoming", "awaiting_confirmation"].includes(s.status))
         .map((s) => s.id)
         .join(","),
     [sessions],
@@ -258,24 +347,25 @@ const MentorSessions = () => {
     let cancelled = false;
 
     const fetchTimers = async () => {
-      const results = {};
-      let finished = false;
+      const timerResults = {};
+      const statusResults = {};
+      let changed = false;
+
       await Promise.all(
         ids.map(async (id) => {
           try {
             const d = await api(ENDPOINTS.booking(id));
             if (d?.booking) {
-              results[id] = {
+              timerResults[id] = {
                 remainingMs: d.booking.remainingMs,
                 running: Boolean(d.booking.timerRunning),
                 at: Date.now(),
               };
-              if (
-                ["awaiting_confirmation", "completed"].includes(
-                  d.booking.status,
-                )
-              )
-                finished = true;
+              const mapped = mapBookingStatus(d.booking.status);
+              if (mapped) {
+                statusResults[id] = mapped;
+                changed = true;
+              }
             }
           } catch {
             /* ignore single failure */
@@ -283,8 +373,29 @@ const MentorSessions = () => {
         }),
       );
       if (cancelled) return;
-      setTimers((prev) => ({ ...prev, ...results }));
-      if (finished) reload();
+
+      setTimers((prev) => ({ ...prev, ...timerResults }));
+
+      if (changed) {
+        // move cards to the right tab immediately
+        setStatusOverrides((prev) => {
+          const next = { ...prev };
+          let diff = false;
+          Object.entries(statusResults).forEach(([id, st]) => {
+            const cur = STATUS_RANK[next[id]] ?? -1;
+            if ((STATUS_RANK[st] ?? 0) > cur) {
+              next[id] = st;
+              diff = true;
+            }
+          });
+          return diff ? next : prev;
+        });
+        // and sync the real list from the server
+        const moved = Object.values(statusResults).some(
+          (st) => st !== "Upcoming",
+        );
+        if (moved) reloadRef.current?.();
+      }
     };
 
     fetchTimers();
@@ -293,14 +404,21 @@ const MentorSessions = () => {
       cancelled = true;
       clearInterval(t);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeIds]);
 
   // Socket updates (instant when server sends them to this user)
   useEffect(() => {
     const onTimer = (p) => {
       const id = p?.requestGroupId || p?.bookingId;
-      if (!id || typeof p.remainingMs !== "number") return;
+      if (!id) return;
+
+      const mapped = mapBookingStatus(p.status);
+      if (mapped) {
+        setOverride(id, mapped);
+        reloadRef.current?.();
+      }
+
+      if (typeof p.remainingMs !== "number") return;
       setTimers((prev) => ({
         ...prev,
         [id]: {
@@ -316,14 +434,20 @@ const MentorSessions = () => {
       socket.off("meeting:timer", onTimer);
       socket.off("meeting:state", onTimer);
     };
-  }, []);
+  }, [setOverride]);
 
   // booking updated -> refresh list
   useEffect(() => {
-    const onUpdated = () => reload();
-    socket.on(EVENTS.booking || "booking:updated", onUpdated);
-    return () => socket.off(EVENTS.booking || "booking:updated", onUpdated);
-  }, [reload]);
+    const onUpdated = (p) => {
+      const id = p?.requestGroupId || p?.bookingId || p?.id;
+      const mapped = mapBookingStatus(p?.status);
+      if (id && mapped) setOverride(id, mapped);
+      reloadRef.current?.();
+    };
+    const evt = EVENTS?.booking || "booking:updated";
+    socket.on(evt, onUpdated);
+    return () => socket.off(evt, onUpdated);
+  }, [setOverride]);
 
   const counts = useMemo(
     () =>
@@ -423,7 +547,7 @@ const MentorSessions = () => {
         )}
 
         <div className="space-y-4">
-          {loading ? (
+          {loading && serverSessions.length === 0 ? (
             <div className="flex justify-center py-20">
               <Loader2 className="animate-spin text-blue-600" />
             </div>
@@ -524,6 +648,9 @@ const SessionCard = ({
   const hasEnded = base.hasEnded && !timerRunning;
   const { joinOpenAt, sessionEndAt } = base;
   const joinable = isUpcoming && (isLive || isJoinWindow);
+
+  // time since the session ended (used by the loader label)
+  const elapsedSinceEnd = session.endsAt ? nowMs - session.endsAt : 0;
 
   const btnStyle = isLive
     ? "bg-green-600 text-white hover:bg-green-700 hover:shadow-lg hover:shadow-green-200 cursor-pointer"
@@ -792,9 +919,20 @@ const SessionCard = ({
             </span>
           </div>
         )}
+
+        {/* Loader: shown from the moment the meeting ends until it is Completed */}
+        {isUpcoming && hasEnded && (
+          <div className="mt-4">
+            <SessionFinalizingIndicator
+              elapsedMs={elapsedSinceEnd}
+              title="Session ended — updating status"
+              description="Checking the final status of this session. It will move to Awaiting Confirmation or Completed automatically."
+            />
+          </div>
+        )}
         {isAwaitingConfirmation && (
           <div className="mt-4">
-            <SessionFinalizingIndicator />
+            <SessionFinalizingIndicator elapsedMs={elapsedSinceEnd} />
           </div>
         )}
       </div>
@@ -821,9 +959,7 @@ const SessionCard = ({
       {showFresher && (
         <PersonDetailsModal
           title="Fresher details"
-          fetcher={() =>
-            api(`${ENDPOINTS.booking(session.id)}/counterpart`)
-          }
+          fetcher={() => api(`${ENDPOINTS.booking(session.id)}/counterpart`)}
           onClose={closeFresher}
         />
       )}

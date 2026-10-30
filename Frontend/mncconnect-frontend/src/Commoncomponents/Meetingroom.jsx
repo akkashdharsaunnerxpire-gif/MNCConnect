@@ -52,7 +52,11 @@ const HD_AUDIO = {
 const getMedia = async () => {
   const attempts = [
     { video: HD_VIDEO, audio: HD_AUDIO, audioOnly: false },
-    { video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: HD_AUDIO, audioOnly: false },
+    {
+      video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: HD_AUDIO,
+      audioOnly: false,
+    },
     { video: true, audio: true, audioOnly: false },
     { video: false, audio: HD_AUDIO, audioOnly: true },
   ];
@@ -75,7 +79,8 @@ const tuneSenders = async (peer) => {
     if (!sender.track) continue;
     try {
       const params = sender.getParameters();
-      if (!params.encodings || !params.encodings.length) params.encodings = [{}];
+      if (!params.encodings || !params.encodings.length)
+        params.encodings = [{}];
       if (sender.track.kind === "video") {
         params.encodings[0].maxBitrate = 2_500_000;
         params.encodings[0].maxFramerate = 30;
@@ -136,7 +141,8 @@ const ReviewGate = ({ booking, onDone }) => {
         </p>
         <h3 className="mt-1 text-xl font-bold">How was your session?</h3>
         <p className="mt-1 text-xs text-slate-500">
-          Give a star rating and your feedback. The meeting continues until the timer ends.
+          Give a star rating and your feedback. The meeting continues until the
+          timer ends.
         </p>
 
         <div className="mt-4 flex justify-center gap-1">
@@ -150,7 +156,11 @@ const ReviewGate = ({ booking, onDone }) => {
             >
               <Star
                 size={34}
-                className={(hover || rating) >= n ? "fill-yellow-400 text-yellow-400" : "text-slate-300"}
+                className={
+                  (hover || rating) >= n
+                    ? "fill-yellow-400 text-yellow-400"
+                    : "text-slate-300"
+                }
               />
             </button>
           ))}
@@ -194,10 +204,16 @@ const SuccessConfirmModal = ({ onYes, onNo }) => (
         Please confirm your session. The meeting continues until the timer ends.
       </p>
       <div className="mt-5 flex gap-3">
-        <button onClick={onNo} className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600">
+        <button
+          onClick={onNo}
+          className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600"
+        >
           No
         </button>
-        <button onClick={onYes} className="flex-1 rounded-xl bg-emerald-600 py-3 text-sm font-bold text-white hover:bg-emerald-700">
+        <button
+          onClick={onYes}
+          className="flex-1 rounded-xl bg-emerald-600 py-3 text-sm font-bold text-white hover:bg-emerald-700"
+        >
           Yes
         </button>
       </div>
@@ -248,8 +264,6 @@ export default function MeetingRoom() {
   const [endedConfirmed, setEndedConfirmed] = useState(false);
   const [reviewDone, setReviewDone] = useState(false);
   const [showSuccessBtn, setShowSuccessBtn] = useState(false);
-  // fresher pressed "No" on the auto pop-up (do not show it again until the mentor asks)
-  const [confirmSkipped, setConfirmSkipped] = useState(false);
 
   const [instructionsAccepted, setInstructionsAccepted] = useState({
     mentor: false,
@@ -290,9 +304,12 @@ export default function MeetingRoom() {
     const peer = new RTCPeerConnection(ICE);
 
     const tracks = localStream.current?.getTracks() || [];
-    if (tracks.length) tracks.forEach((t) => peer.addTrack(t, localStream.current));
-    if (!tracks.some((t) => t.kind === "video")) peer.addTransceiver("video", { direction: "recvonly" });
-    if (!tracks.some((t) => t.kind === "audio")) peer.addTransceiver("audio", { direction: "recvonly" });
+    if (tracks.length)
+      tracks.forEach((t) => peer.addTrack(t, localStream.current));
+    if (!tracks.some((t) => t.kind === "video"))
+      peer.addTransceiver("video", { direction: "recvonly" });
+    if (!tracks.some((t) => t.kind === "audio"))
+      peer.addTransceiver("audio", { direction: "recvonly" });
 
     tuneSenders(peer);
 
@@ -303,7 +320,8 @@ export default function MeetingRoom() {
         remoteVideo.current.play?.().catch(() => {});
       }
     };
-    peer.onicecandidate = (e) => e.candidate && sendSignal({ candidate: e.candidate });
+    peer.onicecandidate = (e) =>
+      e.candidate && sendSignal({ candidate: e.candidate });
     pc.current = peer;
     return peer;
   }, [dropPeer]);
@@ -397,7 +415,9 @@ export default function MeetingRoom() {
       joined.current = true;
       setPhase("in");
       setClock({ ...res.state, at: Date.now() });
-      setInstructionsAccepted(res.state.instructions || { mentor: false, fresher: false });
+      setInstructionsAccepted(
+        res.state.instructions || { mentor: false, fresher: false },
+      );
     });
   }, [bookingId]);
 
@@ -408,7 +428,6 @@ export default function MeetingRoom() {
       setClock({ ...s, at: Date.now() });
       if (s.instructions) setInstructionsAccepted(s.instructions);
       // mentor asked again -> allow the pop-up to show again
-      if (s.successRequested) setConfirmSkipped(false);
     };
     const onInstructionsState = (state) => setInstructionsAccepted(state);
 
@@ -470,7 +489,8 @@ export default function MeetingRoom() {
   }, [bookingId]);
 
   /* ---------- camera ON after both accepted ---------- */
-  const bothAccepted = instructionsAccepted.mentor && instructionsAccepted.fresher;
+  const bothAccepted =
+    instructionsAccepted.mentor && instructionsAccepted.fresher;
   const mediaAllowed = bothAccepted || clock.running;
 
   useEffect(() => {
@@ -487,7 +507,8 @@ export default function MeetingRoom() {
 
       localStream.current = stream;
       if (!stream) setMediaNote("Camera and mic blocked.");
-      else if (audioOnly) setMediaNote("Camera not available. Joined with audio only.");
+      else if (audioOnly)
+        setMediaNote("Camera not available. Joined with audio only.");
       else setMediaNote("");
 
       if (localVideo.current && stream) localVideo.current.srcObject = stream;
@@ -524,34 +545,41 @@ export default function MeetingRoom() {
     ? Math.max(0, clock.remainingMs - (Date.now() - clock.at))
     : clock.remainingMs;
 
-  const inLast5 = clock.running && currentRemaining > 0 && currentRemaining <= FIVE_MIN;
-  const inLast3 = clock.running && currentRemaining > 0 && currentRemaining <= THREE_MIN;
-  const inLast1 = clock.running && currentRemaining > 0 && currentRemaining <= REVIEW_AT_MS;
+  const inLast5 =
+    clock.running && currentRemaining > 0 && currentRemaining <= FIVE_MIN;
+  const inLast3 =
+    clock.running && currentRemaining > 0 && currentRemaining <= THREE_MIN;
+  const inLast1 =
+    clock.running && currentRemaining > 0 && currentRemaining <= REVIEW_AT_MS;
 
   // Mentor: "Meeting Success" button in the last 3 min
   useEffect(() => {
     setShowSuccessBtn(isMentor && phase === "in" && inLast3);
   }, [inLast3, phase, isMentor]);
 
-  const sendSuccessRequest = () => socket.emit("meeting:success-request", { bookingId });
+  const sendSuccessRequest = () =>
+    socket.emit("meeting:success-request", { bookingId });
   const answerSuccess = (accepted) => {
-    if (!accepted) setConfirmSkipped(true);
     socket.emit("meeting:success-confirm", { bookingId, accepted });
   };
 
   // Fresher: mandatory review popup in the LAST 1 MINUTE
   const alreadyReviewed = reviewDone || Boolean(booking?.reviewed);
   const showReviewGate =
-    !isMentor && phase === "in" && Boolean(booking) && inLast1 && !alreadyReviewed;
+    !isMentor &&
+    phase === "in" &&
+    Boolean(booking) &&
+    inLast1 &&
+    !alreadyReviewed;
 
   // Fresher: "did the session go well?" pops at 3 minutes (or when the mentor asks)
+  // Fresher: popup shows ONLY after the mentor clicks "Meeting Success"
   const showSuccessConfirm =
     !isMentor &&
     phase === "in" &&
     !clock.fresherConfirmed &&
     !showReviewGate &&
-    (clock.successRequested || (inLast3 && !confirmSkipped));
-
+    clock.successRequested;
   const toggle = (kind) => {
     const tracks =
       kind === "mic"
@@ -563,11 +591,16 @@ export default function MeetingRoom() {
     kind === "mic" ? setMicOn(next) : setCamOn(next);
   };
 
-  const leaveRoom = () => navigate(isMentor ? "/mentor/sessions" : "/Home/my-bookings");
+  const leaveRoom = () =>
+    navigate(isMentor ? "/mentor/sessions" : "/Home/my-bookings");
   const otherHere = isMentor ? clock.fresherPresent : clock.mentorPresent;
 
-  const myInstructionsDone = isMentor ? instructionsAccepted.mentor : instructionsAccepted.fresher;
-  const peerInstructionsDone = isMentor ? instructionsAccepted.fresher : instructionsAccepted.mentor;
+  const myInstructionsDone = isMentor
+    ? instructionsAccepted.mentor
+    : instructionsAccepted.fresher;
+  const peerInstructionsDone = isMentor
+    ? instructionsAccepted.fresher
+    : instructionsAccepted.mentor;
 
   /* ---------- screens ---------- */
   if (phase === "joining") {
@@ -583,10 +616,19 @@ export default function MeetingRoom() {
     return (
       <Center>
         <Clock3 size={36} className="text-blue-400" />
-        <h2 className="mt-4 text-xl font-bold">The meeting room opens 5 minutes before the session</h2>
-        <p className="mt-2 font-mono text-3xl">{fmtClock((opensAt || Date.now()) - Date.now())}</p>
-        <p className="mt-2 text-sm text-slate-400">We'll let you in automatically.</p>
-        <button onClick={leaveRoom} className="mt-6 rounded-xl border border-slate-600 px-5 py-2.5 text-sm font-semibold">
+        <h2 className="mt-4 text-xl font-bold">
+          The meeting room opens 5 minutes before the session
+        </h2>
+        <p className="mt-2 font-mono text-3xl">
+          {fmtClock((opensAt || Date.now()) - Date.now())}
+        </p>
+        <p className="mt-2 text-sm text-slate-400">
+          We'll let you in automatically.
+        </p>
+        <button
+          onClick={leaveRoom}
+          className="mt-6 rounded-xl border border-slate-600 px-5 py-2.5 text-sm font-semibold"
+        >
           Back
         </button>
       </Center>
@@ -598,7 +640,10 @@ export default function MeetingRoom() {
       <Center>
         <h2 className="text-xl font-bold">Can't open this meeting</h2>
         <p className="mt-2 text-sm text-slate-400">{message}</p>
-        <button onClick={leaveRoom} className="mt-6 rounded-xl bg-white px-5 py-2.5 text-sm font-bold text-slate-900">
+        <button
+          onClick={leaveRoom}
+          className="mt-6 rounded-xl bg-white px-5 py-2.5 text-sm font-bold text-slate-900"
+        >
           Back
         </button>
       </Center>
@@ -614,18 +659,27 @@ export default function MeetingRoom() {
             <Clock3 size={44} className="text-amber-400" />
             <h2 className="mt-4 text-2xl font-bold">Session time completed</h2>
             <p className="mt-2 max-w-md text-sm text-slate-400">
-              Waiting for the fresher to confirm the session. Once confirmed, your earnings will be released.
+              Waiting for the fresher to confirm the session. Once confirmed,
+              your earnings will be released.
             </p>
-            <button onClick={leaveRoom} className="mt-6 rounded-xl bg-white px-5 py-2.5 text-sm font-bold text-slate-900">
+            <button
+              onClick={leaveRoom}
+              className="mt-6 rounded-xl bg-white px-5 py-2.5 text-sm font-bold text-slate-900"
+            >
               Back to sessions
             </button>
           </>
         ) : (
           <>
             <h2 className="text-2xl font-bold">How was the session?</h2>
-            <p className="mt-2 text-sm text-slate-400">Please confirm the session.</p>
+            <p className="mt-2 text-sm text-slate-400">
+              Please confirm the session.
+            </p>
             {booking ? (
-              <SessionCompletionModal booking={booking} onDone={() => leaveRoom()} />
+              <SessionCompletionModal
+                booking={booking}
+                onDone={() => leaveRoom()}
+              />
             ) : (
               <Loader2 className="mt-6 animate-spin" />
             )}
@@ -646,7 +700,10 @@ export default function MeetingRoom() {
             ? "The fresher confirmed the session. Your earnings are now available."
             : "Thanks for your feedback. Your session is confirmed."}
         </p>
-        <button onClick={leaveRoom} className="mt-6 rounded-xl bg-white px-5 py-2.5 text-sm font-bold text-slate-900">
+        <button
+          onClick={leaveRoom}
+          className="mt-6 rounded-xl bg-white px-5 py-2.5 text-sm font-bold text-slate-900"
+        >
           {isMentor ? "Back to sessions" : "Back to my bookings"}
         </button>
         {needsReview && booking && !isMentor && !endedConfirmed && (
@@ -688,21 +745,32 @@ export default function MeetingRoom() {
       <div className="fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-slate-950 text-white">
         <div className="flex shrink-0 items-center justify-between px-5 py-3">
           <div>
-            <p className="text-sm font-semibold">{booking?.companyName || "MNCConnect session"}</p>
+            <p className="text-sm font-semibold">
+              {booking?.companyName || "MNCConnect session"}
+            </p>
             <p
               className={`text-xs ${
-                inLast5 ? "text-red-400" : clock.running ? "text-emerald-400" : "text-amber-300"
+                inLast5
+                  ? "text-red-400"
+                  : clock.running
+                    ? "text-emerald-400"
+                    : "text-amber-300"
               }`}
             >
               {inLast5 ? "Last 5 minutes" : status}
             </p>
           </div>
-          <div className={`rounded-xl px-4 py-2 font-mono text-xl font-bold tabular-nums ${timerCls}`}>
+          <div
+            className={`rounded-xl px-4 py-2 font-mono text-xl font-bold tabular-nums ${timerCls}`}
+          >
             {fmtClock(currentRemaining)}
           </div>
         </div>
 
-        <div className="relative min-h-0 flex-1 px-4 pb-4" style={{ minHeight: 0 }}>
+        <div
+          className="relative min-h-0 flex-1 px-4 pb-4"
+          style={{ minHeight: 0 }}
+        >
           <div
             className="relative h-full w-full overflow-hidden rounded-2xl bg-black"
             style={{ width: "100%", height: "100%", minHeight: 0 }}
@@ -710,7 +778,11 @@ export default function MeetingRoom() {
             <video
               ref={(el) => {
                 remoteVideo.current = el;
-                if (el && remoteStream.current && el.srcObject !== remoteStream.current) {
+                if (
+                  el &&
+                  remoteStream.current &&
+                  el.srcObject !== remoteStream.current
+                ) {
                   el.srcObject = remoteStream.current;
                   el.play?.().catch(() => {});
                 }
@@ -732,13 +804,19 @@ export default function MeetingRoom() {
                 <div className="flex h-20 w-20 items-center justify-center rounded-full bg-slate-800">
                   <UserRound size={36} />
                 </div>
-                <p className="mt-4 text-sm">Waiting for the {isMentor ? "fresher" : "employee"}…</p>
+                <p className="mt-4 text-sm">
+                  Waiting for the {isMentor ? "fresher" : "employee"}…
+                </p>
               </div>
             )}
             <video
               ref={(el) => {
                 localVideo.current = el;
-                if (el && localStream.current && el.srcObject !== localStream.current)
+                if (
+                  el &&
+                  localStream.current &&
+                  el.srcObject !== localStream.current
+                )
                   el.srcObject = localStream.current;
               }}
               autoPlay
@@ -777,25 +855,33 @@ export default function MeetingRoom() {
               The fresher confirmed: the meeting went well ✅
             </div>
           )}
-          {isMentor && clock.fresherDeclined && !clock.successRequested && !clock.fresherConfirmed && (
-            <div className="absolute left-1/2 top-4 z-30 -translate-x-1/2 rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-xl">
-              The fresher said the session is not complete yet. You can ask again.
-            </div>
-          )}
+          {isMentor &&
+            clock.fresherDeclined &&
+            !clock.successRequested &&
+            !clock.fresherConfirmed && (
+              <div className="absolute left-1/2 top-4 z-30 -translate-x-1/2 rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-xl">
+                The fresher said the session is not complete yet. You can ask
+                again.
+              </div>
+            )}
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center justify-center gap-3 pb-3">
-          {isMentor && showSuccessBtn && !clock.successRequested && !clock.fresherConfirmed && (
-            <button
-              onClick={sendSuccessRequest}
-              className="flex h-12 animate-pulse items-center gap-2 rounded-full bg-emerald-600 px-6 text-sm font-bold hover:bg-emerald-700"
-            >
-              <CheckCircle size={18} /> Meeting Success
-            </button>
-          )}
+          {isMentor &&
+            showSuccessBtn &&
+            !clock.successRequested &&
+            !clock.fresherConfirmed && (
+              <button
+                onClick={sendSuccessRequest}
+                className="flex h-12 animate-pulse items-center gap-2 rounded-full bg-emerald-600 px-6 text-sm font-bold hover:bg-emerald-700"
+              >
+                <CheckCircle size={18} /> Meeting Success
+              </button>
+            )}
           {isMentor && clock.successRequested && !clock.fresherConfirmed && (
             <span className="flex h-12 items-center gap-2 rounded-full bg-slate-800 px-5 text-xs font-semibold text-amber-300">
-              <Loader2 size={14} className="animate-spin" /> Waiting for the fresher to confirm…
+              <Loader2 size={14} className="animate-spin" /> Waiting for the
+              fresher to confirm…
             </span>
           )}
 
@@ -830,7 +916,8 @@ export default function MeetingRoom() {
           </button>
         </div>
         <p className="shrink-0 pb-3 text-center text-[11px] text-slate-500">
-          Once the session starts, the timer runs to zero even if someone leaves.
+          Once the session starts, the timer runs to zero even if someone
+          leaves.
         </p>
       </div>
 
@@ -851,7 +938,10 @@ export default function MeetingRoom() {
         <ReviewGate booking={booking} onDone={() => setReviewDone(true)} />
       )}
       {showSuccessConfirm && (
-        <SuccessConfirmModal onYes={() => answerSuccess(true)} onNo={() => answerSuccess(false)} />
+        <SuccessConfirmModal
+          onYes={() => answerSuccess(true)}
+          onNo={() => answerSuccess(false)}
+        />
       )}
     </>
   );
