@@ -119,7 +119,7 @@ const rewardReferrer = async ({ fresher, referralCode }) => {
         referralEarnings: REFERRAL_REWARD,
       },
     },
-    { new: true },
+    { returnDocument: "after" },
   );
   if (!referrer) return false;
 
@@ -616,7 +616,7 @@ exports.applyReferral = async (req, res) => {
           referralEarnings: REFERRAL_REWARD,
         },
       },
-      { new: true },
+      { returnDocument: "after" },
     );
 
     notify({

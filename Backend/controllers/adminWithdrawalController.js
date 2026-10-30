@@ -102,7 +102,7 @@ exports.markPaid = async (req, res) => {
     const w = await Withdrawal.findOneAndUpdate(
       { _id: id, status: "requested" },
       { $set: { status: "paid", utr, note: `UTR: ${utr}`, processedAt: new Date(), processedBy: actor.email } },
-      { new: true }
+      { returnDocument: "after" }
     );
     if (!w) {
       return res.status(404).json({ success: false, message: "Request not found or already processed." });
@@ -148,7 +148,7 @@ exports.markRejected = async (req, res) => {
     const w = await Withdrawal.findOneAndUpdate(
       { _id: id, status: "requested" },
       { $set: { status: "rejected", note: reason, processedAt: new Date(), processedBy: actor.email } },
-      { new: true }
+      { returnDocument: "after" }
     );
     if (!w) {
       return res.status(404).json({ success: false, message: "Request not found or already processed." });

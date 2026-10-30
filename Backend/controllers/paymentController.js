@@ -231,7 +231,7 @@ exports.payWithWallet = async (req, res) => {
     const fresher = await Fresher.findOneAndUpdate(
       { _id: fresherId, walletBalance: { $gte: amount } },
       { $inc: { walletBalance: -amount } },
-      { new: true }
+      { returnDocument: "after" }
     ).select("name email walletBalance");
 
     if (!fresher) {
@@ -352,7 +352,7 @@ const linkPaymentToRequest = async ({
         ...buildSessionFields({ date, time, duration }),
       },
     },
-    { new: true }
+   { returnDocument: "after" }
   );
 };
 
@@ -409,7 +409,7 @@ const assignMentorToRequest = async ({ requestGroupId, mentorId }) => {
       sessionStatus: { $ne: "cancelled" },
     },
     { $set: { mentor: mentorId, sessionStatus: "upcoming" } },
-    { new: true }
+    { returnDocument: "after" }
   );
 
   if (payment) {

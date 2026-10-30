@@ -4,7 +4,7 @@ import axios from "axios";
 import {
   User, Mail, Phone, MapPin, BriefcaseBusiness, Code2, Award, Star, Edit3,
   Share2, FileText, Building, ShieldCheck, Menu, Stethoscope, Download, X,
-  Plus, Loader2, Check, AlertTriangle, LogOut
+  Plus, Loader2, Check, AlertTriangle, LogOut, Camera, Trash2
 } from "lucide-react";
 import { FaLinkedin } from "react-icons/fa";
 
@@ -116,7 +116,15 @@ const MentorProfile = () => {
   }, []);
 
   const apiUpdateMentor = async (email, formValues) => {
-    const { offerLetterFile, employeeIdProofFile, additionalProofFile, languages, ...rest } = formValues;
+    const {
+      offerLetterFile,
+      employeeIdProofFile,
+      additionalProofFile,
+      avatarFile,
+      removeAvatar,
+      languages,
+      ...rest
+    } = formValues;
     const hasFiles = offerLetterFile || employeeIdProofFile || additionalProofFile;
 
     let body;
@@ -139,19 +147,94 @@ const MentorProfile = () => {
 
   const handleSaveProfile = async (formValues) => {
     setSaving(true);
+
+    let updatedMentor = mentor;
+
     try {
+      // First save the normal mentor details and any verification documents.
       const data = await apiUpdateMentor(mentor.email, formValues);
-      if (data?.success === false) throw new Error(data?.message || "Failed to save changes");
+      if (data?.success === false) {
+        throw new Error(data?.message || "Failed to save changes");
+      }
 
-      const { offerLetterFile, employeeIdProofFile, additionalProofFile, ...plainValues } = formValues;
-      const updatedMentor = data?.mentor || { ...mentor, ...plainValues };
+      const {
+        offerLetterFile,
+        employeeIdProofFile,
+        additionalProofFile,
+        avatarFile,
+        removeAvatar,
+        ...plainValues
+      } = formValues;
 
+      updatedMentor = data?.mentor || { ...mentor, ...plainValues };
       setMentor(updatedMentor);
+
+      // Upload the selected profile photo through the authenticated avatar API.
+      if (avatarFile) {
+        const avatarForm = new FormData();
+        avatarForm.append("avatar", avatarFile);
+
+        const avatarResponse = await axios.post(
+          `${API_URL}/auth/avatar`,
+          avatarForm,
+          {
+            withCredentials: true,
+            // Let Axios/browser set the multipart boundary automatically.
+          }
+        );
+
+        if (avatarResponse.data?.success === false) {
+          throw new Error(
+            avatarResponse.data?.message || "Profile photo upload failed."
+          );
+        }
+
+        updatedMentor = {
+          ...updatedMentor,
+          profilePic:
+            avatarResponse.data?.user?.profilePic ||
+            avatarResponse.data?.profilePic ||
+            updatedMentor.profilePic ||
+            "",
+        };
+
+        setMentor(updatedMentor);
+      } else if (removeAvatar) {
+        const avatarResponse = await axios.delete(`${API_URL}/auth/avatar`, {
+          withCredentials: true,
+        });
+
+        if (avatarResponse.data?.success === false) {
+          throw new Error(
+            avatarResponse.data?.message || "Could not remove profile photo."
+          );
+        }
+
+        updatedMentor = {
+          ...updatedMentor,
+          profilePic: "",
+        };
+
+        setMentor(updatedMentor);
+      }
+
       setEditOpen(false);
       showToast("success", "Profile updated successfully!");
     } catch (err) {
       console.error("Mentor update error:", err);
-      showToast("error", err?.response?.data?.message || err.message || "Could not save changes.");
+
+      // If the profile fields were saved but the photo request failed,
+      // keep the saved profile data visible and leave the modal open.
+      if (updatedMentor && updatedMentor !== mentor) {
+        setMentor(updatedMentor);
+      }
+
+      showToast(
+        "error",
+        err?.response?.data?.message ||
+          err.message ||
+          "Could not save changes."
+      );
     } finally {
       setSaving(false);
     }
@@ -418,7 +501,13 @@ const MentorProfile = () => {
       </div>
 
       {editOpen && (
-        <EditMentorModal mentor={mentor} saving={saving} onClose={() => setEditOpen(false)} onSave={handleSaveProfile} />
+        <EditMentorModal
+          mentor={mentor}
+          saving={saving}
+          onClose={() => setEditOpen(false)}
+          onSave={handleSaveProfile}
+          showToast={showToast}
+        />
       )}
 
       {toast && (
@@ -455,7 +544,7 @@ const EDITABLE_FIELDS = [
   { key: "linkedinProfile", label: "LinkedIn URL", icon: User, placeholder: "https://linkedin.com/in/..." },
 ];
 
-const EditMentorModal = ({ mentor, saving, onClose, onSave }) => {
+const EditMentorModal = ({ mentor, saving, onClose, onSave, showToast }) => {
   const [form, setForm] = useState({
     name: mentor?.name || "",
     mobile: mentor?.mobile || "",
@@ -475,9 +564,67 @@ const EditMentorModal = ({ mentor, saving, onClose, onSave }) => {
     offerLetterFile: null,
     employeeIdProofFile: null,
     additionalProofFile: null,
+    avatarFile: null,
+    removeAvatar: false,
   });
 
   const [skillInput, setSkillInput] = useState("");
+  const avatarInputRef = useRef(null);
+
+  const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(
+    mentor?.name || "Mentor"
+  )}&background=eff6ff&color=2563eb`;
+
+  const [avatarPreview, setAvatarPreview] = useState(
+    mentor?.profilePic || fallbackAvatar
+  );
+
+  useEffect(() => {
+    if (!form.avatarFile) return undefined;
+
+    const objectUrl = URL.createObjectURL(form.avatarFile);
+    setAvatarPreview(objectUrl);
+
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [form.avatarFile]);
+
+  const handleAvatarSelect = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
+
+    if (!allowedTypes.includes(file.type)) {
+      showToast?.("error", "Choose a JPG, PNG or WEBP image.");
+      event.target.value = "";
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      showToast?.("error", "Profile photo must be 5MB or smaller.");
+      event.target.value = "";
+      return;
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      avatarFile: file,
+      removeAvatar: false,
+    }));
+  };
+
+  const handleRemoveAvatar = () => {
+    setForm((prev) => ({
+      ...prev,
+      avatarFile: null,
+      removeAvatar: true,
+    }));
+    setAvatarPreview(fallbackAvatar);
+
+    if (avatarInputRef.current) {
+      avatarInputRef.current.value = "";
+    }
+  };
 
   const updateFile = (key, file) => setForm((prev) => ({ ...prev, [key]: file }));
   const updateField = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
@@ -513,6 +660,88 @@ const EditMentorModal = ({ mentor, saving, onClose, onSave }) => {
 
         <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-6">
+            {/* PROFILE PHOTO */}
+            <section className="mb-6 rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                <div className="relative h-20 w-20 shrink-0">
+                  <img
+                    src={avatarPreview}
+                    alt="Mentor profile"
+                    onError={() => setAvatarPreview(fallbackAvatar)}
+                    className="h-20 w-20 rounded-full border-2 border-white object-cover shadow-sm"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => avatarInputRef.current?.click()}
+                    disabled={saving}
+                    aria-label="Choose profile photo"
+                    className="absolute bottom-0 right-0 flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-blue-600 text-white shadow-md transition hover:bg-blue-700 disabled:opacity-60"
+                  >
+                    <Camera size={15} />
+                  </button>
+
+                  <input
+                    ref={avatarInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={handleAvatarSelect}
+                    className="hidden"
+                  />
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-slate-800">
+                    Profile Photo
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Upload a new photo to replace your current profile picture.
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Supported: JPG, PNG, WEBP (Maximum 5MB)
+                  </p>
+
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => avatarInputRef.current?.click()}
+                      disabled={saving}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-600 transition hover:bg-blue-50 disabled:opacity-60"
+                    >
+                      <Camera size={14} />
+                      {form.avatarFile || (mentor?.profilePic && !form.removeAvatar)
+                        ? "Change photo"
+                        : "Upload photo"}
+                    </button>
+
+                    {(mentor?.profilePic || form.avatarFile) && !form.removeAvatar && (
+                      <button
+                        type="button"
+                        onClick={handleRemoveAvatar}
+                        disabled={saving}
+                        className="inline-flex items-center gap-1.5 px-2 py-2 text-xs font-medium text-red-600 transition hover:text-red-700 disabled:opacity-60"
+                      >
+                        <Trash2 size={14} />
+                        Remove photo
+                      </button>
+                    )}
+
+                    {form.avatarFile && (
+                      <span className="max-w-full truncate text-[11px] text-slate-500">
+                        Selected: {form.avatarFile.name}
+                      </span>
+                    )}
+
+                    {form.removeAvatar && (
+                      <span className="text-[11px] font-medium text-amber-700">
+                        Photo will be removed when you save.
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </section>
+
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {EDITABLE_FIELDS.map(({ key, label, type, placeholder, required }) => (
                 <div key={key} className={key === "name" ? "sm:col-span-2" : ""}>

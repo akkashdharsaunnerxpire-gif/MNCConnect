@@ -149,7 +149,7 @@ exports.replyToReview = async (req, res) => {
     const review = await Review.findOneAndUpdate(
       { _id: req.params.id, mentor: req.user.id },
       { $set: { reply: { text, repliedAt: new Date() } } },
-      { new: true }
+      { returnDocument: "after" }
     );
     if (!review) return fail(res, 404, "Review not found.");
 

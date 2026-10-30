@@ -701,7 +701,11 @@ const saveReview = async (req, res) => {
           },
         },
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
+     {
+  upsert: true,
+  returnDocument: "after",
+  setDefaultsOnInsert: true
+},
     );
 
     const complete = isComplete(doc.checks);

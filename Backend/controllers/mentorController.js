@@ -175,7 +175,7 @@ const getMentorProfile = async (req, res) => {
     // Private verification documents and reset tokens are never returned here.
     const mentor = await Mentor.findOne({ email })
       .select(
-        "-password -passwordResetToken -passwordResetExpires -offerLetter -employeeIdProof -additionalProof -offerLetterPublicId -employeeIdProofPublicId -additionalProofPublicId"
+        "-password -passwordResetToken -passwordResetExpires -offerLetter -employeeIdProof -additionalProof -offerLetterPublicId -employeeIdProofPublicId -additionalProofPublicId",
       )
       .lean();
 
@@ -211,7 +211,7 @@ const getMentorsByCompany = async (req, res) => {
       accountStatus: "active",
     })
       .select(
-        "name email profilePic employeeId currentCompany designation department officeLocation yearsOfExperience languages skills gender bio linkedinProfile isVerified"
+        "name email profilePic employeeId currentCompany designation department officeLocation yearsOfExperience languages skills gender bio linkedinProfile isVerified",
       )
       .sort({
         currentCompany: 1,
@@ -321,7 +321,7 @@ const UpdateMentorProfile = async (req, res) => {
 
     if ("countryCode" in updateData || "mobile" in updateData) {
       const current = await Mentor.findOne({ email: mentoremail }).select(
-        "countryCode mobile"
+        "countryCode mobile",
       );
 
       if (!current) {
@@ -409,7 +409,6 @@ const UpdateMentorProfile = async (req, res) => {
       updateData.yearsOfExperience = Number(updateData.yearsOfExperience) || 0;
     }
 
-
     if (Object.keys(updateData).length === 0) {
       return res.status(400).json({
         success: false,
@@ -421,11 +420,11 @@ const UpdateMentorProfile = async (req, res) => {
       { email: mentoremail },
       { $set: updateData },
       {
-        new: true,
+        returnDocument: "after",
         runValidators: true,
-      }
+      },
     ).select(
-      "name email countryCode mobile gender skills profilePic employeeId workEmail linkedinProfile yearsOfExperience currentCompany designation department officeLocation languages  bio isVerified verificationStatus verificationMethod accountStatus lastLoginAt"
+      "name email countryCode mobile gender skills profilePic employeeId workEmail linkedinProfile yearsOfExperience currentCompany designation department officeLocation languages  bio isVerified verificationStatus verificationMethod accountStatus lastLoginAt",
     );
 
     if (!mentor) {
@@ -488,7 +487,9 @@ const getCompanyDepartments = async (req, res) => {
     for (const m of mentors) {
       if (!valuesMatch(m.currentCompany, company)) continue;
 
-      const role = String(m.designation || "").trim().replace(/\s+/g, " ");
+      const role = String(m.designation || "")
+        .trim()
+        .replace(/\s+/g, " ");
       const key = normalize(role);
 
       if (key && !seen.has(key)) seen.set(key, role);
