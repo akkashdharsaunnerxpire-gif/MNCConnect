@@ -14,6 +14,8 @@ import {
 import { useNavigate } from "react-router-dom";
 import { socket } from "../../utils/socket";
 import useMentorSessions from "../../hooks/useMentorSessions";
+import { api, ENDPOINTS } from "../../services/mentorApi";
+import { notifyRequestsChanged } from "../../utils/requestEvents";
 import {
   assignPaymentToMentor,
   formatDuration,
@@ -27,7 +29,7 @@ import {
 } from "../../utils/sessionRequests";
 
 const FALLBACK_AVATAR = "https://i.pravatar.cc/150?img=12";
-import { api, ENDPOINTS } from "../../services/mentorApi";
+
 const TABS = [
   { label: "Pending", icon: Clock3 },
   { label: "Rejected", icon: XCircle },
@@ -107,6 +109,7 @@ const MentorRequests = () => {
     () => sessions.filter((s) => s.status === "Upcoming"),
     [sessions],
   );
+
   const loadPending = useCallback(async () => {
     try {
       const d = await api(ENDPOINTS.mentorPending);
@@ -155,6 +158,7 @@ const MentorRequests = () => {
     };
 
     // another mentor took it -> remove it so nobody tries to accept a dead request
+    // (the header listens to this same socket event, so no notify needed here)
     const handleTaken = ({ id, requestGroupId } = {}) => {
       const key = String(id ?? requestGroupId ?? "");
       if (!key) return;
@@ -256,8 +260,11 @@ const MentorRequests = () => {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [selectedRequest, closeConfirmation]);
 
-  const removeRequest = (id) =>
+  // remove from the list AND tell the header so its Requests badge drops
+  const removeRequest = (id) => {
     setRequests((prev) => prev.filter((r) => String(r.id) !== String(id)));
+    notifyRequestsChanged(id);
+  };
 
   const confirmAction = async () => {
     if (!selectedRequest || !actionType || actionLoading) return;
@@ -314,6 +321,7 @@ const MentorRequests = () => {
         return;
       }
 
+      // rejected: keep it in the "Rejected" tab, but it is no longer pending
       setRequests((prev) =>
         prev.map((r) =>
           String(r.id) === String(selectedRequest.id)
@@ -321,6 +329,7 @@ const MentorRequests = () => {
             : r,
         ),
       );
+      notifyRequestsChanged(selectedRequest.id);
       resetModal();
     } catch (error) {
       console.error("Request status update error:", error);

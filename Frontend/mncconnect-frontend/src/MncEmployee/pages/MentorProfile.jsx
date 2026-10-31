@@ -16,6 +16,11 @@ import { performLogout } from "../../utils/logout";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
+/* Shared input look. Explicit bg + text + caret colours so a global dark/white
+   text rule in index.css can never make typed text invisible. */
+const INPUT_CLASS =
+  "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 caret-blue-600 outline-none placeholder:text-slate-400 transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100";
+
 const MentorProfile = () => {
   const navigate = useNavigate();
   const { refresh } = useAuth();
@@ -588,6 +593,15 @@ const EditMentorModal = ({ mentor, saving, onClose, onSave, showToast }) => {
     return () => URL.revokeObjectURL(objectUrl);
   }, [form.avatarFile]);
 
+  // Esc closes the modal (blocked while saving)
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape" && !saving) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, saving]);
+
   const handleAvatarSelect = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -649,8 +663,9 @@ const EditMentorModal = ({ mentor, saving, onClose, onSave, showToast }) => {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4 backdrop-blur-sm">
-      {/* flex-col: header + footer stay put, only the form body scrolls */}
-      <div className="relative flex max-h-[95dvh] sm:max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl sm:rounded-2xl bg-white shadow-2xl">
+      {/* flex-col: header + footer stay put, only the form body scrolls.
+          text-slate-800 + color-scheme:light = typed text is always visible */}
+      <div className="relative flex max-h-[95dvh] sm:max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl sm:rounded-2xl bg-white text-slate-800 shadow-2xl [color-scheme:light]">
         <div className="flex shrink-0 items-center justify-between border-b border-slate-100 bg-white px-4 py-4 sm:px-6 sm:py-5">
           <h2 className="text-base sm:text-lg font-semibold text-slate-900">Edit Profile</h2>
           <button type="button" onClick={onClose} aria-label="Close" className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100">
@@ -755,7 +770,7 @@ const EditMentorModal = ({ mentor, saving, onClose, onSave, showToast }) => {
                     required={required}
                     onChange={(e) => updateField(key, e.target.value)}
                     placeholder={placeholder || `Enter ${label.toLowerCase()}`}
-                    className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-800 outline-none placeholder:text-slate-400 transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className={INPUT_CLASS}
                   />
                 </div>
               ))}
@@ -768,7 +783,7 @@ const EditMentorModal = ({ mentor, saving, onClose, onSave, showToast }) => {
                 onChange={(e) => updateField("bio", e.target.value)}
                 rows={4}
                 placeholder="Tell mentees about yourself..."
-                className="w-full resize-none rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-800 outline-none placeholder:text-slate-400 transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                className={`${INPUT_CLASS} resize-none`}
               />
             </div>
 
@@ -781,7 +796,7 @@ const EditMentorModal = ({ mentor, saving, onClose, onSave, showToast }) => {
                   onChange={(e) => setSkillInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSkill(); } }}
                   placeholder="e.g. React, Python, Java"
-                  className="min-w-0 flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                  className={`${INPUT_CLASS} min-w-0 flex-1`}
                 />
                 <button type="button" onClick={addSkill} className="flex shrink-0 items-center gap-1 rounded-xl bg-blue-600 px-3 sm:px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700">
                   <Plus size={16} /> Add

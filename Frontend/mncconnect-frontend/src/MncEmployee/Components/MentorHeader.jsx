@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -16,6 +16,8 @@ import { api, ENDPOINTS, EVENTS, NOTIFICATIONS_CHANGED } from "../../services/me
 import useMentorSessions from "../../hooks/useMentorSessions";
 import { useAuth } from "../../context/AuthContext";
 import { performLogout } from "../../utils/logout";
+import { normalizeSessionRequest } from "../../utils/sessionRequests";
+import { REQUESTS_CHANGED } from "../../utils/requestEvents";
 
 const navItems = [
   { name: "Home", path: "/mentor/home", icon: LayoutDashboard },
@@ -26,10 +28,10 @@ const navItems = [
 ];
 
 /* Defined OUTSIDE the header so it is not re-created on every render */
-const CountBadge = ({ count, active }) =>
+const CountBadge = ({ count, active, label = "upcoming" }) =>
   count > 0 ? (
     <span
-      aria-label={`${count} upcoming`}
+      aria-label={`${count} ${label}`}
       className={`flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold ${
         active ? "bg-blue-600 text-white" : "bg-blue-100 text-blue-700"
       }`}
@@ -49,6 +51,7 @@ const MentorHeader = () => {
   const [connected, setConnected] = useState(socket.connected);
   const [unread, setUnread] = useState(0);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [pending, setPending] = useState([]); // [{ id, group }]
 
   /* Sessions count: only Upcoming (finished / cancelled / awaiting are NOT counted) */
   const { sessions } = useMentorSessions();
@@ -56,6 +59,67 @@ const MentorHeader = () => {
     () => (sessions || []).filter((s) => s.status === "Upcoming").length,
     [sessions],
   );
+
+  /* Pending requests count (same Video Call filter as the Requests page) */
+  const loadPending = useCallback(async () => {
+    try {
+      const d = await api(ENDPOINTS.mentorPending);
+      const list = (d.requests || [])
+        .map(normalizeSessionRequest)
+        .filter((r) => r.id && r.type === "Video Call")
+        .map((r) => ({
+          id: String(r.id),
+          group: String(r.requestGroupId ?? ""),
+        }));
+      setPending(list);
+    } catch {
+      /* ignore: keep the last known count */
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPending();
+
+    // new request arrived
+    const onRequest = (incoming) => {
+      const r = normalizeSessionRequest(incoming);
+      if (!r.id || r.type !== "Video Call") return;
+      const id = String(r.id);
+      setPending((prev) =>
+        prev.some((p) => p.id === id)
+          ? prev
+          : [...prev, { id, group: String(r.requestGroupId ?? "") }],
+      );
+    };
+
+    // another mentor took it
+    const onTaken = ({ id, requestGroupId } = {}) => {
+      const key = String(id ?? requestGroupId ?? "");
+      if (!key) return;
+      setPending((prev) => prev.filter((p) => p.id !== key && p.group !== key));
+    };
+
+    // this mentor accepted / rejected from the Requests page
+    const onChanged = (e) => {
+      const key = e.detail?.id != null ? String(e.detail.id) : "";
+      if (key) setPending((prev) => prev.filter((p) => p.id !== key));
+      else loadPending(); // no id -> just re-sync with the server
+    };
+
+    socket.on("session-request", onRequest);
+    socket.on("session-request-taken", onTaken);
+    socket.on("connect", loadPending); // resync after reconnect
+    window.addEventListener(REQUESTS_CHANGED, onChanged);
+
+    return () => {
+      socket.off("session-request", onRequest);
+      socket.off("session-request-taken", onTaken);
+      socket.off("connect", loadPending);
+      window.removeEventListener(REQUESTS_CHANGED, onChanged);
+    };
+  }, [loadPending]);
+
+  const pendingCount = pending.length;
 
   /* online / reconnecting pill */
   useEffect(() => {
@@ -100,8 +164,14 @@ const MentorHeader = () => {
 
   const isActive = (path) => location.pathname.toLowerCase() === path;
 
-  // badge number for each nav item (only Sessions has one)
-  const badgeFor = (path) => (path === "/mentor/sessions" ? upcomingCount : 0);
+  // badge number + label for each nav item
+  const badgeFor = (path) => {
+    if (path === "/mentor/sessions") return upcomingCount;
+    if (path === "/mentor/requests") return pendingCount;
+    return 0;
+  };
+  const badgeLabel = (path) =>
+    path === "/mentor/requests" ? "pending" : "upcoming";
 
   /* =======================================================================
      LOGOUT  (same flow as the Fresher profile)
@@ -162,7 +232,11 @@ const MentorHeader = () => {
               >
                 <Icon size={17} />
                 <span>{name}</span>
-                <CountBadge count={badgeFor(path)} active={active} />
+                <CountBadge
+                  count={badgeFor(path)}
+                  active={active}
+                  label={badgeLabel(path)}
+                />
                 {active && (
                   <span className="absolute bottom-0 left-1/2 h-0.5 w-5 -translate-x-1/2 rounded-full bg-blue-600" />
                 )}
@@ -238,7 +312,11 @@ const MentorHeader = () => {
               >
                 <Icon size={15} />
                 {name}
-                <CountBadge count={badgeFor(path)} active={active} />
+                <CountBadge
+                  count={badgeFor(path)}
+                  active={active}
+                  label={badgeLabel(path)}
+                />
               </Link>
             );
           })}
