@@ -41,17 +41,47 @@ const loadWallet = async (mentorId) => {
   ]);
 
   const reserved = agg[0]?.total || 0;
-  return { payments, withdrawals, wallet: computeWallet(active, reserved) };
+
+  // ---- list for the "My Sessions" page ----
+  // Built from payments, but ONLY the ones that still have a booking.
+  // (A deleted booking used to keep showing up here because its payment was still in the DB.)
+  // Each row also carries the real booking status, so the page does not have to guess
+  // "Completed" just because the end time has passed.
+  // NOTE: the wallet balance above still uses ALL paid payments (money is never hidden).
+  const requestIds = [
+    ...new Set(payments.map((p) => p.requestGroupId).filter(Boolean)),
+  ];
+  const bookings = requestIds.length
+    ? await Booking.find({ requestGroupId: { $in: requestIds } })
+        .select("requestGroupId status")
+        .lean()
+    : [];
+  const bookingById = new Map(bookings.map((b) => [b.requestGroupId, b]));
+
+  const sessionPayments = payments
+    .filter((p) => p.requestGroupId && bookingById.has(p.requestGroupId))
+    .map((p) => ({
+      ...p,
+      bookingStatus: bookingById.get(p.requestGroupId).status,
+    }));
+
+  return {
+    payments,
+    sessionPayments,
+    withdrawals,
+    wallet: computeWallet(active, reserved),
+  };
 };
 
 // GET /api/wallet/me
 exports.getWallet = async (req, res) => {
   try {
-    const { payments, withdrawals, wallet } = await loadWallet(req.user.id);
+    const { payments, sessionPayments, withdrawals, wallet } = await loadWallet(req.user.id);
     return res.json({
       success: true,
       wallet,
       payments,
+      sessionPayments,
       withdrawals,
       mentorSharePercent: 100 - PLATFORM_FEE_PERCENT,
     });
