@@ -4,7 +4,20 @@
 //  - mentor page   -> fresher details
 // The data comes from GET <booking>/counterpart (see bookingController.getCounterpart)
 // Props are unchanged: { title, fetcher, onClose }
-import React, { useCallback, useEffect, useRef, useState } from "react";
+//
+// PERFORMANCE NOTES (lag fix)
+//  - no backdrop-blur (very expensive while scrolling)
+//  - component is memoized: parent's 1-second clock no longer re-renders it
+//  - avatar loads a small image; the big image loads only when zoomed
+//  - open animation uses only opacity + translate (no scale)
+//  - no repeating dot pattern inside scrolling panes
+import React, {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import {
   X,
@@ -73,18 +86,18 @@ const pick = (o, keys) => {
 const fullUrl = (u) =>
   u ? (/^https?:\/\//i.test(u) ? u : `https://${u}`) : "";
 
-// ask the image host for a bigger / sharper copy when it supports it
-const hd = (url, width = 800) => {
+// ask the image host for a resized copy (small = fast decode, no scroll jank)
+const hd = (url, width = 256) => {
   if (!url || typeof url !== "string") return url;
   // Cloudinary
   if (url.includes("res.cloudinary.com") && url.includes("/upload/")) {
     if (/\/upload\/[^/]*(w_|q_|f_)/.test(url)) return url;
     return url.replace(
       "/upload/",
-      `/upload/f_auto,q_auto:best,w_${width},c_limit/`,
+      `/upload/f_auto,q_auto,w_${width},c_limit/`,
     );
   }
-  // Google profile photos (=s96-c  ->  =s800-c)
+  // Google profile photos (=s96-c  ->  =sN-c)
   if (/googleusercontent\.com/.test(url)) {
     return url.replace(/=s\d+(-c)?$/, `=s${width}-c`);
   }
@@ -139,8 +152,8 @@ const Stat = ({ icon, value, label, tone, small }) => (
 const InfoRow = ({ icon, label, children }) => {
   if (!children) return null;
   return (
-    <div className="group flex items-center gap-3 rounded-2xl border border-slate-100 bg-white px-3.5 py-3 transition hover:border-blue-100 hover:bg-blue-50/40">
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition group-hover:bg-blue-100 group-hover:text-blue-600">
+    <div className="group flex items-center gap-3 rounded-2xl border border-slate-100 bg-white px-3.5 py-3">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
         {icon}
       </span>
       <div className="min-w-0 flex-1">
@@ -188,7 +201,7 @@ const LinkBtn = ({ href, icon, children }) => (
     href={href}
     target="_blank"
     rel="noopener noreferrer"
-    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
   >
     {icon}
     {children}
@@ -196,14 +209,16 @@ const LinkBtn = ({ href, icon, children }) => (
   </a>
 );
 
-/* Avatar: big, sharp, falls back to initials if the image fails */
-const Avatar = ({ src, name, onZoom, big }) => {
+/* Avatar: small optimized image, falls back to initials if the image fails */
+const Avatar = memo(({ src, name, onZoom, big }) => {
   const [failed, setFailed] = useState(false);
   const dim = big ? "h-32 w-32" : "h-28 w-28";
 
   if (!src || failed) {
     return (
-      <div className={`relative z-10 flex ${dim} items-center justify-center rounded-full border-4 border-white bg-gradient-to-br from-blue-500 to-blue-700 text-3xl font-bold text-white shadow-xl`}>
+      <div
+        className={`relative z-10 flex ${dim} items-center justify-center rounded-full border-4 border-white bg-gradient-to-br from-blue-500 to-blue-700 text-3xl font-bold text-white shadow-lg`}
+      >
         {initials(name)}
       </div>
     );
@@ -214,21 +229,24 @@ const Avatar = ({ src, name, onZoom, big }) => {
       type="button"
       onClick={onZoom}
       aria-label="View photo full size"
-      className={`group relative z-10 ${dim} shrink-0 overflow-hidden rounded-full border-4 border-white bg-white shadow-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500`}
+      className={`group relative z-10 ${dim} shrink-0 overflow-hidden rounded-full border-4 border-white bg-white shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500`}
     >
       <img
-        src={hd(src, 600)}
+        src={hd(src, 256)}
         alt={name}
+        width={128}
+        height={128}
         decoding="async"
         onError={() => setFailed(true)}
         className="h-full w-full object-cover"
       />
-      <span className="absolute inset-0 flex items-center justify-center bg-slate-900/0 text-white opacity-0 transition group-hover:bg-slate-900/40 group-hover:opacity-100">
+      <span className="absolute inset-0 flex items-center justify-center bg-slate-900/0 text-white opacity-0 transition-opacity group-hover:bg-slate-900/40 group-hover:opacity-100">
         <ZoomIn size={22} />
       </span>
     </button>
   );
-};
+});
+Avatar.displayName = "Avatar";
 
 /* ---------------------------- main ---------------------------- */
 
@@ -293,6 +311,8 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
       document.body.style.overflow = prev;
     };
   }, [onClose]);
+
+  const openZoom = useCallback(() => setZoom(true), []);
 
   const { loading, error, data } = state;
   const p = data?.person || {};
@@ -381,7 +401,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
     const eduLine = [degree, college].filter(Boolean).join(" · ");
 
     const sideBtn =
-      "flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white";
+      "flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white";
 
     const sideInfo = [
       { icon: <Mail size={15} />, text: p.email },
@@ -393,16 +413,9 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
     return (
       <div className="flex flex-col md:h-[min(640px,78vh)] md:flex-row">
         {/* ---------- left: identity ---------- */}
-        <aside className="pdm-scroll relative bg-gradient-to-b from-slate-900 via-slate-900 to-blue-950 p-6 text-white md:w-72 md:shrink-0 md:overflow-y-auto">
-          <div className="pointer-events-none absolute inset-0 opacity-10 [background-image:radial-gradient(circle_at_1px_1px,white_1px,transparent_0)] [background-size:18px_18px]" />
-
+        <aside className="pdm-scroll relative bg-gradient-to-b from-slate-900 via-slate-900 to-blue-950 p-6 text-white md:w-72 md:shrink-0 md:overflow-y-auto md:overscroll-contain">
           <div className="relative flex flex-col items-center text-center">
-            <Avatar
-              big
-              src={p.image}
-              name={p.name}
-              onZoom={() => setZoom(true)}
-            />
+            <Avatar big src={p.image} name={p.name} onZoom={openZoom} />
 
             <h3 className="mt-4 flex max-w-full items-center gap-1.5 text-xl font-bold">
               <span className="truncate">{p.name || "-"}</span>
@@ -486,7 +499,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
         </aside>
 
         {/* ---------- right: request + profile ---------- */}
-        <main className="pdm-scroll min-w-0 flex-1 p-5 sm:p-6 md:overflow-y-auto">
+        <main className="pdm-scroll min-w-0 flex-1 p-5 sm:p-6 md:overflow-y-auto md:overscroll-contain">
           <h2 className="pr-10 text-lg font-bold text-slate-900">{title}</h2>
           <p className="mt-0.5 text-sm text-slate-500">
             What this fresher asked for in this booking.
@@ -598,22 +611,22 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-900/60 backdrop-blur-sm sm:items-center sm:p-4"
+      className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-900/60 sm:items-center sm:p-4"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-label={title}
     >
       <style>{`
-        @keyframes pdm-in { from { opacity: 0; transform: translateY(18px) scale(.98); } to { opacity: 1; transform: none; } }
-        .pdm-in { animation: pdm-in .22s ease-out; }
-        .pdm-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+        @keyframes pdm-in { from { opacity: 0; transform: translate3d(0,14px,0); } to { opacity: 1; transform: translate3d(0,0,0); } }
+        .pdm-in { animation: pdm-in .18s ease-out; }
+        .pdm-scroll { scrollbar-width: none; -ms-overflow-style: none; -webkit-overflow-scrolling: touch; }
         .pdm-scroll::-webkit-scrollbar { display: none; }
         @media (prefers-reduced-motion: reduce) { .pdm-in { animation: none; } }
       `}</style>
 
       <div
-        className={`pdm-in relative flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl ${
+        className={`pdm-in relative flex max-h-[92vh] max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl [transform:translateZ(0)] sm:rounded-3xl ${
           wide ? "max-w-4xl" : "max-w-2xl"
         }`}
         onClick={(e) => e.stopPropagation()}
@@ -623,17 +636,17 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className={`absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+          className={`absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
             wide
               ? "bg-white text-slate-600 shadow ring-1 ring-slate-200 hover:bg-slate-50"
-              : "bg-white/20 text-white backdrop-blur hover:bg-white/30"
+              : "bg-white/25 text-white hover:bg-white/40"
           }`}
         >
           <X size={18} />
         </button>
 
         <div
-          className={`pdm-scroll min-h-0 flex-1 overflow-y-auto ${
+          className={`pdm-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain ${
             wide ? "md:overflow-hidden" : ""
           }`}
         >
@@ -666,7 +679,6 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
             <>
               {/* ---------- banner ---------- */}
               <div className="relative z-0 h-32 bg-gradient-to-br from-slate-900 via-blue-900 to-blue-600">
-                <div className="absolute inset-0 opacity-20 [background-image:radial-gradient(circle_at_1px_1px,white_1px,transparent_0)] [background-size:18px_18px]" />
                 <p className="absolute left-6 top-4 text-xs font-medium text-white/80">
                   {title}
                 </p>
@@ -675,18 +687,14 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
               <div className="relative z-10 px-5 pb-6 sm:px-6">
                 {/* avatar sits ABOVE the banner (z-10), half overlapping */}
                 <div className="-mt-14 flex items-end justify-between gap-3">
-                  <Avatar
-                    src={p.image}
-                    name={p.name}
-                    onZoom={() => setZoom(true)}
-                  />
+                  <Avatar src={p.image} name={p.name} onZoom={openZoom} />
 
                   <div className="mb-1 flex flex-wrap items-center justify-end gap-2">
                     {p.email && (
                       <button
                         type="button"
                         onClick={copyEmail}
-                        className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50"
                       >
                         {copied ? (
                           <>
@@ -706,7 +714,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
                         href={linkedin}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-blue-700"
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-700"
                       >
                         <LinkedinIcon size={14} />
                         LinkedIn
@@ -794,7 +802,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
                       role="tab"
                       aria-selected={tab === t.id}
                       onClick={() => setTab(t.id)}
-                      className={`flex-1 rounded-xl px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                      className={`flex-1 rounded-xl px-4 py-2 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                         tab === t.id
                           ? "bg-white text-slate-900 shadow-sm"
                           : "text-slate-500 hover:text-slate-800"
@@ -1028,7 +1036,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
         </div>
       </div>
 
-      {/* ---------- full-size photo viewer ---------- */}
+      {/* ---------- full-size photo viewer (big image loads only now) ---------- */}
       {zoom && p.image && (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 p-4"
@@ -1052,8 +1060,9 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
             <X size={20} />
           </button>
           <img
-            src={hd(p.image, 1600)}
+            src={hd(p.image, 1200)}
             alt={p.name}
+            decoding="async"
             onClick={(e) => e.stopPropagation()}
             className="max-h-[88vh] max-w-[92vw] rounded-2xl object-contain shadow-2xl"
           />
@@ -1064,4 +1073,13 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
   );
 };
 
-export default PersonDetailsModal;
+/*
+  memo: the parent pages (MyBookings / MentorSessions) re-render every second
+  because of their live clock. `fetcher` is an inline arrow there (new function
+  each render), but we read it through a ref, so it is safe to ignore it.
+  The modal now only re-renders when title / onClose change.
+*/
+export default memo(
+  PersonDetailsModal,
+  (prev, next) => prev.title === next.title && prev.onClose === next.onClose,
+);
