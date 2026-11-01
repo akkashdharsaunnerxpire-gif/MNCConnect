@@ -15,14 +15,14 @@ export default function SessionCompletionModal({ booking, variant = "confirm", o
         method: "PATCH",
         body: { accepted },
       });
-      
-      // ✅ Page redirect to fix UI glitches and Double Click 400 Errors
+
+      // Page redirect to fix UI glitches and Double Click 400 Errors
       if (accepted) {
-        window.location.href = `/Home/review/${booking.requestGroupId}`; 
+        window.location.href = `/Home/review/${booking.requestGroupId}`;
       } else {
         window.location.href = `/Home/my-bookings`;
       }
-      
+
       onDone?.(accepted);
     } catch (e) {
       setError(e?.message || "Unable to confirm. Please try again.");
@@ -32,7 +32,7 @@ export default function SessionCompletionModal({ booking, variant = "confirm", o
 
   if (variant === "prompt") {
     return (
-      <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/85 px-4 backdrop-blur">
+      <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/85 px-4">
         <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl">
           <div className="bg-gradient-to-r from-amber-500 to-orange-500 px-6 py-5 text-white">
             <h2 className="text-lg font-bold">5 minutes left</h2>
@@ -52,7 +52,7 @@ export default function SessionCompletionModal({ booking, variant = "confirm", o
   }
 
   return (
-    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/85 px-4 backdrop-blur">
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/85 px-4">
       <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl">
         <div className="bg-gradient-to-r from-blue-600 to-cyan-500 px-6 py-5 text-white">
           <h2 className="text-xl font-bold">Did the session go well?</h2>
@@ -68,15 +68,15 @@ export default function SessionCompletionModal({ booking, variant = "confirm", o
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
             <div className="flex items-start gap-2">
               <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-              <span>Only click <b>Yes</b> if the mentor attended and helped you. If they didn't join, click <b>No</b> — you'll be refunded.</span>
+              <span>Only click <b>Yes</b> if the mentor attended and helped you. If they didn't join, click <b>No</b>.</span>
             </div>
           </div>
 
           {error && <p className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
 
           <div className="mt-5 grid grid-cols-2 gap-3">
-            <button onClick={() => submit(false)} disabled={busy} className="flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 py-3 text-sm font-bold text-red-700 hover:bg-red-100 disabled:opacity-50">
-              {busy ? <Loader2 size={15} className="animate-spin" /> : <XCircle size={15} />} No, refund me
+            <button onClick={() => submit(false)} disabled={busy} className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+              {busy ? <Loader2 size={15} className="animate-spin" /> : <XCircle size={15} />} No
             </button>
             <button onClick={() => submit(true)} disabled={busy} className="flex items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
               {busy ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />} Yes, all good

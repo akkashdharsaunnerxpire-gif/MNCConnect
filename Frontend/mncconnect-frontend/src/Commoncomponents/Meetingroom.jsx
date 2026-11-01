@@ -34,6 +34,8 @@ const THREE_MIN = 3 * 60 * 1000; // confirm "did the session go well?"
 const FIVE_MIN = 5 * 60 * 1000; // timer turns red + wrap-up banner
 const REVIEW_AT_MS = ONE_MIN; // review pops in the last 1 minute
 const OPEN_BEFORE_MIN = 2; // keep same as backend
+const CONFIRMED_BANNER_MS = 20 * 1000; // mentor sees the green "confirmed" alert for 20s only
+
 /* ---------- HD camera + mic ---------- */
 const HD_VIDEO = {
   width: { ideal: 1920, min: 1280 },
@@ -264,6 +266,9 @@ export default function MeetingRoom() {
   const [endedConfirmed, setEndedConfirmed] = useState(false);
   const [reviewDone, setReviewDone] = useState(false);
   const [showSuccessBtn, setShowSuccessBtn] = useState(false);
+
+  // mentor: green "fresher confirmed" alert, visible for 20 seconds only
+  const [confirmedBanner, setConfirmedBanner] = useState(false);
 
   const [instructionsAccepted, setInstructionsAccepted] = useState({
     mentor: false,
@@ -557,6 +562,19 @@ export default function MeetingRoom() {
     setShowSuccessBtn(isMentor && phase === "in" && inLast3);
   }, [inLast3, phase, isMentor]);
 
+  // Mentor: when the fresher says YES, show the green alert for 20 seconds,
+  // then hide it. (fresherConfirmed is a boolean, so this runs only when it
+  // flips to true, not on every meeting:state update.)
+  useEffect(() => {
+    if (!isMentor || !clock.fresherConfirmed) {
+      setConfirmedBanner(false);
+      return undefined;
+    }
+    setConfirmedBanner(true);
+    const t = setTimeout(() => setConfirmedBanner(false), CONFIRMED_BANNER_MS);
+    return () => clearTimeout(t);
+  }, [isMentor, clock.fresherConfirmed]);
+
   const sendSuccessRequest = () =>
     socket.emit("meeting:success-request", { bookingId });
   const answerSuccess = (accepted) => {
@@ -572,7 +590,6 @@ export default function MeetingRoom() {
     inLast1 &&
     !alreadyReviewed;
 
-  // Fresher: "did the session go well?" pops at 3 minutes (or when the mentor asks)
   // Fresher: popup shows ONLY after the mentor clicks "Meeting Success"
   const showSuccessConfirm =
     !isMentor &&
@@ -713,7 +730,7 @@ export default function MeetingRoom() {
     );
   }
 
-  /* ---------- instructions gate ---------- */
+  /* ---------- instructions gate (full page) ---------- */
   if (phase === "in" && !clock.running && !bothAccepted) {
     return (
       <MeetingInstructionsGate
@@ -848,8 +865,8 @@ export default function MeetingRoom() {
             </p>
           )}
 
-          {/* MENTOR: green alert when the fresher said YES */}
-          {isMentor && clock.fresherConfirmed && (
+          {/* MENTOR: green alert when the fresher said YES (auto-hides after 20s) */}
+          {isMentor && confirmedBanner && (
             <div className="absolute left-1/2 top-4 z-30 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white shadow-xl">
               <CheckCircle size={18} />
               The fresher confirmed: the meeting went well ✅

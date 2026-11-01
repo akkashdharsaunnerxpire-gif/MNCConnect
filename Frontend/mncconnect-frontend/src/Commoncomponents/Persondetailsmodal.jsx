@@ -1,7 +1,7 @@
 // src/Commoncomponents/PersonDetailsModal.jsx
 // Shows the OTHER person of a booking.
-//  - fresher page  -> mentor (MncEmployee) details
-//  - mentor page   -> fresher details
+//  - fresher page  -> mentor (MncEmployee) details   (single compact profile, no tabs)
+//  - mentor page   -> fresher details                (two-pane candidate card)
 // The data comes from GET <booking>/counterpart (see bookingController.getCounterpart)
 // Props are unchanged: { title, fetcher, onClose }
 //
@@ -117,9 +117,9 @@ const LinkedinIcon = ({ size = 16 }) => (
 
 const Skeleton = () => (
   <div className="animate-pulse">
-    <div className="h-36 bg-slate-100" />
+    <div className="h-28 bg-slate-100" />
     <div className="px-6 pb-6">
-      <div className="-mt-14 h-28 w-28 rounded-full border-4 border-white bg-slate-200" />
+      <div className="-mt-12 h-24 w-24 rounded-full border-4 border-white bg-slate-200" />
       <div className="mt-4 h-5 w-48 rounded bg-slate-100" />
       <div className="mt-2 h-4 w-64 rounded bg-slate-100" />
       <div className="mt-6 space-y-2">
@@ -208,7 +208,7 @@ const LinkBtn = ({ href, icon, children }) => (
 /* Avatar: small optimized image, falls back to initials if the image fails */
 const Avatar = memo(({ src, name, onZoom, big }) => {
   const [failed, setFailed] = useState(false);
-  const dim = big ? "h-32 w-32" : "h-28 w-28";
+  const dim = big ? "h-32 w-32" : "h-24 w-24";
 
   if (!src || failed) {
     return (
@@ -248,7 +248,6 @@ Avatar.displayName = "Avatar";
 
 const PersonDetailsModal = ({ title, fetcher, onClose }) => {
   const [state, setState] = useState({ loading: true, error: "", data: null });
-  const [tab, setTab] = useState("profile");
   const [copied, setCopied] = useState(false);
   const [zoom, setZoom] = useState(false);
 
@@ -375,11 +374,6 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
       /* clipboard blocked: ignore */
     }
   };
-
-  const tabs = [
-    { id: "profile", label: isMentor ? "Profile" : "About" },
-    { id: "booking", label: "Booking" },
-  ];
 
   const wide = !loading && !error && !!data && !isMentor;
 
@@ -605,6 +599,163 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
     );
   };
 
+  /* =====================================================================
+     MENTOR VIEW (what the fresher sees): ONE compact profile page.
+     No tabs, no booking section.
+     ===================================================================== */
+  const renderMentor = () => (
+    <>
+      {/* ---------- slim light banner ---------- */}
+      <div className="relative z-0 h-24 border-b border-slate-200 bg-gradient-to-br from-slate-100 via-blue-50 to-white">
+        <p className="absolute left-5 top-4 text-xs font-semibold text-slate-500">
+          {title}
+        </p>
+      </div>
+
+      <div className="relative z-10 px-5 pb-6 sm:px-6">
+        {/* avatar half overlaps the banner; actions on the right */}
+        <div className="-mt-12 flex items-end justify-between gap-3">
+          <Avatar src={p.image} name={p.name} onZoom={openZoom} />
+
+          <div className="mb-1 flex flex-wrap items-center justify-end gap-2">
+            {p.email && (
+              <button
+                type="button"
+                onClick={copyEmail}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+              >
+                {copied ? (
+                  <>
+                    <Check size={14} className="text-emerald-600" />
+                    Copied
+                  </>
+                ) : (
+                  <>
+                    <Copy size={14} />
+                    Copy email
+                  </>
+                )}
+              </button>
+            )}
+            {linkedin && (
+              <a
+                href={linkedin}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-700"
+              >
+                <LinkedinIcon size={14} />
+                LinkedIn
+              </a>
+            )}
+          </div>
+        </div>
+
+        {/* name + role */}
+        <div className="mt-3 min-w-0">
+          <h3 className="flex items-center gap-1.5 text-xl font-bold text-slate-900">
+            <span className="truncate">{p.name || "-"}</span>
+            {p.isVerified && (
+              <BadgeCheck
+                size={19}
+                className="shrink-0 text-blue-600"
+                aria-label="Verified"
+              />
+            )}
+          </h3>
+          {roleLine && (
+            <p className="mt-0.5 text-sm text-slate-500">{roleLine}</p>
+          )}
+        </div>
+
+        {/* numbers */}
+        <div className="mt-4 grid grid-cols-3 gap-2.5">
+          <Stat
+            icon={<Star size={15} />}
+            value={Number(p.rating || 0).toFixed(1)}
+            label="Rating"
+            tone="bg-amber-50 text-amber-700"
+          />
+          <Stat
+            icon={<Users size={15} />}
+            value={p.totalSessions || 0}
+            label="Sessions"
+            tone="bg-emerald-50 text-emerald-700"
+          />
+          <Stat
+            icon={<Sparkles size={15} />}
+            value={experience ? experience.split(" ")[0] : "-"}
+            label="Yrs experience"
+            tone="bg-blue-50 text-blue-700"
+          />
+        </div>
+
+        {bio && (
+          <Block title="Bio">
+            <p className="whitespace-pre-line rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-600">
+              {bio}
+            </p>
+          </Block>
+        )}
+
+        <Block title="Details">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <InfoRow icon={<Mail size={16} />} label="Email">
+              {p.email}
+            </InfoRow>
+            <InfoRow icon={<Phone size={16} />} label="Phone">
+              {phone}
+            </InfoRow>
+            <InfoRow icon={<Building2 size={16} />} label="Company">
+              {p.company}
+            </InfoRow>
+            <InfoRow icon={<Briefcase size={16} />} label="Role">
+              {[p.designation, p.department]
+                .filter(Boolean)
+                .filter((v, i, a) => a.indexOf(v) === i)
+                .join(" · ")}
+            </InfoRow>
+            <InfoRow icon={<MapPin size={16} />} label="Office location">
+              {location}
+            </InfoRow>
+            <InfoRow icon={<UserRound size={16} />} label="Gender">
+              {cap(p.gender)}
+            </InfoRow>
+          </div>
+        </Block>
+
+        {skills.length > 0 && (
+          <Block title="Skills">
+            <Chips items={skills} />
+          </Block>
+        )}
+
+        {languages.length > 0 && (
+          <Block title="Languages" icon={<Languages size={15} />}>
+            <Chips items={languages} tone="slate" />
+          </Block>
+        )}
+
+        {(github || resume) && (
+          <Block title="Links">
+            <div className="flex flex-wrap gap-2">
+              {github && (
+                <LinkBtn href={github} icon={<GithubIcon size={15} />}>
+                  GitHub
+                </LinkBtn>
+              )}
+              {resume && (
+                <LinkBtn href={resume} icon={<FileText size={15} />}>
+                  Resume
+                </LinkBtn>
+              )}
+            </div>
+          </Block>
+        )}
+      </div>
+    </>
+  );
+
   return createPortal(
     <div
       className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-900/40 sm:items-center sm:p-4"
@@ -623,7 +774,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
 
       <div
         className={`pdm-in relative flex max-h-[92vh] max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl [transform:translateZ(0)] sm:rounded-3xl ${
-          wide ? "max-w-4xl" : "max-w-2xl"
+          wide ? "max-w-4xl" : "max-w-xl"
         }`}
         onClick={(e) => e.stopPropagation()}
       >
@@ -666,263 +817,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
           )}
 
           {!loading && data && !isMentor && renderFresher()}
-
-          {!loading && data && isMentor && (
-            <>
-              {/* ---------- banner (light) ---------- */}
-              <div className="relative z-0 h-32 border-b border-slate-200 bg-gradient-to-br from-slate-100 via-blue-50 to-white">
-                <p className="absolute left-6 top-4 text-xs font-semibold text-slate-500">
-                  {title}
-                </p>
-              </div>
-
-              <div className="relative z-10 px-5 pb-6 sm:px-6">
-                {/* avatar sits ABOVE the banner (z-10), half overlapping */}
-                <div className="-mt-14 flex items-end justify-between gap-3">
-                  <Avatar src={p.image} name={p.name} onZoom={openZoom} />
-
-                  <div className="mb-1 flex flex-wrap items-center justify-end gap-2">
-                    {p.email && (
-                      <button
-                        type="button"
-                        onClick={copyEmail}
-                        className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50"
-                      >
-                        {copied ? (
-                          <>
-                            <Check size={14} className="text-emerald-600" />
-                            Copied
-                          </>
-                        ) : (
-                          <>
-                            <Copy size={14} />
-                            Copy email
-                          </>
-                        )}
-                      </button>
-                    )}
-                    {linkedin && (
-                      <a
-                        href={linkedin}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-700"
-                      >
-                        <LinkedinIcon size={14} />
-                        LinkedIn
-                      </a>
-                    )}
-                  </div>
-                </div>
-
-                <div className="mt-4 min-w-0">
-                  <h3 className="flex items-center gap-1.5 text-2xl font-bold text-slate-900">
-                    <span className="truncate">{p.name || "-"}</span>
-                    {p.isVerified && (
-                      <BadgeCheck
-                        size={20}
-                        className="shrink-0 text-blue-600"
-                        aria-label="Verified"
-                      />
-                    )}
-                  </h3>
-                  {roleLine && (
-                    <p className="mt-0.5 text-sm text-slate-500">{roleLine}</p>
-                  )}
-                </div>
-
-                {/* ---------- mentor numbers ---------- */}
-                {isMentor && (
-                  <div className="mt-5 grid grid-cols-3 gap-2.5">
-                    <Stat
-                      icon={<Star size={15} />}
-                      value={Number(p.rating || 0).toFixed(1)}
-                      label="Rating"
-                      tone="bg-amber-50 text-amber-700"
-                    />
-                    <Stat
-                      icon={<Users size={15} />}
-                      value={p.totalSessions || 0}
-                      label="Sessions"
-                      tone="bg-emerald-50 text-emerald-700"
-                    />
-                    <Stat
-                      icon={<Sparkles size={15} />}
-                      value={experience ? experience.split(" ")[0] : "-"}
-                      label="Yrs experience"
-                      tone="bg-blue-50 text-blue-700"
-                    />
-                  </div>
-                )}
-
-                {/* ---------- tabs ---------- */}
-                <div
-                  role="tablist"
-                  className="mt-6 flex gap-1 rounded-2xl bg-slate-100 p-1"
-                >
-                  {tabs.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={tab === t.id}
-                      onClick={() => setTab(t.id)}
-                      className={`flex-1 rounded-xl px-4 py-2 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
-                        tab === t.id
-                          ? "bg-white text-slate-900 shadow-sm"
-                          : "text-slate-500 hover:text-slate-800"
-                      }`}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
-                </div>
-
-                {/* ---------- PROFILE TAB ---------- */}
-                {tab === "profile" && (
-                  <div role="tabpanel">
-                    {bio && (
-                      <Block title="Bio">
-                        <p className="whitespace-pre-line rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-600">
-                          {bio}
-                        </p>
-                      </Block>
-                    )}
-
-                    <Block title="Contact & details">
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <InfoRow icon={<Mail size={16} />} label="Email">
-                          {p.email}
-                        </InfoRow>
-                        <InfoRow icon={<Phone size={16} />} label="Phone">
-                          {phone}
-                        </InfoRow>
-                        <InfoRow icon={<UserRound size={16} />} label="Gender">
-                          {cap(p.gender)}
-                        </InfoRow>
-                        <InfoRow
-                          icon={<MapPin size={16} />}
-                          label="Office location"
-                        >
-                          {location}
-                        </InfoRow>
-                        <InfoRow icon={<Building2 size={16} />} label="Company">
-                          {p.company}
-                        </InfoRow>
-                        <InfoRow icon={<Briefcase size={16} />} label="Role">
-                          {[p.designation, p.department]
-                            .filter(Boolean)
-                            .filter((v, i, a) => a.indexOf(v) === i)
-                            .join(" · ")}
-                        </InfoRow>
-                        <InfoRow
-                          icon={<GraduationCap size={16} />}
-                          label="Experience"
-                        >
-                          {experience}
-                        </InfoRow>
-                      </div>
-                    </Block>
-
-                    {skills.length > 0 && (
-                      <Block title="Skills">
-                        <Chips items={skills} />
-                      </Block>
-                    )}
-
-                    {languages.length > 0 && (
-                      <Block title="Languages" icon={<Languages size={15} />}>
-                        <Chips items={languages} tone="slate" />
-                      </Block>
-                    )}
-
-                    {hasLinks && (
-                      <Block title="Links">
-                        <div className="flex flex-wrap gap-2">
-                          {linkedin && (
-                            <LinkBtn href={linkedin} icon={<LinkedinIcon size={15} />}>
-                              LinkedIn
-                            </LinkBtn>
-                          )}
-                          {github && (
-                            <LinkBtn href={github} icon={<GithubIcon size={15} />}>
-                              GitHub
-                            </LinkBtn>
-                          )}
-                          {resume && (
-                            <LinkBtn href={resume} icon={<FileText size={15} />}>
-                              Resume
-                            </LinkBtn>
-                          )}
-                        </div>
-                      </Block>
-                    )}
-                  </div>
-                )}
-
-                {/* ---------- BOOKING TAB ---------- */}
-                {tab === "booking" && (
-                  <div role="tabpanel">
-                    <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200">
-                      <div className="flex items-center justify-between border-b border-slate-200 bg-slate-100 px-4 py-3 text-slate-800">
-                        <span className="inline-flex items-center gap-2 text-sm font-semibold">
-                          <Video size={16} className="text-blue-600" />
-                          {s.sessionType || "Session"}
-                        </span>
-                        {s.durationMinutes ? (
-                          <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 ring-1 ring-inset ring-slate-200">
-                            {s.durationMinutes} min
-                          </span>
-                        ) : null}
-                      </div>
-
-                      <div className="grid grid-cols-2 divide-x divide-slate-100 bg-white">
-                        <div className="p-4">
-                          <p className="flex items-center gap-1.5 text-[11px] font-medium text-slate-400">
-                            <CalendarDays size={13} /> Date
-                          </p>
-                          <p className="mt-1 text-sm font-bold text-slate-900">
-                            {s.date || "Not specified"}
-                          </p>
-                        </div>
-                        <div className="p-4">
-                          <p className="flex items-center gap-1.5 text-[11px] font-medium text-slate-400">
-                            <Clock3 size={13} /> Time
-                          </p>
-                          <p className="mt-1 text-sm font-bold text-slate-900">
-                            {s.time || "Not specified"}
-                          </p>
-                        </div>
-                      </div>
-
-                      {s.language && (
-                        <div className="flex flex-wrap gap-2 border-t border-dashed border-slate-200 bg-slate-50 px-4 py-3">
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
-                            <Languages size={13} /> {s.language}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    {s.reason ? (
-                      <Block
-                        title="Your message"
-                        icon={<MessageSquare size={15} />}
-                      >
-                        <blockquote className="whitespace-pre-line rounded-2xl border-l-4 border-blue-500 bg-slate-50 p-4 text-sm leading-6 text-slate-700">
-                          {s.reason}
-                        </blockquote>
-                      </Block>
-                    ) : (
-                      <p className="mt-5 rounded-2xl bg-slate-50 p-4 text-center text-sm text-slate-400">
-                        No message was added with this booking.
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
+          {!loading && data && isMentor && renderMentor()}
         </div>
       </div>
 

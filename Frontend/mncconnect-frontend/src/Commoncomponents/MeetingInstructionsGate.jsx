@@ -1,6 +1,15 @@
 // src/Commoncomponents/MeetingInstructionsGate.jsx
+// Full-page "Before we start" screen. White + black theme.
+// Props / socket logic are unchanged.
 import React, { useEffect, useState } from "react";
-import { CheckCircle2, Loader2, ChevronDown, AlertTriangle } from "lucide-react";
+import {
+  CheckCircle2,
+  Loader2,
+  ChevronDown,
+  AlertTriangle,
+  Circle,
+  ShieldCheck,
+} from "lucide-react";
 import { socket } from "../utils/socket";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
@@ -13,6 +22,21 @@ const LANGS = [
   { code: "te", label: "తెలుగు" },
   { code: "kn", label: "ಕನ್ನಡ" },
 ];
+
+const StatusRow = ({ label, done }) => (
+  <div className="flex items-center justify-between rounded-xl border border-white/15 px-4 py-3">
+    <span className="text-sm font-medium text-white/90">{label}</span>
+    {done ? (
+      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-white">
+        <CheckCircle2 size={16} /> Accepted
+      </span>
+    ) : (
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-white/50">
+        <Circle size={16} /> Pending
+      </span>
+    )}
+  </div>
+);
 
 export default function MeetingInstructionsGate({
   bookingId,
@@ -27,7 +51,7 @@ export default function MeetingInstructionsGate({
   const [checked, setChecked] = useState(alreadyAccepted);
   const [submitting, setSubmitting] = useState(alreadyAccepted);
 
-  // server-la already accept pannirundha (refresh), locked state-la kaattu
+  // already accepted on the server (page refresh) -> show locked state
   useEffect(() => {
     if (alreadyAccepted) {
       setChecked(true);
@@ -68,99 +92,141 @@ export default function MeetingInstructionsGate({
     socket.emit("meeting:instructions-accepted", { bookingId });
   };
 
+  const isMentor = role === "mentor";
+  const youLabel = isMentor ? "You (Employee)" : "You (Fresher)";
+  const otherLabel = isMentor ? "Fresher" : "Employee";
+
   return (
-    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/90 px-4 backdrop-blur">
-      <div className="w-full max-w-2xl overflow-hidden rounded-3xl bg-white shadow-2xl">
-        <div className="border-b border-white/10 bg-gradient-to-r from-blue-600 to-cyan-500 px-6 py-5 text-white">
-          <h2 className="text-xl font-bold">Before we start</h2>
-          <p className="mt-1 text-sm text-blue-100">
-            Read the {role === "mentor" ? "mentor" : "fresher"} guidelines below.
-            Your camera turns on and the meeting starts only after both of you accept.
+    <div className="fixed inset-0 z-[130] flex h-[100dvh] flex-col overflow-hidden bg-white text-slate-900 md:flex-row">
+      {/* ---------------- left / top: black panel ---------------- */}
+      <aside className="flex shrink-0 flex-col bg-black px-6 py-6 text-white md:w-[380px] md:px-10 md:py-10 lg:w-[440px]">
+        <p className="text-sm font-bold tracking-wide">
+          MNC<span className="text-white/60">Connect</span>
+        </p>
+
+        <div className="mt-6 md:mt-14">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-white/80">
+            <ShieldCheck size={13} /> Meeting guidelines
+          </span>
+          <h1 className="mt-4 text-3xl font-bold leading-tight md:text-4xl">
+            Before we start
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-white/65">
+            Please read the {isMentor ? "employee" : "fresher"} guidelines. The
+            camera turns on and the meeting starts only after both of you
+            accept.
           </p>
         </div>
 
-        <div className="px-6 py-4">
-          <div className="mb-4 flex items-center gap-2">
-            <label className="text-sm font-medium text-slate-700">Language:</label>
-            <div className="relative">
-              <select
-                value={lang}
-                onChange={(e) => setLang(e.target.value)}
-                className="appearance-none rounded-xl border border-slate-200 bg-white py-2 pl-3 pr-9 text-sm outline-none focus:border-blue-400"
-              >
-                {LANGS.map((l) => (
-                  <option key={l.code} value={l.code}>
-                    {l.label}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                size={15}
-                className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-slate-400"
-              />
-            </div>
-          </div>
+        <div className="mt-6 space-y-2.5 md:mt-10">
+          <StatusRow label={youLabel} done={submitting} />
+          <StatusRow label={otherLabel} done={peerAccepted} />
+        </div>
 
+        <div className="mt-6 md:mt-auto md:pt-10">
+          <label
+            htmlFor="gate-lang"
+            className="text-xs font-semibold uppercase tracking-wider text-white/50"
+          >
+            Language
+          </label>
+          <div className="relative mt-2">
+            <select
+              id="gate-lang"
+              value={lang}
+              onChange={(e) => setLang(e.target.value)}
+              className="w-full appearance-none rounded-xl border border-white/20 bg-black py-3 pl-4 pr-10 text-sm font-medium text-white outline-none focus:border-white"
+            >
+              {LANGS.map((l) => (
+                <option key={l.code} value={l.code}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              size={16}
+              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-white/60"
+            />
+          </div>
+        </div>
+      </aside>
+
+      {/* ---------------- right / bottom: white panel ---------------- */}
+      <main className="flex min-h-0 flex-1 flex-col bg-white">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-6 py-4 md:px-10 md:py-6">
+          <h2 className="text-lg font-bold text-slate-900 md:text-xl">
+            Guidelines
+          </h2>
+          {!loading && items.length > 0 && (
+            <span className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">
+              {items.length} points
+            </span>
+          )}
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-5 md:px-10 md:py-6">
           {error && (
-            <div className="mb-3 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <div className="mb-4 flex items-start gap-2 rounded-xl border border-slate-300 bg-slate-50 p-3 text-sm text-slate-800">
               <AlertTriangle size={16} className="mt-0.5 shrink-0" />
               {error}
             </div>
           )}
 
           {loading ? (
-            <div className="flex justify-center py-10">
-              <Loader2 className="animate-spin text-blue-600" />
+            <div className="flex justify-center py-20">
+              <Loader2 className="animate-spin text-slate-900" />
             </div>
           ) : items.length === 0 ? (
-            <p className="py-6 text-center text-sm text-slate-500">
+            <p className="py-16 text-center text-sm text-slate-500">
               No instructions available.
             </p>
           ) : (
-            <ol className="max-h-[320px] space-y-3 overflow-y-auto pr-1">
+            <ol className="mx-auto max-w-3xl divide-y divide-slate-100">
               {items.map((it, i) => (
-                <li
-                  key={it._id || i}
-                  className="flex gap-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-700"
-                >
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700">
+                <li key={it._id || i} className="flex gap-4 py-4">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-black text-xs font-bold text-white">
                     {i + 1}
                   </span>
-                  <span>{it.text}</span>
+                  <p className="pt-0.5 text-[15px] leading-7 text-slate-700">
+                    {it.text}
+                  </p>
                 </li>
               ))}
             </ol>
           )}
-
-          <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white p-3">
-            <input
-              type="checkbox"
-              checked={checked}
-              disabled={submitting}
-              onChange={(e) => setChecked(e.target.checked)}
-              className="mt-0.5 h-5 w-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-            />
-            <span className="text-sm text-slate-700">
-              I have read and understood all the instructions above.
-            </span>
-          </label>
-
-          <button
-            onClick={submit}
-            disabled={!checked || submitting || items.length === 0}
-            className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3.5 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {submitting ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-            {submitting ? "Accepted. Waiting for the other person…" : "Accept & continue"}
-          </button>
-
-          {peerAccepted && (
-            <p className="mt-2 text-center text-xs font-medium text-emerald-600">
-              ✓ The other person has accepted.{submitting ? "" : " Waiting for you…"}
-            </p>
-          )}
         </div>
-      </div>
+
+        {/* footer: accept */}
+        <div className="shrink-0 border-t border-slate-200 bg-white px-6 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:px-10 md:py-5">
+          <div className="mx-auto flex max-w-3xl flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                checked={checked}
+                disabled={submitting}
+                onChange={(e) => setChecked(e.target.checked)}
+                className="mt-0.5 h-5 w-5 shrink-0 cursor-pointer rounded border-slate-400 accent-black"
+              />
+              <span className="text-sm text-slate-700">
+                I have read and understood all the instructions.
+              </span>
+            </label>
+
+            <button
+              onClick={submit}
+              disabled={!checked || submitting || items.length === 0}
+              className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-black px-8 py-3.5 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              {submitting ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <CheckCircle2 size={16} />
+              )}
+              {submitting ? "Accepted. Waiting…" : "Accept & continue"}
+            </button>
+          </div>
+        </div>
+      </main>
     </div>
   );
 }
