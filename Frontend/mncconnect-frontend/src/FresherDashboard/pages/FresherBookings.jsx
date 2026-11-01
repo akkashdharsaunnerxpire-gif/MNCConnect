@@ -349,7 +349,7 @@ const MyBookings = () => {
   const view = (b) => {
     const starts = new Date(b.startsAt).getTime();
     const ends = new Date(b.endsAt).getTime();
-    const opens = starts - 5 * 60000;
+    const opens = starts - 2 * 60000;
     const left = timerOf(b);
     const finished = Boolean(finishedIds[b.requestGroupId]);
 

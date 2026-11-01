@@ -33,7 +33,7 @@ const ONE_MIN = 60 * 1000;
 const THREE_MIN = 3 * 60 * 1000; // confirm "did the session go well?"
 const FIVE_MIN = 5 * 60 * 1000; // timer turns red + wrap-up banner
 const REVIEW_AT_MS = ONE_MIN; // review pops in the last 1 minute
-
+const OPEN_BEFORE_MIN = 2; // keep same as backend
 /* ---------- HD camera + mic ---------- */
 const HD_VIDEO = {
   width: { ideal: 1920, min: 1280 },
@@ -617,7 +617,7 @@ export default function MeetingRoom() {
       <Center>
         <Clock3 size={36} className="text-blue-400" />
         <h2 className="mt-4 text-xl font-bold">
-          The meeting room opens 5 minutes before the session
+          The meeting room opens {OPEN_BEFORE_MIN} minutes before the session
         </h2>
         <p className="mt-2 font-mono text-3xl">
           {fmtClock((opensAt || Date.now()) - Date.now())}

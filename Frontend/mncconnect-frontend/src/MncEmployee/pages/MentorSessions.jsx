@@ -34,7 +34,7 @@ import SessionDetailsModal from "../../Commoncomponents/SessionDetailsModal";
 import PersonDetailsModal from "../../Commoncomponents/Persondetailsmodal";
 
 const INDIA_TIMEZONE = "Asia/Kolkata";
-const JOIN_WINDOW_MINUTES = 5;
+const JOIN_WINDOW_MINUTES = 2;
 const FINAL_WARNING_MS = 5 * 60 * 1000;
 const TIMER_POLL_MS = 3000;
 const TABS = ["Upcoming", "Awaiting Confirmation", "Completed", "Cancelled"];

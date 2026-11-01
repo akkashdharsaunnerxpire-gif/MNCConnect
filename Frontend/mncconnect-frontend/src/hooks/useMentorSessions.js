@@ -1,7 +1,7 @@
 // src/hooks/useMentorSessions.js
-// Builds the mentor's session list from the live wallet payments
-// (Payment docs already carry mentor, session date/time, duration, status).
-// Refreshes on "wallet:updated" and flips Upcoming -> Completed by itself.
+// Builds the mentor's session list from the live wallet payments.
+// The server now sends `sessionPayments`: only payments that still have a booking,
+// each with the real `bookingStatus`. Refreshes on "wallet:updated".
 
 import { useEffect, useMemo, useState } from "react";
 import useLive from "./useLive";
@@ -10,6 +10,19 @@ import { api, ENDPOINTS, EVENTS } from "../services/mentorApi";
 const avatarFor = (name) =>
   `https://ui-avatars.com/api/?name=${encodeURIComponent(name || "Fresher")}&background=eff6ff&color=2563eb`;
 
+// real booking status (server) -> status used by the Sessions page
+const BOOKING_TO_PAGE = {
+  pending: "Upcoming",
+  accepted: "Upcoming",
+  in_progress: "Upcoming",
+  awaiting_confirmation: "awaiting_confirmation",
+  completed: "Completed",
+  disputed: "Cancelled",
+  expired: "Cancelled",
+  missed: "Cancelled",
+  cancelled: "Cancelled",
+};
+
 export const toSession = (p, now) => {
   const dur = Number(p.durationMinutes) || 30;
   const endsAt = p.sessionEndsAt ? new Date(p.sessionEndsAt).getTime() : null;
@@ -17,7 +30,8 @@ export const toSession = (p, now) => {
 
   let status = "Upcoming";
   if (p.sessionStatus === "cancelled") status = "Cancelled";
-  else if (endsAt && endsAt <= now) status = "Completed";
+  else if (BOOKING_TO_PAGE[p.bookingStatus]) status = BOOKING_TO_PAGE[p.bookingStatus];
+  else if (endsAt && endsAt <= now) status = "Completed"; // old server (no bookingStatus)
 
   return {
     id: p.requestGroupId || p._id || p.id,
@@ -53,7 +67,11 @@ export default function useMentorSessions() {
   }, []);
 
   const sessions = useMemo(() => {
-    const list = live.data?.payments || live.data?.transactions || [];
+    const list =
+      live.data?.sessionPayments ||
+      live.data?.payments ||
+      live.data?.transactions ||
+      [];
     return list
       .filter((p) => p.sessionStatus && p.sessionStatus !== "unassigned")
       .map((p) => toSession(p, now))

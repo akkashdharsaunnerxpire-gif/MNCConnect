@@ -68,6 +68,7 @@ export async function api(path, { method = "GET", body, token } = {}) {
   const res = await fetch(`${API_URL}${path}`, {
     method,
     credentials: "include", // sends the HttpOnly mnc_token cookie
+    cache: "no-store", // never reuse an old answer (deleted rows must disappear)
     headers: {
       ...(body && !isForm ? { "Content-Type": "application/json" } : {}),
       // optional explicit token (only if a caller passes one)

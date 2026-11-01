@@ -27,12 +27,25 @@ const GENDER_OPTIONS = [
 ];
 const LANGUAGE_OPTIONS = ["English", "Tamil", "Hindi", "Malayalam", "Telugu", "Kannada"];
 
-const MIN_LEAD_MIN = 15;
+// Payment (card / UPI / OTP) can take 5-10 minutes, so the slot must be well ahead.
+// The server only rejects a slot that has ALREADY passed after payment.
+const MIN_LEAD_MIN = 30;
+
+// the meeting room opens this many minutes before the start time (keep same as backend)
+const OPEN_BEFORE_MIN = 2;
+
 const makeRequestId = () => `REQ-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 
 const todayISO = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+// true when the chosen date + time is at least MIN_LEAD_MIN minutes from right now
+const hasEnoughLead = (date, time) => {
+  const start = startFrom(date, time);
+  const ms = start ? start.getTime() : NaN;
+  return Number.isFinite(ms) && ms >= Date.now() + MIN_LEAD_MIN * 60000;
 };
 
 // gender comes from the saved profile when it is male/female, else the fresher picks it
@@ -92,6 +105,14 @@ export default function SessionBoard() {
   const reqIdRef = useRef(null);
   const paymentIdRef = useRef(null);
 
+  // clock tick: the "time must be 30 min ahead" check must not go stale
+  // when the page stays open for a long time
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 15000);
+    return () => clearInterval(t);
+  }, []);
+
   const price = priceFor(f.minutes);
   const type = SESSION_TYPES.find((t) => t.value === f.sessionType) || SESSION_TYPES[0];
 
@@ -135,8 +156,8 @@ export default function SessionBoard() {
     const p = [];
     if (f.reason.trim().length < 10) p.push("Tell us why you want to attend (at least 10 characters)");
     if (!f.date || !f.time) p.push("Choose a date and time");
-    else if (startFrom(f.date, f.time).getTime() < Date.now() + MIN_LEAD_MIN * 60000)
-      p.push(`Choose a time at least ${MIN_LEAD_MIN} minutes from now`);
+    else if (!hasEnoughLead(f.date, f.time))
+      p.push(`Choose a time at least ${MIN_LEAD_MIN} minutes from now (payment can take a few minutes)`);
     // role / gender / language only matter when the request goes to everyone
     if (!rebook) {
       if (!deptLoading && departments.length === 0)
@@ -146,7 +167,8 @@ export default function SessionBoard() {
       if (!f.language) p.push("Select your language before paying");
     }
     return p;
-  }, [f, rebook, departments, deptLoading, deptError, companyName]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [f, rebook, departments, deptLoading, deptError, companyName, tick]);
 
   /* ---------- live booking updates ---------- */
   const applyBooking = useCallback((b) => {
@@ -211,6 +233,14 @@ export default function SessionBoard() {
   const startPayment = async () => {
     if (problems.length) return;
     setError("");
+
+    // Check the time AGAIN right now. The page may have been open for a long time,
+    // so the earlier check can be out of date.
+    if (!hasEnoughLead(f.date, f.time)) {
+      setTick((n) => n + 1);
+      setError(`Please choose a time at least ${MIN_LEAD_MIN} minutes from now.`);
+      return;
+    }
 
     try {
       if (!window.Razorpay) throw new Error("Payment gateway failed to load. Please refresh the page.");
@@ -354,7 +384,9 @@ export default function SessionBoard() {
             {/* WHEN */}
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <h2 className="flex items-center gap-2 text-xl font-bold text-slate-950"><CalendarDays size={20} /> When?</h2>
-              <p className="mt-1 text-sm text-slate-500">The meeting room opens 5 minutes before your start time.</p>
+              <p className="mt-1 text-sm text-slate-500">
+                Pick a time at least {MIN_LEAD_MIN} minutes from now. The meeting room opens {OPEN_BEFORE_MIN} minutes before your start time.
+              </p>
 
               <div className="mt-5 grid gap-4 sm:grid-cols-2">
                 <div>
@@ -447,7 +479,7 @@ export default function SessionBoard() {
                       <p><b className="text-slate-900">2.</b> The first employee to accept gets your session.</p>
                     </>
                   )}
-                  <p><b className="text-slate-900">3.</b> You both get an alert 5 minutes before. Read the instructions first. Your camera turns on and the timer starts only after both of you accept.</p>
+                  <p><b className="text-slate-900">3.</b> You both get an alert {OPEN_BEFORE_MIN} minutes before. Read the instructions first. Your camera turns on and the timer starts only after both of you accept.</p>
                   <p><b className="text-slate-900">4.</b> If nobody accepts before your start time, or the session does not start, you are refunded automatically.</p>
                   <p><b className="text-slate-900">5.</b> After the session, confirm and leave your review inside the meeting.</p>
                 </div>
@@ -547,7 +579,7 @@ export default function SessionBoard() {
             </div>
           </div>
           <p className="mt-4 text-sm text-slate-500">
-            {booking?.date} at {booking?.time}. The meeting room opens 5 minutes before, and we'll send you an alert.
+            {booking?.date} at {booking?.time}. The meeting room opens {OPEN_BEFORE_MIN} minutes before, and we'll send you an alert.
           </p>
           <button type="button" onClick={() => navigate("/Home/my-bookings")} className="mt-6 w-full rounded-xl bg-slate-950 py-3.5 text-sm font-bold text-white hover:bg-slate-800">
             Go to My Bookings
