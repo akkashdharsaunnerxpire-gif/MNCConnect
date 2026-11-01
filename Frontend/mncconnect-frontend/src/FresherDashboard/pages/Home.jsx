@@ -1,5 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { Link, useNavigate } from "react-router-dom";
 
 import {
   Search,
@@ -12,10 +18,16 @@ import {
   BarChart3,
   BadgeCheck,
   ArrowRight,
+  ArrowDown,
   X,
   LayoutGrid,
   List,
   RotateCcw,
+  Clock3,
+  CalendarCheck2,
+  MousePointerClick,
+  Sparkles,
+  TrendingUp,
 } from "lucide-react";
 
 import { socket } from "../../utils/socket";
@@ -55,12 +67,14 @@ const categories = [
 const SORT_OPTIONS = ["Popular", "Rating", "Employees", "Online now"];
 
 const AVATAR_COLORS = [
-  "bg-violet-100 text-violet-700",
+  "bg-blue-100 text-blue-700",
   "bg-sky-100 text-sky-700",
+  "bg-indigo-100 text-indigo-700",
+  "bg-cyan-100 text-cyan-700",
   "bg-emerald-100 text-emerald-700",
-  "bg-amber-100 text-amber-700",
-  "bg-rose-100 text-rose-700",
 ];
+
+const RECENT_KEY = "mnc_recent_searches";
 
 // ============================================================
 // HELPERS
@@ -82,6 +96,25 @@ const hashIndex = (text = "", mod = AVATAR_COLORS.length) => {
   let h = 0;
   for (let i = 0; i < text.length; i += 1) h = (h * 31 + text.charCodeAt(i)) >>> 0;
   return h % mod;
+};
+
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const readRecent = () => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.slice(0, 5) : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeRecent = (list) => {
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 5)));
+  } catch {
+    /* storage can be blocked, ignore */
+  }
 };
 
 // Categories that have their own chip. Anything else (custom text typed by
@@ -292,8 +325,8 @@ const mergeCompanies = (list = []) => {
   return Array.from(merged.values());
 };
 
-// "View" ALWAYS booking page-ku mattum. Meeting room-ku direct link kidayadhu.
-// Already book pannina company-um thirumba book panna idhu thaan vazhi.
+// "View" ALWAYS goes to the booking page only. There is no direct link to the meeting room.
+// A company that was already booked can be booked again the same way.
 const sessionLink = (company) =>
   `/Home/sessionboard/${encodeURIComponent(company.companyName || "")}`;
 
@@ -302,6 +335,8 @@ const sessionLink = (company) =>
 // ============================================================
 
 const BrowseMentors = () => {
+  const navigate = useNavigate();
+
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -312,7 +347,15 @@ const BrowseMentors = () => {
   const [onlineOnly, setOnlineOnly] = useState(false);
   const [view, setView] = useState("grid");
 
+  // search box UX
+  const [focused, setFocused] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(-1);
+  const [recent, setRecent] = useState(readRecent);
+  const [showFab, setShowFab] = useState(false);
+
   const searchRef = useRef(null);
+  const searchSectionRef = useRef(null);
+  const resultsRef = useRef(null);
 
   // ---------------- fetch ----------------
   // silent = background refresh (no skeleton flash, no error screen)
@@ -380,20 +423,54 @@ const BrowseMentors = () => {
     };
   }, [fetchCompanies]);
 
-  // press "/" anywhere to jump into the search box
+  // scroll to the search card and focus the input
+  const goToSearch = useCallback(() => {
+    searchSectionRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+    setTimeout(() => searchRef.current?.focus({ preventScroll: true }), 450);
+  }, []);
+
+  // scroll straight to the company cards (used by the "Find your company" button)
+  const goToCards = useCallback(() => {
+    resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
+  // "/" or Ctrl/Cmd+K anywhere -> jump to the search box
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const isSlash = e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey;
+      const isK = e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey);
+      if (!isSlash && !isK) return;
 
       const tag = document.activeElement?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (
+        isSlash &&
+        (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT")
+      )
+        return;
 
       e.preventDefault();
-      searchRef.current?.focus();
+      goToSearch();
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+  }, [goToSearch]);
+
+  // floating "Search" button: show it once the search card has scrolled out of view (upwards)
+  useEffect(() => {
+    const el = searchSectionRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return undefined;
+
+    const io = new IntersectionObserver(
+      ([entry]) =>
+        setShowFab(!entry.isIntersecting && entry.boundingClientRect.top < 0),
+      { threshold: 0 }
+    );
+    io.observe(el);
+    return () => io.disconnect();
   }, []);
 
   // ---------------- derived data ----------------
@@ -429,18 +506,45 @@ const BrowseMentors = () => {
     [companies]
   );
 
+  // top companies by employee count -> quick-pick chips under the search box
+  const popularCompanies = useMemo(
+    () =>
+      [...companies]
+        .sort((a, b) => (b.mentorCount || 0) - (a.mentorCount || 0))
+        .slice(0, 6),
+    [companies]
+  );
+
+  const keyword = search.trim();
+
+  // autocomplete suggestions (company names that match what is typed)
+  const suggestions = useMemo(() => {
+    const k = keyword.toLowerCase();
+    if (!k) return [];
+    return companies
+      .filter((c) =>
+        [c.companyName, c.industry].join(" ").toLowerCase().includes(k)
+      )
+      .sort((a, b) => {
+        const aStart = a.companyName.toLowerCase().startsWith(k) ? 0 : 1;
+        const bStart = b.companyName.toLowerCase().startsWith(k) ? 0 : 1;
+        return aStart - bStart || (b.mentorCount || 0) - (a.mentorCount || 0);
+      })
+      .slice(0, 5);
+  }, [companies, keyword]);
+
   const filteredCompanies = useMemo(() => {
-    const keyword = search.toLowerCase().trim();
+    const k = keyword.toLowerCase();
 
     const data = companies.filter((company) => {
       if (!matchesCategory(company, activeCategory)) return false;
       if (onlineOnly && !(company.onlineCount > 0)) return false;
 
-      if (keyword) {
+      if (k) {
         const haystack = [company.companyName, company.industry, company.category]
           .join(" ")
           .toLowerCase();
-        if (!haystack.includes(keyword)) return false;
+        if (!haystack.includes(k)) return false;
       }
 
       return true;
@@ -454,10 +558,16 @@ const BrowseMentors = () => {
     else if (sort === "Employees") data.sort(byEmployees);
     else if (sort === "Online now")
       data.sort((a, b) => byOnline(a, b) || byEmployees(a, b));
-    else data.sort((a, b) => byEmployees(a, b) || byOnline(a, b)); // Popular
+    else
+      data.sort(
+        (a, b) =>
+          Number(b.onlineCount > 0) - Number(a.onlineCount > 0) || // online first
+          byEmployees(a, b) ||
+          byOnline(a, b)
+      ); // Popular
 
     return data;
-  }, [companies, search, activeCategory, sort, onlineOnly]);
+  }, [companies, keyword, activeCategory, sort, onlineOnly]);
 
   const clearAll = () => {
     setSearch("");
@@ -466,11 +576,53 @@ const BrowseMentors = () => {
     setOnlineOnly(false);
   };
 
+  const saveRecent = (text) => {
+    const t = String(text || "").trim();
+    if (!t) return;
+    const next = [t, ...recent.filter((r) => r.toLowerCase() !== t.toLowerCase())];
+    setRecent(next.slice(0, 5));
+    writeRecent(next);
+  };
+
+  const clearRecent = () => {
+    setRecent([]);
+    writeRecent([]);
+  };
+
+  const pickSuggestion = (company) => {
+    saveRecent(company.companyName);
+    setFocused(false);
+    navigate(sessionLink(company));
+  };
+
+  const onSearchKeyDown = (e) => {
+    if (e.key === "ArrowDown" && suggestions.length) {
+      e.preventDefault();
+      setActiveIdx((i) => (i + 1) % suggestions.length);
+    } else if (e.key === "ArrowUp" && suggestions.length) {
+      e.preventDefault();
+      setActiveIdx((i) => (i <= 0 ? suggestions.length - 1 : i - 1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (activeIdx >= 0 && suggestions[activeIdx]) {
+        pickSuggestion(suggestions[activeIdx]);
+      } else {
+        saveRecent(keyword);
+        setFocused(false);
+        searchRef.current?.blur();
+        resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    } else if (e.key === "Escape") {
+      setFocused(false);
+      searchRef.current?.blur();
+    }
+  };
+
   const activeFilters = [];
-  if (search.trim())
+  if (keyword)
     activeFilters.push({
       key: "search",
-      label: `“${search.trim()}”`,
+      label: `“${keyword}”`,
       clear: () => setSearch(""),
     });
   if (activeCategory !== "All Companies")
@@ -493,6 +645,8 @@ const BrowseMentors = () => {
     });
 
   const dash = loading || error ? "–" : null;
+  const showDropdown =
+    focused && (suggestions.length > 0 || (!keyword && recent.length > 0));
 
   // ============================================================
   // UI
@@ -502,25 +656,36 @@ const BrowseMentors = () => {
     <div className="min-h-screen bg-white text-slate-900">
       <style>{`
         @keyframes mc-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+        @keyframes mc-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
+        @keyframes mc-bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(5px); } }
+        @keyframes mc-shine { from { background-position: 0% 50%; } to { background-position: 200% 50%; } }
         .mc-rise { animation: mc-rise .5s cubic-bezier(.2,.7,.2,1) both; }
+        .mc-float { animation: mc-float 7s ease-in-out infinite; }
+        .mc-bounce { animation: mc-bounce 1.4s ease-in-out infinite; }
+        .mc-shine { background-size: 200% auto; animation: mc-shine 5s linear infinite; }
         .mc-no-scrollbar { scrollbar-width: none; }
         .mc-no-scrollbar::-webkit-scrollbar { display: none; }
-        @media (prefers-reduced-motion: reduce) { .mc-rise { animation: none; } }
+        @media (prefers-reduced-motion: reduce) {
+          .mc-rise, .mc-float, .mc-bounce, .mc-shine { animation: none; }
+        }
       `}</style>
 
       {/* ======================================================
-          HERO
+          HERO  (title + live stats only. Search is BELOW)
       ====================================================== */}
-      <section className="relative overflow-hidden border-b border-slate-100">
+      <section className="relative overflow-hidden">
         <div className="pointer-events-none absolute inset-0" aria-hidden="true">
-          <div className="absolute inset-0 bg-gradient-to-b from-violet-50/70 via-white to-white" />
-          <div className="absolute -left-24 -top-24 h-80 w-80 rounded-full bg-violet-200/40 blur-3xl" />
-          <div className="absolute -right-24 top-10 h-80 w-80 rounded-full bg-sky-200/40 blur-3xl" />
-          <div className="absolute inset-0 opacity-[0.35] [background-image:linear-gradient(to_right,rgba(15,23,42,0.05)_1px,transparent_1px),linear-gradient(to_bottom,rgba(15,23,42,0.05)_1px,transparent_1px)] [background-size:56px_56px] [mask-image:radial-gradient(ellipse_at_center,black_30%,transparent_75%)]" />
+          <div className="absolute inset-0 bg-gradient-to-b from-blue-50 via-white to-white" />
+          <div className="mc-float absolute -left-24 -top-24 h-96 w-96 rounded-full bg-blue-200/40 blur-3xl" />
+          <div
+            className="mc-float absolute -right-28 top-6 h-96 w-96 rounded-full bg-cyan-200/40 blur-3xl"
+            style={{ animationDelay: "2s" }}
+          />
+          <div className="absolute inset-0 opacity-[0.4] [background-image:linear-gradient(to_right,rgba(37,99,235,0.07)_1px,transparent_1px),linear-gradient(to_bottom,rgba(37,99,235,0.07)_1px,transparent_1px)] [background-size:56px_56px] [mask-image:radial-gradient(ellipse_at_center,black_30%,transparent_75%)]" />
         </div>
 
-        <div className="relative mx-auto max-w-5xl px-5 pb-12 pt-14 text-center sm:px-8 sm:pt-16">
-          <span className="mc-rise inline-flex items-center gap-2 rounded-full border border-violet-200 bg-white px-3.5 py-1 text-xs font-semibold uppercase tracking-widest text-violet-700 shadow-sm">
+        <div className="relative mx-auto max-w-5xl px-5 pb-24 pt-14 text-center sm:px-8 sm:pb-28 sm:pt-16">
+          <span className="mc-rise inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-3.5 py-1 text-xs font-semibold uppercase tracking-widest text-blue-700 shadow-sm">
             <BadgeCheck size={14} /> Learn from the best
           </span>
 
@@ -529,7 +694,7 @@ const BrowseMentors = () => {
             style={{ animationDelay: "60ms" }}
           >
             Browse{" "}
-            <span className="bg-gradient-to-r from-violet-600 via-indigo-600 to-sky-500 bg-clip-text text-transparent">
+            <span className="mc-shine bg-gradient-to-r from-blue-600 via-sky-500 to-blue-600 bg-clip-text text-transparent">
               MNC Employees
             </span>
           </h1>
@@ -538,51 +703,36 @@ const BrowseMentors = () => {
             className="mc-rise mx-auto mt-4 max-w-xl text-base text-slate-500 sm:text-lg"
             style={{ animationDelay: "120ms" }}
           >
-            Book 1:1 sessions with verified professionals from the world's leading companies.
+            Book 1:1 sessions with verified professionals from the world's
+            leading companies.
           </p>
 
-          {/* search */}
+          {/* CTA -> scrolls straight down to the company cards */}
           <div
-            className="mc-rise mx-auto mt-8 max-w-2xl"
+            className="mc-rise mt-7 flex flex-col items-center gap-3"
             style={{ animationDelay: "180ms" }}
           >
-            <label
-              htmlFor="company-search"
-              className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3.5 shadow-lg shadow-slate-200/60 transition focus-within:border-violet-400 focus-within:ring-4 focus-within:ring-violet-100"
+            <button
+              type="button"
+              onClick={goToCards}
+              className="group inline-flex items-center gap-2 rounded-full bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-200 transition hover:bg-blue-700 hover:shadow-xl active:scale-95"
             >
-              <Search size={20} className="shrink-0 text-slate-400" />
-              <input
-                id="company-search"
-                ref={searchRef}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search company or industry…"
-                autoComplete="off"
-                className="min-w-0 flex-1 bg-transparent text-base text-slate-800 outline-none placeholder:text-slate-400"
-              />
-              {search ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearch("");
-                    searchRef.current?.focus();
-                  }}
-                  aria-label="Clear search"
-                  className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                >
-                  <X size={16} />
-                </button>
-              ) : (
-                <kbd className="hidden rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-400 sm:block">
-                  /
-                </kbd>
-              )}
-            </label>
+              <Search size={16} />
+              Find your company
+              <ArrowDown size={16} className="mc-bounce" />
+            </button>
+            <p className="text-xs text-slate-400">
+              Search is just below · press{" "}
+              <kbd className="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-medium text-slate-500">
+                /
+              </kbd>{" "}
+              anytime
+            </p>
           </div>
 
           {/* live stats */}
           <div
-            className="mc-rise mx-auto mt-8 grid max-w-3xl grid-cols-2 gap-3 md:grid-cols-4"
+            className="mc-rise mx-auto mt-9 grid max-w-3xl grid-cols-2 gap-3 md:grid-cols-4"
             style={{ animationDelay: "240ms" }}
           >
             <StatPill
@@ -615,19 +765,252 @@ const BrowseMentors = () => {
       </section>
 
       {/* ======================================================
+          SEARCH CARD  (floats over the hero's bottom edge)
+      ====================================================== */}
+      <section
+        ref={searchSectionRef}
+        id="search"
+        className="relative z-20 mx-auto -mt-12 max-w-4xl scroll-mt-24 px-5 sm:px-8"
+      >
+        <div className="rounded-3xl border border-blue-100 bg-white p-4 shadow-2xl shadow-blue-100/80 sm:p-6">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-600 text-white">
+                <Search size={16} />
+              </span>
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900">
+                  Search companies
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Type a company name or industry
+                </p>
+              </div>
+            </div>
+            {!loading && !error && (
+              <span className="hidden items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 sm:inline-flex">
+                <Sparkles size={12} /> {totals.companies} companies ready
+              </span>
+            )}
+          </div>
+
+          {/* input + autocomplete */}
+          <div className="relative">
+            <label
+              htmlFor="company-search"
+              className={`flex items-center gap-3 rounded-2xl border bg-white px-4 py-3.5 transition ${
+                focused
+                  ? "border-blue-500 ring-4 ring-blue-100"
+                  : "border-slate-200 hover:border-blue-300"
+              }`}
+            >
+              <Search
+                size={20}
+                className={`shrink-0 transition ${focused ? "text-blue-600" : "text-slate-400"}`}
+              />
+              <input
+                id="company-search"
+                ref={searchRef}
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setActiveIdx(-1);
+                }}
+                onFocus={() => setFocused(true)}
+                onBlur={() => setFocused(false)}
+                onKeyDown={onSearchKeyDown}
+                placeholder="Search company or industry…  e.g. TCS, Infosys, Finance"
+                autoComplete="off"
+                role="combobox"
+                aria-expanded={showDropdown}
+                aria-controls="company-suggestions"
+                className="min-w-0 flex-1 bg-transparent text-base text-slate-800 outline-none placeholder:text-slate-400"
+              />
+              {search ? (
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    setSearch("");
+                    searchRef.current?.focus();
+                  }}
+                  aria-label="Clear search"
+                  className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                >
+                  <X size={16} />
+                </button>
+              ) : (
+                <kbd className="hidden rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-400 sm:block">
+                  /
+                </kbd>
+              )}
+            </label>
+
+            {showDropdown && (
+              <div
+                id="company-suggestions"
+                role="listbox"
+                onMouseDown={(e) => e.preventDefault()}
+                className="absolute left-0 right-0 top-full z-30 mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-200/80"
+              >
+                {suggestions.length > 0 ? (
+                  <>
+                    <p className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                      Companies
+                    </p>
+                    {suggestions.map((c, i) => (
+                      <button
+                        key={c.companyName}
+                        type="button"
+                        role="option"
+                        aria-selected={i === activeIdx}
+                        onMouseEnter={() => setActiveIdx(i)}
+                        onClick={() => pickSuggestion(c)}
+                        className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition ${
+                          i === activeIdx ? "bg-blue-50" : "hover:bg-slate-50"
+                        }`}
+                      >
+                        <Logo company={c} size="h-9 w-9" rounded="rounded-lg" small />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-semibold text-slate-900">
+                            <Highlight text={c.companyName} query={keyword} />
+                          </span>
+                          <span className="block truncate text-xs text-slate-500">
+                            {c.industry} · {c.mentorCount || 0}{" "}
+                            {(c.mentorCount || 0) === 1 ? "employee" : "employees"}
+                          </span>
+                        </span>
+                        {c.onlineCount > 0 && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                            {c.onlineCount} online
+                          </span>
+                        )}
+                        <ArrowRight size={15} className="text-slate-300" />
+                      </button>
+                    ))}
+                    <p className="border-t border-slate-100 bg-slate-50 px-4 py-2 text-[11px] text-slate-400">
+                      ↑ ↓ to move · Enter to open · Esc to close
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between px-4 pb-1 pt-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                        Recent searches
+                      </p>
+                      <button
+                        type="button"
+                        onClick={clearRecent}
+                        className="text-[11px] font-medium text-blue-600 hover:underline"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    {recent.map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => {
+                          setSearch(r);
+                          searchRef.current?.focus();
+                        }}
+                        className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                      >
+                        <Clock3 size={15} className="text-slate-400" />
+                        {r}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* quick picks */}
+          {popularCompanies.length > 0 && !keyword && (
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-400">
+                <TrendingUp size={13} /> Popular:
+              </span>
+              {popularCompanies.map((c) => (
+                <button
+                  key={c.companyName}
+                  type="button"
+                  onClick={() => {
+                    setSearch(c.companyName);
+                    saveRecent(c.companyName);
+                  }}
+                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 transition hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 active:scale-95"
+                >
+                  {c.companyName}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* category chips (part of the search card, so filters live with search) */}
+          <div
+            className="mc-no-scrollbar -mx-1 mt-4 flex gap-2 overflow-x-auto px-1 pb-1"
+            role="tablist"
+            aria-label="Company category"
+          >
+            {categories.map((item) => {
+              const active = activeCategory === item;
+              return (
+                <button
+                  key={item}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setActiveCategory(item)}
+                  className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition active:scale-95 ${
+                    active
+                      ? "border-blue-600 bg-blue-600 text-white shadow-md shadow-blue-200"
+                      : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700"
+                  }`}
+                >
+                  {item}
+                  {!loading && (
+                    <span
+                      className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
+                        active
+                          ? "bg-white/25 text-white"
+                          : "bg-slate-100 text-slate-500"
+                      }`}
+                    >
+                      {categoryCounts[item] ?? 0}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* ======================================================
           TRUSTED LOGOS (only companies that have a logo)
       ====================================================== */}
       {logoCompanies.length > 0 && (
-        <section className="border-b border-slate-100 bg-slate-50/50">
+        <section className="mt-10 border-y border-slate-100 bg-slate-50/60">
           <div className="mx-auto flex max-w-[1400px] items-center gap-6 overflow-x-auto px-5 py-4 mc-no-scrollbar sm:px-8">
             <span className="shrink-0 text-xs font-semibold uppercase tracking-wider text-slate-400">
               Employees from
             </span>
             <div className="flex items-center gap-5">
               {logoCompanies.slice(0, 10).map((company) => (
-                <div
+                <button
                   key={company.companyName}
-                  title={company.companyName}
+                  type="button"
+                  title={`Search ${company.companyName}`}
+                  onClick={() => {
+                    setSearch(company.companyName);
+                    resultsRef.current?.scrollIntoView({
+                      behavior: "smooth",
+                      block: "start",
+                    });
+                  }}
                   className="flex h-8 w-8 shrink-0 items-center justify-center opacity-60 grayscale transition duration-200 hover:scale-110 hover:opacity-100 hover:grayscale-0"
                 >
                   <img
@@ -635,7 +1018,7 @@ const BrowseMentors = () => {
                     alt={company.companyName}
                     className="max-h-full max-w-full object-contain"
                   />
-                </div>
+                </button>
               ))}
               {logoCompanies.length > 10 && (
                 <span className="shrink-0 text-xs font-medium text-slate-400">
@@ -650,45 +1033,12 @@ const BrowseMentors = () => {
       {/* ======================================================
           RESULTS
       ====================================================== */}
-      <main className="mx-auto max-w-[1400px] px-5 py-8 sm:px-8 sm:py-10">
-        {/* category chips */}
-        <div
-          className="mc-no-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1 pb-1"
-          role="tablist"
-          aria-label="Company category"
-        >
-          {categories.map((item) => {
-            const active = activeCategory === item;
-            return (
-              <button
-                key={item}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => setActiveCategory(item)}
-                className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition active:scale-95 ${
-                  active
-                    ? "border-violet-600 bg-violet-600 text-white shadow-md shadow-violet-200"
-                    : "border-slate-200 bg-white text-slate-600 hover:border-violet-300 hover:text-violet-700"
-                }`}
-              >
-                {item}
-                {!loading && (
-                  <span
-                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
-                      active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
-                    }`}
-                  >
-                    {categoryCounts[item] ?? 0}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-
+      <main
+        ref={resultsRef}
+        className="mx-auto max-w-[1400px] scroll-mt-24 px-5 py-8 sm:px-8 sm:py-10"
+      >
         {/* toolbar */}
-        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-slate-500" aria-live="polite">
             {loading ? (
               "Loading companies…"
@@ -713,7 +1063,7 @@ const BrowseMentors = () => {
               role="switch"
               aria-checked={onlineOnly}
               onClick={() => setOnlineOnly((v) => !v)}
-              className="inline-flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-violet-300"
+              className="inline-flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-blue-300"
             >
               <span
                 className={`relative h-5 w-9 rounded-full transition ${
@@ -727,9 +1077,14 @@ const BrowseMentors = () => {
                 />
               </span>
               Online now
+              {totals.online > 0 && (
+                <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold leading-none text-emerald-700">
+                  {totals.online}
+                </span>
+              )}
             </button>
 
-            <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-500 transition focus-within:border-violet-400 hover:border-violet-300">
+            <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-500 transition focus-within:border-blue-400 hover:border-blue-300">
               Sort
               <select
                 value={sort}
@@ -761,7 +1116,7 @@ const BrowseMentors = () => {
                   aria-pressed={view === id}
                   className={`rounded-lg p-1.5 transition ${
                     view === id
-                      ? "bg-violet-50 text-violet-700"
+                      ? "bg-blue-50 text-blue-700"
                       : "text-slate-400 hover:text-slate-700"
                   }`}
                 >
@@ -780,7 +1135,7 @@ const BrowseMentors = () => {
                 key={f.key}
                 type="button"
                 onClick={f.clear}
-                className="group inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700 transition hover:bg-violet-100"
+                className="group inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 transition hover:bg-blue-100"
               >
                 {f.label}
                 <X size={12} className="opacity-60 transition group-hover:opacity-100" />
@@ -821,14 +1176,14 @@ const BrowseMentors = () => {
               <button
                 type="button"
                 onClick={() => fetchCompanies()}
-                className="mt-6 inline-flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-violet-200 transition hover:bg-violet-700 active:scale-95"
+                className="mt-6 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-blue-200 transition hover:bg-blue-700 active:scale-95"
               >
                 <RotateCcw size={15} /> Try again
               </button>
             </div>
           ) : filteredCompanies.length === 0 ? (
             <div className="mx-auto max-w-md rounded-3xl border border-dashed border-slate-300 px-8 py-14 text-center">
-              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-blue-500">
                 <Building2 size={28} />
               </div>
               <h2 className="mt-5 text-xl font-semibold">No companies found</h2>
@@ -838,7 +1193,7 @@ const BrowseMentors = () => {
               <button
                 type="button"
                 onClick={clearAll}
-                className="mt-6 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-violet-200 transition hover:bg-violet-700 active:scale-95"
+                className="mt-6 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-blue-200 transition hover:bg-blue-700 active:scale-95"
               >
                 Clear filters
               </button>
@@ -846,13 +1201,23 @@ const BrowseMentors = () => {
           ) : view === "grid" ? (
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {filteredCompanies.map((company, index) => (
-                <CompanyCard key={company.companyName} company={company} index={index} />
+                <CompanyCard
+                  key={company.companyName}
+                  company={company}
+                  index={index}
+                  query={keyword}
+                />
               ))}
             </div>
           ) : (
             <div className="space-y-3">
               {filteredCompanies.map((company, index) => (
-                <CompanyRow key={company.companyName} company={company} index={index} />
+                <CompanyRow
+                  key={company.companyName}
+                  company={company}
+                  index={index}
+                  query={keyword}
+                />
               ))}
             </div>
           )}
@@ -860,10 +1225,36 @@ const BrowseMentors = () => {
       </main>
 
       {/* ======================================================
+          HOW IT WORKS
+      ====================================================== */}
+      <section className="mx-auto max-w-[1400px] px-5 pb-10 sm:px-8">
+        <div className="grid gap-4 md:grid-cols-3">
+          <Step
+            n="1"
+            icon={<MousePointerClick size={20} />}
+            title="Pick a company"
+            desc="Search or browse and open the company you want to learn from."
+          />
+          <Step
+            n="2"
+            icon={<CalendarCheck2 size={20} />}
+            title="Choose your time"
+            desc="Select a slot, pay securely, and your request goes to matching employees."
+          />
+          <Step
+            n="3"
+            icon={<BadgeCheck size={20} />}
+            title="Get matched & meet"
+            desc="Once an employee accepts, join the live session. Not accepted? You get a wallet refund."
+          />
+        </div>
+      </section>
+
+      {/* ======================================================
           TRUST FEATURES
       ====================================================== */}
-      <section className="mx-auto max-w-[1400px] px-5 pb-14 sm:px-8">
-        <div className="grid gap-4 rounded-3xl border border-slate-200 bg-gradient-to-br from-violet-50/60 via-white to-sky-50/60 p-5 sm:grid-cols-2 sm:p-6 lg:grid-cols-4">
+      <section className="mx-auto max-w-[1400px] px-5 pb-16 sm:px-8">
+        <div className="grid gap-4 rounded-3xl border border-blue-100 bg-gradient-to-br from-blue-50/70 via-white to-sky-50/70 p-5 sm:grid-cols-2 sm:p-6 lg:grid-cols-4">
           <Feature
             icon={<Award size={20} />}
             title="Learn from the top 1%"
@@ -886,6 +1277,20 @@ const BrowseMentors = () => {
           />
         </div>
       </section>
+
+      {/* floating "Search" button (appears after you scroll past the search card) */}
+      <button
+        type="button"
+        onClick={goToSearch}
+        aria-label="Go to search"
+        className={`fixed bottom-6 right-6 z-40 inline-flex items-center gap-2 rounded-full bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-xl shadow-blue-300/60 transition-all duration-300 hover:bg-blue-700 active:scale-95 ${
+          showFab
+            ? "translate-y-0 opacity-100"
+            : "pointer-events-none translate-y-6 opacity-0"
+        }`}
+      >
+        <Search size={16} /> Search
+      </button>
     </div>
   );
 };
@@ -894,9 +1299,33 @@ const BrowseMentors = () => {
 // SMALL PIECES
 // ============================================================
 
+// bold the part of the text that matches what the user typed
+const Highlight = ({ text = "", query = "" }) => {
+  const q = query.trim();
+  if (!q) return <>{text}</>;
+
+  const parts = String(text).split(new RegExp(`(${escapeRegExp(q)})`, "ig"));
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.toLowerCase() === q.toLowerCase() ? (
+          <mark
+            key={i}
+            className="rounded bg-blue-100 px-0.5 font-semibold text-blue-800"
+          >
+            {part}
+          </mark>
+        ) : (
+          <React.Fragment key={i}>{part}</React.Fragment>
+        )
+      )}
+    </>
+  );
+};
+
 const StatPill = ({ icon, value, label }) => (
-  <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3.5 text-left shadow-sm backdrop-blur transition hover:-translate-y-0.5 hover:shadow-md">
-    <div className="flex h-5 items-center text-violet-600">{icon}</div>
+  <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3.5 text-left shadow-sm backdrop-blur transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md">
+    <div className="flex h-5 items-center text-blue-600">{icon}</div>
     <p className="mt-2 text-2xl font-semibold tracking-tight tabular-nums text-slate-900">
       {value}
     </p>
@@ -906,7 +1335,7 @@ const StatPill = ({ icon, value, label }) => (
 
 const Feature = ({ icon, title, desc }) => (
   <div className="flex items-center gap-4 rounded-2xl p-3 transition hover:bg-white">
-    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
+    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-700">
       {icon}
     </div>
     <div className="min-w-0">
@@ -916,23 +1345,47 @@ const Feature = ({ icon, title, desc }) => (
   </div>
 );
 
-const Logo = ({ company, size = "h-14 w-14", rounded = "rounded-2xl" }) => {
+const Step = ({ n, icon, title, desc }) => (
+  <div className="group relative rounded-2xl border border-slate-200 bg-white p-5 transition hover:-translate-y-1 hover:border-blue-300 hover:shadow-lg hover:shadow-blue-100">
+    <span className="absolute right-4 top-3 text-4xl font-black text-blue-50 transition group-hover:text-blue-100">
+      {n}
+    </span>
+    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md shadow-blue-200">
+      {icon}
+    </div>
+    <h4 className="mt-4 text-sm font-semibold text-slate-900">{title}</h4>
+    <p className="mt-1 text-xs leading-5 text-slate-500">{desc}</p>
+  </div>
+);
+
+const Logo = ({
+  company,
+  size = "h-14 w-14",
+  rounded = "rounded-2xl",
+  small = false,
+}) => {
   const [failed, setFailed] = useState(false);
   const name = company.companyName || "";
 
   return (
     <div
-      className={`flex ${size} shrink-0 items-center justify-center overflow-hidden ${rounded} border border-slate-200 bg-white shadow-md`}
+      className={`flex ${size} shrink-0 items-center justify-center overflow-hidden ${rounded} border border-slate-200 bg-white ${
+        small ? "" : "shadow-md"
+      }`}
     >
       {company.logo && !failed ? (
         <img
           src={company.logo}
           alt={`${name} logo`}
-          className="h-full w-full object-contain p-2"
+          className={`h-full w-full object-contain ${small ? "p-1" : "p-2"}`}
           onError={() => setFailed(true)}
         />
       ) : (
-        <span className="text-base font-bold text-violet-600">{initialsOf(name)}</span>
+        <span
+          className={`font-bold text-blue-600 ${small ? "text-xs" : "text-base"}`}
+        >
+          {initialsOf(name)}
+        </span>
       )}
     </div>
   );
@@ -965,30 +1418,51 @@ const CoverImage = ({ company }) => {
   );
 };
 
+const isMentorOnline = (m = {}) =>
+  m.isOnline === true || m.online === true || m.status === "online";
+
 const MiniAvatar = ({ mentor }) => {
   const [failed, setFailed] = useState(false);
   const photo = mentorPhoto(mentor);
   const name = mentor.name || mentor.fullName || "";
+  const online = isMentorOnline(mentor);
 
-  return photo && !failed ? (
-    <img
-      src={photo}
-      alt={name || "Employee"}
-      onError={() => setFailed(true)}
-      className="h-8 w-8 rounded-full border-2 border-white object-cover"
-    />
-  ) : (
+  return (
     <span
-      className={`flex h-8 w-8 items-center justify-center rounded-full border-2 border-white text-[11px] font-semibold ${AVATAR_COLORS[hashIndex(name)]}`}
+      className="relative inline-flex"
+      title={`${name || "Employee"}${online ? " · online" : " · offline"}`}
     >
-      {initialsOf(name)}
+      {photo && !failed ? (
+        <img
+          src={photo}
+          alt={name || "Employee"}
+          onError={() => setFailed(true)}
+          className="h-8 w-8 rounded-full border-2 border-white object-cover"
+        />
+      ) : (
+        <span
+          className={`flex h-8 w-8 items-center justify-center rounded-full border-2 border-white text-[11px] font-semibold ${AVATAR_COLORS[hashIndex(name)]}`}
+        >
+          {initialsOf(name)}
+        </span>
+      )}
+      {/* green dot = this employee is online right now */}
+      {online && (
+        <span className="absolute -bottom-0.5 -right-0.5 flex h-3 w-3">
+          <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-70 motion-safe:animate-ping" />
+          <span className="relative inline-flex h-3 w-3 rounded-full border-2 border-white bg-emerald-500" />
+        </span>
+      )}
     </span>
   );
 };
 
-// real employees only; no placeholder faces
+// real employees only; online ones come first so you SEE who is available
 const AvatarStack = ({ mentors = [], total = 0, max = 4 }) => {
-  const shown = mentors.slice(0, max);
+  const sorted = [...mentors].sort(
+    (a, b) => Number(isMentorOnline(b)) - Number(isMentorOnline(a))
+  );
+  const shown = sorted.slice(0, max);
   const extra = Math.max(total - shown.length, 0);
 
   if (!shown.length && !total) {
@@ -1009,18 +1483,19 @@ const AvatarStack = ({ mentors = [], total = 0, max = 4 }) => {
   );
 };
 
+// Solid badges so they are readable on top of ANY cover photo
 const OnlineBadge = ({ count }) =>
   count > 0 ? (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-100">
-      <span className="relative flex h-1.5 w-1.5">
-        <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 motion-safe:animate-ping" />
-        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500 px-3 py-1 text-xs font-bold text-white shadow-lg shadow-emerald-500/40 ring-2 ring-white/80">
+      <span className="relative flex h-2 w-2">
+        <span className="absolute inline-flex h-full w-full rounded-full bg-white opacity-70 motion-safe:animate-ping" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
       </span>
       {count} online
     </span>
   ) : (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-500">
-      <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-900/65 px-3 py-1 text-xs font-semibold text-white ring-1 ring-white/30 backdrop-blur">
+      <span className="h-2 w-2 rounded-full bg-slate-300" />
       Offline
     </span>
   );
@@ -1040,7 +1515,7 @@ const RatingText = ({ company }) => {
       ) : null}
     </span>
   ) : (
-    <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">
+    <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
       New
     </span>
   );
@@ -1050,14 +1525,14 @@ const RatingText = ({ company }) => {
 // GRID CARD
 // ============================================================
 
-const CompanyCard = ({ company, index }) => {
+const CompanyCard = ({ company, index, query }) => {
   const name = company.companyName || "";
 
   return (
     <Link
       to={sessionLink(company)}
       aria-label={`Book a session with ${name}`}
-      className="mc-rise group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:border-violet-300 hover:shadow-xl hover:shadow-violet-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2"
+      className="mc-rise group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition duration-300 hover:-translate-y-1.5 hover:border-blue-300 hover:shadow-xl hover:shadow-blue-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
       style={{ animationDelay: `${Math.min(index, 12) * 40}ms` }}
     >
       <div className="relative h-32 overflow-hidden bg-slate-100">
@@ -1075,8 +1550,12 @@ const CompanyCard = ({ company, index }) => {
 
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="truncate text-base font-semibold text-slate-900">{name}</h3>
-            <p className="mt-0.5 truncate text-xs text-slate-500">{company.industry}</p>
+            <h3 className="truncate text-base font-semibold text-slate-900">
+              <Highlight text={name} query={query} />
+            </h3>
+            <p className="mt-0.5 truncate text-xs text-slate-500">
+              <Highlight text={company.industry || ""} query={query} />
+            </p>
           </div>
           <RatingText company={company} />
         </div>
@@ -1093,8 +1572,8 @@ const CompanyCard = ({ company, index }) => {
 
         <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4">
           <AvatarStack mentors={company.mentors} total={company.mentorCount || 0} />
-          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-violet-700">
-            View
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700 transition group-hover:bg-blue-600 group-hover:text-white">
+            Book
             <ArrowRight
               size={16}
               className="transition-transform group-hover:translate-x-1"
@@ -1110,21 +1589,25 @@ const CompanyCard = ({ company, index }) => {
 // LIST ROW
 // ============================================================
 
-const CompanyRow = ({ company, index }) => {
+const CompanyRow = ({ company, index, query }) => {
   const name = company.companyName || "";
 
   return (
     <Link
       to={sessionLink(company)}
       aria-label={`Book a session with ${name}`}
-      className="mc-rise group flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition duration-200 hover:border-violet-300 hover:shadow-lg hover:shadow-violet-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 sm:flex-row sm:items-center"
+      className="mc-rise group flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition duration-200 hover:border-blue-300 hover:shadow-lg hover:shadow-blue-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 sm:flex-row sm:items-center"
       style={{ animationDelay: `${Math.min(index, 12) * 30}ms` }}
     >
       <Logo company={company} size="h-14 w-14" rounded="rounded-xl" />
 
       <div className="min-w-0 flex-1">
-        <h3 className="truncate text-base font-semibold text-slate-900">{name}</h3>
-        <p className="mt-0.5 truncate text-xs text-slate-500">{company.industry}</p>
+        <h3 className="truncate text-base font-semibold text-slate-900">
+          <Highlight text={name} query={query} />
+        </h3>
+        <p className="mt-0.5 truncate text-xs text-slate-500">
+          <Highlight text={company.industry || ""} query={query} />
+        </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
@@ -1144,8 +1627,8 @@ const CompanyRow = ({ company, index }) => {
         />
       </div>
 
-      <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-violet-700 sm:ml-2">
-        View
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700 transition group-hover:bg-blue-600 group-hover:text-white sm:ml-2">
+        Book
         <ArrowRight
           size={16}
           className="transition-transform group-hover:translate-x-1"

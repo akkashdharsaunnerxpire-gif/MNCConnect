@@ -37,6 +37,7 @@ import WelcomeBonus from "../pages/Welcomebonus";
 import ReferralBonus from "../pages/ReferralBonus";
 
 /* ------------------------------------------------------------------
+   THEME: blue + white (same as Home / My Bookings).
    Edit these two lists to add / remove menu items.
    Every `path` must exist in your router.
    (Alerts removed: the bell in the header replaces it.)
@@ -57,17 +58,18 @@ const MENU_ITEMS = [
   { path: "/Home/my-bookings", label: "Session history", icon: Clock3 },
 ];
 
-const OPEN_BEFORE_MS = 5 * 60 * 1000; // meeting room opens 5 minutes early (same as the server)
+// meeting room opens 2 minutes early (same as the server + My Bookings page)
+const OPEN_BEFORE_MS = 2 * 60 * 1000;
 const TOAST_MS = 6000;
 
 const TYPE_STYLE = {
-  session: { icon: Video, cls: "bg-indigo-50 text-indigo-600" },
+  session: { icon: Video, cls: "bg-blue-50 text-blue-600" },
   payment: { icon: IndianRupee, cls: "bg-emerald-50 text-emerald-600" },
   review: { icon: Star, cls: "bg-amber-50 text-amber-600" },
   success: { icon: CalendarDays, cls: "bg-emerald-50 text-emerald-600" },
 };
 const styleFor = (type) =>
-  TYPE_STYLE[type] || { icon: Bell, cls: "bg-indigo-50 text-indigo-600" };
+  TYPE_STYLE[type] || { icon: Bell, cls: "bg-blue-50 text-blue-600" };
 
 /* ------------------------------------------------------------------
    AVATAR (same logic as the Profile page)
@@ -151,13 +153,13 @@ const countdown = (ms) => {
   return `${pad(m)}:${pad(sec)}`;
 };
 
-const Badge = ({ count, tone = "indigo" }) =>
+const Badge = ({ count, tone = "blue" }) =>
   count > 0 ? (
     <span
       className={`flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold leading-none text-white shadow-md ring-1 ring-white ${
         tone === "amber"
           ? "bg-amber-500"
-          : "bg-gradient-to-br from-purple-500 to-indigo-600"
+          : "bg-gradient-to-br from-blue-500 to-blue-700"
       }`}
     >
       {count > 9 ? "9+" : count}
@@ -258,9 +260,9 @@ const Header = () => {
     walletCtl.start({
       scale: [1, 1.25, 0.96, 1],
       boxShadow: [
-        "0 0 0 0 rgba(99,102,241,0)",
-        "0 0 0 10px rgba(99,102,241,.35)",
-        "0 0 0 0 rgba(99,102,241,0)",
+        "0 0 0 0 rgba(37,99,235,0)",
+        "0 0 0 10px rgba(37,99,235,.35)",
+        "0 0 0 0 rgba(37,99,235,0)",
       ],
       transition: { duration: 0.7 },
     });
@@ -338,7 +340,7 @@ const Header = () => {
     return () => window.removeEventListener(NOTIFICATIONS_CHANGED, reload);
   }, [reload]);
 
-  // 5-minute alert pushed by the server
+  // session reminder alert pushed by the server
   useUserEvents(userId, {
     [EVENTS.reminder]: (p) => {
       setDismissedId(null);
@@ -491,8 +493,8 @@ const Header = () => {
   const navCls = (item) =>
     `relative flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${
       isActive(item)
-        ? "bg-indigo-50 text-indigo-700"
-        : "text-slate-600 hover:bg-slate-50 hover:text-indigo-600"
+        ? "bg-blue-50 text-blue-700"
+        : "text-slate-600 hover:bg-slate-50 hover:text-blue-600"
     }`;
 
   const badgeFor = (key) =>
@@ -530,7 +532,7 @@ const Header = () => {
           type="button"
           onClick={() => go("/Home/my-bookings")}
           title="Your next session"
-          className={`${base} items-center gap-2 rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100`}
+          className={`${base} items-center gap-2 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-100`}
         >
           <Clock3 size={14} />
           Next session in{" "}
@@ -585,12 +587,12 @@ const Header = () => {
               setShowNotifications(false);
             }}
           >
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-600 to-purple-600 shadow-lg shadow-indigo-200">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-sky-500 shadow-lg shadow-blue-200">
               <GraduationCap size={22} className="text-white" />
             </div>
             <div className="hidden sm:block">
               <h1 className="text-lg font-extrabold tracking-tight text-slate-900">
-                MNC<span className="text-indigo-600">Connect</span>
+                MNC<span className="text-blue-600">Connect</span>
               </h1>
               <p className="text-[10px] font-medium text-slate-500">
                 Fresher Community
@@ -613,7 +615,7 @@ const Header = () => {
                   {item.badge && (
                     <Badge
                       count={badgeFor(item.badge)}
-                      tone={item.badge === "upcoming" ? "amber" : "indigo"}
+                      tone={item.badge === "upcoming" ? "amber" : "blue"}
                     />
                   )}
                 </Link>
@@ -624,6 +626,7 @@ const Header = () => {
           <div className="hidden items-center gap-2 lg:flex">
             {renderSessionChip()}
 
+            {/* live connection: now a labelled pill, so it is clear what the dot means */}
             {connected !== undefined && (
               <span
                 title={
@@ -631,16 +634,21 @@ const Header = () => {
                     ? "Live updates connected"
                     : "Reconnecting to live updates…"
                 }
-                className="flex h-10 items-center px-1"
+                className={`flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-bold ${
+                  connected
+                    ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+                    : "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+                }`}
               >
-                <span className="relative flex h-2.5 w-2.5">
+                <span className="relative flex h-2 w-2">
                   {connected && (
                     <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 motion-safe:animate-ping" />
                   )}
                   <span
-                    className={`relative inline-flex h-2.5 w-2.5 rounded-full ${connected ? "bg-emerald-500" : "bg-amber-500"}`}
+                    className={`relative inline-flex h-2 w-2 rounded-full ${connected ? "bg-emerald-500" : "bg-amber-500"}`}
                   />
                 </span>
+                {connected ? "Live" : "Reconnecting"}
               </span>
             )}
 
@@ -651,8 +659,8 @@ const Header = () => {
               aria-label={`Notifications, ${unreadCount} unread`}
               className={`relative flex h-10 w-10 items-center justify-center rounded-xl transition ${
                 bellActive
-                  ? "bg-indigo-50 text-indigo-700"
-                  : "text-slate-600 hover:bg-slate-100 hover:text-indigo-600"
+                  ? "bg-blue-50 text-blue-700"
+                  : "text-slate-600 hover:bg-slate-100 hover:text-blue-600"
               }`}
             >
               <motion.span
@@ -675,10 +683,10 @@ const Header = () => {
               animate={walletCtl}
               type="button"
               onClick={() => go("/Home/bonus-wallet")}
-              className="flex items-center gap-2 rounded-xl bg-indigo-50 px-3 py-2 transition hover:bg-indigo-100"
+              className="flex items-center gap-2 rounded-xl bg-blue-50 px-3 py-2 transition hover:bg-blue-100"
             >
-              <Wallet size={18} className="text-indigo-600" />
-              <span className="font-bold text-indigo-700">
+              <Wallet size={18} className="text-blue-600" />
+              <span className="font-bold text-blue-700">
                 {me ? (
                   <CountUp value={balance} instant={hold !== null} />
                 ) : (
@@ -695,9 +703,9 @@ const Header = () => {
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
                 aria-label="Profile menu"
-                className="flex items-center gap-1.5 rounded-full border-2 border-indigo-100 bg-slate-100 py-0.5 pl-0.5 pr-2 transition hover:border-indigo-300"
+                className="flex items-center gap-1.5 rounded-full border-2 border-blue-100 bg-slate-100 py-0.5 pl-0.5 pr-2 transition hover:border-blue-300"
               >
-                <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-white text-sm font-bold text-indigo-700">
+                <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-white text-sm font-bold text-blue-700">
                   <Avatar src={avatarSrc} initial={initial} />
                 </span>
                 <ChevronDown
@@ -717,7 +725,7 @@ const Header = () => {
                     className="absolute right-0 mt-2 w-64 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl"
                   >
                     <div className="flex items-center gap-3 border-b border-slate-100 px-4 py-3">
-                      <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-indigo-50 text-base font-bold text-indigo-700 ring-2 ring-indigo-100">
+                      <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-blue-50 text-base font-bold text-blue-700 ring-2 ring-blue-100">
                         <Avatar
                           src={avatarSrc}
                           initial={initial}
@@ -740,7 +748,7 @@ const Header = () => {
                           type="button"
                           role="menuitem"
                           onClick={() => go(path)}
-                          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-700 transition hover:bg-indigo-50 hover:text-indigo-700"
+                          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-700 transition hover:bg-blue-50 hover:text-blue-700"
                         >
                           <Icon size={17} />
                           {label}
@@ -761,7 +769,7 @@ const Header = () => {
               aria-label={`Notifications, ${unreadCount} unread`}
               className={`relative flex h-10 w-10 items-center justify-center rounded-xl ${
                 bellActive
-                  ? "bg-indigo-50 text-indigo-700"
+                  ? "bg-blue-50 text-blue-700"
                   : "text-slate-600 hover:bg-slate-100"
               }`}
             >
@@ -784,7 +792,7 @@ const Header = () => {
               type="button"
               onClick={() => go("/Home/profile")}
               aria-label="My profile"
-              className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border-2 border-indigo-100 bg-white text-sm font-bold text-indigo-700"
+              className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border-2 border-blue-100 bg-white text-sm font-bold text-blue-700"
             >
               <Avatar src={avatarSrc} initial={initial} />
             </button>
@@ -817,7 +825,7 @@ const Header = () => {
                   <Video size={16} />
                   {bannerMs !== null && bannerMs <= 0
                     ? "Your session is live. The meeting room is open."
-                    : `Your session starts in ${bannerMs !== null ? countdown(bannerMs) : "5 minutes"}. The meeting room is open.`}
+                    : `Your session starts in ${bannerMs !== null ? countdown(bannerMs) : "2 minutes"}. The meeting room is open.`}
                 </span>
                 <span className="flex items-center gap-2">
                   <button
@@ -856,7 +864,7 @@ const Header = () => {
                   onClick={() => go("/Home/profile")}
                   className="mb-2 flex w-full items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-left"
                 >
-                  <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-indigo-50 text-lg font-bold text-indigo-700 ring-2 ring-indigo-100">
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-blue-50 text-lg font-bold text-blue-700 ring-2 ring-blue-100">
                     <Avatar src={avatarSrc} initial={initial} iconSize={22} />
                   </span>
                   <span className="min-w-0 flex-1">
@@ -880,13 +888,13 @@ const Header = () => {
                       key={item.path}
                       type="button"
                       onClick={() => go(item.path)}
-                      className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-semibold transition ${isActive(item) ? "bg-indigo-50 text-indigo-700" : "text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"}`}
+                      className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-semibold transition ${isActive(item) ? "bg-blue-50 text-blue-700" : "text-slate-700 hover:bg-blue-50 hover:text-blue-700"}`}
                     >
                       <Icon size={19} />
                       <span className="flex-1">{item.label}</span>
                       <Badge
                         count={count}
-                        tone={item.badge === "upcoming" ? "amber" : "indigo"}
+                        tone={item.badge === "upcoming" ? "amber" : "blue"}
                       />
                     </button>
                   );
@@ -901,7 +909,7 @@ const Header = () => {
                     key={label}
                     type="button"
                     onClick={() => go(path)}
-                    className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-semibold text-slate-700 transition hover:bg-indigo-50 hover:text-indigo-700"
+                    className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-semibold text-slate-700 transition hover:bg-blue-50 hover:text-blue-700"
                   >
                     <Icon size={19} />
                     {label}
@@ -911,13 +919,13 @@ const Header = () => {
                 <button
                   type="button"
                   onClick={() => go("/Home/bonus-wallet")}
-                  className="flex w-full items-center justify-between rounded-xl bg-indigo-50 px-4 py-3 text-left"
+                  className="flex w-full items-center justify-between rounded-xl bg-blue-50 px-4 py-3 text-left"
                 >
-                  <span className="flex items-center gap-3 font-semibold text-indigo-700">
+                  <span className="flex items-center gap-3 font-semibold text-blue-700">
                     <Wallet size={19} />
                     Bonus Wallet
                   </span>
-                  <span className="font-bold text-indigo-700">₹{balance}</span>
+                  <span className="font-bold text-blue-700">₹{balance}</span>
                 </button>
               </div>
             </motion.div>
@@ -942,7 +950,7 @@ const Header = () => {
                 animate={{ opacity: 1, x: 0, scale: 1 }}
                 exit={{ opacity: 0, x: 40 }}
                 onClick={() => openNotification(n)}
-                className="pointer-events-auto flex w-full gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 text-left shadow-xl transition hover:border-indigo-200"
+                className="pointer-events-auto flex w-full gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 text-left shadow-xl transition hover:border-blue-200"
               >
                 <span
                   className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${cls}`}
@@ -1025,7 +1033,7 @@ const Header = () => {
                     <button
                       type="button"
                       onClick={markAllRead}
-                      className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-indigo-600 transition hover:bg-indigo-50"
+                      className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-blue-600 transition hover:bg-blue-50"
                     >
                       <CheckCheck size={15} /> Mark all read
                     </button>
@@ -1058,7 +1066,7 @@ const Header = () => {
                     role="tab"
                     aria-selected={filter === t.id}
                     onClick={() => setFilter(t.id)}
-                    className={`rounded-full px-3 py-1 text-xs font-semibold transition ${filter === t.id ? "bg-indigo-600 text-white" : "text-slate-500 hover:bg-slate-100"}`}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold transition ${filter === t.id ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-100"}`}
                   >
                     {t.label}
                   </button>
@@ -1080,7 +1088,7 @@ const Header = () => {
                         key={n.id}
                         type="button"
                         onClick={() => openNotification(n)}
-                        className={`flex w-full gap-3 border-b border-slate-100 px-4 py-3 text-left transition hover:bg-slate-50 ${n.read ? "bg-white" : "bg-indigo-50/30"}`}
+                        className={`flex w-full gap-3 border-b border-slate-100 px-4 py-3 text-left transition hover:bg-slate-50 ${n.read ? "bg-white" : "bg-blue-50/40"}`}
                       >
                         <div
                           className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${cls}`}
@@ -1093,7 +1101,7 @@ const Header = () => {
                               {n.title}
                             </h3>
                             {!n.read && (
-                              <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-indigo-600" />
+                              <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-blue-600" />
                             )}
                           </div>
                           <p className="mt-1 text-xs leading-5 text-slate-500">
@@ -1116,7 +1124,7 @@ const Header = () => {
                 <button
                   type="button"
                   onClick={() => go("/Home/notifications")}
-                  className="flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-800"
+                  className="flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800"
                 >
                   Read all <ChevronRight size={15} />
                 </button>
