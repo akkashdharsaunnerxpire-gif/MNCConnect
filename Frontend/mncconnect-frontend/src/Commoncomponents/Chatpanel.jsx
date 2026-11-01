@@ -14,6 +14,7 @@ import {
   CheckCheck,
   Loader2,
   MessageSquare,
+  Reply,
   Send,
   Smile,
   X,
@@ -121,22 +122,63 @@ const initialsOf = (title = "") => {
   ).toUpperCase();
 };
 
+/**
+ * One chat bubble.
+ *  - tap / click the bubble  -> reply to it (WhatsApp style)
+ *  - hover reply icon (desktop) does the same
+ *  - tap the quoted part     -> jump to the original message
+ * Selecting text (to copy) does NOT trigger reply.
+ */
 const MessageRow = memo(function MessageRow({
   m,
   mine,
   firstInGroup,
   lastInGroup,
+  myRole,
+  peerName,
+  highlight,
+  onReply,
+  onJump,
 }) {
   const big = isEmojiOnly(m.text);
 
+  const handleReply = () => {
+    const sel = typeof window !== "undefined" ? window.getSelection?.() : null;
+    if (sel && String(sel).trim()) return; // user is selecting text to copy
+    onReply(m);
+  };
+
+  const replyBtn = (
+    <button
+      type="button"
+      onClick={() => onReply(m)}
+      aria-label="Reply"
+      className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-500 opacity-0 transition hover:bg-white/80 group-hover/row:opacity-100 focus:opacity-100 sm:flex"
+    >
+      <Reply size={16} />
+    </button>
+  );
+
+  const quoteMine = m.replyTo?.senderRole === myRole;
+
   return (
     <div
-      className={`flex w-full ${mine ? "justify-end" : "justify-start"} ${
-        firstInGroup ? "mt-3" : "mt-0.5"
+      data-mid={String(m._id)}
+      className={`group/row flex w-full items-center gap-1 rounded-lg transition-colors duration-500 ${
+        mine ? "justify-end" : "justify-start"
+      } ${firstInGroup ? "mt-3" : "mt-0.5"} ${
+        highlight ? "bg-sky-300/40" : ""
       }`}
     >
+      {mine && replyBtn}
+
       <div
-        className={`max-w-[80%] px-3 py-1.5 text-sm text-slate-900 shadow-sm ${
+        onClick={handleReply}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => e.key === "Enter" && handleReply()}
+        title="Tap to reply"
+        className={`max-w-[80%] cursor-pointer select-text px-3 py-1.5 text-sm text-slate-900 shadow-sm ${
           mine
             ? `bg-[#d9fdd3] ${
                 lastInGroup ? "rounded-2xl rounded-tr-md" : "rounded-2xl"
@@ -146,6 +188,30 @@ const MessageRow = memo(function MessageRow({
               }`
         }`}
       >
+        {m.replyTo && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onJump(m.replyTo.messageId);
+            }}
+            className={`mb-1 block w-full rounded-lg border-l-4 px-2.5 py-1.5 text-left ${
+              mine ? "bg-black/5" : "bg-slate-100"
+            } ${quoteMine ? "border-emerald-500" : "border-blue-500"}`}
+          >
+            <span
+              className={`block text-[11px] font-semibold ${
+                quoteMine ? "text-emerald-700" : "text-blue-600"
+              }`}
+            >
+              {quoteMine ? "You" : peerName}
+            </span>
+            <span className="line-clamp-2 block break-words text-xs text-slate-600">
+              {m.replyTo.text}
+            </span>
+          </button>
+        )}
+
         <p
           className={`whitespace-pre-wrap break-words ${
             big ? "text-4xl leading-tight" : "leading-relaxed"
@@ -160,6 +226,8 @@ const MessageRow = memo(function MessageRow({
           {mine && <Ticks message={m} />}
         </div>
       </div>
+
+      {!mine && replyBtn}
     </div>
   );
 });
@@ -192,6 +260,7 @@ export default function ChatPanel({
   onIncoming,
 }) {
   const peerRole = role === "mentor" ? "fresher" : "mentor";
+  const peerName = title.replace(/^chat with\s+/i, "").trim() || "Contact";
 
   // mentor and fresher are different roles, so the sender role tells who sent it
   const isMine = useCallback((m) => m.senderRole === role, [role]);
@@ -212,6 +281,11 @@ export default function ChatPanel({
   const [showEmoji, setShowEmoji] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+
+  // reply state
+  const [replyTo, setReplyTo] = useState(null); // the message being replied to
+  const [highlightId, setHighlightId] = useState(null);
+  const highlightTimer = useRef(null);
 
   const scrollRef = useRef(null);
   const textareaRef = useRef(null);
@@ -240,6 +314,26 @@ export default function ChatPanel({
       prev.some((p) => String(p._id) === String(m._id)) ? prev : [...prev, m],
     );
   }, []);
+
+  /* ---------------- reply helpers ---------------- */
+  const startReply = useCallback((m) => {
+    setReplyTo(m);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, []);
+
+  const cancelReply = useCallback(() => setReplyTo(null), []);
+
+  // scroll to the original message and flash it
+  const jumpTo = useCallback((id) => {
+    const el = scrollRef.current?.querySelector(`[data-mid="${id}"]`);
+    if (!el) return; // original is older than what is loaded
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    setHighlightId(String(id));
+    clearTimeout(highlightTimer.current);
+    highlightTimer.current = setTimeout(() => setHighlightId(null), 1600);
+  }, []);
+
+  useEffect(() => () => clearTimeout(highlightTimer.current), []);
 
   /* ---------------- unlock audio on first user interaction ---------------- */
   useEffect(() => {
@@ -271,6 +365,7 @@ export default function ChatPanel({
     setLoading(true);
     setHasMore(false);
     setMessages([]);
+    setReplyTo(null);
     setErr("");
     initialScrollDone.current = false;
     stickToBottom.current = true;
@@ -610,23 +705,28 @@ export default function ChatPanel({
     setErr("");
     setShowEmoji(false);
 
-    socket.emit("chat:send", { bookingId, text: t }, (res) => {
-      sendingRef.current = false;
-      setSending(false);
+    socket.emit(
+      "chat:send",
+      { bookingId, text: t, replyToId: replyTo?._id || null },
+      (res) => {
+        sendingRef.current = false;
+        setSending(false);
 
-      if (res?.ok) {
-        playSendSound();
-        forceScroll.current = true;
-        setText("");
-        if (res.message) addMessage(res.message);
-        requestAnimationFrame(() => {
-          if (textareaRef.current) textareaRef.current.style.height = "auto";
-          textareaRef.current?.focus();
-        });
-      } else {
-        setErr(res?.message || "Could not send. Try again.");
-      }
-    });
+        if (res?.ok) {
+          playSendSound();
+          forceScroll.current = true;
+          setText("");
+          setReplyTo(null);
+          if (res.message) addMessage(res.message);
+          requestAnimationFrame(() => {
+            if (textareaRef.current) textareaRef.current.style.height = "auto";
+            textareaRef.current?.focus();
+          });
+        } else {
+          setErr(res?.message || "Could not send. Try again.");
+        }
+      },
+    );
   };
 
   const onKeyDown = (e) => {
@@ -771,6 +871,11 @@ export default function ChatPanel({
                     mine={row.mine}
                     firstInGroup={row.firstInGroup}
                     lastInGroup={row.lastInGroup}
+                    myRole={role}
+                    peerName={peerName}
+                    highlight={highlightId === row.key}
+                    onReply={startReply}
+                    onJump={jumpTo}
                   />
                 ),
               )}
@@ -797,53 +902,87 @@ export default function ChatPanel({
       )}
 
       {/* Composer */}
-      <div className="relative flex shrink-0 items-end gap-2 border-t border-slate-200 bg-white p-3">
-        {showEmoji && (
-          <EmojiPicker pickerRef={emojiPickerRef} onPick={insertEmoji} />
+      <div className="shrink-0 border-t border-slate-200 bg-white">
+        {/* replying to ... */}
+        {replyTo && (
+          <div className="px-3 pt-3">
+            <div
+              className={`flex items-center gap-2 rounded-xl border-l-4 bg-slate-50 px-3 py-2 ${
+                isMine(replyTo) ? "border-emerald-500" : "border-blue-500"
+              }`}
+            >
+              <div className="min-w-0 flex-1">
+                <p
+                  className={`text-[11px] font-semibold ${
+                    isMine(replyTo) ? "text-emerald-700" : "text-blue-600"
+                  }`}
+                >
+                  {isMine(replyTo) ? "You" : peerName}
+                </p>
+                <p className="truncate text-xs text-slate-600">
+                  {replyTo.text}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={cancelReply}
+                aria-label="Cancel reply"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-200 hover:text-slate-600"
+              >
+                <X size={15} />
+              </button>
+            </div>
+          </div>
         )}
 
-        <button
-          ref={emojiBtnRef}
-          type="button"
-          onClick={() => setShowEmoji((v) => !v)}
-          aria-label="Emoji"
-          aria-expanded={showEmoji}
-          className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-full transition ${
-            showEmoji
-              ? "bg-blue-50 text-blue-600"
-              : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-          }`}
-        >
-          <Smile size={22} />
-        </button>
-
-        <textarea
-          ref={textareaRef}
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value);
-            resizeTextarea();
-          }}
-          onKeyDown={onKeyDown}
-          rows={1}
-          maxLength={MAX_LEN}
-          placeholder="Type a message…"
-          className="max-h-28 min-h-[42px] flex-1 resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
-        />
-
-        <button
-          type="button"
-          onClick={send}
-          disabled={!text.trim() || sending}
-          aria-label="Send"
-          className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-full bg-blue-600 text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {sending ? (
-            <Loader2 size={17} className="animate-spin" />
-          ) : (
-            <Send size={17} />
+        <div className="relative flex items-end gap-2 p-3">
+          {showEmoji && (
+            <EmojiPicker pickerRef={emojiPickerRef} onPick={insertEmoji} />
           )}
-        </button>
+
+          <button
+            ref={emojiBtnRef}
+            type="button"
+            onClick={() => setShowEmoji((v) => !v)}
+            aria-label="Emoji"
+            aria-expanded={showEmoji}
+            className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-full transition ${
+              showEmoji
+                ? "bg-blue-50 text-blue-600"
+                : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            }`}
+          >
+            <Smile size={22} />
+          </button>
+
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              resizeTextarea();
+            }}
+            onKeyDown={onKeyDown}
+            rows={1}
+            maxLength={MAX_LEN}
+            placeholder="Type a message…"
+            className="max-h-28 min-h-[42px] flex-1 resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
+          />
+
+          <button
+            type="button"
+            onClick={send}
+            disabled={!text.trim() || sending}
+            aria-label="Send"
+            className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-full bg-blue-600 text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {sending ? (
+              <Loader2 size={17} className="animate-spin" />
+            ) : (
+              <Send size={17} />
+            )}
+          </button>
+        </div>
       </div>
     </>
   );
@@ -862,7 +1001,7 @@ export default function ChatPanel({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 p-4"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose?.();
       }}

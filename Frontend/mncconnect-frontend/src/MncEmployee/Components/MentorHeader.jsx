@@ -27,6 +27,45 @@ const navItems = [
   { name: "Reviews", path: "/mentor/reviews", icon: Star },
 ];
 
+/* ------------------------------------------------------------------
+   AVATAR (same logic as MentorProfile)
+   uploaded photo -> ui-avatars -> first letter
+------------------------------------------------------------------ */
+const PROFILE_IMAGE_KEYS = ["profilePic", "profileImage", "avatar", "photo", "photoUrl"];
+
+const getRawAvatarUrl = (u) => {
+  for (const key of PROFILE_IMAGE_KEYS) {
+    if (u?.[key]) return u[key];
+  }
+  return null;
+};
+
+const getFallbackAvatarUrl = (name) =>
+  `https://ui-avatars.com/api/?name=${encodeURIComponent(name || "Mentor")}&background=eff6ff&color=2563eb`;
+
+/* Shows the photo; if it is missing or fails to load, shows the initial letter */
+const Avatar = ({ src, initial }) => {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  if (src && !failed) {
+    return (
+      <img
+        src={src}
+        alt=""
+        onError={() => setFailed(true)}
+        className="h-full w-full object-cover"
+        referrerPolicy="no-referrer"
+      />
+    );
+  }
+
+  return initial ? <span>{initial}</span> : <UserCircle size={21} className="text-slate-500" />;
+};
+
 /* Defined OUTSIDE the header so it is not re-created on every render */
 const CountBadge = ({ count, active, label = "upcoming" }) =>
   count > 0 ? (
@@ -52,6 +91,35 @@ const MentorHeader = () => {
   const [unread, setUnread] = useState(0);
   const [loggingOut, setLoggingOut] = useState(false);
   const [pending, setPending] = useState([]); // [{ id, group }]
+  const [me, setMe] = useState(null); // live profile (photo + name) from /auth/me
+
+  /* ---------- profile photo ---------- */
+  const loadMe = useCallback(async () => {
+    try {
+      const d = await api("/auth/me");
+      setMe(d?.user || d || null);
+    } catch {
+      /* ignore: keep the last known photo */
+    }
+  }, []);
+
+  useEffect(() => {
+    loadMe();
+  }, [loadMe]);
+
+  // MentorProfile fires "profile:updated" after photo / details change -> refresh instantly
+  useEffect(() => {
+    window.addEventListener("profile:updated", loadMe);
+    return () => window.removeEventListener("profile:updated", loadMe);
+  }, [loadMe]);
+
+  const displayName = (me?.name || user?.name || user?.mentor?.name || "").trim();
+  const initial = displayName ? displayName.charAt(0).toUpperCase() : "";
+  const avatarSrc =
+    getRawAvatarUrl(me) ||
+    getRawAvatarUrl(user) ||
+    getRawAvatarUrl(user?.mentor) ||
+    (displayName ? getFallbackAvatarUrl(displayName) : null);
 
   /* Sessions count: only Upcoming (finished / cancelled / awaiting are NOT counted) */
   const { sessions } = useMentorSessions();
@@ -203,6 +271,8 @@ const MentorHeader = () => {
       active ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
     }`;
 
+  const profileActive = isActive("/mentor/profile");
+
   return (
     <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
@@ -281,8 +351,20 @@ const MentorHeader = () => {
             )}
           </Link>
 
-          <Link to="/mentor/profile" aria-label="Profile" className={iconBtn(isActive("/mentor/profile"))}>
-            <UserCircle size={21} />
+          {/* profile photo -> opens the profile page */}
+          <Link
+            to="/mentor/profile"
+            aria-label="Profile"
+            title={displayName || "Profile"}
+            className="flex h-10 w-10 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          >
+            <span
+              className={`flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-blue-50 text-sm font-bold text-blue-700 ring-2 transition ${
+                profileActive ? "ring-blue-500" : "ring-blue-100 hover:ring-blue-300"
+              }`}
+            >
+              <Avatar src={avatarSrc} initial={initial} />
+            </span>
           </Link>
 
           <button

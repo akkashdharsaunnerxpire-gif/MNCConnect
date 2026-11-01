@@ -2,23 +2,53 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion, useAnimationControls } from "framer-motion";
 import {
-  ArrowLeft, Bell, CalendarDays, CheckCheck, ChevronDown, ChevronRight, Clock3, GraduationCap,
-  Home, IndianRupee, Loader2, Menu, Star, User, Video, Wallet, WifiOff, X,
+  ArrowLeft,
+  Bell,
+  CalendarDays,
+  CheckCheck,
+  ChevronDown,
+  ChevronRight,
+  Clock3,
+  GraduationCap,
+  Home,
+  IndianRupee,
+  Loader2,
+  Menu,
+  Star,
+  User,
+  Video,
+  Wallet,
+  WifiOff,
+  X,
 } from "lucide-react";
 import useLive from "../../hooks/useLive";
 import useUserEvents from "../../hooks/useUserEvents";
-import { api, ENDPOINTS, EVENTS, NOTIFICATIONS_CHANGED, getUser, getUserId, timeAgo } from "../../services/fresherApi";
+import {
+  api,
+  ENDPOINTS,
+  EVENTS,
+  NOTIFICATIONS_CHANGED,
+  getUser,
+  getUserId,
+  timeAgo,
+} from "../../services/fresherApi";
 // !! fix this path if Welcomebonus.jsx lives somewhere else
 import WelcomeBonus from "../pages/Welcomebonus";
+import ReferralBonus from "../pages/ReferralBonus";
 
 /* ------------------------------------------------------------------
    Edit these two lists to add / remove menu items.
    Every `path` must exist in your router.
+   (Alerts removed: the bell in the header replaces it.)
 ------------------------------------------------------------------ */
 const NAV_ITEMS = [
   { path: "/Home", label: "Home", icon: Home, exact: true },
-  { path: "/Home/my-bookings", label: "My Bookings", icon: CalendarDays, badge: "upcoming" },
-  { path: "/Home/notifications", label: "Alerts", icon: Bell, badge: "unread" },
+  {
+    path: "/Home/my-bookings",
+    label: "My Bookings",
+    icon: CalendarDays,
+    badge: "upcoming",
+  },
 ];
 
 const MENU_ITEMS = [
@@ -36,7 +66,72 @@ const TYPE_STYLE = {
   review: { icon: Star, cls: "bg-amber-50 text-amber-600" },
   success: { icon: CalendarDays, cls: "bg-emerald-50 text-emerald-600" },
 };
-const styleFor = (type) => TYPE_STYLE[type] || { icon: Bell, cls: "bg-indigo-50 text-indigo-600" };
+const styleFor = (type) =>
+  TYPE_STYLE[type] || { icon: Bell, cls: "bg-indigo-50 text-indigo-600" };
+
+/* ------------------------------------------------------------------
+   AVATAR (same logic as the Profile page)
+   uploaded photo -> gender avatar -> first letter
+------------------------------------------------------------------ */
+const PROFILE_IMAGE_KEYS = [
+  "profilePic",
+  "profileImage",
+  "avatar",
+  "photo",
+  "photoUrl",
+];
+
+const getRawAvatarUrl = (u) => {
+  for (const key of PROFILE_IMAGE_KEYS) {
+    if (u?.[key]) return u[key];
+  }
+  return null;
+};
+
+const getGenderAvatarUrl = (u) => {
+  const seed = encodeURIComponent(
+    u?.email || u?.name || u?._id || u?.id || "fresher",
+  );
+  const gender = String(u?.gender || "")
+    .trim()
+    .toLowerCase();
+
+  if (gender.startsWith("m"))
+    return `https://avatar.iran.liara.run/public/boy?username=${seed}`;
+  if (gender.startsWith("f"))
+    return `https://avatar.iran.liara.run/public/girl?username=${seed}`;
+  return `https://api.dicebear.com/9.x/personas/svg?seed=${seed}&backgroundType=solid&backgroundColor=dbeafe`;
+};
+
+const resolveAvatar = (u) =>
+  u ? getRawAvatarUrl(u) || getGenderAvatarUrl(u) : null;
+
+/* Shows the photo; if it is missing or fails to load, shows the initial letter */
+const Avatar = ({ src, initial, iconSize = 17 }) => {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  if (src && !failed) {
+    return (
+      <img
+        src={src}
+        alt=""
+        onError={() => setFailed(true)}
+        className="h-full w-full object-cover"
+        referrerPolicy="no-referrer"
+      />
+    );
+  }
+
+  return initial ? (
+    <span>{initial}</span>
+  ) : (
+    <User size={iconSize} className="text-slate-600" />
+  );
+};
 
 const toMs = (v) => {
   if (v === undefined || v === null || v === "") return null;
@@ -60,7 +155,9 @@ const Badge = ({ count, tone = "indigo" }) =>
   count > 0 ? (
     <span
       className={`flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold leading-none text-white shadow-md ring-1 ring-white ${
-        tone === "amber" ? "bg-amber-500" : "bg-gradient-to-br from-purple-500 to-indigo-600"
+        tone === "amber"
+          ? "bg-amber-500"
+          : "bg-gradient-to-br from-purple-500 to-indigo-600"
       }`}
     >
       {count > 9 ? "9+" : count}
@@ -84,7 +181,10 @@ const CountUp = ({ value, instant = false }) => {
     let raf;
     const tick = (t) => {
       const p = Math.min((t - t0) / 800, 1);
-      const v = p === 1 ? value : Math.round(a + (value - a) * (1 - Math.pow(1 - p, 3)));
+      const v =
+        p === 1
+          ? value
+          : Math.round(a + (value - a) * (1 - Math.pow(1 - p, 3)));
       from.current = v;
       setShown(v);
       if (p < 1) raf = requestAnimationFrame(tick);
@@ -108,7 +208,9 @@ const Header = () => {
   const [reminder, setReminder] = useState(null);
   const [dismissedId, setDismissedId] = useState(null);
   const [now, setNow] = useState(Date.now());
-  const [online, setOnline] = useState(typeof navigator === "undefined" ? true : navigator.onLine);
+  const [online, setOnline] = useState(
+    typeof navigator === "undefined" ? true : navigator.onLine,
+  );
   const [toasts, setToasts] = useState([]);
   const [ring, setRing] = useState(0);
 
@@ -121,9 +223,9 @@ const Header = () => {
   const menuBtnRef = useRef(null); // mobile hamburger (fallback when wallet button is hidden)
   const walletCtl = useAnimationControls();
 
-  /* ---------- wallet balance: SAME source as the wallet page (/auth/me -> walletBalance) ----------
+  /* ---------- wallet balance + profile: SAME source as the wallet page (/auth/me) ----------
      Auth is cookie based now, so there is NO token check: the cookie is sent by api(). */
-  const { data: meData } = useLive({
+  const { data: meData, reload: reloadMe } = useLive({
     fetcher: () => api("/auth/me"),
     events: [EVENTS.notification, "wallet:updated"],
     userId,
@@ -134,6 +236,17 @@ const Header = () => {
 
   // name: live profile first, then the saved session marker
   const userName = (me?.name || getUser().name || "").trim();
+
+  // profile photo (uploaded one, or the gender / default avatar)
+  const avatarSrc = resolveAvatar(me);
+
+  // Profile page fires "profile:updated" after photo / details change -> refresh header instantly
+  useEffect(() => {
+    if (typeof reloadMe !== "function") return undefined;
+    const onProfile = () => reloadMe();
+    window.addEventListener("profile:updated", onProfile);
+    return () => window.removeEventListener("profile:updated", onProfile);
+  }, [reloadMe]);
 
   // while the welcome animation plays, the nav shows the balance WITHOUT the bonus
   // (Welcomebonus calls onHold(base) at the start and onHold(null) when the coin lands)
@@ -160,8 +273,12 @@ const Header = () => {
     userId,
   });
 
-  const notifications = (data?.notifications || []).map((n) => ({ ...n, id: n.id || n._id }));
-  const unreadCount = data?.unreadCount ?? notifications.filter((n) => !n.read).length;
+  const notifications = (data?.notifications || []).map((n) => ({
+    ...n,
+    id: n.id || n._id,
+  }));
+  const unreadCount =
+    data?.unreadCount ?? notifications.filter((n) => !n.read).length;
 
   /* ---------- live bookings (next session, waiting requests) ---------- */
   const { data: bookingData } = useLive({
@@ -177,25 +294,30 @@ const Header = () => {
       bookings
         .filter((b) => b.status === "accepted" && (toMs(b.endsAt) ?? 0) > now)
         .sort((a, b) => (toMs(a.startsAt) ?? 0) - (toMs(b.startsAt) ?? 0)),
-    [bookings, now]
+    [bookings, now],
   );
   const pendingCount = bookings.filter(
-    (b) => b.status === "pending" && (toMs(b.expiresAt) ?? Infinity) > now
+    (b) => b.status === "pending" && (toMs(b.expiresAt) ?? Infinity) > now,
   ).length;
 
   const nextBooking = upcoming[0];
   const nextStart = toMs(nextBooking?.startsAt);
   const msToStart = nextStart !== null ? nextStart - now : null;
-  const joinOpen = Boolean(nextBooking) && msToStart !== null && msToStart <= OPEN_BEFORE_MS;
+  const joinOpen =
+    Boolean(nextBooking) && msToStart !== null && msToStart <= OPEN_BEFORE_MS;
   const nextId = nextBooking?.requestGroupId || nextBooking?.id;
 
   // reminder from the server, or (if the page was opened late) derived from the next booking
-  const reminderFresh = reminder && !(toMs(reminder.startsAt) && now - toMs(reminder.startsAt) > 3 * 3600 * 1000);
+  const reminderFresh =
+    reminder &&
+    !(
+      toMs(reminder.startsAt) && now - toMs(reminder.startsAt) > 3 * 3600 * 1000
+    );
   const banner = reminderFresh
     ? { id: reminder.requestGroupId, startsAt: toMs(reminder.startsAt) }
     : joinOpen
-    ? { id: nextId, startsAt: nextStart }
-    : null;
+      ? { id: nextId, startsAt: nextStart }
+      : null;
   const showBanner = Boolean(banner?.id) && banner.id !== dismissedId;
   const bannerMs = banner?.startsAt != null ? banner.startsAt - now : null;
 
@@ -246,7 +368,12 @@ const Header = () => {
     setRing((r) => r + 1);
     fresh.slice(0, 2).forEach((n) => {
       setToasts((t) => [n, ...t.filter((x) => x.id !== n.id)].slice(0, 3));
-      timers.current.push(setTimeout(() => setToasts((t) => t.filter((x) => x.id !== n.id)), TOAST_MS));
+      timers.current.push(
+        setTimeout(
+          () => setToasts((t) => t.filter((x) => x.id !== n.id)),
+          TOAST_MS,
+        ),
+      );
     });
   }, [data]);
 
@@ -279,22 +406,34 @@ const Header = () => {
       setData((d) => ({
         ...(d || {}),
         unreadCount: Math.max(0, (d?.unreadCount || 1) - 1),
-        notifications: (d?.notifications || []).map((x) => ((x.id || x._id) === n.id ? { ...x, read: true } : x)),
+        notifications: (d?.notifications || []).map((x) =>
+          (x.id || x._id) === n.id ? { ...x, read: true } : x,
+        ),
       }));
       api(ENDPOINTS.notificationRead(n.id), { method: "PATCH" }).catch(reload);
     }
     setToasts((t) => t.filter((x) => x.id !== n.id));
     setShowNotifications(false);
-    if (typeof n.link === "string" && n.link.startsWith("/") && !n.link.startsWith("//")) navigate(n.link);
+    if (
+      typeof n.link === "string" &&
+      n.link.startsWith("/") &&
+      !n.link.startsWith("//")
+    )
+      navigate(n.link);
   };
 
   const markAllRead = () => {
     setData((d) => ({
       ...(d || {}),
       unreadCount: 0,
-      notifications: (d?.notifications || []).map((x) => ({ ...x, read: true })),
+      notifications: (d?.notifications || []).map((x) => ({
+        ...x,
+        read: true,
+      })),
     }));
-    api(ENDPOINTS.notificationsReadAll || "/fresher/notifications/read-all", { method: "PATCH" })
+    api(ENDPOINTS.notificationsReadAll || "/fresher/notifications/read-all", {
+      method: "PATCH",
+    })
       .then(() => window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED)))
       .catch(reload);
   };
@@ -320,7 +459,8 @@ const Header = () => {
   useEffect(() => {
     if (!menuOpen) return undefined;
     const onDown = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+      if (menuRef.current && !menuRef.current.contains(e.target))
+        setMenuOpen(false);
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
@@ -344,16 +484,29 @@ const Header = () => {
     setReminder(null);
   };
 
-  const isActive = (item) => (item.exact ? location.pathname === item.path : location.pathname.startsWith(item.path));
+  const isActive = (item) =>
+    item.exact
+      ? location.pathname === item.path
+      : location.pathname.startsWith(item.path);
   const navCls = (item) =>
     `relative flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${
-      isActive(item) ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-50 hover:text-indigo-600"
+      isActive(item)
+        ? "bg-indigo-50 text-indigo-700"
+        : "text-slate-600 hover:bg-slate-50 hover:text-indigo-600"
     }`;
 
-  const badgeFor = (key) => (key === "unread" ? unreadCount : key === "upcoming" ? upcoming.length : 0);
+  const badgeFor = (key) =>
+    key === "unread" ? unreadCount : key === "upcoming" ? upcoming.length : 0;
 
-  const shown = (filter === "unread" ? notifications.filter((n) => !n.read) : notifications).slice(0, 8);
+  const shown = (
+    filter === "unread" ? notifications.filter((n) => !n.read) : notifications
+  ).slice(0, 8);
   const initial = userName ? userName.charAt(0).toUpperCase() : "";
+
+  // bell is highlighted while the full Notifications page is open
+  const bellActive = location.pathname
+    .toLowerCase()
+    .startsWith("/home/notifications");
 
   /* small "next session" chip, used on desktop and in the mobile menu */
   const renderSessionChip = (block = false) => {
@@ -369,7 +522,8 @@ const Header = () => {
             <span className="absolute inline-flex h-full w-full rounded-full bg-white opacity-70 motion-safe:animate-ping" />
             <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
           </span>
-          <Video size={14} /> {msToStart <= 0 ? "Join live session" : "Join now"}
+          <Video size={14} />{" "}
+          {msToStart <= 0 ? "Join live session" : "Join now"}
         </button>
       ) : (
         <button
@@ -379,7 +533,10 @@ const Header = () => {
           className={`${base} items-center gap-2 rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100`}
         >
           <Clock3 size={14} />
-          Next session in <span className="font-mono tabular-nums">{countdown(msToStart ?? 0)}</span>
+          Next session in{" "}
+          <span className="font-mono tabular-nums">
+            {countdown(msToStart ?? 0)}
+          </span>
         </button>
       );
     }
@@ -404,22 +561,40 @@ const Header = () => {
         {/* offline bar */}
         <AnimatePresence>
           {!online && (
-            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden bg-slate-900 text-white" role="alert">
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden bg-slate-900 text-white"
+              role="alert"
+            >
               <div className="mx-auto flex max-w-7xl items-center justify-center gap-2 px-4 py-2 text-xs font-semibold">
-                <WifiOff size={14} /> You're offline. Live updates will resume when you reconnect.
+                <WifiOff size={14} /> You're offline. Live updates will resume
+                when you reconnect.
               </div>
             </motion.div>
           )}
         </AnimatePresence>
 
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-          <Link to="/Home" className="flex items-center gap-2" onClick={() => { setMobileMenu(false); setShowNotifications(false); }}>
+          <Link
+            to="/Home"
+            className="flex items-center gap-2"
+            onClick={() => {
+              setMobileMenu(false);
+              setShowNotifications(false);
+            }}
+          >
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-600 to-purple-600 shadow-lg shadow-indigo-200">
               <GraduationCap size={22} className="text-white" />
             </div>
             <div className="hidden sm:block">
-              <h1 className="text-lg font-extrabold tracking-tight text-slate-900">MNC<span className="text-indigo-600">Connect</span></h1>
-              <p className="text-[10px] font-medium text-slate-500">Fresher Community</p>
+              <h1 className="text-lg font-extrabold tracking-tight text-slate-900">
+                MNC<span className="text-indigo-600">Connect</span>
+              </h1>
+              <p className="text-[10px] font-medium text-slate-500">
+                Fresher Community
+              </p>
             </div>
           </Link>
 
@@ -427,10 +602,20 @@ const Header = () => {
             {NAV_ITEMS.map((item) => {
               const Icon = item.icon;
               return (
-                <Link key={item.path} to={item.path} className={navCls(item)} aria-current={isActive(item) ? "page" : undefined}>
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  className={navCls(item)}
+                  aria-current={isActive(item) ? "page" : undefined}
+                >
                   <Icon size={17} />
                   {item.label}
-                  {item.badge && <Badge count={badgeFor(item.badge)} tone={item.badge === "upcoming" ? "amber" : "indigo"} />}
+                  {item.badge && (
+                    <Badge
+                      count={badgeFor(item.badge)}
+                      tone={item.badge === "upcoming" ? "amber" : "indigo"}
+                    />
+                  )}
                 </Link>
               );
             })}
@@ -441,21 +626,47 @@ const Header = () => {
 
             {connected !== undefined && (
               <span
-                title={connected ? "Live updates connected" : "Reconnecting to live updates…"}
+                title={
+                  connected
+                    ? "Live updates connected"
+                    : "Reconnecting to live updates…"
+                }
                 className="flex h-10 items-center px-1"
               >
                 <span className="relative flex h-2.5 w-2.5">
-                  {connected && <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 motion-safe:animate-ping" />}
-                  <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${connected ? "bg-emerald-500" : "bg-amber-500"}`} />
+                  {connected && (
+                    <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 motion-safe:animate-ping" />
+                  )}
+                  <span
+                    className={`relative inline-flex h-2.5 w-2.5 rounded-full ${connected ? "bg-emerald-500" : "bg-amber-500"}`}
+                  />
                 </span>
               </span>
             )}
 
-            <button type="button" onClick={() => setShowNotifications(true)} aria-label={`Notifications, ${unreadCount} unread`} className="relative flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 hover:text-indigo-600">
-              <motion.span key={ring} animate={ring ? { rotate: [0, -16, 14, -10, 6, 0] } : {}} transition={{ duration: 0.6 }} className="flex" style={{ transformOrigin: "50% 10%" }}>
+            {/* desktop bell */}
+            <button
+              type="button"
+              onClick={() => setShowNotifications(true)}
+              aria-label={`Notifications, ${unreadCount} unread`}
+              className={`relative flex h-10 w-10 items-center justify-center rounded-xl transition ${
+                bellActive
+                  ? "bg-indigo-50 text-indigo-700"
+                  : "text-slate-600 hover:bg-slate-100 hover:text-indigo-600"
+              }`}
+            >
+              <motion.span
+                key={ring}
+                animate={ring ? { rotate: [0, -16, 14, -10, 6, 0] } : {}}
+                transition={{ duration: 0.6 }}
+                className="flex"
+                style={{ transformOrigin: "50% 10%" }}
+              >
                 <Bell size={20} />
               </motion.span>
-              <span className="absolute -right-0.5 -top-0.5"><Badge count={unreadCount} /></span>
+              <span className="absolute -right-0.5 -top-0.5">
+                <Badge count={unreadCount} />
+              </span>
             </button>
 
             {/* wallet button: the welcome-bonus coin lands here */}
@@ -468,7 +679,11 @@ const Header = () => {
             >
               <Wallet size={18} className="text-indigo-600" />
               <span className="font-bold text-indigo-700">
-                {me ? <CountUp value={balance} instant={hold !== null} /> : "₹–"}
+                {me ? (
+                  <CountUp value={balance} instant={hold !== null} />
+                ) : (
+                  "₹–"
+                )}
               </span>
             </motion.button>
 
@@ -479,12 +694,16 @@ const Header = () => {
                 onClick={() => setMenuOpen((v) => !v)}
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
+                aria-label="Profile menu"
                 className="flex items-center gap-1.5 rounded-full border-2 border-indigo-100 bg-slate-100 py-0.5 pl-0.5 pr-2 transition hover:border-indigo-300"
               >
                 <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-white text-sm font-bold text-indigo-700">
-                  {initial || <User size={17} className="text-slate-600" />}
+                  <Avatar src={avatarSrc} initial={initial} />
                 </span>
-                <ChevronDown size={14} className={`text-slate-500 transition ${menuOpen ? "rotate-180" : ""}`} />
+                <ChevronDown
+                  size={14}
+                  className={`text-slate-500 transition ${menuOpen ? "rotate-180" : ""}`}
+                />
               </button>
 
               <AnimatePresence>
@@ -497,14 +716,34 @@ const Header = () => {
                     transition={{ duration: 0.15 }}
                     className="absolute right-0 mt-2 w-64 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl"
                   >
-                    <div className="border-b border-slate-100 px-4 py-3">
-                      <p className="truncate text-sm font-bold text-slate-900">{userName || "My account"}</p>
-                      <p className="mt-0.5 text-xs text-slate-500">Bonus balance ₹{balance}</p>
+                    <div className="flex items-center gap-3 border-b border-slate-100 px-4 py-3">
+                      <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-indigo-50 text-base font-bold text-indigo-700 ring-2 ring-indigo-100">
+                        <Avatar
+                          src={avatarSrc}
+                          initial={initial}
+                          iconSize={20}
+                        />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-bold text-slate-900">
+                          {userName || "My account"}
+                        </p>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          Bonus balance ₹{balance}
+                        </p>
+                      </div>
                     </div>
                     <div className="p-1.5">
                       {MENU_ITEMS.map(({ path, label, icon: Icon }) => (
-                        <button key={label} type="button" role="menuitem" onClick={() => go(path)} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-700 transition hover:bg-indigo-50 hover:text-indigo-700">
-                          <Icon size={17} />{label}
+                        <button
+                          key={label}
+                          type="button"
+                          role="menuitem"
+                          onClick={() => go(path)}
+                          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-700 transition hover:bg-indigo-50 hover:text-indigo-700"
+                        >
+                          <Icon size={17} />
+                          {label}
                         </button>
                       ))}
                     </div>
@@ -515,14 +754,50 @@ const Header = () => {
           </div>
 
           <div className="flex items-center gap-2 lg:hidden">
-            <button type="button" onClick={() => setShowNotifications(true)} aria-label={`Notifications, ${unreadCount} unread`} className="relative flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100">
-              <motion.span key={ring} animate={ring ? { rotate: [0, -16, 14, -10, 6, 0] } : {}} transition={{ duration: 0.6 }} className="flex" style={{ transformOrigin: "50% 10%" }}>
+            {/* mobile bell */}
+            <button
+              type="button"
+              onClick={() => setShowNotifications(true)}
+              aria-label={`Notifications, ${unreadCount} unread`}
+              className={`relative flex h-10 w-10 items-center justify-center rounded-xl ${
+                bellActive
+                  ? "bg-indigo-50 text-indigo-700"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              <motion.span
+                key={ring}
+                animate={ring ? { rotate: [0, -16, 14, -10, 6, 0] } : {}}
+                transition={{ duration: 0.6 }}
+                className="flex"
+                style={{ transformOrigin: "50% 10%" }}
+              >
                 <Bell size={20} />
               </motion.span>
-              <span className="absolute -right-0.5 -top-0.5"><Badge count={unreadCount} /></span>
+              <span className="absolute -right-0.5 -top-0.5">
+                <Badge count={unreadCount} />
+              </span>
             </button>
+
+            {/* mobile: profile photo opens the profile page */}
+            <button
+              type="button"
+              onClick={() => go("/Home/profile")}
+              aria-label="My profile"
+              className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border-2 border-indigo-100 bg-white text-sm font-bold text-indigo-700"
+            >
+              <Avatar src={avatarSrc} initial={initial} />
+            </button>
+
             {/* mobile: coin lands on the menu button (wallet button is inside the menu) */}
-            <button ref={menuBtnRef} type="button" onClick={() => setMobileMenu((p) => !p)} aria-label="Menu" aria-expanded={mobileMenu} className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-700 hover:bg-slate-100">
+            <button
+              ref={menuBtnRef}
+              type="button"
+              onClick={() => setMobileMenu((p) => !p)}
+              aria-label="Menu"
+              aria-expanded={mobileMenu}
+              className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-700 hover:bg-slate-100"
+            >
               {mobileMenu ? <X size={22} /> : <Menu size={22} />}
             </button>
           </div>
@@ -531,7 +806,12 @@ const Header = () => {
         {/* session-start banner: server reminder, or derived from the next booking */}
         <AnimatePresence>
           {showBanner && (
-            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden bg-green-600 text-white">
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden bg-green-600 text-white"
+            >
               <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2.5 text-sm sm:px-6 lg:px-8">
                 <span className="flex items-center gap-2 font-semibold">
                   <Video size={16} />
@@ -540,8 +820,20 @@ const Header = () => {
                     : `Your session starts in ${bannerMs !== null ? countdown(bannerMs) : "5 minutes"}. The meeting room is open.`}
                 </span>
                 <span className="flex items-center gap-2">
-                  <button type="button" onClick={() => joinMeeting(banner.id)} className="rounded-lg bg-white px-3 py-1 text-xs font-bold text-green-700 hover:bg-green-50">Join now</button>
-                  <button type="button" onClick={dismissBanner} aria-label="Dismiss"><X size={16} /></button>
+                  <button
+                    type="button"
+                    onClick={() => joinMeeting(banner.id)}
+                    className="rounded-lg bg-white px-3 py-1 text-xs font-bold text-green-700 hover:bg-green-50"
+                  >
+                    Join now
+                  </button>
+                  <button
+                    type="button"
+                    onClick={dismissBanner}
+                    aria-label="Dismiss"
+                  >
+                    <X size={16} />
+                  </button>
                 </span>
               </div>
             </motion.div>
@@ -551,30 +843,80 @@ const Header = () => {
         {/* mobile menu */}
         <AnimatePresence>
           {mobileMenu && (
-            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden border-t border-slate-100 bg-white lg:hidden">
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden border-t border-slate-100 bg-white lg:hidden"
+            >
               <div className="space-y-1 px-4 py-4">
+                {/* user card with photo */}
+                <button
+                  type="button"
+                  onClick={() => go("/Home/profile")}
+                  className="mb-2 flex w-full items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-left"
+                >
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-indigo-50 text-lg font-bold text-indigo-700 ring-2 ring-indigo-100">
+                    <Avatar src={avatarSrc} initial={initial} iconSize={22} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-bold text-slate-900">
+                      {userName || "My account"}
+                    </span>
+                    <span className="block text-xs text-slate-500">
+                      View profile
+                    </span>
+                  </span>
+                  <ChevronRight size={18} className="text-slate-400" />
+                </button>
+
                 <div className="mb-2">{renderSessionChip(true)}</div>
 
                 {NAV_ITEMS.map((item) => {
                   const Icon = item.icon;
                   const count = item.badge ? badgeFor(item.badge) : 0;
                   return (
-                    <button key={item.path} type="button" onClick={() => go(item.path)} className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-semibold transition ${isActive(item) ? "bg-indigo-50 text-indigo-700" : "text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"}`}>
+                    <button
+                      key={item.path}
+                      type="button"
+                      onClick={() => go(item.path)}
+                      className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-semibold transition ${isActive(item) ? "bg-indigo-50 text-indigo-700" : "text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"}`}
+                    >
                       <Icon size={19} />
                       <span className="flex-1">{item.label}</span>
-                      <Badge count={count} tone={item.badge === "upcoming" ? "amber" : "indigo"} />
+                      <Badge
+                        count={count}
+                        tone={item.badge === "upcoming" ? "amber" : "indigo"}
+                      />
                     </button>
                   );
                 })}
 
-                {MENU_ITEMS.filter((m) => !NAV_ITEMS.some((n) => n.path === m.path) && m.path !== "/Home/bonus-wallet").map(({ path, label, icon: Icon }) => (
-                  <button key={label} type="button" onClick={() => go(path)} className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-semibold text-slate-700 transition hover:bg-indigo-50 hover:text-indigo-700">
-                    <Icon size={19} />{label}
+                {MENU_ITEMS.filter(
+                  (m) =>
+                    !NAV_ITEMS.some((n) => n.path === m.path) &&
+                    m.path !== "/Home/bonus-wallet",
+                ).map(({ path, label, icon: Icon }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => go(path)}
+                    className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left font-semibold text-slate-700 transition hover:bg-indigo-50 hover:text-indigo-700"
+                  >
+                    <Icon size={19} />
+                    {label}
                   </button>
                 ))}
 
-                <button type="button" onClick={() => go("/Home/bonus-wallet")} className="flex w-full items-center justify-between rounded-xl bg-indigo-50 px-4 py-3 text-left">
-                  <span className="flex items-center gap-3 font-semibold text-indigo-700"><Wallet size={19} />Bonus Wallet</span>
+                <button
+                  type="button"
+                  onClick={() => go("/Home/bonus-wallet")}
+                  className="flex w-full items-center justify-between rounded-xl bg-indigo-50 px-4 py-3 text-left"
+                >
+                  <span className="flex items-center gap-3 font-semibold text-indigo-700">
+                    <Wallet size={19} />
+                    Bonus Wallet
+                  </span>
                   <span className="font-bold text-indigo-700">₹{balance}</span>
                 </button>
               </div>
@@ -584,7 +926,10 @@ const Header = () => {
       </header>
 
       {/* live notification pop-ups */}
-      <div className="pointer-events-none fixed right-4 top-20 z-[110] flex w-[calc(100vw-2rem)] max-w-sm flex-col gap-2" aria-live="polite">
+      <div
+        className="pointer-events-none fixed right-4 top-20 z-[110] flex w-[calc(100vw-2rem)] max-w-sm flex-col gap-2"
+        aria-live="polite"
+      >
         <AnimatePresence>
           {toasts.map((n) => {
             const { icon: Icon, cls } = styleFor(n.type);
@@ -599,17 +944,33 @@ const Header = () => {
                 onClick={() => openNotification(n)}
                 className="pointer-events-auto flex w-full gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 text-left shadow-xl transition hover:border-indigo-200"
               >
-                <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${cls}`}><Icon size={17} /></span>
+                <span
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${cls}`}
+                >
+                  <Icon size={17} />
+                </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-bold text-slate-800">{n.title}</span>
-                  <span className="mt-0.5 line-clamp-2 block text-xs leading-5 text-slate-500">{n.message}</span>
+                  <span className="block text-sm font-bold text-slate-800">
+                    {n.title}
+                  </span>
+                  <span className="mt-0.5 line-clamp-2 block text-xs leading-5 text-slate-500">
+                    {n.message}
+                  </span>
                 </span>
                 <span
                   role="button"
                   tabIndex={0}
                   aria-label="Dismiss"
-                  onClick={(e) => { e.stopPropagation(); setToasts((t) => t.filter((x) => x.id !== n.id)); }}
-                  onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); setToasts((t) => t.filter((x) => x.id !== n.id)); } }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setToasts((t) => t.filter((x) => x.id !== n.id));
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.stopPropagation();
+                      setToasts((t) => t.filter((x) => x.id !== n.id));
+                    }
+                  }}
                   className="self-start rounded-md p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-600"
                 >
                   <X size={14} />
@@ -623,33 +984,79 @@ const Header = () => {
       {/* notification panel */}
       <AnimatePresence>
         {showNotifications && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex items-start justify-center bg-slate-900/30 px-4 pt-20 backdrop-blur-[2px]" onClick={() => setShowNotifications(false)}>
-            <motion.div initial={{ opacity: 0, y: -20, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -20, scale: 0.96 }} transition={{ duration: 0.2 }} className="w-full max-w-[480px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Notifications">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-start justify-center bg-slate-900/30 px-4 pt-20 backdrop-blur-[2px]"
+            onClick={() => setShowNotifications(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: -20, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -20, scale: 0.96 }}
+              transition={{ duration: 0.2 }}
+              className="w-full max-w-[480px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-label="Notifications"
+            >
               <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
                 <div className="flex items-center gap-3">
-                  <button type="button" onClick={() => setShowNotifications(false)} aria-label="Back" className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100"><ArrowLeft size={19} /></button>
+                  <button
+                    type="button"
+                    onClick={() => setShowNotifications(false)}
+                    aria-label="Back"
+                    className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100"
+                  >
+                    <ArrowLeft size={19} />
+                  </button>
                   <div>
-                    <h2 className="text-base font-bold text-slate-900">Notifications</h2>
-                    <p className="text-xs text-slate-500">{unreadCount} unread</p>
+                    <h2 className="text-base font-bold text-slate-900">
+                      Notifications
+                    </h2>
+                    <p className="text-xs text-slate-500">
+                      {unreadCount} unread
+                    </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
                   {unreadCount > 0 && (
-                    <button type="button" onClick={markAllRead} className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-indigo-600 transition hover:bg-indigo-50">
+                    <button
+                      type="button"
+                      onClick={markAllRead}
+                      className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-indigo-600 transition hover:bg-indigo-50"
+                    >
                       <CheckCheck size={15} /> Mark all read
                     </button>
                   )}
-                  <button type="button" onClick={() => setShowNotifications(false)} aria-label="Close" className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100"><X size={18} /></button>
+                  <button
+                    type="button"
+                    onClick={() => setShowNotifications(false)}
+                    aria-label="Close"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100"
+                  >
+                    <X size={18} />
+                  </button>
                 </div>
               </div>
 
-              <div className="flex gap-1 border-b border-slate-100 px-4 py-2" role="tablist">
+              <div
+                className="flex gap-1 border-b border-slate-100 px-4 py-2"
+                role="tablist"
+              >
                 {[
                   { id: "all", label: "All" },
-                  { id: "unread", label: `Unread${unreadCount ? ` (${unreadCount})` : ""}` },
+                  {
+                    id: "unread",
+                    label: `Unread${unreadCount ? ` (${unreadCount})` : ""}`,
+                  },
                 ].map((t) => (
                   <button
-                    key={t.id} type="button" role="tab" aria-selected={filter === t.id}
+                    key={t.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={filter === t.id}
                     onClick={() => setFilter(t.id)}
                     className={`rounded-full px-3 py-1 text-xs font-semibold transition ${filter === t.id ? "bg-indigo-600 text-white" : "text-slate-500 hover:bg-slate-100"}`}
                   >
@@ -661,21 +1068,40 @@ const Header = () => {
               <div className="max-h-[400px] overflow-y-auto">
                 {shown.length === 0 ? (
                   <p className="px-4 py-10 text-center text-sm text-slate-400">
-                    {filter === "unread" ? "You're all caught up" : "No notifications yet"}
+                    {filter === "unread"
+                      ? "You're all caught up"
+                      : "No notifications yet"}
                   </p>
                 ) : (
                   shown.map((n) => {
                     const { icon: Icon, cls } = styleFor(n.type);
                     return (
-                      <button key={n.id} type="button" onClick={() => openNotification(n)} className={`flex w-full gap-3 border-b border-slate-100 px-4 py-3 text-left transition hover:bg-slate-50 ${n.read ? "bg-white" : "bg-indigo-50/30"}`}>
-                        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${cls}`}><Icon size={17} /></div>
+                      <button
+                        key={n.id}
+                        type="button"
+                        onClick={() => openNotification(n)}
+                        className={`flex w-full gap-3 border-b border-slate-100 px-4 py-3 text-left transition hover:bg-slate-50 ${n.read ? "bg-white" : "bg-indigo-50/30"}`}
+                      >
+                        <div
+                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${cls}`}
+                        >
+                          <Icon size={17} />
+                        </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-start justify-between gap-2">
-                            <h3 className="text-sm font-bold text-slate-800">{n.title}</h3>
-                            {!n.read && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-indigo-600" />}
+                            <h3 className="text-sm font-bold text-slate-800">
+                              {n.title}
+                            </h3>
+                            {!n.read && (
+                              <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-indigo-600" />
+                            )}
                           </div>
-                          <p className="mt-1 text-xs leading-5 text-slate-500">{n.message}</p>
-                          <p className="mt-1 text-[10px] font-medium text-slate-400">{timeAgo(n.createdAt)}</p>
+                          <p className="mt-1 text-xs leading-5 text-slate-500">
+                            {n.message}
+                          </p>
+                          <p className="mt-1 text-[10px] font-medium text-slate-400">
+                            {timeAgo(n.createdAt)}
+                          </p>
                         </div>
                       </button>
                     );
@@ -684,8 +1110,14 @@ const Header = () => {
               </div>
 
               <div className="flex items-center justify-between bg-slate-50 px-4 py-3">
-                <span className="text-[11px] text-slate-400">{connected === false ? "Reconnecting…" : "Updates live"}</span>
-                <button type="button" onClick={() => go("/Home/notifications")} className="flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-800">
+                <span className="text-[11px] text-slate-400">
+                  {connected === false ? "Reconnecting…" : "Updates live"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => go("/Home/notifications")}
+                  className="flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-800"
+                >
                   Read all <ChevronRight size={15} />
                 </button>
               </div>
@@ -698,6 +1130,16 @@ const Header = () => {
           It reads welcomeBonusSeen from the DB itself, so it only needs the refs + callbacks. */}
       {showWelcome && me && (
         <WelcomeBonus
+          targetRef={walletBtnRef}
+          fallbackRef={menuBtnRef}
+          onHold={setHold}
+          onLand={bumpWallet}
+        />
+      )}
+      {/* referral reward: +₹10 coin flies into the wallet whenever someone uses your code */}
+      {me && (
+        <ReferralBonus
+          me={me}
           targetRef={walletBtnRef}
           fallbackRef={menuBtnRef}
           onHold={setHold}

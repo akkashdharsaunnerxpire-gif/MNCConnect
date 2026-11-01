@@ -72,6 +72,8 @@ const fresherSchema = new mongoose.Schema(
       type: Number,
       default: 0, // Amount available to use for bookings
     },
+    totalRefunds: { type: Number, default: 0 },
+    referralEarnings: { type: Number, default: 0 },
     referralCode: {
       type: String,
       unique: true,
@@ -98,59 +100,59 @@ const fresherSchema = new mongoose.Schema(
       default: false,
     },
     profilePicPublicId: {
-  type: String,
-  default: "",
-  select: false,
-},
-gender: {
-  type: String,
-  enum: ["male", "female", "other", "prefer not to say", ""],
-  default: "",
-},
+      type: String,
+      default: "",
+      select: false,
+    },
+    gender: {
+      type: String,
+      enum: ["male", "female", "other", "prefer not to say", ""],
+      default: "",
+    },
 
-dateOfBirth: {
-  type: Date,
-  default: null,
-},
+    dateOfBirth: {
+      type: Date,
+      default: null,
+    },
 
-location: {
-  type: String,
-  trim: true,
-  default: "",
-},
+    location: {
+      type: String,
+      trim: true,
+      default: "",
+    },
 
-nationality: {
-  type: String,
-  trim: true,
-  default: "",
-},
+    nationality: {
+      type: String,
+      trim: true,
+      default: "",
+    },
 
-bio: {
-  type: String,
-  trim: true,
-  maxlength: 2000,
-  default: "",
-},
+    bio: {
+      type: String,
+      trim: true,
+      maxlength: 2000,
+      default: "",
+    },
 
-education: {
-  type: [mongoose.Schema.Types.Mixed],
-  default: [],
-},
+    education: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: [],
+    },
 
-career: {
-  type: [mongoose.Schema.Types.Mixed],
-  default: [],
-},
+    career: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: [],
+    },
 
-skills: {
-  type: [String],
-  default: [],
-},
+    skills: {
+      type: [String],
+      default: [],
+    },
 
-interests: {
-  type: [String],
-  default: [],
-},
+    interests: {
+      type: [String],
+      default: [],
+    },
   },
   {
     timestamps: true,

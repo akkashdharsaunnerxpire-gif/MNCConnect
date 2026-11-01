@@ -2,9 +2,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   CalendarDays, CheckCircle2, ChevronRight, IndianRupee, Loader2,
-  ShieldCheck, Send, UserRound, Briefcase, Mail, TimerReset, AlertTriangle, RotateCcw, X,
+  ShieldCheck, Send, UserRound, Briefcase, Mail, TimerReset, AlertTriangle, RotateCcw, X, Wallet,
 } from "lucide-react";
 import useUserEvents from "../../hooks/useUserEvents";
+import useLive from "../../hooks/useLive";
 import {
   api, ENDPOINTS, EVENTS, DURATIONS, durationLabel, priceFor, getUser, getUserId,
   toApiDate, toApiTime, startFrom, inr,
@@ -33,6 +34,9 @@ const MIN_LEAD_MIN = 30;
 
 // the meeting room opens this many minutes before the start time (keep same as backend)
 const OPEN_BEFORE_MIN = 2;
+
+// backend: POST /api/payments/pay-with-wallet
+const WALLET_PAY_ENDPOINT = ENDPOINTS.payWithWallet || "/payments/pay-with-wallet";
 
 const makeRequestId = () => `REQ-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 
@@ -104,6 +108,8 @@ export default function SessionBoard() {
 
   const reqIdRef = useRef(null);
   const paymentIdRef = useRef(null);
+  const paidByWalletRef = useRef(false); // true when the wallet paid for the current booking
+  const canRetryRef = useRef(false); // true only when retrying the booking call is safe
 
   // clock tick: the "time must be 30 min ahead" check must not go stale
   // when the page stays open for a long time
@@ -115,6 +121,26 @@ export default function SessionBoard() {
 
   const price = priceFor(f.minutes);
   const type = SESSION_TYPES.find((t) => t.value === f.sessionType) || SESSION_TYPES[0];
+
+  /* ---------- wallet (same source as the wallet page: /auth/me -> walletBalance) ---------- */
+  const { data: meData, reload: reloadMe } = useLive({
+    fetcher: () => api("/auth/me"),
+    events: [EVENTS.notification, "wallet:updated"],
+    userId,
+  });
+  const me = meData?.user || meData || null;
+  const walletBalance = Math.max(0, Number(me?.walletBalance) || 0);
+
+  const [useWallet, setUseWallet] = useState(true);
+  const canWallet = walletBalance >= price; // the wallet must cover the FULL price
+  const payWallet = useWallet && canWallet;
+  const walletAfter = payWallet ? walletBalance - price : walletBalance;
+
+  // wallet changed (booking made / refund) -> this page + header + wallet page refresh
+  const refreshWallet = useCallback(() => {
+    if (typeof reloadMe === "function") reloadMe();
+    window.dispatchEvent(new Event("profile:updated"));
+  }, [reloadMe]);
 
   /* ---------- load the roles (departments) of this company ---------- */
   useEffect(() => {
@@ -175,8 +201,11 @@ export default function SessionBoard() {
     if (!b || b.requestGroupId !== reqIdRef.current) return;
     setBooking((prev) => ({ ...(prev || {}), ...b }));
     if (b.status === "accepted") setStage("accepted");
-    else if (["expired", "missed", "cancelled"].includes(b.status)) setStage("expired");
-  }, []);
+    else if (["expired", "missed", "cancelled"].includes(b.status)) {
+      setStage("expired");
+      refreshWallet(); // the refund may have gone back to the wallet
+    }
+  }, [refreshWallet]);
 
   useUserEvents(userId, { [EVENTS.booking]: applyBooking });
 
@@ -188,7 +217,7 @@ export default function SessionBoard() {
     return () => clearInterval(t);
   }, [stage, applyBooking]);
 
-  /* ---------- send the request (after payment) ---------- */
+  /* ---------- send the request (after payment / wallet) ---------- */
   const submitBooking = useCallback(async () => {
     setStage("sending");
     setError("");
@@ -197,7 +226,7 @@ export default function SessionBoard() {
         method: "POST",
         body: {
           requestGroupId: reqIdRef.current,
-          razorpayPaymentId: paymentIdRef.current,
+          razorpayPaymentId: paymentIdRef.current, // wallet payments have their own id (wallet_pay_...)
           companyName,
           preferredMentorId: rebook?.mentorId || undefined, // book again -> only this mentor gets it
           requester: { fullName: user.fullName || user.name || "Fresher", email: user.email || "", image: user.image || user.avatar || "" },
@@ -219,15 +248,19 @@ export default function SessionBoard() {
       setNotifiedCount(res.notifiedCount || 0);
       setBooking(res.booking);
       setStage(res.booking.status === "accepted" ? "accepted" : "waiting");
+      canRetryRef.current = false;
+      refreshWallet();
     } catch (e) {
       setError(e.message);
       setStage("error");
       // 4xx (except 402 "payment not verified") = the server already refunded -> nothing to retry.
-      // 5xx / network = the payment is still safe, keep the id so "Retry" works.
+      // 5xx / network = the money is still safe, keep the id so "Retry" works.
       const s = Number(e.status) || 0;
-      if (s >= 400 && s < 500 && s !== 402) paymentIdRef.current = null;
+      canRetryRef.current = !(s >= 400 && s < 500 && s !== 402);
+      if (!canRetryRef.current) paymentIdRef.current = null;
+      refreshWallet(); // a wallet refund may have just happened
     }
-  }, [companyName, user, type, f, price, rebook]);
+  }, [companyName, user, type, f, price, rebook, refreshWallet]);
 
   /* ---------- pay ---------- */
   const startPayment = async () => {
@@ -242,11 +275,39 @@ export default function SessionBoard() {
       return;
     }
 
+    reqIdRef.current = makeRequestId(); // ovvoru booking-kum pudhu id, so rebook pannalaam
+    paymentIdRef.current = null;
+    paidByWalletRef.current = false;
+    canRetryRef.current = false;
+
+    /* ---- A) pay from the wallet (no Razorpay) ---- */
+    if (payWallet) {
+      setStage("sending");
+      try {
+        // the server deducts atomically and refuses if the balance is not enough
+        const paid = await api(WALLET_PAY_ENDPOINT, {
+          method: "POST",
+          body: { amount: price, topic: companyName },
+        });
+        paymentIdRef.current = paid.paymentId;
+        paidByWalletRef.current = true;
+        canRetryRef.current = true;
+        refreshWallet(); // balance already dropped
+      } catch (e) {
+        setError(e.message);
+        setStage("error");
+        canRetryRef.current = false;
+        refreshWallet();
+        return;
+      }
+      await submitBooking();
+      return;
+    }
+
+    /* ---- B) pay with Razorpay ---- */
     try {
       if (!window.Razorpay) throw new Error("Payment gateway failed to load. Please refresh the page.");
 
-      reqIdRef.current = makeRequestId(); // ovvoru booking-kum pudhu id, so rebook pannalaam
-      paymentIdRef.current = null;
       setStage("paying");
 
       const order = await api(ENDPOINTS.createOrder, { method: "POST", body: { amount: price } });
@@ -271,6 +332,7 @@ export default function SessionBoard() {
               },
             });
             paymentIdRef.current = verified.paymentId || response.razorpay_payment_id;
+            canRetryRef.current = true;
             await submitBooking();
           } catch (e) {
             setError(e.message);
@@ -291,6 +353,8 @@ export default function SessionBoard() {
     setBooking(null);
     reqIdRef.current = null;
     paymentIdRef.current = null;
+    paidByWalletRef.current = false;
+    canRetryRef.current = false;
     setError("");
   };
 
@@ -317,6 +381,10 @@ export default function SessionBoard() {
           ["Language", f.language || "Not selected"],
         ]),
   ];
+
+  const payLabel = payWallet
+    ? `Pay ${inr(price)} from wallet & send request`
+    : `Pay ${inr(price)} & send request`;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -504,6 +572,36 @@ export default function SessionBoard() {
                 </div>
               </dl>
 
+              {/* WALLET */}
+              <div className={`mt-4 rounded-xl border p-3 ${payWallet ? "border-indigo-200 bg-indigo-50" : "border-slate-200 bg-slate-50"}`}>
+                <label className={`flex items-start gap-3 ${canWallet ? "cursor-pointer" : "cursor-not-allowed opacity-80"}`}>
+                  <input
+                    type="checkbox"
+                    checked={payWallet}
+                    disabled={!canWallet || Boolean(stage)}
+                    onChange={(e) => setUseWallet(e.target.checked)}
+                    className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center justify-between gap-2 text-sm font-semibold text-slate-900">
+                      <span className="flex items-center gap-1.5"><Wallet size={15} className="text-indigo-600" /> Pay from wallet</span>
+                      <span className="tabular-nums text-indigo-700">{me ? inr(walletBalance) : "₹–"}</span>
+                    </span>
+                    <span className="mt-0.5 block text-xs text-slate-500">
+                      {!me
+                        ? "Checking your wallet…"
+                        : !canWallet
+                          ? walletBalance > 0
+                            ? `Wallet balance is not enough. You need ${inr(price - walletBalance)} more.`
+                            : "Your wallet is empty."
+                          : payWallet
+                            ? `${inr(price)} will be deducted. Balance after booking: ${inr(walletAfter)}`
+                            : "Wallet will not be used. You will pay by card / UPI."}
+                    </span>
+                  </span>
+                </label>
+              </div>
+
               {problems.length > 0 && (
                 <ul className="mt-4 space-y-1 rounded-xl bg-amber-50 p-3 text-xs text-amber-800">
                   {problems.map((p) => <li key={p}>• {p}</li>)}
@@ -517,7 +615,7 @@ export default function SessionBoard() {
                   problems.length === 0 && !stage ? "bg-slate-950 text-white hover:bg-slate-800" : "cursor-not-allowed bg-slate-200 text-slate-400"
                 }`}
               >
-                Pay {inr(price)} & send request
+                {payLabel}
               </button>
               <p className="mt-3 text-center text-xs text-slate-400">Secure payment · automatic refund if nobody accepts</p>
             </div>
@@ -596,7 +694,9 @@ export default function SessionBoard() {
           <h2 className="mt-5 text-2xl font-bold text-slate-900">Amount refunded</h2>
           <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-slate-500">
             {rebook ? `${rebook.mentorName || "Your mentor"} could not take this session.` : "Nobody accepted your request in time."}{" "}
-            {inr(booking?.amount || price)} is being refunded to your payment method.
+            {paidByWalletRef.current
+              ? `${inr(booking?.amount || price)} is back in your wallet.`
+              : `${inr(booking?.amount || price)} is being refunded to your payment method.`}
           </p>
           <button type="button" onClick={closeAll} className="mt-6 w-full rounded-xl bg-slate-950 py-3.5 text-sm font-bold text-white hover:bg-slate-800">OK</button>
         </Overlay>
@@ -607,9 +707,9 @@ export default function SessionBoard() {
           <AlertTriangle size={40} className="mx-auto text-red-500" />
           <h2 className="mt-4 text-xl font-bold text-slate-900">We couldn't send your request</h2>
           <p className="mt-2 text-sm text-slate-600">{error}</p>
-          {paymentIdRef.current ? (
+          {canRetryRef.current ? (
             <>
-              <p className="mt-2 text-xs text-slate-400">Your payment is safe. Retry, or it will be refunded.</p>
+              <p className="mt-2 text-xs text-slate-400">Your money is safe. Retry, or it will be refunded.</p>
               <button type="button" onClick={submitBooking} className="mt-5 w-full rounded-xl bg-slate-950 py-3.5 text-sm font-bold text-white hover:bg-slate-800">Retry</button>
               <button type="button" onClick={closeAll} className="mt-2 w-full rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600">Close</button>
             </>

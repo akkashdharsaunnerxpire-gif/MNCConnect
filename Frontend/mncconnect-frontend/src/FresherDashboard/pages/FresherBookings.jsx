@@ -23,6 +23,10 @@ import {
   IndianRupee,
   MessageSquare,
   RotateCcw,
+  Send,
+  UserCheck,
+  Check,
+  X,
 } from "lucide-react";
 import useLive from "../../hooks/useLive";
 import ReviewModal from "../pages/Reviewmodal";
@@ -64,6 +68,179 @@ const NO_TIMER_STATUSES = [
 ];
 const NO_CHAT_STATUSES = ["pending", "expired", "missed", "cancelled"];
 const DONE_STATUSES = ["completed", "awaiting_confirmation", "disputed"];
+
+/* =========================================================================
+   BOOKING STEPPER  (Requested -> Accepted -> Session -> Completed)
+   Theme: BLUE + WHITE
+   - done     : solid blue circle, white tick
+   - current  : solid blue circle, white icon, soft blue ring
+   - upcoming : white circle, blue border, light-blue icon
+   - failed   : red (kept red on purpose so a refund/miss is obvious)
+   - review   : red attention (kept red on purpose)
+========================================================================= */
+
+const STEPS = [
+  { label: "Requested", icon: Send },
+  { label: "Accepted", icon: UserCheck },
+  { label: "Session", icon: Video },
+  { label: "Completed", icon: CheckCircle2 },
+];
+
+// label shown on the step where a refunded booking stopped
+const FAIL_LABEL = { 1: "Not accepted", 2: "Missed", 3: "Disputed" };
+
+// which step a refunded booking stopped at
+const failIndex = (b) => {
+  if (b.status === "disputed") return 3;
+  if (b.status === "missed") return 2;
+  if (!b.mentor?.id) return 1; // expired / cancelled before anyone accepted
+  return 2; // cancelled after acceptance
+};
+
+// active = the step that is happening right now (4 = everything finished)
+const progressOf = (b, v) => {
+  switch (v.key) {
+    case "pending":
+      return { active: 1 };
+    case "confirmed":
+      return { active: 2 };
+    case "open":
+      return { active: 2, live: true };
+    case "ended":
+      return { active: 3 };
+    case "review":
+      return { active: 3, attention: true };
+    case "done":
+      return { active: 4 };
+    case "refunded":
+      return { active: failIndex(b), failAt: failIndex(b) };
+    default:
+      return { active: 0 };
+  }
+};
+
+// small text under each step label
+const subOf = (i, b, v, left, now, failAt) => {
+  if (failAt === i) {
+    if (b.refundStatus === "refunded") return "Refunded";
+    if (b.refundStatus === "failed") return "Refund processing";
+    return "Refunding…";
+  }
+
+  if (i === 0) return `Paid ${inr(b.amount)}`;
+
+  if (i === 1) {
+    if (v.key === "pending") {
+      return v.expires
+        ? `Auto-refund in ${fmtClock(Math.max(0, v.expires - now))}`
+        : b.direct
+          ? "Waiting for mentor…"
+          : "Waiting…";
+    }
+    return b.mentor?.name || "Accepted";
+  }
+
+  if (i === 2) {
+    if (v.key === "confirmed") return `Opens in ${fmtClock(Math.max(0, v.opens - now))}`;
+    if (v.key === "open") return left !== null ? `${fmtClock(left)} left` : "Room open";
+    if (["ended", "review", "done"].includes(v.key)) return "Finished";
+    return "";
+  }
+
+  if (i === 3) {
+    if (v.key === "review") return "Review required";
+    if (v.key === "done") return "Completed";
+    if (v.key === "ended") return "Confirming…";
+    return "";
+  }
+
+  return "";
+};
+
+const BookingStepper = ({ b, v, left, now }) => {
+  const { active, live, attention, failAt } = progressOf(b, v);
+  const failed = failAt !== undefined;
+  const reached = failed ? failAt : active; // connector lines are coloured up to here
+
+  return (
+    <div className="flex" role="list" aria-label="Booking progress">
+      {STEPS.map((step, i) => {
+        const Icon = step.icon;
+
+        const isFailed = failed && i === failAt;
+        const isDone = failed ? i < failAt : i < active;
+        const isCurrent = !failed && i === active && active < STEPS.length;
+
+        const circle = isFailed
+          ? "bg-red-500 text-white ring-4 ring-red-100"
+          : isDone
+            ? "bg-blue-600 text-white"
+            : isCurrent
+              ? attention
+                ? "bg-red-500 text-white shadow-lg ring-4 ring-red-100"
+                : "bg-blue-600 text-white shadow-lg ring-4 ring-blue-100"
+              : "bg-white text-blue-300 border-2 border-blue-200";
+
+        const labelCls = isFailed
+          ? "text-red-600"
+          : isDone || isCurrent
+            ? "text-slate-900"
+            : "text-slate-400";
+
+        const subCls = isFailed
+          ? "text-red-500"
+          : isCurrent
+            ? attention
+              ? "text-red-600"
+              : "text-blue-700"
+            : "text-slate-400";
+
+        const label = isFailed ? FAIL_LABEL[i] || step.label : step.label;
+        const sub = subOf(i, b, v, left, now, failAt);
+
+        return (
+          <div key={step.label} role="listitem" className="relative flex min-w-0 flex-1 flex-col items-center">
+            {/* connector to the NEXT step */}
+            {i < STEPS.length - 1 && (
+              <span
+                aria-hidden="true"
+                className={`absolute left-1/2 top-5 h-[3px] w-full -translate-y-1/2 rounded-full transition-colors duration-500 ${
+                  i < reached ? "bg-blue-600" : "bg-blue-100"
+                }`}
+              />
+            )}
+
+            {/* circle */}
+            <span
+              className={`relative z-10 flex h-10 w-10 items-center justify-center rounded-full transition-all duration-500 ${circle}`}
+            >
+              {isCurrent && live && (
+                <span className="absolute inset-0 rounded-full bg-blue-400/60 motion-safe:animate-ping" />
+              )}
+              {isFailed ? (
+                <X className="relative h-[18px] w-[18px]" />
+              ) : isDone ? (
+                <Check className="relative h-[18px] w-[18px]" />
+              ) : (
+                <Icon className="relative h-[18px] w-[18px]" />
+              )}
+            </span>
+
+            <p className={`mt-2 text-center text-xs font-semibold transition-colors ${labelCls}`}>{label}</p>
+            <p
+              className={`mt-0.5 max-w-[92px] truncate text-center text-[11px] tabular-nums sm:max-w-[150px] ${subCls}`}
+              title={sub}
+            >
+              {sub || "\u00A0"}
+            </p>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+/* ========================================================================= */
 
 const MyBookings = () => {
   useChatNotificationSound("fresher");
@@ -368,6 +545,7 @@ const MyBookings = () => {
         key: "pending",
         label: b.direct ? "Waiting for your mentor" : "Waiting for an employee",
         tone: "amber",
+        expires: new Date(b.expiresAt).getTime(),
       };
 
     // live meeting timer running
@@ -612,8 +790,17 @@ const MyBookings = () => {
                         </div>
                       )}
                       {v.key === "pending" && (
-                        <div className="flex items-center justify-center gap-2 rounded-xl bg-amber-50 px-4 py-3 text-xs font-medium text-amber-700">
-                          <Loader2 className="h-4 w-4 animate-spin" /> Waiting...
+                        <div className="rounded-xl bg-amber-50 px-4 py-3 text-center text-xs font-medium text-amber-700">
+                          <div className="flex items-center justify-center gap-2">
+                            <Loader2 className="h-4 w-4 animate-spin" /> Waiting...
+                          </div>
+                          {Number.isFinite(v.expires) && (
+                            <p className="mt-1.5 text-[11px] font-normal text-amber-700">
+                              Auto-cancels at{" "}
+                              <b className="font-semibold">{fmtTimeIST(v.expires)}</b>{" "}
+                              if no one accepts · refund goes to your wallet
+                            </p>
+                          )}
                         </div>
                       )}
                       {v.key === "review" && (
@@ -637,7 +824,9 @@ const MyBookings = () => {
                           {b.refundStatus === "failed"
                             ? "refund processing"
                             : b.refundStatus === "refunded"
-                              ? "refunded"
+                              ? b.status === "expired" || b.status === "disputed"
+                                ? "refunded to wallet"
+                                : "refunded"
                               : "amount held"}
                         </div>
                       )}
@@ -682,6 +871,11 @@ const MyBookings = () => {
                         </button>
                       )}
                     </div>
+                  </div>
+
+                  {/* LIVE BOOKING PROGRESS (stepper) */}
+                  <div className="mx-3 mb-5 sm:mx-6">
+                    <BookingStepper b={b} v={v} left={left} now={now} />
                   </div>
 
                   {/* LIVE TIMER - same value as inside the meeting room */}

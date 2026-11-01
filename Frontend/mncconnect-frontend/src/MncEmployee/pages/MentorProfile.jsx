@@ -2,9 +2,30 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 import {
-  User, Mail, Phone, MapPin, BriefcaseBusiness, Code2, Award, Star, Edit3,
-  Share2, FileText, Building, ShieldCheck, Menu, Stethoscope, Download, X,
-  Plus, Loader2, Check, AlertTriangle, LogOut, Camera, Trash2
+  User,
+  Mail,
+  Phone,
+  MapPin,
+  BriefcaseBusiness,
+  Code2,
+  Award,
+  Star,
+  Edit3,
+  Share2,
+  FileText,
+  Building,
+  ShieldCheck,
+  Menu,
+  Stethoscope,
+  Download,
+  X,
+  Plus,
+  Loader2,
+  Check,
+  AlertTriangle,
+  LogOut,
+  Camera,
+  Trash2,
 } from "lucide-react";
 import { FaLinkedin } from "react-icons/fa";
 
@@ -84,7 +105,7 @@ const MentorProfile = () => {
 
   const completedSessions = useMemo(
     () => (sessions || []).filter((s) => s.status === "Completed").length,
-    [sessions]
+    [sessions],
   );
 
   /* ---------- mentor profile ---------- */
@@ -95,13 +116,15 @@ const MentorProfile = () => {
       setError("");
 
       // identity comes from the cookie session, not localStorage
-      const me = await axios.get(`${API_URL}/auth/me`, { withCredentials: true });
+      const me = await axios.get(`${API_URL}/auth/me`, {
+        withCredentials: true,
+      });
       const email = me.data?.user?.email;
       if (!email) throw new Error("Session expired. Please login again.");
 
       const response = await axios.get(
         `${API_URL}/mentor/${encodeURIComponent(email)}`,
-        { withCredentials: true }
+        { withCredentials: true },
       );
       if (response.data?.success) {
         setMentor(response.data.mentor);
@@ -110,7 +133,11 @@ const MentorProfile = () => {
       }
     } catch (err) {
       console.error("Mentor profile error:", err);
-      setError(err?.response?.data?.message || err.message || "Unable to load mentor profile.");
+      setError(
+        err?.response?.data?.message ||
+          err.message ||
+          "Unable to load mentor profile.",
+      );
     } finally {
       setLoading(false);
     }
@@ -130,23 +157,32 @@ const MentorProfile = () => {
       languages,
       ...rest
     } = formValues;
-    const hasFiles = offerLetterFile || employeeIdProofFile || additionalProofFile;
+    const hasFiles =
+      offerLetterFile || employeeIdProofFile || additionalProofFile;
 
     let body;
     const config = { withCredentials: true };
 
     if (hasFiles) {
       body = new FormData();
-      Object.entries(rest).forEach(([key, value]) => body.append(key, value ?? ""));
+      Object.entries(rest).forEach(([key, value]) =>
+        body.append(key, value ?? ""),
+      );
       (languages || []).forEach((skill) => body.append("languages[]", skill));
       if (offerLetterFile) body.append("offerLetter", offerLetterFile);
-      if (employeeIdProofFile) body.append("employeeIdProof", employeeIdProofFile);
-      if (additionalProofFile) body.append("additionalProof", additionalProofFile);
+      if (employeeIdProofFile)
+        body.append("employeeIdProof", employeeIdProofFile);
+      if (additionalProofFile)
+        body.append("additionalProof", additionalProofFile);
     } else {
       body = { ...rest, languages };
     }
 
-    const res = await axios.put(`${API_URL}/mentor/${encodeURIComponent(email)}`, body, config);
+    const res = await axios.put(
+      `${API_URL}/mentor/${encodeURIComponent(email)}`,
+      body,
+      config,
+    );
     return res.data;
   };
 
@@ -185,12 +221,12 @@ const MentorProfile = () => {
           {
             withCredentials: true,
             // Let Axios/browser set the multipart boundary automatically.
-          }
+          },
         );
 
         if (avatarResponse.data?.success === false) {
           throw new Error(
-            avatarResponse.data?.message || "Profile photo upload failed."
+            avatarResponse.data?.message || "Profile photo upload failed.",
           );
         }
 
@@ -211,7 +247,7 @@ const MentorProfile = () => {
 
         if (avatarResponse.data?.success === false) {
           throw new Error(
-            avatarResponse.data?.message || "Could not remove profile photo."
+            avatarResponse.data?.message || "Could not remove profile photo.",
           );
         }
 
@@ -222,8 +258,9 @@ const MentorProfile = () => {
 
         setMentor(updatedMentor);
       }
-
       setEditOpen(false);
+      window.dispatchEvent(new Event("profile:updated"));
+      showToast("success", "Profile updated successfully!");
       showToast("success", "Profile updated successfully!");
     } catch (err) {
       console.error("Mentor update error:", err);
@@ -238,7 +275,7 @@ const MentorProfile = () => {
         "error",
         err?.response?.data?.message ||
           err.message ||
-          "Could not save changes."
+          "Could not save changes.",
       );
     } finally {
       setSaving(false);
@@ -309,11 +346,24 @@ const MentorProfile = () => {
       <div className="flex items-center justify-center min-h-screen px-4 sm:px-5 bg-slate-50">
         <div className="w-full max-w-md p-6 sm:p-8 text-center bg-white shadow-xl rounded-3xl">
           <ShieldCheck size={48} className="mx-auto text-red-500" />
-          <h2 className="mt-4 text-lg sm:text-xl font-bold text-slate-900">Profile unavailable</h2>
-          <p className="mt-2 text-sm text-slate-500 break-words">{error || "Mentor data could not be loaded."}</p>
+          <h2 className="mt-4 text-lg sm:text-xl font-bold text-slate-900">
+            Profile unavailable
+          </h2>
+          <p className="mt-2 text-sm text-slate-500 break-words">
+            {error || "Mentor data could not be loaded."}
+          </p>
           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
-            <Link to="/mentor/home" className="inline-block px-6 py-3 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700">Back to Home</Link>
-            <button onClick={handleLogout} disabled={loggingOut} className="inline-block px-6 py-3 text-sm font-semibold text-red-600 border border-red-200 rounded-xl hover:bg-red-50 disabled:opacity-60">
+            <Link
+              to="/mentor/home"
+              className="inline-block px-6 py-3 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700"
+            >
+              Back to Home
+            </Link>
+            <button
+              onClick={handleLogout}
+              disabled={loggingOut}
+              className="inline-block px-6 py-3 text-sm font-semibold text-red-600 border border-red-200 rounded-xl hover:bg-red-50 disabled:opacity-60"
+            >
               {loggingOut ? "Logging out…" : "Logout"}
             </button>
           </div>
@@ -326,28 +376,49 @@ const MentorProfile = () => {
     <div className="min-h-screen overflow-x-hidden bg-slate-50">
       {/* Mobile menu button */}
       <div className="lg:hidden fixed top-3 left-3 sm:top-4 sm:left-4 z-50">
-        <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 bg-white rounded-lg shadow-lg" aria-label="Toggle menu">
+        <button
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          className="p-2 bg-white rounded-lg shadow-lg"
+          aria-label="Toggle menu"
+        >
           <Menu size={22} />
         </button>
       </div>
-      {sidebarOpen && <div onClick={() => setSidebarOpen(false)} className="fixed inset-0 z-40 bg-black/30 lg:hidden" />}
+      {sidebarOpen && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          className="fixed inset-0 z-40 bg-black/30 lg:hidden"
+        />
+      )}
 
       <div className="flex">
         {/* SIDEBAR: drawer on mobile, sticky column on desktop */}
-        <aside className={`fixed lg:sticky top-0 left-0 z-50 w-64 max-w-[85vw] shrink-0 h-[100dvh] overflow-y-auto bg-white border-r border-slate-100 px-5 py-6 flex flex-col transition-transform duration-300 lg:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
+        <aside
+          className={`fixed lg:sticky top-0 left-0 z-50 w-64 max-w-[85vw] shrink-0 h-[100dvh] overflow-y-auto bg-white border-r border-slate-100 px-5 py-6 flex flex-col transition-transform duration-300 lg:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}
+        >
           <div className="flex items-center gap-2 px-1 mb-6">
             <div className="w-8 h-8 shrink-0 rounded-lg bg-orange-500 flex items-center justify-center">
               <Stethoscope size={18} className="text-white" />
             </div>
-            <span className="text-[15px] font-semibold text-slate-900">MentorConnect<span className="text-orange-500">_</span></span>
+            <span className="text-[15px] font-semibold text-slate-900">
+              MentorConnect<span className="text-orange-500">_</span>
+            </span>
           </div>
 
           <div className="px-1 pb-5 mb-4 border-b border-slate-100">
             <div className="flex items-center gap-3">
-              <img src={profile.avatar} alt={profile.name} className="w-11 h-11 shrink-0 rounded-full object-cover border-2 border-blue-100" />
+              <img
+                src={profile.avatar}
+                alt={profile.name}
+                className="w-11 h-11 shrink-0 rounded-full object-cover border-2 border-blue-100"
+              />
               <div className="min-w-0">
-                <p className="font-semibold text-sm text-slate-900 truncate">{profile.name}</p>
-                <p className="text-xs text-slate-400 truncate">{profile.designation}</p>
+                <p className="font-semibold text-sm text-slate-900 truncate">
+                  {profile.name}
+                </p>
+                <p className="text-xs text-slate-400 truncate">
+                  {profile.designation}
+                </p>
               </div>
             </div>
           </div>
@@ -356,7 +427,12 @@ const MentorProfile = () => {
             {NAV_ITEMS.map(({ key, label, icon: Icon }) => {
               const isActive = key === activeTab;
               return (
-                <button key={key} onClick={() => { setActiveTab(key); setSidebarOpen(false); }}
+                <button
+                  key={key}
+                  onClick={() => {
+                    setActiveTab(key);
+                    setSidebarOpen(false);
+                  }}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium border-l-2 transition text-left ${isActive ? "bg-orange-50 text-orange-600 border-orange-500" : "text-slate-500 border-transparent hover:bg-slate-50 hover:text-slate-700"}`}
                 >
                   <Icon size={18} className="shrink-0" />
@@ -365,7 +441,10 @@ const MentorProfile = () => {
               );
             })}
             <div className="my-3 border-t border-slate-100" />
-            <Link to="/mentor/settings" className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-500 hover:bg-slate-50 hover:text-slate-700">
+            <Link
+              to="/mentor/settings"
+              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-500 hover:bg-slate-50 hover:text-slate-700"
+            >
               <Edit3 size={18} className="shrink-0" />
               <span>Settings</span>
             </Link>
@@ -376,7 +455,11 @@ const MentorProfile = () => {
               disabled={loggingOut}
               className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-red-500 hover:bg-red-50 disabled:opacity-60 text-left"
             >
-              {loggingOut ? <Loader2 size={18} className="shrink-0 animate-spin" /> : <LogOut size={18} className="shrink-0" />}
+              {loggingOut ? (
+                <Loader2 size={18} className="shrink-0 animate-spin" />
+              ) : (
+                <LogOut size={18} className="shrink-0" />
+              )}
               <span>{loggingOut ? "Logging out…" : "Logout"}</span>
             </button>
           </nav>
@@ -386,7 +469,9 @@ const MentorProfile = () => {
               <Award size={16} />
               <span className="text-xs font-semibold">Premium Mentor</span>
             </div>
-            <p className="text-[11px] text-blue-50">Verified mentors get 3x more mentee requests.</p>
+            <p className="text-[11px] text-blue-50">
+              Verified mentors get 3x more mentee requests.
+            </p>
           </div>
         </aside>
 
@@ -399,9 +484,19 @@ const MentorProfile = () => {
               <span>Profile</span>
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <button aria-label="Share" className="w-9 h-9 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50"><Share2 size={16} /></button>
-              <button onClick={() => setEditOpen(true)} className="flex items-center gap-2 px-3 sm:px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">
-                <Edit3 size={16} /> <span className="hidden min-[380px]:inline">Edit Profile</span><span className="min-[380px]:hidden">Edit</span>
+              <button
+                aria-label="Share"
+                className="w-9 h-9 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50"
+              >
+                <Share2 size={16} />
+              </button>
+              <button
+                onClick={() => setEditOpen(true)}
+                className="flex items-center gap-2 px-3 sm:px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+              >
+                <Edit3 size={16} />{" "}
+                <span className="hidden min-[380px]:inline">Edit Profile</span>
+                <span className="min-[380px]:hidden">Edit</span>
               </button>
             </div>
           </div>
@@ -410,13 +505,25 @@ const MentorProfile = () => {
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 mb-4 sm:mb-6">
             <div className="flex flex-col md:flex-row md:items-center gap-5 sm:gap-6">
               <div className="flex min-w-0 items-center gap-3 sm:gap-4">
-                <img src={profile.avatar} alt={profile.name} className="w-14 h-14 sm:w-16 sm:h-16 shrink-0 rounded-2xl object-cover" />
+                <img
+                  src={profile.avatar}
+                  alt={profile.name}
+                  className="w-14 h-14 sm:w-16 sm:h-16 shrink-0 rounded-2xl object-cover"
+                />
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h1 className="text-base sm:text-lg font-semibold text-slate-900 break-words">{profile.name}</h1>
-                    {profile.isVerified && <span className="px-2 py-0.5 text-[10px] font-semibold text-blue-600 bg-blue-50 rounded-full">Verified</span>}
+                    <h1 className="text-base sm:text-lg font-semibold text-slate-900 break-words">
+                      {profile.name}
+                    </h1>
+                    {profile.isVerified && (
+                      <span className="px-2 py-0.5 text-[10px] font-semibold text-blue-600 bg-blue-50 rounded-full">
+                        Verified
+                      </span>
+                    )}
                   </div>
-                  <p className="text-sm text-slate-500 mt-0.5 break-words">{profile.designation} at {profile.company}</p>
+                  <p className="text-sm text-slate-500 mt-0.5 break-words">
+                    {profile.designation} at {profile.company}
+                  </p>
                   <p className="flex items-start gap-1.5 text-sm text-slate-400 mt-1 min-w-0">
                     <Mail size={14} className="mt-0.5 shrink-0" />
                     <span className="min-w-0 break-all">{profile.email}</span>
@@ -427,12 +534,17 @@ const MentorProfile = () => {
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 sm:gap-x-8 gap-y-4 md:ml-auto">
                 <Field label="Location" value={profile.location} />
                 <Field label="Experience" value={`${profile.experience} yrs`} />
-                <Field label="Status" value={
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className={`w-1.5 h-1.5 rounded-full ${profile.accountStatus === "active" ? "bg-emerald-500" : "bg-amber-400"}`} />
-                    {profile.verificationStatus}
-                  </span>
-                } />
+                <Field
+                  label="Status"
+                  value={
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full ${profile.accountStatus === "active" ? "bg-emerald-500" : "bg-amber-400"}`}
+                      />
+                      {profile.verificationStatus}
+                    </span>
+                  }
+                />
                 <Field label="Rating" value={profile.rating} />
                 <Field label="Sessions" value={profile.totalSessions} />
                 <Field label="Reviews" value={profile.totalReviews} />
@@ -444,40 +556,94 @@ const MentorProfile = () => {
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6">
             {activeTab === "personal" && (
               <div>
-                <h2 className="text-sm font-semibold text-slate-900 mb-4">Personal Information</h2>
+                <h2 className="text-sm font-semibold text-slate-900 mb-4">
+                  Personal Information
+                </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-                  <DetailItem icon={<User size={16} />} label="Full Name" value={profile.name} />
-                  <DetailItem icon={<Mail size={16} />} label="Email" value={profile.email} />
-                  <DetailItem icon={<Phone size={16} />} label="Phone" value={profile.phone} />
-                  <DetailItem icon={<Building size={16} />} label="Employee ID" value={profile.employeeId} />
-                  <DetailItem icon={<MapPin size={16} />} label="Office Location" value={profile.officeLocation} />
-                  <DetailItem icon={<BriefcaseBusiness size={16} />} label="Department" value={profile.department} />
-                  <DetailItem icon={<Mail size={16} />} label="Work Email" value={profile.workEmail} />
-                  <DetailItem icon={<ShieldCheck size={16} />} label="Verification Status" value={profile.verificationStatus} />
+                  <DetailItem
+                    icon={<User size={16} />}
+                    label="Full Name"
+                    value={profile.name}
+                  />
+                  <DetailItem
+                    icon={<Mail size={16} />}
+                    label="Email"
+                    value={profile.email}
+                  />
+                  <DetailItem
+                    icon={<Phone size={16} />}
+                    label="Phone"
+                    value={profile.phone}
+                  />
+                  <DetailItem
+                    icon={<Building size={16} />}
+                    label="Employee ID"
+                    value={profile.employeeId}
+                  />
+                  <DetailItem
+                    icon={<MapPin size={16} />}
+                    label="Office Location"
+                    value={profile.officeLocation}
+                  />
+                  <DetailItem
+                    icon={<BriefcaseBusiness size={16} />}
+                    label="Department"
+                    value={profile.department}
+                  />
+                  <DetailItem
+                    icon={<Mail size={16} />}
+                    label="Work Email"
+                    value={profile.workEmail}
+                  />
+                  <DetailItem
+                    icon={<ShieldCheck size={16} />}
+                    label="Verification Status"
+                    value={profile.verificationStatus}
+                  />
                 </div>
                 <div className="mt-6 pt-6 border-t border-slate-100">
-                  <h3 className="text-sm font-semibold text-slate-700 mb-2">About Me</h3>
-                  <p className="text-sm text-slate-600 leading-relaxed break-words">{profile.bio}</p>
+                  <h3 className="text-sm font-semibold text-slate-700 mb-2">
+                    About Me
+                  </h3>
+                  <p className="text-sm text-slate-600 leading-relaxed break-words">
+                    {profile.bio}
+                  </p>
                 </div>
               </div>
             )}
 
             {activeTab === "skills" && (
               <div>
-                <h2 className="text-sm font-semibold text-slate-900 mb-4">Skills & Expertise</h2>
+                <h2 className="text-sm font-semibold text-slate-900 mb-4">
+                  Skills & Expertise
+                </h2>
                 <div className="flex flex-wrap gap-2">
                   {profile.skills.length > 0 ? (
                     profile.skills.map((skill, index) => (
-                      <span key={index} className="px-3 sm:px-4 py-1.5 sm:py-2 bg-blue-50 text-blue-600 rounded-lg text-sm font-medium break-words">{skill}</span>
+                      <span
+                        key={index}
+                        className="px-3 sm:px-4 py-1.5 sm:py-2 bg-blue-50 text-blue-600 rounded-lg text-sm font-medium break-words"
+                      >
+                        {skill}
+                      </span>
                     ))
                   ) : (
-                    <p className="text-slate-400 text-sm">No skills added yet</p>
+                    <p className="text-slate-400 text-sm">
+                      No skills added yet
+                    </p>
                   )}
                 </div>
                 {profile.linkedin && (
                   <div className="mt-6 pt-6 border-t border-slate-100">
-                    <h3 className="text-sm font-semibold text-slate-700 mb-2">Social Links</h3>
-                    <a href={profile.linkedin} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-blue-600 hover:underline text-sm">
+                    <h3 className="text-sm font-semibold text-slate-700 mb-2">
+                      Social Links
+                    </h3>
+                    <a
+                      href={profile.linkedin}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 text-blue-600 hover:underline text-sm"
+                    >
                       <FaLinkedin size={18} /> LinkedIn Profile
                     </a>
                   </div>
@@ -487,20 +653,46 @@ const MentorProfile = () => {
 
             {activeTab === "documents" && (
               <div>
-                <h2 className="text-sm font-semibold text-slate-900 mb-4">Uploaded Documents</h2>
+                <h2 className="text-sm font-semibold text-slate-900 mb-4">
+                  Uploaded Documents
+                </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-                  <DocumentCard title="Offer Letter" url={profile.offerLetter} />
-                  <DocumentCard title="Employee ID Proof" url={profile.employeeIdProof} />
-                  {profile.additionalProof && <DocumentCard title="Additional Proof" url={profile.additionalProof} />}
+                  <DocumentCard
+                    title="Offer Letter"
+                    url={profile.offerLetter}
+                  />
+                  <DocumentCard
+                    title="Employee ID Proof"
+                    url={profile.employeeIdProof}
+                  />
+                  {profile.additionalProof && (
+                    <DocumentCard
+                      title="Additional Proof"
+                      url={profile.additionalProof}
+                    />
+                  )}
                 </div>
               </div>
             )}
           </div>
 
           <div className="grid grid-cols-3 gap-2 sm:gap-4 mt-4 sm:mt-6">
-            <StatCard label="Sessions" value={profile.totalSessions} icon={BriefcaseBusiness} />
-            <StatCard label="Rating" value={profile.rating} icon={Star} iconClass="text-yellow-400 fill-yellow-400" />
-            <StatCard label="Reviews" value={profile.totalReviews} icon={FileText} />
+            <StatCard
+              label="Sessions"
+              value={profile.totalSessions}
+              icon={BriefcaseBusiness}
+            />
+            <StatCard
+              label="Rating"
+              value={profile.rating}
+              icon={Star}
+              iconClass="text-yellow-400 fill-yellow-400"
+            />
+            <StatCard
+              label="Reviews"
+              value={profile.totalReviews}
+              icon={FileText}
+            />
           </div>
         </main>
       </div>
@@ -518,12 +710,22 @@ const MentorProfile = () => {
       {toast && (
         <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:bottom-6 z-[100]">
           <div className="flex items-center gap-3 rounded-2xl bg-white px-4 sm:px-5 py-3 sm:py-4 shadow-2xl ring-1 ring-black/5 sm:max-w-sm">
-            <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${toast.type === "success" ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"}`}>
-              {toast.type === "success" ? <Check size={15} /> : <AlertTriangle size={15} />}
+            <div
+              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${toast.type === "success" ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"}`}
+            >
+              {toast.type === "success" ? (
+                <Check size={15} />
+              ) : (
+                <AlertTriangle size={15} />
+              )}
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-slate-900">{toast.type === "success" ? "Success" : "Error"}</p>
-              <p className="text-xs text-slate-500 break-words">{toast.message}</p>
+              <p className="text-sm font-semibold text-slate-900">
+                {toast.type === "success" ? "Success" : "Error"}
+              </p>
+              <p className="text-xs text-slate-500 break-words">
+                {toast.message}
+              </p>
             </div>
           </div>
         </div>
@@ -545,8 +747,18 @@ const EDITABLE_FIELDS = [
   { key: "employeeId", label: "Employee ID", icon: Building },
   { key: "officeLocation", label: "Office Location", icon: MapPin },
   { key: "workEmail", label: "Work Email", icon: Mail },
-  { key: "yearsOfExperience", label: "Years of Experience", icon: Award, type: "number" },
-  { key: "linkedinProfile", label: "LinkedIn URL", icon: User, placeholder: "https://linkedin.com/in/..." },
+  {
+    key: "yearsOfExperience",
+    label: "Years of Experience",
+    icon: Award,
+    type: "number",
+  },
+  {
+    key: "linkedinProfile",
+    label: "LinkedIn URL",
+    icon: User,
+    placeholder: "https://linkedin.com/in/...",
+  },
 ];
 
 const EditMentorModal = ({ mentor, saving, onClose, onSave, showToast }) => {
@@ -577,11 +789,11 @@ const EditMentorModal = ({ mentor, saving, onClose, onSave, showToast }) => {
   const avatarInputRef = useRef(null);
 
   const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(
-    mentor?.name || "Mentor"
+    mentor?.name || "Mentor",
   )}&background=eff6ff&color=2563eb`;
 
   const [avatarPreview, setAvatarPreview] = useState(
-    mentor?.profilePic || fallbackAvatar
+    mentor?.profilePic || fallbackAvatar,
   );
 
   useEffect(() => {
@@ -640,8 +852,10 @@ const EditMentorModal = ({ mentor, saving, onClose, onSave, showToast }) => {
     }
   };
 
-  const updateFile = (key, file) => setForm((prev) => ({ ...prev, [key]: file }));
-  const updateField = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
+  const updateFile = (key, file) =>
+    setForm((prev) => ({ ...prev, [key]: file }));
+  const updateField = (key, value) =>
+    setForm((prev) => ({ ...prev, [key]: value }));
 
   const addSkill = () => {
     const trimmed = skillInput.trim();
@@ -652,7 +866,10 @@ const EditMentorModal = ({ mentor, saving, onClose, onSave, showToast }) => {
   };
 
   const removeSkill = (skill) => {
-    updateField("languages", form.languages.filter((s) => s !== skill));
+    updateField(
+      "languages",
+      form.languages.filter((s) => s !== skill),
+    );
   };
 
   const handleSubmit = (e) => {
@@ -667,8 +884,15 @@ const EditMentorModal = ({ mentor, saving, onClose, onSave, showToast }) => {
           text-slate-800 + color-scheme:light = typed text is always visible */}
       <div className="relative flex max-h-[95dvh] sm:max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl sm:rounded-2xl bg-white text-slate-800 shadow-2xl [color-scheme:light]">
         <div className="flex shrink-0 items-center justify-between border-b border-slate-100 bg-white px-4 py-4 sm:px-6 sm:py-5">
-          <h2 className="text-base sm:text-lg font-semibold text-slate-900">Edit Profile</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100">
+          <h2 className="text-base sm:text-lg font-semibold text-slate-900">
+            Edit Profile
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100"
+          >
             <X size={17} />
           </button>
         </div>
@@ -724,22 +948,24 @@ const EditMentorModal = ({ mentor, saving, onClose, onSave, showToast }) => {
                       className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-600 transition hover:bg-blue-50 disabled:opacity-60"
                     >
                       <Camera size={14} />
-                      {form.avatarFile || (mentor?.profilePic && !form.removeAvatar)
+                      {form.avatarFile ||
+                      (mentor?.profilePic && !form.removeAvatar)
                         ? "Change photo"
                         : "Upload photo"}
                     </button>
 
-                    {(mentor?.profilePic || form.avatarFile) && !form.removeAvatar && (
-                      <button
-                        type="button"
-                        onClick={handleRemoveAvatar}
-                        disabled={saving}
-                        className="inline-flex items-center gap-1.5 px-2 py-2 text-xs font-medium text-red-600 transition hover:text-red-700 disabled:opacity-60"
-                      >
-                        <Trash2 size={14} />
-                        Remove photo
-                      </button>
-                    )}
+                    {(mentor?.profilePic || form.avatarFile) &&
+                      !form.removeAvatar && (
+                        <button
+                          type="button"
+                          onClick={handleRemoveAvatar}
+                          disabled={saving}
+                          className="inline-flex items-center gap-1.5 px-2 py-2 text-xs font-medium text-red-600 transition hover:text-red-700 disabled:opacity-60"
+                        >
+                          <Trash2 size={14} />
+                          Remove photo
+                        </button>
+                      )}
 
                     {form.avatarFile && (
                       <span className="max-w-full truncate text-[11px] text-slate-500">
@@ -758,26 +984,35 @@ const EditMentorModal = ({ mentor, saving, onClose, onSave, showToast }) => {
             </section>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              {EDITABLE_FIELDS.map(({ key, label, type, placeholder, required }) => (
-                <div key={key} className={key === "name" ? "sm:col-span-2" : ""}>
-                  <label className="mb-1.5 block text-xs font-medium text-slate-500">
-                    {label}
-                    {required && <span className="ml-1 text-red-500">*</span>}
-                  </label>
-                  <input
-                    type={type || "text"}
-                    value={form[key]}
-                    required={required}
-                    onChange={(e) => updateField(key, e.target.value)}
-                    placeholder={placeholder || `Enter ${label.toLowerCase()}`}
-                    className={INPUT_CLASS}
-                  />
-                </div>
-              ))}
+              {EDITABLE_FIELDS.map(
+                ({ key, label, type, placeholder, required }) => (
+                  <div
+                    key={key}
+                    className={key === "name" ? "sm:col-span-2" : ""}
+                  >
+                    <label className="mb-1.5 block text-xs font-medium text-slate-500">
+                      {label}
+                      {required && <span className="ml-1 text-red-500">*</span>}
+                    </label>
+                    <input
+                      type={type || "text"}
+                      value={form[key]}
+                      required={required}
+                      onChange={(e) => updateField(key, e.target.value)}
+                      placeholder={
+                        placeholder || `Enter ${label.toLowerCase()}`
+                      }
+                      className={INPUT_CLASS}
+                    />
+                  </div>
+                ),
+              )}
             </div>
 
             <div className="mt-4">
-              <label className="mb-1.5 block text-xs font-medium text-slate-500">About Me</label>
+              <label className="mb-1.5 block text-xs font-medium text-slate-500">
+                About Me
+              </label>
               <textarea
                 value={form.bio}
                 onChange={(e) => updateField("bio", e.target.value)}
@@ -788,29 +1023,52 @@ const EditMentorModal = ({ mentor, saving, onClose, onSave, showToast }) => {
             </div>
 
             <div className="mt-4">
-              <label className="mb-1.5 block text-xs font-medium text-slate-500">Skills / Languages</label>
+              <label className="mb-1.5 block text-xs font-medium text-slate-500">
+                Skills / Languages
+              </label>
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={skillInput}
                   onChange={(e) => setSkillInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSkill(); } }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addSkill();
+                    }
+                  }}
                   placeholder="e.g. React, Python, Java"
                   className={`${INPUT_CLASS} min-w-0 flex-1`}
                 />
-                <button type="button" onClick={addSkill} className="flex shrink-0 items-center gap-1 rounded-xl bg-blue-600 px-3 sm:px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700">
+                <button
+                  type="button"
+                  onClick={addSkill}
+                  className="flex shrink-0 items-center gap-1 rounded-xl bg-blue-600 px-3 sm:px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+                >
                   <Plus size={16} /> Add
                 </button>
               </div>
 
               <div className="mt-3 flex min-h-[44px] flex-wrap gap-2 rounded-xl border border-dashed border-slate-200 p-3">
                 {form.languages.length === 0 ? (
-                  <p className="w-full py-1 text-center text-sm text-slate-400">No skills added yet</p>
+                  <p className="w-full py-1 text-center text-sm text-slate-400">
+                    No skills added yet
+                  </p>
                 ) : (
                   form.languages.map((skill) => (
-                    <span key={skill} className="flex max-w-full items-center gap-2 rounded-full bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700">
+                    <span
+                      key={skill}
+                      className="flex max-w-full items-center gap-2 rounded-full bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700"
+                    >
                       <span className="min-w-0 break-words">{skill}</span>
-                      <button type="button" onClick={() => removeSkill(skill)} aria-label={`Remove ${skill}`} className="shrink-0 hover:text-red-500"><X size={13} /></button>
+                      <button
+                        type="button"
+                        onClick={() => removeSkill(skill)}
+                        aria-label={`Remove ${skill}`}
+                        className="shrink-0 hover:text-red-500"
+                      >
+                        <X size={13} />
+                      </button>
                     </span>
                   ))
                 )}
@@ -818,22 +1076,51 @@ const EditMentorModal = ({ mentor, saving, onClose, onSave, showToast }) => {
             </div>
 
             <div className="mt-6 pt-6 border-t border-slate-100">
-              <label className="mb-3 block text-xs font-medium text-slate-500">Documents</label>
+              <label className="mb-3 block text-xs font-medium text-slate-500">
+                Documents
+              </label>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <DocumentUploadField label="Offer Letter" currentUrl={form.offerLetter} file={form.offerLetterFile} onChange={(file) => updateFile("offerLetterFile", file)} />
-                <DocumentUploadField label="Employee ID Proof" currentUrl={form.employeeIdProof} file={form.employeeIdProofFile} onChange={(file) => updateFile("employeeIdProofFile", file)} />
-                <DocumentUploadField label="Additional Proof" currentUrl={form.additionalProof} file={form.additionalProofFile} onChange={(file) => updateFile("additionalProofFile", file)} />
+                <DocumentUploadField
+                  label="Offer Letter"
+                  currentUrl={form.offerLetter}
+                  file={form.offerLetterFile}
+                  onChange={(file) => updateFile("offerLetterFile", file)}
+                />
+                <DocumentUploadField
+                  label="Employee ID Proof"
+                  currentUrl={form.employeeIdProof}
+                  file={form.employeeIdProofFile}
+                  onChange={(file) => updateFile("employeeIdProofFile", file)}
+                />
+                <DocumentUploadField
+                  label="Additional Proof"
+                  currentUrl={form.additionalProof}
+                  file={form.additionalProofFile}
+                  onChange={(file) => updateFile("additionalProofFile", file)}
+                />
               </div>
             </div>
           </div>
 
           {/* footer always visible */}
           <div className="flex shrink-0 flex-col-reverse gap-2 sm:gap-3 border-t border-slate-100 bg-white px-4 py-3 sm:flex-row sm:justify-end sm:px-6 sm:py-4">
-            <button type="button" onClick={onClose} className="rounded-full border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-500 transition hover:bg-slate-50">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-500 transition hover:bg-slate-50"
+            >
               Cancel
             </button>
-            <button type="submit" disabled={saving} className="flex items-center justify-center gap-2 rounded-full bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-lg transition hover:bg-blue-700 hover:shadow-xl disabled:opacity-60">
-              {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex items-center justify-center gap-2 rounded-full bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-lg transition hover:bg-blue-700 hover:shadow-xl disabled:opacity-60"
+            >
+              {saving ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <Check size={16} />
+              )}
               {saving ? "Saving…" : "Save Changes"}
             </button>
           </div>
@@ -849,18 +1136,34 @@ const DocumentUploadField = ({ label, currentUrl, file, onChange }) => {
     <div className="min-w-0 rounded-xl border border-slate-200 p-3">
       <p className="text-sm font-medium text-slate-700">{label}</p>
       {file ? (
-        <p className="mt-1 truncate text-xs font-medium text-blue-600">Selected: {file.name}</p>
+        <p className="mt-1 truncate text-xs font-medium text-blue-600">
+          Selected: {file.name}
+        </p>
       ) : currentUrl ? (
-        <a href={currentUrl} target="_blank" rel="noopener noreferrer" className="mt-1 flex items-center gap-1.5 text-xs text-blue-600 hover:underline">
+        <a
+          href={currentUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-1 flex items-center gap-1.5 text-xs text-blue-600 hover:underline"
+        >
           <Download size={12} /> View current file
         </a>
       ) : (
         <p className="mt-1 text-xs text-slate-400">Not uploaded</p>
       )}
-      <label htmlFor={inputId} className="mt-2 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2 text-xs font-semibold text-slate-500 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600">
+      <label
+        htmlFor={inputId}
+        className="mt-2 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2 text-xs font-semibold text-slate-500 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
+      >
         <Plus size={13} /> {currentUrl || file ? "Replace file" : "Upload file"}
       </label>
-      <input id={inputId} type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(e) => onChange(e.target.files?.[0] || null)} className="hidden" />
+      <input
+        id={inputId}
+        type="file"
+        accept=".pdf,.jpg,.jpeg,.png"
+        onChange={(e) => onChange(e.target.files?.[0] || null)}
+        className="hidden"
+      />
     </div>
   );
 };
@@ -876,8 +1179,12 @@ const DetailItem = ({ icon, label, value }) => (
   <div className="flex min-w-0 items-center gap-3 p-3 bg-slate-50 rounded-lg">
     <div className="shrink-0 text-slate-400">{icon}</div>
     <div className="min-w-0">
-      <p className="text-[10px] text-slate-400 uppercase tracking-wider">{label}</p>
-      <p className="text-sm font-medium text-slate-900 break-words">{value || "Not provided"}</p>
+      <p className="text-[10px] text-slate-400 uppercase tracking-wider">
+        {label}
+      </p>
+      <p className="text-sm font-medium text-slate-900 break-words">
+        {value || "Not provided"}
+      </p>
     </div>
   </div>
 );
@@ -886,7 +1193,12 @@ const DocumentCard = ({ title, url }) => (
   <div className="min-w-0 p-4 border border-slate-100 rounded-lg">
     <p className="text-sm font-medium text-slate-700">{title}</p>
     {url ? (
-      <a href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 mt-2 text-blue-600 hover:underline text-sm">
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center gap-2 mt-2 text-blue-600 hover:underline text-sm"
+      >
         <Download size={14} /> View Document
       </a>
     ) : (
@@ -895,10 +1207,17 @@ const DocumentCard = ({ title, url }) => (
   </div>
 );
 
-const StatCard = ({ label, value, icon: Icon, iconClass = "text-blue-500" }) => (
+const StatCard = ({
+  label,
+  value,
+  icon: Icon,
+  iconClass = "text-blue-500",
+}) => (
   <div className="min-w-0 bg-white rounded-2xl border border-slate-100 shadow-sm p-3 sm:p-4 text-center">
     <Icon size={18} className={`mx-auto mb-1.5 sm:mb-2 ${iconClass}`} />
-    <div className="text-lg sm:text-xl font-semibold text-slate-900 truncate">{value}</div>
+    <div className="text-lg sm:text-xl font-semibold text-slate-900 truncate">
+      {value}
+    </div>
     <p className="text-[11px] sm:text-xs text-slate-400">{label}</p>
   </div>
 );

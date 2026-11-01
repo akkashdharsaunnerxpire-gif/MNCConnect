@@ -35,6 +35,30 @@ const GAP_MS = 30 * 60 * 1000;
 const OPEN_BEFORE_MS = 2 * 60 * 1000;
 const PLATFORM_FEE_PERCENT = Number(process.env.PLATFORM_FEE_PERCENT || 25);
 
+/**
+ * AUTO-CANCEL
+ * A request that is still "pending" (nobody accepted) this many minutes BEFORE
+ * the session start is cancelled automatically and the money goes back to the
+ * fresher's WALLET.
+ *   session 4:30 PM + PENDING_CUTOFF_MIN=10  ->  cancelled at 4:20 PM
+ * Change it in .env:  PENDING_CUTOFF_MIN=10
+ */
+const PENDING_CUTOFF_MIN = Number(process.env.PENDING_CUTOFF_MIN) || 10;
+const PENDING_CUTOFF_MS = PENDING_CUTOFF_MIN * 60 * 1000;
+
+// If the fresher books very close to the start (cutoff already passed), still give
+// mentors at least this long to accept before auto-cancelling.
+const MIN_WAIT_MS = 2 * 60 * 1000;
+
+// startsAt (Date) -> the moment a still-pending request is auto-cancelled
+const expiryFor = (startsAt) => {
+  const start = new Date(startsAt).getTime();
+  const ideal = start - PENDING_CUTOFF_MS; // e.g. 4:20 PM for a 4:30 PM session
+  const floor = Date.now() + MIN_WAIT_MS; // late bookings: wait at least 2 min
+  // never later than 30 seconds before the start
+  return new Date(Math.min(start - 30 * 1000, Math.max(ideal, floor)));
+};
+
 const MAX_REFUND_ATTEMPTS = 5;
 const REFUND_RETRY_GAP_MS = 30 * 60 * 1000;
 
@@ -244,6 +268,9 @@ const isWalletPayment = (p) =>
  * ONE refund function for everything. Returns "refunded" | "failed".
  * Payment is locked first (paid -> refunded, atomic) so it can never be refunded twice.
  * If the refund fails the lock is released so the scheduler can retry.
+ *
+ * options.to === "wallet" -> money goes to the fresher's wallet (even if the fresher
+ * paid with Razorpay). Wallet payments always go back to the wallet.
  */
 const refundPayment = async (payment, reason = "", options = {}) => {
   if (!payment) return "failed";
@@ -280,7 +307,7 @@ const refundPayment = async (payment, reason = "", options = {}) => {
   const amount = Number(before.amount) || 0;
 
   try {
-    // wallet refund: Razorpay knows nothing about this payment, so do NOT call it
+    // wallet refund: Razorpay knows nothing about this credit, so do NOT call it
     if (toWallet) {
       if (!before.fresher) {
         await unlock();
@@ -340,10 +367,11 @@ const refundPayment = async (payment, reason = "", options = {}) => {
 /**
  * Close a booking in one of the `from` statuses, set it to `to`, refund the fresher.
  * Atomic on the booking status, so only one caller can win.
+ * `refundTo: "wallet"` sends the money to the fresher's wallet.
  */
 const closeAndRefund = async (
   bookingId,
-  { from, to, reason, title, mentorNote },
+  { from, to, reason, title, mentorNote, refundTo },
 ) => {
   const locked = await Booking.findOneAndUpdate(
     { _id: bookingId, status: { $in: from } },
@@ -355,7 +383,11 @@ const closeAndRefund = async (
   const payment = locked.razorpayPaymentId
     ? await Payment.findOne({ razorpayPaymentId: locked.razorpayPaymentId })
     : null;
-  const result = await refundPayment(payment, reason);
+  const result = await refundPayment(
+    payment,
+    reason,
+    refundTo ? { to: refundTo } : {},
+  );
   await Booking.updateOne(
     { _id: locked._id },
     { $set: { refundStatus: result } },
@@ -368,7 +400,7 @@ const closeAndRefund = async (
   if (!fresh) return null;
 
   if (fresh.fresher) {
-    const wallet = isWalletPayment(payment);
+    const wallet = isWalletPayment(payment) || refundTo === "wallet";
     const refundedText = wallet
       ? `Your payment of ₹${fresh.amount} was added back to your wallet.`
       : `Your payment of ₹${fresh.amount} is being refunded.`;
@@ -385,7 +417,7 @@ const closeAndRefund = async (
           ? `${reason} ${refundedText}`
           : `${reason} Refund is processing, we will update you soon.`,
       type: "payment",
-      link: "/Home",
+      link: wallet ? "/Home/wallet" : "/Home",
     });
     emitToUser(fresh.fresher, "booking:updated", toClient(fresh));
   }
@@ -405,12 +437,14 @@ const closeAndRefund = async (
   return fresh;
 };
 
+// Nobody accepted in time -> status "expired" + money back to the WALLET.
 const expireAndRefund = (bookingId, reason) =>
   closeAndRefund(bookingId, {
     from: ["pending"],
     to: "expired",
     reason,
-    title: "Request expired",
+    title: "Booking auto-cancelled",
+    refundTo: "wallet",
   });
 
 /* ============================ BROADCAST ============================ */
@@ -474,7 +508,7 @@ const broadcastLoop = async (
   }
 
   console.log(
-    `[request ${requestGroupId}] needs company="${booking.companyName}" dept="${booking.role}" gender="${booking.gender}" lang="${booking.language}"\n  ${
+    `[request ${requestGroupId}] needs company="${booking.companyName}" dept="${booking.role}" gender="${booking.gender}" lang="${booking.language}" | auto-cancel at ${new Date(booking.expiresAt).toISOString()}\n  ${
       report.join("\n  ") || "no approved+active mentors found"
     }`,
   );
@@ -550,6 +584,13 @@ exports.createRequest = async (req, res) => {
       status: "paid",
     });
     if (!payment) return fail(res, 402, "Payment not verified");
+    if (
+      req.user?.role === "fresher" &&
+      payment.fresher &&
+      String(payment.fresher) !== String(req.user.id)
+    ) {
+      return fail(res, 403, "This payment belongs to another account");
+    }
 
     if (await Booking.exists({ razorpayPaymentId: paymentId })) {
       return fail(res, 409, "This payment is already used for another booking");
@@ -668,7 +709,10 @@ exports.createRequest = async (req, res) => {
       time: String(sd.time),
       startsAt,
       endsAt,
-      expiresAt: startsAt,
+      // AUTO-CANCEL moment: PENDING_CUTOFF_MIN minutes before the session starts.
+      // Session 4:30 PM -> expiresAt 4:20 PM. If still "pending" then, the
+      // scheduler cancels it and refunds the wallet.
+      expiresAt: expiryFor(startsAt),
       razorpayPaymentId: paymentId,
       preferredMentor: preferredMentor ? preferredMentor._id : null,
     });
@@ -776,6 +820,7 @@ exports.updateRequest = async (req, res) => {
       return res.json({ success: true, status: "rejected" });
     }
 
+    // accept is only possible BEFORE the auto-cancel time (expiresAt)
     if (booking.status !== "pending" || booking.expiresAt <= new Date())
       return fail(res, 409, "Request unavailable");
 
@@ -1323,6 +1368,7 @@ exports.markAllFresherNotificationsRead = async (req, res) => {
 let schedulerBusy = false;
 
 exports.startSchedulers = (app) => {
+  // runs every 15 seconds so the auto-cancel happens within ~15s of the cutoff time
   setInterval(async () => {
     if (mongoose.connection.readyState !== 1) return;
     if (schedulerBusy) return;
@@ -1331,16 +1377,28 @@ exports.startSchedulers = (app) => {
     try {
       const now = new Date();
 
-      // 1) nobody accepted before the start time -> expire + refund
+      // 1) AUTO-CANCEL: nobody accepted before (start - PENDING_CUTOFF_MIN)
+      //    -> status "expired" + refund to the fresher's WALLET.
+      //    Session 4:30 PM, cutoff 10 min -> cancelled at 4:20 PM.
       const stale = await Booking.find({
         status: "pending",
         expiresAt: { $lte: now },
       }).select("_id");
       for (const b of stale) {
-        await expireAndRefund(
+        const closed = await expireAndRefund(
           b._id,
-          "No employee accepted your request in time.",
+          `No employee accepted your request ${PENDING_CUTOFF_MIN} minutes before the session, so it was cancelled automatically.`,
         );
+
+        // remove the request card from every mentor who still has it open
+        if (closed) {
+          (closed.notified || []).forEach((mentorId) =>
+            emitToMentorSockets(app, mentorId, "session-request-taken", {
+              id: closed.requestGroupId,
+              requestGroupId: closed.requestGroupId,
+            }),
+          );
+        }
       }
 
       // 2) NO-SHOW
@@ -1408,8 +1466,9 @@ exports.startSchedulers = (app) => {
         const payment = await Payment.findOne({
           razorpayPaymentId: b.razorpayPaymentId,
         });
+        // disputed + auto-cancelled (expired) bookings always refund to the wallet
         const result = await refundPayment(payment, "Retry: session refund", {
-          to: b.status === "disputed" ? "wallet" : "auto",
+          to: ["disputed", "expired"].includes(b.status) ? "wallet" : "auto",
         });
 
         if (result === "refunded") {
@@ -1452,12 +1511,38 @@ exports.startSchedulers = (app) => {
           { _id: b._id },
           { $set: { reminderSent: true } },
         );
+      // 7) wallet money was taken but the booking was never created -> give it back
+      const orphanWallet = await Payment.find({
+        status: "paid",
+        method: "wallet",
+        sessionStatus: "unassigned",
+        paidAt: { $lte: new Date(now.getTime() - 10 * 60 * 1000) },
+      }).limit(20);
+
+      for (const p of orphanWallet) {
+        if (await Booking.exists({ razorpayPaymentId: p.razorpayPaymentId }))
+          continue;
+
+        const result = await refundPayment(p, "Booking was not created", {
+          to: "wallet",
+        });
+        if (result === "refunded" && p.fresher) {
+          notify({
+            user: p.fresher,
+            role: "fresher",
+            title: "Wallet refund",
+            message: `₹${p.amount} was added back to your wallet because the booking was not completed.`,
+            type: "payment",
+            link: "/Home/bonus-wallet",
+          });
+        }
+      }
     } catch (e) {
       console.error("scheduler error:", e);
     } finally {
       schedulerBusy = false;
     }
-  }, 30000);
+  }, 15000);
 };
 
 exports.pushPendingToMentor = async (app, mentorId) => {

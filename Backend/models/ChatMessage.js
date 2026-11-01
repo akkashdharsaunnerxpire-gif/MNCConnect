@@ -3,6 +3,17 @@ const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 const Booking = require("./Booking");
 
+// small copy of the message that was replied to (WhatsApp style quote).
+// Saved as a snapshot so chat history needs no extra lookup.
+const replySchema = new mongoose.Schema(
+  {
+    messageId: { type: String, required: true },
+    senderRole: { type: String, enum: ["mentor", "fresher"], required: true },
+    text: { type: String, default: "", maxlength: 200 },
+  },
+  { _id: false },
+);
+
 const chatSchema = new mongoose.Schema(
   {
     bookingId: { type: String, required: true },
@@ -12,6 +23,8 @@ const chatSchema = new mongoose.Schema(
     recipientRole: { type: String, enum: ["mentor", "fresher"], default: null },
     recipientId: { type: String, default: null },
     text: { type: String, required: true, maxlength: 1000, trim: true },
+    // the message this one is replying to (null = normal message)
+    replyTo: { type: replySchema, default: null },
     deliveredAt: { type: Date, default: null },
     readAt: { type: Date, default: null },
   },
@@ -458,6 +471,26 @@ function registerChat(io) {
           return ack?.({ ok: false, message: "Cannot send message" });
         }
 
+        // reply: look the original up on the server (never trust text from the
+        // client) and only allow messages that belong to THIS booking
+        let replyTo = null;
+        if (payload.replyToId && mongoose.isValidObjectId(payload.replyToId)) {
+          const original = await ChatMessage.findOne({
+            _id: payload.replyToId,
+            bookingId: user.bookingKey,
+          })
+            .select("_id senderRole text")
+            .lean();
+
+          if (original) {
+            replyTo = {
+              messageId: String(original._id),
+              senderRole: original.senderRole,
+              text: String(original.text || "").slice(0, 200),
+            };
+          }
+        }
+
         const recipientOnline = isUserOnline(user.peerRole, user.peerId);
 
         const msg = await ChatMessage.create({
@@ -467,6 +500,7 @@ function registerChat(io) {
           recipientRole: user.peerRole,
           recipientId: user.peerId,
           text,
+          replyTo,
           deliveredAt: recipientOnline ? new Date() : null,
         });
 
