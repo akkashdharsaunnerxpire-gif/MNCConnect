@@ -24,9 +24,15 @@ const {
 /* ============================ CONFIG ============================ */
 const MENTOR_PUBLIC_FIELDS =
   "name email profilePic currentCompany designation department officeLocation yearsOfExperience languages skills bio linkedinProfile gender rating totalReviews totalSessions isVerified";
-const MIN_LEAD_MS = 15 * 60 * 1000;
+
+// The "slot must be 30 min away" rule lives in the frontend (BEFORE the fresher pays).
+// After the fresher has already paid, the server only rejects a slot that is
+// already (almost) over. PAYMENT_GRACE_SEC=60 -> slot must be > 60 seconds away.
+const PAYMENT_GRACE_MS = (Number(process.env.PAYMENT_GRACE_SEC) || 60) * 1000;
+
 const GAP_MS = 30 * 60 * 1000;
-const OPEN_BEFORE_MS = 5 * 60 * 1000;
+// the meeting room (and the reminder) opens this long before the start time
+const OPEN_BEFORE_MS = 2 * 60 * 1000;
 const PLATFORM_FEE_PERCENT = Number(process.env.PLATFORM_FEE_PERCENT || 25);
 
 const MAX_REFUND_ATTEMPTS = 5;
@@ -566,9 +572,33 @@ exports.createRequest = async (req, res) => {
       return reject(400, "Payment amount does not match the session price.");
     }
 
+    // ---- date / time ----
+    // 1) can we read it at all?
     const startsAt = parseSessionStart(sd.date, sd.time);
-    if (!startsAt || startsAt.getTime() < Date.now() + MIN_LEAD_MS)
-      return reject(400, "Invalid date/time");
+    if (!startsAt || Number.isNaN(startsAt.getTime())) {
+      console.warn("createRequest: cannot read date/time", {
+        date: sd.date,
+        time: sd.time,
+      });
+      return reject(400, "We could not read the date and time you selected.");
+    }
+
+    // 2) the fresher has ALREADY PAID. Only reject when the slot is (almost) over.
+    //    The "30 min ahead" rule is checked in the frontend before payment.
+    const secondsLeft = Math.round((startsAt.getTime() - Date.now()) / 1000);
+    if (startsAt.getTime() < Date.now() + PAYMENT_GRACE_MS) {
+      console.warn("createRequest: slot passed while paying", {
+        date: sd.date,
+        time: sd.time,
+        startsAtISO: startsAt.toISOString(),
+        nowISO: new Date().toISOString(),
+        secondsLeft,
+      });
+      return reject(
+        400,
+        "The time you selected passed while you were paying. Please book a later time.",
+      );
+    }
     const endsAt = new Date(startsAt.getTime() + minutes * 60000);
 
     let preferredMentor = null;
@@ -888,12 +918,12 @@ exports.getCounterpart = async (req, res) => {
       requestGroupId: String(req.params.id || "").trim(),
     }).lean();
     if (!b) return fail(res, 404, "Booking not found");
- 
+
     const me = String(req.user?.id || "");
     const isFresher = Boolean(b.fresher) && String(b.fresher) === me;
     const isMentor = Boolean(b.mentor) && String(b.mentor) === me;
     if (!isFresher && !isMentor) return fail(res, 403, "Access denied");
- 
+
     const session = {
       sessionType: b.sessionType || "",
       reason: b.reason || "",
@@ -904,17 +934,17 @@ exports.getCounterpart = async (req, res) => {
       role: b.role || "",
       companyName: b.companyName || "",
     };
- 
+
     // ---- fresher is asking -> show the mentor ----
     if (isFresher) {
       if (!b.mentor)
         return fail(res, 404, "No employee has accepted this booking yet.");
- 
+
       const m = await Mentor.findById(b.mentor)
         .select(MENTOR_PUBLIC_FIELDS)
         .lean();
       if (!m) return fail(res, 404, "Employee not found");
- 
+
       return res.json({
         success: true,
         kind: "mentor",
@@ -941,14 +971,14 @@ exports.getCounterpart = async (req, res) => {
         session,
       });
     }
- 
+
     // ---- mentor is asking -> show the fresher ----
     const f = b.fresher
       ? await Fresher.findById(b.fresher)
           .select("name email gender profilePic")
           .lean()
       : null;
- 
+
     return res.json({
       success: true,
       kind: "fresher",
@@ -966,6 +996,7 @@ exports.getCounterpart = async (req, res) => {
     return fail(res, 500, "Failed to load details");
   }
 };
+
 // Pending requests for THIS mentor: direct ones addressed to him + normal ones that match
 // his profile (company / gender / department / language). Does not depend on `notified`,
 // so a mentor who opens the page later still sees every request.
@@ -1414,7 +1445,7 @@ exports.startSchedulers = (app) => {
       const soon = await Booking.find({
         status: "accepted",
         reminderSent: false,
-        startsAt: { $lte: new Date(now.getTime() + 5 * 60000) },
+        startsAt: { $lte: new Date(now.getTime() + OPEN_BEFORE_MS) },
       });
       for (const b of soon)
         await Booking.updateOne(
