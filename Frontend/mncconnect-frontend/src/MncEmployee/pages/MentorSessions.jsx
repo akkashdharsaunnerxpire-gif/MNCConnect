@@ -30,7 +30,6 @@ import useMentorSessions from "../../hooks/useMentorSessions";
 import { inr, api, ENDPOINTS, EVENTS } from "../../services/mentorApi";
 import { socket } from "../../utils/socket";
 import ChatPanel from "../../Commoncomponents/Chatpanel";
-import SessionDetailsModal from "../../Commoncomponents/SessionDetailsModal";
 import PersonDetailsModal from "../../Commoncomponents/Persondetailsmodal";
 
 const INDIA_TIMEZONE = "Asia/Kolkata";
@@ -602,7 +601,6 @@ const SessionCard = ({
   onChatOpen,
   onChatClose,
 }) => {
-  const [detailsFor, setDetailsFor] = useState(null);
   const [chatFor, setChatFor] = useState(null);
   // fresher details modal
   const [showFresher, setShowFresher] = useState(false);
@@ -836,16 +834,9 @@ const SessionCard = ({
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {/* UPCOMING: Details + Fresher details + Message + Join */}
+            {/* UPCOMING: Fresher details + Message + Join */}
             {isUpcoming && !hasEnded && (
               <>
-                <button
-                  type="button"
-                  onClick={() => setDetailsFor(session)}
-                  className={secondaryBtn}
-                >
-                  View Details
-                </button>
                 {fresherBtn}
                 <MessageButton
                   unread={unread}
@@ -863,7 +854,7 @@ const SessionCard = ({
               </>
             )}
 
-            {/* AWAITING / COMPLETED / CANCELLED: Fresher details + Message + View Details */}
+            {/* AWAITING / COMPLETED / CANCELLED: Fresher details + Message */}
             {(isCompleted || isCancelled || isAwaitingConfirmation) && (
               <>
                 {fresherBtn}
@@ -872,13 +863,6 @@ const SessionCard = ({
                   onClick={() => openChat(session)}
                   className={secondaryBtn}
                 />
-                <button
-                  type="button"
-                  onClick={() => setDetailsFor(session)}
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-medium text-slate-500 transition hover:bg-slate-100"
-                >
-                  View Details
-                </button>
               </>
             )}
 
@@ -937,16 +921,6 @@ const SessionCard = ({
         )}
       </div>
 
-      {detailsFor && (
-        <SessionDetailsModal
-          session={detailsFor}
-          onClose={() => setDetailsFor(null)}
-          onMessage={(s) => {
-            setDetailsFor(null);
-            openChat(s);
-          }}
-        />
-      )}
       {chatFor && (
         <ChatPanel
           variant="modal"

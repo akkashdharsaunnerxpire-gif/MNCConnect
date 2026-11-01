@@ -5,12 +5,8 @@
 // The data comes from GET <booking>/counterpart (see bookingController.getCounterpart)
 // Props are unchanged: { title, fetcher, onClose }
 //
-// PERFORMANCE NOTES (lag fix)
-//  - no backdrop-blur (very expensive while scrolling)
-//  - component is memoized: parent's 1-second clock no longer re-renders it
-//  - avatar loads a small image; the big image loads only when zoomed
-//  - open animation uses only opacity + translate (no scale)
-//  - no repeating dot pattern inside scrolling panes
+// THEME: full white surfaces + light-dark (slate) text / accents.
+// PERFORMANCE: no backdrop-blur, memoized, small avatar image, light animation.
 import React, {
   memo,
   useCallback,
@@ -121,15 +117,15 @@ const LinkedinIcon = ({ size = 16 }) => (
 
 const Skeleton = () => (
   <div className="animate-pulse">
-    <div className="h-36 bg-slate-200" />
+    <div className="h-36 bg-slate-100" />
     <div className="px-6 pb-6">
-      <div className="-mt-14 h-28 w-28 rounded-full border-4 border-white bg-slate-300" />
-      <div className="mt-4 h-5 w-48 rounded bg-slate-200" />
+      <div className="-mt-14 h-28 w-28 rounded-full border-4 border-white bg-slate-200" />
+      <div className="mt-4 h-5 w-48 rounded bg-slate-100" />
       <div className="mt-2 h-4 w-64 rounded bg-slate-100" />
       <div className="mt-6 space-y-2">
-        <div className="h-14 rounded-2xl bg-slate-100" />
-        <div className="h-14 rounded-2xl bg-slate-100" />
-        <div className="h-14 rounded-2xl bg-slate-100" />
+        <div className="h-14 rounded-2xl bg-slate-50" />
+        <div className="h-14 rounded-2xl bg-slate-50" />
+        <div className="h-14 rounded-2xl bg-slate-50" />
       </div>
     </div>
   </div>
@@ -152,7 +148,7 @@ const Stat = ({ icon, value, label, tone, small }) => (
 const InfoRow = ({ icon, label, children }) => {
   if (!children) return null;
   return (
-    <div className="group flex items-center gap-3 rounded-2xl border border-slate-100 bg-white px-3.5 py-3">
+    <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3.5 py-3">
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
         {icon}
       </span>
@@ -217,7 +213,7 @@ const Avatar = memo(({ src, name, onZoom, big }) => {
   if (!src || failed) {
     return (
       <div
-        className={`relative z-10 flex ${dim} items-center justify-center rounded-full border-4 border-white bg-gradient-to-br from-blue-500 to-blue-700 text-3xl font-bold text-white shadow-lg`}
+        className={`relative z-10 flex ${dim} items-center justify-center rounded-full border-4 border-white bg-gradient-to-br from-blue-100 to-blue-200 text-3xl font-bold text-blue-700 shadow-md ring-1 ring-slate-200`}
       >
         {initials(name)}
       </div>
@@ -229,7 +225,7 @@ const Avatar = memo(({ src, name, onZoom, big }) => {
       type="button"
       onClick={onZoom}
       aria-label="View photo full size"
-      className={`group relative z-10 ${dim} shrink-0 overflow-hidden rounded-full border-4 border-white bg-white shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500`}
+      className={`group relative z-10 ${dim} shrink-0 overflow-hidden rounded-full border-4 border-white bg-white shadow-md ring-1 ring-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500`}
     >
       <img
         src={hd(src, 256)}
@@ -389,8 +385,8 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
 
   /* =====================================================================
      FRESHER VIEW (what the mentor sees): two-pane "candidate card"
-       left  = identity + actions + quick contact
-       right = session request + profile sections
+       left  = identity + actions + quick contact   (light grey panel)
+       right = session request + profile sections   (white)
      ===================================================================== */
   const renderFresher = () => {
     const asked = [targetRole, s.role]
@@ -401,7 +397,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
     const eduLine = [degree, college].filter(Boolean).join(" · ");
 
     const sideBtn =
-      "flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white";
+      "flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";
 
     const sideInfo = [
       { icon: <Mail size={15} />, text: p.email },
@@ -413,23 +409,23 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
     return (
       <div className="flex flex-col md:h-[min(640px,78vh)] md:flex-row">
         {/* ---------- left: identity ---------- */}
-        <aside className="pdm-scroll relative bg-gradient-to-b from-slate-900 via-slate-900 to-blue-950 p-6 text-white md:w-72 md:shrink-0 md:overflow-y-auto md:overscroll-contain">
+        <aside className="pdm-scroll relative border-b border-slate-200 bg-slate-50 p-6 text-slate-800 md:w-72 md:shrink-0 md:overflow-y-auto md:overscroll-contain md:border-b-0 md:border-r">
           <div className="relative flex flex-col items-center text-center">
             <Avatar big src={p.image} name={p.name} onZoom={openZoom} />
 
-            <h3 className="mt-4 flex max-w-full items-center gap-1.5 text-xl font-bold">
+            <h3 className="mt-4 flex max-w-full items-center gap-1.5 text-xl font-bold text-slate-900">
               <span className="truncate">{p.name || "-"}</span>
               {p.isVerified && (
-                <BadgeCheck size={18} className="shrink-0 text-blue-400" />
+                <BadgeCheck size={18} className="shrink-0 text-blue-600" />
               )}
             </h3>
 
-            <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-blue-100 ring-1 ring-inset ring-white/20">
+            <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 ring-1 ring-inset ring-blue-100">
               <GraduationCap size={13} /> Fresher
             </span>
 
             {eduLine && (
-              <p className="mt-3 text-sm text-slate-300">{eduLine}</p>
+              <p className="mt-3 text-sm text-slate-500">{eduLine}</p>
             )}
           </div>
 
@@ -438,11 +434,11 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
               <button
                 type="button"
                 onClick={copyEmail}
-                className={`${sideBtn} bg-white text-slate-900 hover:bg-slate-100`}
+                className={`${sideBtn} bg-slate-800 text-white hover:bg-slate-700`}
               >
                 {copied ? (
                   <>
-                    <Check size={15} className="text-emerald-600" /> Copied
+                    <Check size={15} className="text-emerald-300" /> Copied
                   </>
                 ) : (
                   <>
@@ -456,7 +452,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
                 href={linkedin}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={`${sideBtn} bg-blue-600 text-white hover:bg-blue-500`}
+                className={`${sideBtn} bg-blue-600 text-white hover:bg-blue-700`}
               >
                 <LinkedinIcon size={15} /> LinkedIn
               </a>
@@ -466,7 +462,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
                 href={github}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={`${sideBtn} bg-white/10 text-white ring-1 ring-inset ring-white/20 hover:bg-white/20`}
+                className={`${sideBtn} border border-slate-200 bg-white text-slate-700 hover:bg-slate-100`}
               >
                 <GithubIcon size={15} /> GitHub
               </a>
@@ -476,7 +472,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
                 href={resume}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={`${sideBtn} bg-white/10 text-white ring-1 ring-inset ring-white/20 hover:bg-white/20`}
+                className={`${sideBtn} border border-slate-200 bg-white text-slate-700 hover:bg-slate-100`}
               >
                 <FileText size={15} /> Resume
               </a>
@@ -484,11 +480,11 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
           </div>
 
           {sideInfo.length > 0 && (
-            <ul className="relative mt-6 space-y-3 border-t border-white/10 pt-5">
+            <ul className="relative mt-6 space-y-3 border-t border-slate-200 pt-5">
               {sideInfo.map((x) => (
                 <li
                   key={x.text}
-                  className="flex items-center gap-2.5 text-sm text-slate-300"
+                  className="flex items-center gap-2.5 text-sm text-slate-600"
                 >
                   <span className="shrink-0 text-slate-400">{x.icon}</span>
                   <span className="min-w-0 break-words">{x.text}</span>
@@ -499,7 +495,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
         </aside>
 
         {/* ---------- right: request + profile ---------- */}
-        <main className="pdm-scroll min-w-0 flex-1 p-5 sm:p-6 md:overflow-y-auto md:overscroll-contain">
+        <main className="pdm-scroll min-w-0 flex-1 bg-white p-5 sm:p-6 md:overflow-y-auto md:overscroll-contain">
           <h2 className="pr-10 text-lg font-bold text-slate-900">{title}</h2>
           <p className="mt-0.5 text-sm text-slate-500">
             What this fresher asked for in this booking.
@@ -547,7 +543,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
           {/* message */}
           {s.reason ? (
             <Block title="Why they booked" icon={<MessageSquare size={15} />}>
-              <blockquote className="whitespace-pre-line rounded-2xl border-l-4 border-blue-500 bg-blue-50/60 p-4 text-sm leading-6 text-slate-700">
+              <blockquote className="whitespace-pre-line rounded-2xl border-l-4 border-blue-500 bg-slate-50 p-4 text-sm leading-6 text-slate-700">
                 {s.reason}
               </blockquote>
             </Block>
@@ -611,7 +607,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-900/60 sm:items-center sm:p-4"
+      className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-900/40 sm:items-center sm:p-4"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -636,11 +632,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className={`absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
-            wide
-              ? "bg-white text-slate-600 shadow ring-1 ring-slate-200 hover:bg-slate-50"
-              : "bg-white/25 text-white hover:bg-white/40"
-          }`}
+          className="absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-600 shadow ring-1 ring-slate-200 transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
         >
           <X size={18} />
         </button>
@@ -666,7 +658,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
               <button
                 type="button"
                 onClick={load}
-                className="mt-5 inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
+                className="mt-5 inline-flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
               >
                 <RefreshCw size={15} /> Try again
               </button>
@@ -677,9 +669,9 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
 
           {!loading && data && isMentor && (
             <>
-              {/* ---------- banner ---------- */}
-              <div className="relative z-0 h-32 bg-gradient-to-br from-slate-900 via-blue-900 to-blue-600">
-                <p className="absolute left-6 top-4 text-xs font-medium text-white/80">
+              {/* ---------- banner (light) ---------- */}
+              <div className="relative z-0 h-32 border-b border-slate-200 bg-gradient-to-br from-slate-100 via-blue-50 to-white">
+                <p className="absolute left-6 top-4 text-xs font-semibold text-slate-500">
                   {title}
                 </p>
               </div>
@@ -763,33 +755,6 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
                   </div>
                 )}
 
-                {/* ---------- fresher quick facts ---------- */}
-                {!isMentor && (s.date || s.time || s.durationMinutes) && (
-                  <div className="mt-5 grid grid-cols-3 gap-2.5">
-                    <Stat
-                      small
-                      icon={<CalendarDays size={15} />}
-                      value={s.date || "-"}
-                      label="Session date"
-                      tone="bg-blue-50 text-blue-700"
-                    />
-                    <Stat
-                      small
-                      icon={<Clock3 size={15} />}
-                      value={s.time || "-"}
-                      label="Start time"
-                      tone="bg-amber-50 text-amber-700"
-                    />
-                    <Stat
-                      small
-                      icon={<Video size={15} />}
-                      value={s.durationMinutes ? `${s.durationMinutes} min` : "-"}
-                      label={s.sessionType || "Session"}
-                      tone="bg-emerald-50 text-emerald-700"
-                    />
-                  </div>
-                )}
-
                 {/* ---------- tabs ---------- */}
                 <div
                   role="tablist"
@@ -813,22 +778,11 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
                   ))}
                 </div>
 
-                {/* ---------- PROFILE / ABOUT TAB ---------- */}
+                {/* ---------- PROFILE TAB ---------- */}
                 {tab === "profile" && (
                   <div role="tabpanel">
-                    {!isMentor && s.reason && (
-                      <Block
-                        title="Why they booked"
-                        icon={<MessageSquare size={15} />}
-                      >
-                        <blockquote className="whitespace-pre-line rounded-2xl border-l-4 border-blue-500 bg-blue-50/60 p-4 text-sm leading-6 text-slate-700">
-                          {s.reason}
-                        </blockquote>
-                      </Block>
-                    )}
-
                     {bio && (
-                      <Block title={isMentor ? "Bio" : "About"}>
+                      <Block title="Bio">
                         <p className="whitespace-pre-line rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-600">
                           {bio}
                         </p>
@@ -848,77 +802,27 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
                         </InfoRow>
                         <InfoRow
                           icon={<MapPin size={16} />}
-                          label={isMentor ? "Office location" : "Location"}
+                          label="Office location"
                         >
                           {location}
                         </InfoRow>
-                        {isMentor && (
-                          <>
-                            <InfoRow
-                              icon={<Building2 size={16} />}
-                              label="Company"
-                            >
-                              {p.company}
-                            </InfoRow>
-                            <InfoRow icon={<Briefcase size={16} />} label="Role">
-                              {[p.designation, p.department]
-                                .filter(Boolean)
-                                .filter((v, i, a) => a.indexOf(v) === i)
-                                .join(" · ")}
-                            </InfoRow>
-                            <InfoRow
-                              icon={<GraduationCap size={16} />}
-                              label="Experience"
-                            >
-                              {experience}
-                            </InfoRow>
-                          </>
-                        )}
+                        <InfoRow icon={<Building2 size={16} />} label="Company">
+                          {p.company}
+                        </InfoRow>
+                        <InfoRow icon={<Briefcase size={16} />} label="Role">
+                          {[p.designation, p.department]
+                            .filter(Boolean)
+                            .filter((v, i, a) => a.indexOf(v) === i)
+                            .join(" · ")}
+                        </InfoRow>
+                        <InfoRow
+                          icon={<GraduationCap size={16} />}
+                          label="Experience"
+                        >
+                          {experience}
+                        </InfoRow>
                       </div>
                     </Block>
-
-                    {!isMentor && hasEducation && (
-                      <Block title="Education" icon={<GraduationCap size={15} />}>
-                        <div className="space-y-2">
-                          <InfoRow icon={<Building2 size={16} />} label="College">
-                            {college}
-                          </InfoRow>
-                          <InfoRow icon={<BookOpen size={16} />} label="Degree">
-                            {[degree, branch].filter(Boolean).join(" · ")}
-                          </InfoRow>
-                          <div className="grid gap-2 sm:grid-cols-2">
-                            <InfoRow
-                              icon={<CalendarDays size={16} />}
-                              label="Graduation year"
-                            >
-                              {gradYear && String(gradYear)}
-                            </InfoRow>
-                            <InfoRow icon={<Award size={16} />} label="CGPA / %">
-                              {cgpa && String(cgpa)}
-                            </InfoRow>
-                          </div>
-                        </div>
-                      </Block>
-                    )}
-
-                    {!isMentor && (targetRole || s.role || s.language) && (
-                      <Block title="Looking for" icon={<Target size={15} />}>
-                        <div className="space-y-2">
-                          <Chips
-                            items={[targetRole, s.role]
-                              .filter(Boolean)
-                              .map(String)
-                              .filter((v, i, a) => a.indexOf(v) === i)}
-                          />
-                          {s.language && (
-                            <Chips
-                              tone="slate"
-                              items={[`Prefers ${s.language}`]}
-                            />
-                          )}
-                        </div>
-                      </Block>
-                    )}
 
                     {skills.length > 0 && (
                       <Block title="Skills">
@@ -953,13 +857,6 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
                         </div>
                       </Block>
                     )}
-
-                    {!isMentor && !fresherHasExtras && (
-                      <p className="mt-5 rounded-2xl bg-slate-50 p-4 text-center text-sm text-slate-400">
-                        College, skills and links will show here once the
-                        fresher completes their profile.
-                      </p>
-                    )}
                   </div>
                 )}
 
@@ -967,13 +864,13 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
                 {tab === "booking" && (
                   <div role="tabpanel">
                     <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200">
-                      <div className="flex items-center justify-between bg-slate-900 px-4 py-3 text-white">
+                      <div className="flex items-center justify-between border-b border-slate-200 bg-slate-100 px-4 py-3 text-slate-800">
                         <span className="inline-flex items-center gap-2 text-sm font-semibold">
-                          <Video size={16} />
+                          <Video size={16} className="text-blue-600" />
                           {s.sessionType || "Session"}
                         </span>
                         {s.durationMinutes ? (
-                          <span className="rounded-full bg-white/15 px-2.5 py-1 text-xs font-semibold">
+                          <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 ring-1 ring-inset ring-slate-200">
                             {s.durationMinutes} min
                           </span>
                         ) : null}
@@ -998,28 +895,21 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
                         </div>
                       </div>
 
-                      {(s.language || (!isMentor && s.role)) && (
+                      {s.language && (
                         <div className="flex flex-wrap gap-2 border-t border-dashed border-slate-200 bg-slate-50 px-4 py-3">
-                          {s.language && (
-                            <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
-                              <Languages size={13} /> {s.language}
-                            </span>
-                          )}
-                          {!isMentor && s.role && (
-                            <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
-                              <Briefcase size={13} /> {s.role}
-                            </span>
-                          )}
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
+                            <Languages size={13} /> {s.language}
+                          </span>
                         </div>
                       )}
                     </div>
 
                     {s.reason ? (
                       <Block
-                        title={isMentor ? "Fresher's message" : "Your message"}
+                        title="Your message"
                         icon={<MessageSquare size={15} />}
                       >
-                        <blockquote className="whitespace-pre-line rounded-2xl border-l-4 border-blue-500 bg-blue-50/60 p-4 text-sm leading-6 text-slate-700">
+                        <blockquote className="whitespace-pre-line rounded-2xl border-l-4 border-blue-500 bg-slate-50 p-4 text-sm leading-6 text-slate-700">
                           {s.reason}
                         </blockquote>
                       </Block>
@@ -1039,7 +929,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
       {/* ---------- full-size photo viewer (big image loads only now) ---------- */}
       {zoom && p.image && (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 p-4"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4"
           onClick={(e) => {
             e.stopPropagation();
             setZoom(false);
@@ -1055,7 +945,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
               setZoom(false);
             }}
             aria-label="Close photo"
-            className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"
+            className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white text-slate-700 shadow hover:bg-slate-100"
           >
             <X size={20} />
           </button>
