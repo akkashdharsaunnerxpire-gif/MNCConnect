@@ -8,6 +8,7 @@ import React, {
 } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import useChatNotificationSound from "../../hooks/useChatNotificationSound";
+
 import {
   CalendarDays,
   CheckCircle2,
@@ -27,6 +28,8 @@ import {
   UserCheck,
   Check,
   X,
+  Users,
+  Copy,
 } from "lucide-react";
 import useLive from "../../hooks/useLive";
 import ReviewModal from "../pages/Reviewmodal";
@@ -69,14 +72,13 @@ const NO_TIMER_STATUSES = [
 const NO_CHAT_STATUSES = ["pending", "expired", "missed", "cancelled"];
 const DONE_STATUSES = ["completed", "awaiting_confirmation", "disputed"];
 
+// group: a friend who joined with the invite link (NOT the one who booked)
+const isGroupFriendOf = (b, userId) =>
+  b.mode === "group" && String(b.hostId) !== String(userId);
+
 /* =========================================================================
    BOOKING STEPPER  (Requested -> Accepted -> Session -> Completed)
    Theme: BLUE + WHITE
-   - done     : solid blue circle, white tick
-   - current  : solid blue circle, white icon, soft blue ring
-   - upcoming : white circle, blue border, light-blue icon
-   - failed   : red (kept red on purpose so a refund/miss is obvious)
-   - review   : red attention (kept red on purpose)
 ========================================================================= */
 
 const STEPS = [
@@ -86,18 +88,15 @@ const STEPS = [
   { label: "Completed", icon: CheckCircle2 },
 ];
 
-// label shown on the step where a refunded booking stopped
 const FAIL_LABEL = { 1: "Not accepted", 2: "Missed", 3: "Disputed" };
 
-// which step a refunded booking stopped at
 const failIndex = (b) => {
   if (b.status === "disputed") return 3;
   if (b.status === "missed") return 2;
-  if (!b.mentor?.id) return 1; // expired / cancelled before anyone accepted
-  return 2; // cancelled after acceptance
+  if (!b.mentor?.id) return 1;
+  return 2;
 };
 
-// active = the step that is happening right now (4 = everything finished)
 const progressOf = (b, v) => {
   switch (v.key) {
     case "pending":
@@ -119,7 +118,6 @@ const progressOf = (b, v) => {
   }
 };
 
-// small text under each step label
 const subOf = (i, b, v, left, now, failAt) => {
   if (failAt === i) {
     if (b.refundStatus === "refunded") return "Refunded";
@@ -141,8 +139,10 @@ const subOf = (i, b, v, left, now, failAt) => {
   }
 
   if (i === 2) {
-    if (v.key === "confirmed") return `Opens in ${fmtClock(Math.max(0, v.opens - now))}`;
-    if (v.key === "open") return left !== null ? `${fmtClock(left)} left` : "Room open";
+    if (v.key === "confirmed")
+      return `Opens in ${fmtClock(Math.max(0, v.opens - now))}`;
+    if (v.key === "open")
+      return left !== null ? `${fmtClock(left)} left` : "Room open";
     if (["ended", "review", "done"].includes(v.key)) return "Finished";
     return "";
   }
@@ -160,7 +160,7 @@ const subOf = (i, b, v, left, now, failAt) => {
 const BookingStepper = ({ b, v, left, now }) => {
   const { active, live, attention, failAt } = progressOf(b, v);
   const failed = failAt !== undefined;
-  const reached = failed ? failAt : active; // connector lines are coloured up to here
+  const reached = failed ? failAt : active;
 
   return (
     <div className="flex" role="list" aria-label="Booking progress">
@@ -199,8 +199,11 @@ const BookingStepper = ({ b, v, left, now }) => {
         const sub = subOf(i, b, v, left, now, failAt);
 
         return (
-          <div key={step.label} role="listitem" className="relative flex min-w-0 flex-1 flex-col items-center">
-            {/* connector to the NEXT step */}
+          <div
+            key={step.label}
+            role="listitem"
+            className="relative flex min-w-0 flex-1 flex-col items-center"
+          >
             {i < STEPS.length - 1 && (
               <span
                 aria-hidden="true"
@@ -210,7 +213,6 @@ const BookingStepper = ({ b, v, left, now }) => {
               />
             )}
 
-            {/* circle */}
             <span
               className={`relative z-10 flex h-10 w-10 items-center justify-center rounded-full transition-all duration-500 ${circle}`}
             >
@@ -226,7 +228,11 @@ const BookingStepper = ({ b, v, left, now }) => {
               )}
             </span>
 
-            <p className={`mt-2 text-center text-xs font-semibold transition-colors ${labelCls}`}>{label}</p>
+            <p
+              className={`mt-2 text-center text-xs font-semibold transition-colors ${labelCls}`}
+            >
+              {label}
+            </p>
             <p
               className={`mt-0.5 max-w-[92px] truncate text-center text-[11px] tabular-nums sm:max-w-[150px] ${subCls}`}
               title={sub}
@@ -236,6 +242,61 @@ const BookingStepper = ({ b, v, left, now }) => {
           </div>
         );
       })}
+    </div>
+  );
+};
+
+/* ---------- GROUP badge: joined count + invite link (host only) ---------- */
+const NAMES_SHOWN = 8; // a 60-student group must not print 60 names
+
+const GroupInfo = ({ b, me }) => {
+  const [copied, setCopied] = useState(false);
+  if (b.mode !== "group") return null;
+
+  const isHost = String(b.hostId) === String(me);
+  const link = `${window.location.origin}/Home/join/${b.inviteCode}`;
+  const canInvite =
+    isHost && b.inviteCode && ["pending", "accepted"].includes(b.status);
+
+  const members = b.members || [];
+  const shown = members.slice(0, NAMES_SHOWN).map((m) => m.name);
+  const more = Math.max(0, members.length - NAMES_SHOWN);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      window.prompt("Copy this link", link);
+    }
+  };
+
+  return (
+    <div className="mx-5 mb-4 rounded-xl border border-indigo-100 bg-indigo-50 p-3 sm:mx-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="flex items-center gap-1.5 text-xs font-semibold text-indigo-900">
+          <Users className="h-4 w-4" /> Group session · {members.length || 1}/
+          {b.maxMembers} joined
+          {isHost ? " · you are the host" : ""}
+        </p>
+        {canInvite && (
+          <button
+            type="button"
+            onClick={copy}
+            className="flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"
+          >
+            <Copy className="h-3.5 w-3.5" />{" "}
+            {copied ? "Link copied" : "Copy invite link"}
+          </button>
+        )}
+      </div>
+      {shown.length > 0 && (
+        <p className="mt-1.5 text-[11px] text-indigo-700">
+          {shown.join(", ")}
+          {more > 0 ? ` +${more} more` : ""}
+        </p>
+      )}
     </div>
   );
 };
@@ -258,7 +319,7 @@ const MyBookings = () => {
 
   // unread chat messages: requestGroupId -> count
   const [unreadCounts, setUnreadCounts] = useState({});
-  const openChatId = useRef(null); // chat open right now (its messages are not "unread")
+  const openChatId = useRef(null);
   const seenMessageIds = useRef(new Set());
 
   // requestGroupId -> { remainingMs, running, at }
@@ -284,7 +345,6 @@ const MyBookings = () => {
 
   const bookings = data?.bookings || [];
 
-  // mark a meeting as finished (moves it to Past) + refresh from server
   const markFinished = (ids) => {
     const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
     if (!list.length) return;
@@ -305,28 +365,24 @@ const MyBookings = () => {
 
   /* ---------- unread chat badge ---------- */
 
-  // Unread counts saved on the server. Covers messages that arrived while this
-  // user was offline / on another page / before a refresh.
   const loadUnread = useCallback(() => {
     api("/chat/unread")
       .then((d) => {
         if (!d?.counts) return;
         const counts = { ...d.counts };
-        // the chat that is open right now is being read -> keep it at 0
         if (openChatId.current) counts[openChatId.current] = 0;
         setUnreadCounts(counts);
       })
       .catch(() => {});
   }, []);
 
-  // on page open
   useEffect(() => {
     loadUnread();
   }, [loadUnread]);
 
-  // after a socket reconnect / when the tab is used again
   useEffect(() => {
-    const onFocus = () => document.visibilityState === "visible" && loadUnread();
+    const onFocus = () =>
+      document.visibilityState === "visible" && loadUnread();
 
     socket.on("connect", loadUnread);
     window.addEventListener("focus", onFocus);
@@ -339,7 +395,6 @@ const MyBookings = () => {
     };
   }, [loadUnread]);
 
-  // live: new message from the mentor -> +1 (unless that chat is open)
   useEffect(() => {
     const onChatMessage = (message) => {
       if (message.senderRole === "fresher") return;
@@ -371,7 +426,7 @@ const MyBookings = () => {
   const closeChat = () => {
     openChatId.current = null;
     setChatFor(null);
-    loadUnread(); // sync with the server (messages are now marked read)
+    loadUnread();
   };
 
   const closeDetails = useCallback(() => setDetailsFor(null), []);
@@ -395,7 +450,6 @@ const MyBookings = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
-  // ids of bookings that can have a live meeting
   const activeIds = useMemo(
     () =>
       bookings
@@ -431,15 +485,11 @@ const MyBookings = () => {
                 at: Date.now(),
               };
 
-              // server says meeting is over
               if (DONE_STATUSES.includes(d.booking.status)) {
                 justFinished.push(id);
-              }
-              // timer was running before and now it is stopped / reached 0
-              else if (
+              } else if (
                 wasRunningRef.current[id] &&
-                (!running ||
-                  (typeof remaining === "number" && remaining <= 0))
+                (!running || (typeof remaining === "number" && remaining <= 0))
               ) {
                 justFinished.push(id);
               }
@@ -482,7 +532,6 @@ const MyBookings = () => {
         },
       }));
 
-      // timer stopped / hit 0 after it had been running
       if (wasRunningRef.current[id] && (!running || p.remainingMs <= 0)) {
         markFinished(id);
       }
@@ -496,20 +545,17 @@ const MyBookings = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // raw countdown (ignores finished flag)
   const rawLeft = (b) => {
     const t = timers[b.requestGroupId];
     if (!t?.running || typeof t.remainingMs !== "number") return null;
     return Math.max(0, t.remainingMs - (now - t.at));
   };
 
-  // countdown shown in UI -> null once the meeting is finished
   const timerOf = (b) => {
     if (finishedIds[b.requestGroupId]) return null;
     return rawLeft(b);
   };
 
-  // Every second: if a running timer reached 0 -> meeting finished -> move to Past
   useEffect(() => {
     const newly = [];
     bookings.forEach((b) => {
@@ -530,12 +576,15 @@ const MyBookings = () => {
     const left = timerOf(b);
     const finished = Boolean(finishedIds[b.requestGroupId]);
 
+    // group friends never write the review (only the host does) -> they go straight to "Completed"
+    const noReviewNeeded = b.reviewed || isGroupFriendOf(b, userId);
+
     // money went back to the fresher -> always "Refunded" (even if a review was written)
     if (["disputed", "expired", "missed", "cancelled"].includes(b.status))
       return { key: "refunded", label: "Refunded", tone: "slate" };
 
     if (DONE_STATUSES.includes(b.status)) {
-      if (b.reviewed)
+      if (noReviewNeeded)
         return { key: "done", label: "Completed", tone: "emerald" };
       return { key: "review", label: "Review required", tone: "red" };
     }
@@ -558,10 +607,9 @@ const MyBookings = () => {
         starts,
       };
 
-    // meeting finished (timer hit 0) -> move to Past right away,
-    // even if the server status has not changed yet
+    // meeting finished (timer hit 0) -> move to Past right away
     if (finished) {
-      if (b.reviewed)
+      if (noReviewNeeded)
         return { key: "done", label: "Completed", tone: "emerald" };
       return { key: "review", label: "Review required", tone: "red" };
     }
@@ -599,6 +647,7 @@ const MyBookings = () => {
   );
   const list = tab === "upcoming" ? upcoming : past;
 
+  // (a friend never reaches v.key === "review", so only the host / single bookings come here)
   const needsReview = decorated.find(
     ({ v, b }) => v.key === "review" && b.requestGroupId !== dismissedReview,
   )?.b;
@@ -706,16 +755,17 @@ const MyBookings = () => {
                 Number.isFinite(startMs) && Number.isFinite(endMs)
                   ? `${fmtTimeIST(startMs)} → ${fmtTimeIST(endMs)}`
                   : b.time;
+
+              // group friends have no chat (chat is host <-> employee only)
               const canChat =
                 Boolean(b.mentor) &&
+                !isGroupFriendOf(b, userId) &&
                 !NO_CHAT_STATUSES.includes(b.status) &&
                 v.key !== "pending";
-              // an employee accepted this booking -> fresher can see who it is
               const canSeeMentor =
                 Boolean(b.mentor?.id) &&
                 b.status !== "pending" &&
                 v.key !== "pending";
-              // past + session really happened + we know the mentor
               const sessionHappened =
                 ["completed", "awaiting_confirmation"].includes(b.status) ||
                 Boolean(finishedIds[b.requestGroupId]);
@@ -731,7 +781,11 @@ const MyBookings = () => {
                   <div className="flex flex-col gap-5 p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between">
                     <div className="flex min-w-0 gap-4">
                       <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-50">
-                        <Video className="h-7 w-7 text-blue-600" />
+                        {b.mode === "group" ? (
+                          <Users className="h-7 w-7 text-blue-600" />
+                        ) : (
+                          <Video className="h-7 w-7 text-blue-600" />
+                        )}
                       </div>
                       <div className="min-w-0">
                         <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -743,6 +797,11 @@ const MyBookings = () => {
                           >
                             {v.label}
                           </span>
+                          {b.mode === "group" && (
+                            <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
+                              Group
+                            </span>
+                          )}
                         </div>
                         <div className="grid gap-2 text-sm text-slate-500 sm:grid-cols-2">
                           <span className="flex items-center gap-2">
@@ -751,7 +810,10 @@ const MyBookings = () => {
                           </span>
                           <span className="flex items-center gap-2">
                             <UserRound className="h-4 w-4 text-slate-400" />
-                            {b.mentor?.name || "Waiting for an employee"}
+                            {b.mentor?.name ||
+                              (v.key === "refunded"
+                                ? "No employee assigned"
+                                : "Waiting for an employee")}
                           </span>
                           <span className="flex items-center gap-2">
                             <CalendarDays className="h-4 w-4 text-slate-400" />
@@ -792,12 +854,15 @@ const MyBookings = () => {
                       {v.key === "pending" && (
                         <div className="rounded-xl bg-amber-50 px-4 py-3 text-center text-xs font-medium text-amber-700">
                           <div className="flex items-center justify-center gap-2">
-                            <Loader2 className="h-4 w-4 animate-spin" /> Waiting...
+                            <Loader2 className="h-4 w-4 animate-spin" />{" "}
+                            Waiting...
                           </div>
                           {Number.isFinite(v.expires) && (
                             <p className="mt-1.5 text-[11px] font-normal text-amber-700">
                               Auto-cancels at{" "}
-                              <b className="font-semibold">{fmtTimeIST(v.expires)}</b>{" "}
+                              <b className="font-semibold">
+                                {fmtTimeIST(v.expires)}
+                              </b>{" "}
                               if no one accepts · refund goes to your wallet
                             </p>
                           )}
@@ -824,14 +889,14 @@ const MyBookings = () => {
                           {b.refundStatus === "failed"
                             ? "refund processing"
                             : b.refundStatus === "refunded"
-                              ? b.status === "expired" || b.status === "disputed"
+                              ? b.status === "expired" ||
+                                b.status === "disputed"
                                 ? "refunded to wallet"
                                 : "refunded"
                               : "amount held"}
                         </div>
                       )}
 
-                      {/* BOOK AGAIN with the same mentor -> opens the booking form directly */}
                       {canRebook && (
                         <button
                           type="button"
@@ -842,7 +907,6 @@ const MyBookings = () => {
                         </button>
                       )}
 
-                      {/* MncEmployee details (only after an employee accepted) */}
                       {canSeeMentor && (
                         <button
                           type="button"
@@ -854,7 +918,6 @@ const MyBookings = () => {
                         </button>
                       )}
 
-                      {/* MESSAGE (only after an employee accepted) */}
                       {canChat && (
                         <button
                           type="button"
@@ -872,6 +935,9 @@ const MyBookings = () => {
                       )}
                     </div>
                   </div>
+
+                  {/* GROUP INFO */}
+                  <GroupInfo b={b} me={userId} />
 
                   {/* LIVE BOOKING PROGRESS (stepper) */}
                   <div className="mx-3 mb-5 sm:mx-6">
@@ -910,6 +976,7 @@ const MyBookings = () => {
                     </span>
                     <span className="font-semibold text-slate-700">
                       {inr(b.amount)}
+                      {b.mode === "group" ? " / person" : ""}
                     </span>
                   </div>
                 </div>

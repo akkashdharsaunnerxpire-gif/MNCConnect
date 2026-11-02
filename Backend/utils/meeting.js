@@ -1,11 +1,18 @@
-// utils/meeting.js
+// utils/meeting.js  (single + GROUP meetings)
+//
+// Group rules
+//  - room = 1 mentor + 1..N freshers (host + friends who paid)
+//  - timer starts ONCE when: mentor inside + accepted instructions, HOST inside + accepted instructions
+//  - only the HOST answers "success / not success" at the end
+//  - WebRTC signalling is now addressed: payload.to = target socket id (mesh).
+//    Without `to` it still broadcasts, so the old 1:1 client keeps working.
 const jwt = require("jsonwebtoken");
 const Booking = require("../models/Booking");
 const { completeBooking } = require("../controllers/bookingController");
 const { emitToUser } = require("./realtime");
 
 const OPEN_BEFORE_MS = 5 * 60 * 1000;
-const SUCCESS_WINDOW_MS = 3 * 60 * 1000; // mentor can send "success" in the last 3 min
+const SUCCESS_WINDOW_MS = 3 * 60 * 1000;
 const BROADCAST_EVERY_TICKS = 5;
 const SAVE_EVERY_MS = 10 * 1000;
 const ORPHAN_ROOM_TTL_MS = 30 * 60 * 1000;
@@ -13,7 +20,6 @@ const ORPHAN_ROOM_TTL_MS = 30 * 60 * 1000;
 const rooms = new Map();
 const channel = (id) => `meeting:${id}`;
 
-// Old way: JWT string sent from the browser. Only a fallback now.
 const verify = (token) => {
   try {
     const p = jwt.verify(String(token || ""), process.env.JWT_SECRET);
@@ -23,18 +29,23 @@ const verify = (token) => {
   }
 };
 
-// Cookie login: the socket handshake already identified the user
-// (socket.data.user, set from the HttpOnly cookie). No token needed from the browser.
 const identify = (socket, payload = {}) => {
   const u = socket.data?.user || socket.user;
   if (u && (u.id || u._id) && u.role) {
     return { id: String(u.id || u._id), role: u.role };
   }
-  return verify(payload.token); // fallback for old clients
+  return verify(payload.token);
 };
+
+// host OR a friend who paid and joined the group
+const isMemberFresher = (b, userId) =>
+  String(b.fresher) === userId ||
+  (b.participants || []).some((p) => String(p.fresher) === userId);
 
 const remainingOf = (r) =>
   r.running && r.endsAtMs ? Math.max(0, r.endsAtMs - Date.now()) : r.remainingMs;
+
+const hostInside = (r) => Array.from(r.fresher.values()).includes(r.fresherId);
 
 const stateOf = (r) => ({
   bookingId: r.id,
@@ -43,7 +54,12 @@ const stateOf = (r) => ({
   running: r.running,
   mentorPresent: r.mentor.size > 0,
   fresherPresent: r.fresher.size > 0,
-  instructions: { ...r.instructionsAccepted },
+  fresherCount: new Set(r.fresher.values()).size, // distinct freshers inside
+  hostPresent: hostInside(r),
+  mode: r.mode,
+  maxMembers: r.maxMembers,
+  hostId: r.fresherId,
+  instructions: { ...r.instructionsAccepted }, // fresher = HOST accepted
   startedOnce: Boolean(r.startedOnce),
   successRequested: Boolean(r.successRequested),
   fresherConfirmed: Boolean(r.fresherConfirmed),
@@ -51,9 +67,31 @@ const stateOf = (r) => ({
   serverNow: Date.now(),
 });
 
+// what ONE person must see on the instructions gate (a friend's own acceptance, not the host's)
+const instructionsFor = (r, role, userId) => ({
+  mentor: Boolean(r.instructionsAccepted.mentor),
+  fresher:
+    role === "fresher"
+      ? r.acceptedUsers.has(userId)
+      : Boolean(r.instructionsAccepted.fresher),
+});
+
+const sendInstructions = (io, r) => {
+  r.mentor.forEach((userId, sid) =>
+    io.to(sid).emit("meeting:instructions-state", instructionsFor(r, "mentor", userId)),
+  );
+  r.fresher.forEach((userId, sid) =>
+    io.to(sid).emit("meeting:instructions-state", instructionsFor(r, "fresher", userId)),
+  );
+};
+
 const pushToUsers = (r) => {
-  const payload = { requestGroupId: r.id, running: r.running, remainingMs: Math.round(remainingOf(r)) };
-  if (r.fresherId) emitToUser(r.fresherId, "meeting:timer", payload);
+  const payload = {
+    requestGroupId: r.id,
+    running: r.running,
+    remainingMs: Math.round(remainingOf(r)),
+  };
+  r.fresherIds.forEach((id) => emitToUser(id, "meeting:timer", payload));
   if (r.mentorId) emitToUser(r.mentorId, "meeting:timer", payload);
 };
 
@@ -62,9 +100,18 @@ const makeRoom = (b) => {
   const total = Number(b.durationMinutes) * 60000;
   const resumed = b.status === "in_progress" && saved.timerEndsAt;
 
+  const fresherIds = new Set(
+    [b.fresher, ...(b.participants || []).map((p) => p.fresher)]
+      .filter(Boolean)
+      .map(String),
+  );
+
   return {
     id: b.requestGroupId,
-    fresherId: b.fresher ? String(b.fresher) : "",
+    fresherId: b.fresher ? String(b.fresher) : "", // HOST
+    fresherIds, // host + friends
+    mode: b.sessionMode || "single",
+    maxMembers: b.maxMembers || 1,
     mentorId: b.mentor ? String(b.mentor) : "",
     totalMs: total,
     startsAtMs: new Date(b.startsAt).getTime(),
@@ -77,14 +124,15 @@ const makeRoom = (b) => {
     successRequested: Boolean(saved.successRequested),
     fresherConfirmed: Boolean(saved.fresherConfirmed),
     fresherDeclined: false,
-    mentor: new Set(),
-    fresher: new Set(),
+    mentor: new Map(), // socketId -> userId
+    fresher: new Map(), // socketId -> userId
+    acceptedUsers: new Set(saved.instructionsAccepted?.fresher && b.fresher ? [String(b.fresher)] : []), // host stays accepted after a server restart
     lastSave: Date.now(),
     lastActivity: Date.now(),
     ticks: 0,
     instructionsAccepted: {
       mentor: Boolean(saved.instructionsAccepted?.mentor),
-      fresher: Boolean(saved.instructionsAccepted?.fresher),
+      fresher: Boolean(saved.instructionsAccepted?.fresher), // = host accepted
     },
   };
 };
@@ -105,7 +153,6 @@ const save = (r) =>
     }
   ).catch(() => {});
 
-// Starts ONCE. Afterwards it only stops at zero.
 const startTimer = (r) => {
   const now = Date.now();
   r.startedOnce = true;
@@ -131,13 +178,15 @@ const startTimer = (r) => {
 
 const refresh = (io, r) => {
   r.lastActivity = Date.now();
-  const bothInside = r.mentor.size > 0 && r.fresher.size > 0;
-  const bothAccepted = r.instructionsAccepted.mentor && r.instructionsAccepted.fresher;
-  if (!r.startedOnce && bothInside && bothAccepted) startTimer(r);
+  const ready =
+    r.mentor.size > 0 &&
+    hostInside(r) &&
+    r.instructionsAccepted.mentor &&
+    r.instructionsAccepted.fresher;
+  if (!r.startedOnce && ready) startTimer(r);
   io.to(channel(r.id)).emit("meeting:state", stateOf(r));
 };
 
-// ONLY called when the timer reaches zero (no early end any more)
 const finish = async (io, r) => {
   if (r.finishing) return;
   r.finishing = true;
@@ -147,7 +196,7 @@ const finish = async (io, r) => {
   const confirmed = Boolean(r.fresherConfirmed);
   try {
     await save(r);
-    await completeBooking(r.id); // fresherConfirmed -> "completed" directly, else "awaiting_confirmation"
+    await completeBooking(r.id);
   } catch (e) {
     console.error("completeBooking failed:", e.message);
   }
@@ -166,9 +215,13 @@ const leave = (io, socket) => {
   r[m.role].delete(socket.id);
   r.lastActivity = Date.now();
 
-  if (r[m.role].size === 0) {
-    socket.to(channel(m.id)).emit("meeting:peer-left", { role: m.role });
-  }
+  // group: tell everybody WHICH peer left (socketId) so they can close that connection
+  socket.to(channel(m.id)).emit("meeting:peer-left", {
+    role: m.role,
+    socketId: socket.id,
+    userId: m.userId,
+    roleEmpty: r[m.role].size === 0,
+  });
 
   refresh(io, r);
 
@@ -195,7 +248,6 @@ exports.initMeetings = (io) => {
   io.on("connection", (socket) => {
     socket.on("meeting:join", async (payload = {}, ack = () => {}) => {
       try {
-        // cookie login first (socket.data.user), JWT from the payload only as a fallback
         const user = identify(socket, payload);
         if (!user) return ack({ ok: false, code: "AUTH", message: "Log in again." });
 
@@ -205,7 +257,7 @@ exports.initMeetings = (io) => {
 
         const role =
           String(b.mentor) === user.id && user.role === "mentor" ? "mentor" :
-          String(b.fresher) === user.id && user.role === "fresher" ? "fresher" : null;
+          isMemberFresher(b, user.id) && user.role === "fresher" ? "fresher" : null;
         if (!role) return ack({ ok: false, code: "FORBIDDEN" });
 
         if (["completed", "awaiting_confirmation", "disputed"].includes(b.status)) {
@@ -225,16 +277,33 @@ exports.initMeetings = (io) => {
           r = makeRoom(b);
           rooms.set(r.id, r);
         }
+        if (role === "fresher") r.fresherIds.add(user.id); // friend joined after the room was built
 
-        r[role].add(socket.id);
-        socket.data.meeting = { id: r.id, role };
+        // everybody who is already inside (new joiner starts a connection to each of them)
+        const peers = [];
+        r.mentor.forEach((uid, sid) => peers.push({ socketId: sid, role: "mentor", userId: uid }));
+        r.fresher.forEach((uid, sid) => peers.push({ socketId: sid, role: "fresher", userId: uid }));
+
+        r[role].set(socket.id, user.id);
+        socket.data.meeting = { id: r.id, role, userId: user.id };
         socket.join(channel(r.id));
 
-        socket.to(channel(r.id)).emit("meeting:peer-joined", { role });
+        socket.to(channel(r.id)).emit("meeting:peer-joined", {
+          role,
+          socketId: socket.id,
+          userId: user.id,
+        });
         refresh(io, r);
-        socket.emit("meeting:instructions-state", r.instructionsAccepted);
+        socket.emit("meeting:instructions-state", instructionsFor(r, role, user.id));
 
-        return ack({ ok: true, role, state: stateOf(r) });
+        return ack({
+          ok: true,
+          role,
+          isHost: role === "fresher" && user.id === r.fresherId,
+          instructions: instructionsFor(r, role, user.id),
+          peers,
+          state: stateOf(r),
+        });
       } catch (error) {
         console.error("meeting:join error:", error.message);
         return ack({ ok: false, code: "ERROR" });
@@ -246,45 +315,64 @@ exports.initMeetings = (io) => {
       if (!m || m.id !== bookingId) return;
       const r = rooms.get(m.id);
       if (!r) return;
-      r.instructionsAccepted[m.role] = true;
-      io.to(channel(m.id)).emit("meeting:instructions-state", r.instructionsAccepted);
+
+      if (m.role === "mentor") {
+        r.instructionsAccepted.mentor = true;
+      } else {
+        r.acceptedUsers.add(m.userId);
+        if (m.userId === r.fresherId) r.instructionsAccepted.fresher = true; // host decides the start
+      }
+
+      sendInstructions(io, r);
       save(r);
       refresh(io, r);
     });
 
-    // MENTOR: "Meeting Success" -> asks the fresher to confirm. Meeting does NOT end.
+    // MENTOR: "Meeting Success"
     socket.on("meeting:success-request", ({ bookingId } = {}) => {
       const m = socket.data.meeting;
       if (!m || m.id !== bookingId || m.role !== "mentor") return;
       const r = rooms.get(m.id);
       if (!r || !r.running || r.fresherConfirmed) return;
-      if (remainingOf(r) > SUCCESS_WINDOW_MS) return; // only in the last 3 minutes
+      if (remainingOf(r) > SUCCESS_WINDOW_MS) return;
       r.successRequested = true;
       r.fresherDeclined = false;
       save(r);
       refresh(io, r);
     });
 
-    // FRESHER: Yes / No
+    // HOST only: Yes / No
     socket.on("meeting:success-confirm", ({ bookingId, accepted } = {}) => {
       const m = socket.data.meeting;
       if (!m || m.id !== bookingId || m.role !== "fresher") return;
       const r = rooms.get(m.id);
       if (!r || !r.successRequested) return;
+      if (m.userId !== r.fresherId) return; // friends cannot confirm
       if (accepted) {
         r.fresherConfirmed = true;
         r.fresherDeclined = false;
       } else {
-        r.successRequested = false; // mentor can ask again
+        r.successRequested = false;
         r.fresherDeclined = true;
       }
       save(r);
       refresh(io, r);
     });
 
+    // WebRTC signalling.  payload = { data, to? }
+    //  to  -> only that socket (mesh, group)
+    //  no to -> everybody else in the room (old 1:1 behaviour)
     socket.on("meeting:signal", (payload = {}) => {
       const m = socket.data.meeting;
-      if (m) socket.to(channel(m.id)).emit("meeting:signal", { data: payload.data });
+      if (!m) return;
+      const out = { data: payload.data, from: socket.id, role: m.role, userId: m.userId };
+
+      if (payload.to) {
+        const target = io.sockets.sockets.get(String(payload.to));
+        if (target && target.data.meeting?.id === m.id) target.emit("meeting:signal", out);
+        return;
+      }
+      socket.to(channel(m.id)).emit("meeting:signal", out);
     });
 
     socket.on("meeting:leave", () => leave(io, socket));

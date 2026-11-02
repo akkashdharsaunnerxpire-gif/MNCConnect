@@ -6,6 +6,7 @@ const bookingSchema = new Schema(
   {
     requestGroupId: { type: String, required: true, unique: true },
 
+    // for a GROUP session this is the HOST (the one who booked)
     fresher: {
       type: Schema.Types.ObjectId,
       ref: "Fresher",
@@ -25,6 +26,7 @@ const bookingSchema = new Schema(
     language: { type: String, default: "" },
 
     durationMinutes: { type: Number, required: true },
+    // price of ONE person (group: every member pays this)
     amount: { type: Number, required: true },
 
     date: { type: String, default: "" },
@@ -71,6 +73,7 @@ const bookingSchema = new Schema(
     acceptedAt: { type: Date, default: null },
     completedAt: { type: Date, default: null },
 
+    // the HOST's payment (friends' payments are inside `participants`)
     razorpayPaymentId: { type: String, default: "" },
     refundStatus: {
       type: String,
@@ -96,6 +99,27 @@ const bookingSchema = new Schema(
         fresher: { type: Boolean, default: false },
       },
     },
+
+    // ---------- GROUP SESSIONS ----------
+    sessionMode: {
+      type: String,
+      enum: ["single", "group"],
+      default: "single",
+      index: true,
+    },
+    maxMembers: { type: Number, default: 1, min: 1 },
+    perPersonAmount: { type: Number, default: 0 },
+    inviteCode: { type: String, default: "", index: true },
+    // everybody who PAID: host first, then the friends / students who joined
+    participants: [
+      {
+        fresher: { type: Schema.Types.ObjectId, ref: "Fresher" },
+        name: { type: String, default: "" },
+        razorpayPaymentId: { type: String, default: "" },
+        amount: { type: Number, default: 0 },
+        joinedAt: { type: Date, default: Date.now },
+      },
+    ],
   },
   { timestamps: true },
 );
@@ -105,7 +129,7 @@ bookingSchema.index({ mentor: 1, status: 1, startsAt: 1 });
 bookingSchema.index({ status: 1, "meeting.timerEndsAt": 1 });
 bookingSchema.index({ status: 1, refundStatus: 1 });
 
-// Prevent duplicate bookings using the same Razorpay payment ID
+// Prevent duplicate bookings using the same Razorpay payment ID (host payment)
 bookingSchema.index(
   { razorpayPaymentId: 1 },
   {
@@ -118,5 +142,9 @@ bookingSchema.index(
 
 // Improve queries filtering by status and notification state
 bookingSchema.index({ status: 1, notified: 1 });
+
+// GROUP: "my bookings" (host OR joined friend) and "is this payment already used?"
+bookingSchema.index({ "participants.fresher": 1 });
+bookingSchema.index({ "participants.razorpayPaymentId": 1 });
 
 module.exports = mongoose.model("Booking", bookingSchema);

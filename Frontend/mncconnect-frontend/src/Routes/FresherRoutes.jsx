@@ -26,6 +26,7 @@ import BonusWallet from "../FresherDashboard/pages/FresherWallet";
 import MeetingRoom from "../Commoncomponents/Meetingroom";
 import SuspenseLoader from "../Commoncomponents/SuspenseLoader";
 import { useAuth } from "../context/AuthContext";
+import JoinGroup from "../FresherDashboard/pages/JoinGroup";
 
 // Fresher auth pages (lazy, only loaded when opened)
 const Login = lazy(() => import("../Authpage/FresherAuth/FresherLoginRegister"));
@@ -35,6 +36,50 @@ const Forgetpassword = lazy(
 const FresherResetPassword = lazy(
   () => import("../Authpage/FresherAuth/FresherResetPassword"),
 );
+
+// ================= "come back after login" (group invite links) =================
+// A friend opens  /Home/join/ABC123  while logged out -> we remember the link,
+// send him to /login, and after login (he lands on /Home) we send him back to the link.
+
+const AFTER_LOGIN_KEY = "mnc_after_login";
+const AFTER_LOGIN_TTL_MS = 30 * 60 * 1000; // forget the link after 30 minutes
+const RETURN_PATH = /^\/Home\/(join|meeting)\//; // only these links are remembered
+
+const saveAfterLogin = (path) => {
+  try {
+    if (RETURN_PATH.test(path)) {
+      sessionStorage.setItem(
+        AFTER_LOGIN_KEY,
+        JSON.stringify({ path, at: Date.now() }),
+      );
+    }
+  } catch {
+    /* storage blocked, ignore */
+  }
+};
+
+const readAfterLogin = () => {
+  try {
+    const raw = sessionStorage.getItem(AFTER_LOGIN_KEY);
+    if (!raw) return "";
+    const { path, at } = JSON.parse(raw);
+    if (!RETURN_PATH.test(String(path || "")) || Date.now() - at > AFTER_LOGIN_TTL_MS) {
+      sessionStorage.removeItem(AFTER_LOGIN_KEY);
+      return "";
+    }
+    return path;
+  } catch {
+    return "";
+  }
+};
+
+const clearAfterLogin = () => {
+  try {
+    sessionStorage.removeItem(AFTER_LOGIN_KEY);
+  } catch {
+    /* ignore */
+  }
+};
 
 // ================= GUARDS =================
 
@@ -51,9 +96,25 @@ const FresherLoginRoute = () => {
 // PROTECTED dashboard: the server (via cookie) decides.
 const FresherProtectedRoute = () => {
   const { role, loading } = useAuth();
+  const location = useLocation();
 
   if (loading) return <SuspenseLoader />;
-  if (role !== "fresher") return <Navigate to="/login" replace />;
+
+  if (role !== "fresher") {
+    // remember an invite / meeting link so we can return to it after login
+    saveAfterLogin(`${location.pathname}${location.search}`);
+    return <Navigate to="/login" replace />;
+  }
+
+  const here = `${location.pathname}${location.search}`;
+  const saved = readAfterLogin();
+
+  // just logged in and landed on /Home -> go to the link he came for
+  if (saved && /^\/Home\/?$/.test(location.pathname)) {
+    return <Navigate to={saved} replace />;
+  }
+  // arrived at the remembered link -> forget it
+  if (saved && saved === here) clearAfterLogin();
 
   return <Outlet />;
 };
@@ -120,6 +181,9 @@ const FresherRoutes = () => {
             element={<SessionBoardRoute />}
           />
           <Route path="sessionboard/*" element={<SessionBoardRoute />} />
+
+          {/* Group session: a friend opens the invite link */}
+          <Route path="join/:code" element={<JoinGroup />} />
 
           <Route path="bonus-wallet" element={<BonusWallet />} />
           <Route path="my-bookings" element={<MyBookings />} />

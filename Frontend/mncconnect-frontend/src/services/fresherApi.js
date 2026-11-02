@@ -44,7 +44,34 @@ export const durationLabel = (m) =>
 export const getToken = () => "";
 
 // Logged-in user comes from the session marker saved by saveSession()
-export const getUser = () => getStoredUser() || {};
+// Logged-in user comes from the session marker saved by saveSession().
+// getStoredUser() logs a deprecation warning on every call, and many components call
+// getUser() on every render, so the answer is kept for a few seconds.
+// An EMPTY user (not logged in yet) is never cached, so a fresh login is picked up at once.
+const USER_CACHE_MS = 3000;
+let cachedUser = null;
+let cachedAt = 0;
+
+export const refreshUserCache = () => {
+  cachedUser = null;
+  cachedAt = 0;
+};
+
+// profile edited / saved elsewhere -> read the user again
+if (typeof window !== "undefined") {
+  window.addEventListener("profile:updated", refreshUserCache);
+}
+
+export const getUser = () => {
+  if (cachedUser && Date.now() - cachedAt < USER_CACHE_MS) return cachedUser;
+
+  const u = getStoredUser() || {};
+  if (u.id || u._id) {
+    cachedUser = u;
+    cachedAt = Date.now();
+  }
+  return u;
+};
 
 export const getUserId = () => {
   const u = getUser();
@@ -56,6 +83,7 @@ let redirectingToLogin = false;
 
 const sessionExpired = () => {
   clearSession(); // clear FIRST, so /login does not bounce back to /Home
+  refreshUserCache();
   if (!redirectingToLogin && window.location.pathname !== "/login") {
     redirectingToLogin = true;
     window.location.replace("/login");
