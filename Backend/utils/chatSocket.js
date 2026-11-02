@@ -1,8 +1,7 @@
 // utils/chatSocket.js
 // Socket side of the chat: chat:join / chat:leave / chat:send / chat:read
 // group chat -> every paid member (host + friends) and the mentor can chat.
-// NEW: chat:read stores WHO read (readers) and sends it to everybody (seen-by avatars)
-// NEW: new-message badge goes straight to every online socket of the other members
+// PRIVACY: "read" receipts (who read) go ONLY to the person who wrote the message.
 const jwt = require("jsonwebtoken");
 const ChatMessage = require("../models/ChatMessage");
 const Mentor = require("../models/Mentor");
@@ -62,6 +61,15 @@ const readerOf = async (user) => {
     image: doc?.profilePic || "",
     at: new Date(),
   };
+};
+
+// send an event to EVERY online socket of one user
+const emitToUserSockets = (io, userId, event, payload, skipSocketId) => {
+  for (const s of io.sockets.sockets.values()) {
+    if (s.id === skipSocketId) continue;
+    if (String(s.data?.user?.id || "") !== String(userId)) continue;
+    s.emit(event, payload);
+  }
 };
 
 // who is inside this chat room right now
@@ -220,9 +228,14 @@ exports.initChat = (io) => {
           deliveredAt: someoneElseInside ? new Date() : null,
         });
 
+        // what other people receive: no readBy (nobody must see who read what)
+        const base = doc.toObject();
+        delete base.readBy;
         const message = {
-          ...doc.toObject(),
+          ...base,
           _id: String(doc._id),
+          readers: [],
+          readByMe: false,
           requestGroupId: bookingId,
         };
 
@@ -264,7 +277,9 @@ exports.initChat = (io) => {
       }
     });
 
-    /* ---------------- READ (blue ticks + seen-by avatars) ---------------- */
+    /* ---------------- READ ----------------
+       PRIVACY: the "read" receipt (with the reader's name + photo)
+       goes ONLY to the person who wrote that message. */
     socket.on("chat:read", async (payload = {}, ack = () => {}) => {
       try {
         const user = identify(socket, payload);
@@ -287,7 +302,7 @@ exports.initChat = (io) => {
           senderId: { $ne: user.id },
           readBy: { $ne: user.id },
         })
-          .select("_id")
+          .select("_id senderId")
           .lean();
 
         if (!fresh.length) return ack({ ok: true });
@@ -309,13 +324,24 @@ exports.initChat = (io) => {
           { $set: { deliveredAt: now } },
         );
 
-        io.to(room(bookingId)).emit("chat:receipt", {
-          bookingId,
-          messageIds: freshIds.map(String),
-          status: "read",
-          readAt: now,
-          deliveredAt: now,
-          reader, // -> "seen by" avatar on every message
+        // group the messages by their writer, tell ONLY that writer
+        const bySender = new Map();
+        fresh.forEach((m) => {
+          const key = String(m.senderId || "");
+          if (!key) return;
+          if (!bySender.has(key)) bySender.set(key, []);
+          bySender.get(key).push(String(m._id));
+        });
+
+        bySender.forEach((messageIds, senderId) => {
+          emitToUserSockets(io, senderId, "chat:receipt", {
+            bookingId,
+            messageIds,
+            status: "read",
+            readAt: now,
+            deliveredAt: now,
+            reader,
+          });
         });
 
         return ack({ ok: true });

@@ -186,7 +186,7 @@ const SeenAvatar = memo(function SeenAvatar({ r }) {
   );
 });
 
-/* ---------- GROUP: "seen by" row under a message ---------- */
+/* ---------- GROUP: "seen by" row (only under MY OWN messages) ---------- */
 const SeenBy = memo(function SeenBy({ readers, senderId }) {
   const list = (readers || []).filter((r) => bare(r.id) !== bare(senderId));
   if (!list.length) return null;
@@ -215,7 +215,8 @@ const SeenBy = memo(function SeenBy({ readers, senderId }) {
  * One chat bubble.
  *  - tap / click the bubble  -> reply to it (WhatsApp style)
  *  - tap the quoted part     -> jump to the original message
- *  - GROUP: sender's name on top, "seen by" profile photos below
+ *  - GROUP: sender's name on top of other people's messages
+ *  - GROUP: "seen by" photos ONLY under MY OWN messages
  */
 const MessageRow = memo(function MessageRow({
   m,
@@ -337,7 +338,8 @@ const MessageRow = memo(function MessageRow({
           </div>
         </div>
 
-        {/* GROUP: who has seen this message (profile photos) */}
+        {/* "seen by" photos: ONLY under my own messages.
+            Other people's messages: nobody sees who read them. */}
         {group && mine && (
           <SeenBy readers={m.readers} senderId={senderIdOf(m)} />
         )}
@@ -363,8 +365,8 @@ const DayDivider = memo(function DayDivider({ label }) {
  * variant="panel"  -> right side panel (inside the meeting room).
  *
  * group={true}     -> GROUP chat: everybody can write, sender name on every
- *                     message, and "seen by" profile photos under each message.
- *                     myUserId is optional now: the server tells the client who it is.
+ *                     message from others, and "seen by" photos under MY messages.
+ *                     myUserId is optional: the server tells the client who it is.
  */
 export default function ChatPanel({
   bookingId,
@@ -566,6 +568,7 @@ export default function ChatPanel({
       }
     };
 
+    // "read" receipts arrive ONLY for messages I wrote (server rule)
     const onReceipt = (r) => {
       const ids = new Set((r.messageIds || []).map(String));
       if (!ids.size) return;
@@ -575,7 +578,6 @@ export default function ChatPanel({
           if (!ids.has(String(m._id))) return m;
 
           if (r.status === "read") {
-            // add the reader (once) -> "seen by" photo appears
             const readers = m.readers || [];
             const nextReaders =
               r.reader && !readers.some((x) => bare(x.id) === bare(r.reader.id))
@@ -744,16 +746,11 @@ export default function ChatPanel({
 
   /* ---------------- read receipts ----------------
      single : "not mine and readAt is empty"
-     group  : "not mine and I am not in m.readers"
-              (readAt is already set after the FIRST person read it,
-               so it cannot be used to know if I read it)            */
+     group  : "not mine and the server says I have not read it (readByMe)" */
   useEffect(() => {
     if (!open || !joined || !visible) return;
 
-    const iRead = (m) =>
-      group
-        ? (m.readers || []).some((r) => bare(r.id) === selfId)
-        : Boolean(m.readAt);
+    const iRead = (m) => (group ? Boolean(m.readByMe) : Boolean(m.readAt));
 
     const unread = messages
       .filter(
@@ -771,7 +768,7 @@ export default function ChatPanel({
         unread.forEach((id) => readSentRef.current.delete(id));
       }
     });
-  }, [messages, open, joined, visible, isMine, bookingId, group, selfId]);
+  }, [messages, open, joined, visible, isMine, bookingId, group]);
 
   /* ---------------- modal: Esc to close ---------------- */
   useEffect(() => {

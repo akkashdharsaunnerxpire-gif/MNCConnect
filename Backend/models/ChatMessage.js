@@ -1,7 +1,8 @@
 // models/ChatMessage.js
 // Model + REST handlers (routes/chatRoutes.js imports getChatHistory, getUnreadCounts from here)
 // group chat: host + friends (booking.participants) + mentor can open / read / write.
-// NEW: readers = who has read the message (name + photo) -> "seen by" avatars
+// readers = who has read the message (name + photo)
+// PRIVACY: a person only gets the readers of HIS OWN messages.
 const mongoose = require("mongoose");
 const Booking = require("./Booking");
 
@@ -80,11 +81,17 @@ const chatAccess = async (bookingId, user) => {
     : { ok: false, message: "Not allowed to access this chat" };
 };
 
-const toClient = (m) => ({
-  ...m,
-  readers: m.readers || [],
-  requestGroupId: m.bookingId,
-});
+// PRIVACY: readers / readBy of OTHER people's messages never leave the server.
+const toClient = (m, me) => {
+  const { readBy = [], readers = [], ...rest } = m;
+  const mine = String(m.senderId || "") === String(me);
+  return {
+    ...rest,
+    readers: mine ? readers : [],
+    readByMe: readBy.map(String).includes(String(me)),
+    requestGroupId: m.bookingId,
+  };
+};
 
 /* ------------------------------------------------------------------ */
 /* GET /api/chat/:bookingId?limit=50&before=<ISO date>                 */
@@ -108,8 +115,12 @@ const getChatHistory = async (req, res) => {
       .limit(limit + 1)
       .lean();
 
+    const me = String(req.user.id);
     const hasMore = rows.length > limit;
-    const messages = rows.slice(0, limit).reverse().map(toClient);
+    const messages = rows
+      .slice(0, limit)
+      .reverse()
+      .map((m) => toClient(m, me));
 
     return res.json({ success: true, messages, hasMore });
   } catch (error) {
@@ -122,8 +133,6 @@ const getChatHistory = async (req, res) => {
 
 /* ------------------------------------------------------------------ */
 /* GET /api/chat/unread  ->  { counts: { requestGroupId: n } }         */
-/* Rule (same for single + group): message NOT sent by me AND I am     */
-/* not in readBy.  (old single messages without readBy: readAt null)   */
 /* ------------------------------------------------------------------ */
 const getUnreadCounts = async (req, res) => {
   try {
@@ -137,7 +146,6 @@ const getUnreadCounts = async (req, res) => {
       .select("requestGroupId sessionMode mentor")
       .lean();
 
-    // a mentor only sees chats of bookings he accepted
     const mine = bookings.filter((b) =>
       role === "mentor" ? idOf(b.mentor) === me : true,
     );
