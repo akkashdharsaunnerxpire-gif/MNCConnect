@@ -25,7 +25,8 @@ const parseCookies = (header = "") =>
       return acc;
     }, {});
 
-const { registerChat } = require("./models/ChatMessage");
+// FIX: chat socket handler now lives in utils/chatSocket.js
+const { initChat } = require("./utils/chatSocket");
 
 // ---- never let one bad handler kill the whole server ----
 process.on("uncaughtException", (err) => {
@@ -72,7 +73,7 @@ const io = new Server(server, {
 });
 
 // ================= COOKIE-BASED SOCKET AUTH =================
-// IMPORTANT: this must be registered BEFORE registerChat / initMeetings,
+// IMPORTANT: this must be registered BEFORE initChat / initMeetings,
 // so every socket is authenticated before any other handler runs.
 // The browser sends the HttpOnly cookie "mnc_token" automatically
 // (client needs withCredentials: true). Identity comes from the token,
@@ -120,7 +121,8 @@ app.set("io", io);
 app.set("onlineEmployees", onlineEmployees);
 app.set("onlineMentors", onlineMentors);
 
-registerChat(io);
+// chat (single + group)
+initChat(io);
 
 // Initialize meetings (meeting rooms listen for their own events)
 initMeetings(io);
@@ -135,7 +137,7 @@ const PRESENCE = {
 const toKey = (id) =>
   id === undefined || id === null ? "" : String(id).trim();
 
-// NEW: broadcast mentor presence so fresher pages update without reload
+// broadcast mentor presence so fresher pages update without reload
 const offlineTimers = new Map(); // mentorId -> timeout (grace period for page refresh)
 
 const emitMentorPresence = (mentorId, isOnline) => {
@@ -155,7 +157,6 @@ const markOffline = (socket, role) => {
       map.delete(id);
       console.log(`${label} ${id} is OFFLINE`);
 
-      // NEW: tell freshers, after a short grace period
       if (role === "mentor") {
         // 3s grace: a mentor refreshing the page should not flicker offline
         clearTimeout(offlineTimers.get(id));
@@ -196,7 +197,6 @@ const markOnline = (socket, role, rawId) => {
   socket.data.presence = socket.data.presence || {};
   socket.data.presence[role] = id;
 
-  // NEW: tell freshers a mentor just came online
   if (role === "mentor") {
     clearTimeout(offlineTimers.get(id)); // reconnected within grace period
     offlineTimers.delete(id);
