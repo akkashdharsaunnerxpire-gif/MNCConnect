@@ -26,6 +26,8 @@ import {
   ShieldCheck,
   UserRound,
   Users,
+  Mail,
+  X,
 } from "lucide-react";
 import useMentorSessions from "../../hooks/useMentorSessions";
 import { inr, api, ENDPOINTS, EVENTS } from "../../services/mentorApi";
@@ -250,6 +252,114 @@ const getJoinStatus = (session, nowMs) => {
     sessionEndAt: new Date(session.endsAt),
     msUntilStart: Math.max(0, session.startsAt - nowMs),
   };
+};
+
+/* ------------------------------------------------------------------ */
+/* GROUP details modal: host + every other fresher of the group        */
+/* Uses  people[]  from the backend (see getCounterpart change).       */
+/* If the backend has not been updated yet it still shows the host     */
+/* and the other members' names.                                       */
+/* ------------------------------------------------------------------ */
+const PersonRow = ({ p }) => (
+  <li className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 p-3">
+    {p.image ? (
+      <img
+        src={p.image}
+        alt={p.name}
+        className="h-11 w-11 shrink-0 rounded-full object-cover"
+      />
+    ) : (
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-700">
+        {(p.name || "?").charAt(0).toUpperCase()}
+      </div>
+    )}
+    <div className="min-w-0 flex-1">
+      <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-900">
+        <span className="truncate">{p.name}</span>
+        {p.isHost && (
+          <span className="rounded-md bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">
+            Host
+          </span>
+        )}
+      </p>
+      {p.email && (
+        <p className="mt-0.5 flex items-center gap-1.5 break-all text-xs text-slate-500">
+          <Mail size={12} /> {p.email}
+        </p>
+      )}
+      {p.gender && (
+        <p className="mt-0.5 text-xs capitalize text-slate-400">{p.gender}</p>
+      )}
+    </div>
+  </li>
+);
+
+const GroupDetailsModal = ({ bookingId, onClose }) => {
+  const [people, setPeople] = useState(null);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    api(`${ENDPOINTS.booking(bookingId)}/counterpart`)
+      .then((d) => {
+        if (cancelled) return;
+        if (Array.isArray(d?.people) && d.people.length) {
+          setPeople(d.people);
+          return;
+        }
+        // fallback (old backend): host + names of the others
+        const host = d?.person ? [{ ...d.person, isHost: true }] : [];
+        const others = (d?.session?.members || [])
+          .filter((n) => n && n !== d?.person?.name)
+          .map((n, i) => ({ id: `m${i}`, name: n }));
+        setPeople([...host, ...others]);
+      })
+      .catch((e) => !cancelled && setErr(e.message || "Could not load details"));
+    return () => {
+      cancelled = true;
+    };
+  }, [bookingId]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 px-4"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="flex items-center gap-2 text-base font-bold text-slate-900">
+            <Users size={18} className="text-indigo-600" /> Group details
+            {people ? ` (${people.length})` : ""}
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {err ? (
+          <p className="text-sm text-red-600">{err}</p>
+        ) : !people ? (
+          <div className="flex justify-center py-10">
+            <Loader2 className="animate-spin text-blue-600" />
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {people.map((p) => (
+              <PersonRow key={p.id || p.name} p={p} />
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
 };
 
 const MentorSessions = () => {
@@ -747,7 +857,7 @@ const SessionCard = ({
       className={secondaryBtn}
     >
       <UserRound size={15} />
-      {isGroup ? "Host details" : "Fresher details"}
+      {isGroup ? "Group details" : "Fresher details"}
     </button>
   );
 
@@ -1009,13 +1119,16 @@ const SessionCard = ({
           onClose={closeChat}
         />
       )}
-      {showFresher && (
-        <PersonDetailsModal
-          title={isGroup ? "Host details" : "Fresher details"}
-          fetcher={() => api(`${ENDPOINTS.booking(session.id)}/counterpart`)}
-          onClose={closeFresher}
-        />
-      )}
+      {showFresher &&
+        (isGroup ? (
+          <GroupDetailsModal bookingId={session.id} onClose={closeFresher} />
+        ) : (
+          <PersonDetailsModal
+            title="Fresher details"
+            fetcher={() => api(`${ENDPOINTS.booking(session.id)}/counterpart`)}
+            onClose={closeFresher}
+          />
+        ))}
     </>
   );
 };

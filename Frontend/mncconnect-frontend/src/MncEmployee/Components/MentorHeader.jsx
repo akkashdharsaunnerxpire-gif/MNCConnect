@@ -121,10 +121,17 @@ const MentorHeader = () => {
     getRawAvatarUrl(user?.mentor) ||
     (displayName ? getFallbackAvatarUrl(displayName) : null);
 
-  /* Sessions count: only Upcoming (finished / cancelled / awaiting are NOT counted) */
+  /* Sessions count: only Upcoming (finished / cancelled / awaiting are NOT counted).
+     GROUP FIX: the server sends one row per paying fresher, all with the SAME
+     session id. Count each meeting ONCE (unique id), same as the Sessions page. */
   const { sessions } = useMentorSessions();
   const upcomingCount = useMemo(
-    () => (sessions || []).filter((s) => s.status === "Upcoming").length,
+    () =>
+      new Set(
+        (sessions || [])
+          .filter((s) => s.status === "Upcoming")
+          .map((s) => String(s.id)),
+      ).size,
     [sessions],
   );
 

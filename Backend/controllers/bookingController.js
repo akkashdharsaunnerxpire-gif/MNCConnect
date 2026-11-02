@@ -192,9 +192,10 @@ const membersOf = (b) =>
 
 const paymentIdsOf = (b) => [
   ...new Set(
-    [b.razorpayPaymentId, ...membersOf(b).map((m) => m.razorpayPaymentId)].filter(
-      Boolean,
-    ),
+    [
+      b.razorpayPaymentId,
+      ...membersOf(b).map((m) => m.razorpayPaymentId),
+    ].filter(Boolean),
   ),
 ];
 
@@ -214,12 +215,16 @@ const paymentUsed = (paymentId) =>
     ],
   });
 
-const makeInviteCode = () => crypto.randomBytes(4).toString("hex").toUpperCase();
+const makeInviteCode = () =>
+  crypto.randomBytes(4).toString("hex").toUpperCase();
 
 const emitBooking = (b) => {
   const payload = toClient(b);
-  participantUserIds(b).forEach((id) => emitToUser(id, "booking:updated", payload));
-  if (b.mentor) emitToUser(b.mentor._id || b.mentor, "booking:updated", payload);
+  participantUserIds(b).forEach((id) =>
+    emitToUser(id, "booking:updated", payload),
+  );
+  if (b.mentor)
+    emitToUser(b.mentor._id || b.mentor, "booking:updated", payload);
 };
 
 // payments of EVERY member -> assigned to the accepting mentor
@@ -456,7 +461,12 @@ const refundAll = async (booking, reason, options = {}) => {
 };
 
 // tell each member that their refund started
-const notifyRefunds = (fresh, payments, result, { title, reason, refundTo }) => {
+const notifyRefunds = (
+  fresh,
+  payments,
+  result,
+  { title, reason, refundTo },
+) => {
   for (const mem of membersOf(fresh)) {
     if (!mem.fresher) continue;
     const pay = payments.find(
@@ -888,7 +898,9 @@ exports.createRequest = async (req, res) => {
 // GET /api/bookings/invite/:code   (fresher) -> what a friend sees before paying
 exports.joinPreview = async (req, res) => {
   try {
-    const code = String(req.params.code || "").trim().toUpperCase();
+    const code = String(req.params.code || "")
+      .trim()
+      .toUpperCase();
     if (!code) return fail(res, 400, "Invite code is required");
 
     const b = await Booking.findOne({
@@ -933,7 +945,9 @@ exports.joinPreview = async (req, res) => {
 // The friend has ALREADY paid (wallet or Razorpay). Any failure here refunds that payment.
 exports.joinGroup = async (req, res) => {
   try {
-    const code = String(req.body?.inviteCode || "").trim().toUpperCase();
+    const code = String(req.body?.inviteCode || "")
+      .trim()
+      .toUpperCase();
     const paymentId = String(req.body?.razorpayPaymentId || "").trim();
     if (!code || !paymentId)
       return fail(res, 400, "inviteCode and paymentId required");
@@ -994,7 +1008,8 @@ exports.joinGroup = async (req, res) => {
       { returnDocument: "after" },
     ).populate("mentor", POPULATE_MENTOR);
 
-    if (!updated) return reject(409, "The group is full or you already joined.");
+    if (!updated)
+      return reject(409, "The group is full or you already joined.");
 
     await linkPaymentToRequest({
       razorpayPaymentId: paymentId,
@@ -1301,22 +1316,42 @@ exports.getCounterpart = async (req, res) => {
       });
     }
 
-    const f = b.fresher
-      ? await Fresher.findById(b.fresher)
-          .select("name email gender profilePic")
-          .lean()
-      : null;
+    // mentor side: host + (group) every other fresher
+    const ids = participantUserIds(b);
+    const freshers = await Fresher.find({ _id: { $in: ids } })
+      .select("name email gender profilePic")
+      .lean();
+
+    const people = ids
+      .map((id) => {
+        const f = freshers.find((x) => String(x._id) === id);
+        const part = (b.participants || []).find(
+          (p) => String(p.fresher) === id,
+        );
+        return {
+          id,
+          name: f?.name || part?.name || "Fresher",
+          email: f?.email || "",
+          image: f?.profilePic || "",
+          gender: f?.gender || "",
+          isHost: String(b.fresher) === id,
+        };
+      })
+      .sort((a, z) => Number(z.isHost) - Number(a.isHost)); // host first
+
+    const host = people.find((p) => p.isHost) || people[0] || {};
 
     return res.json({
       success: true,
       kind: "fresher",
       person: {
-        id: b.fresher ? String(b.fresher) : "",
-        name: f?.name || b.fresherName || "Fresher",
-        email: f?.email || b.fresherEmail || "",
-        image: f?.profilePic || b.fresherImage || "",
-        gender: f?.gender || b.gender || "",
+        id: host.id || "",
+        name: host.name || b.fresherName || "Fresher",
+        email: host.email || b.fresherEmail || "",
+        image: host.image || b.fresherImage || "",
+        gender: host.gender || b.gender || "",
       },
+      people, // used by the group details modal
       session,
     });
   } catch (error) {
@@ -1382,7 +1417,9 @@ const pushTimerOff = (b) => {
     running: false,
     remainingMs: 0,
   };
-  participantUserIds(b).forEach((id) => emitToUser(id, "meeting:timer", payload));
+  participantUserIds(b).forEach((id) =>
+    emitToUser(id, "meeting:timer", payload),
+  );
   if (b.mentor) emitToUser(b.mentor._id || b.mentor, "meeting:timer", payload);
 };
 
@@ -1890,7 +1927,6 @@ exports.pushPendingToMentor = async (app, mentorId) => {
 exports.whyNot = whyNot;
 exports.participantUserIds = participantUserIds;
 
-
 /* ============================ GROUP VIDEO TOKEN (LiveKit) ============================ */
 // POST /api/bookings/:id/livekit-token   (fresher member OR the accepted mentor)
 // Group meetings (up to 60 people) run on LiveKit (SFU). P2P cannot handle that many.
@@ -1900,13 +1936,18 @@ exports.livekitToken = async (req, res) => {
   try {
     const { LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET } = process.env;
     if (!LIVEKIT_URL || !LIVEKIT_API_KEY || !LIVEKIT_API_SECRET)
-      return fail(res, 500, "Group video is not configured (LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET missing).");
+      return fail(
+        res,
+        500,
+        "Group video is not configured (LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET missing).",
+      );
 
     const b = await Booking.findOne({
       requestGroupId: String(req.params.id || "").trim(),
     }).lean();
     if (!b) return fail(res, 404, "Booking not found");
-    if (b.sessionMode !== "group") return fail(res, 400, "This is not a group session");
+    if (b.sessionMode !== "group")
+      return fail(res, 400, "This is not a group session");
 
     const me = String(req.user.id);
     const isMentor =
