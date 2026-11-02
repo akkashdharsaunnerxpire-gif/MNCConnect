@@ -25,6 +25,7 @@ import {
   AlertTriangle,
   ShieldCheck,
   UserRound,
+  Users,
 } from "lucide-react";
 import useMentorSessions from "../../hooks/useMentorSessions";
 import { inr, api, ENDPOINTS, EVENTS } from "../../services/mentorApi";
@@ -59,6 +60,46 @@ const mapBookingStatus = (status) => {
     default:
       return null;
   }
+};
+
+/* ------------------------------------------------------------------ */
+/* GROUP FIX                                                           */
+/* The backend returns one row per PAYMENT (host + every friend), all  */
+/* with the SAME session id (= requestGroupId). That showed 2 cards    */
+/* for ONE meeting. Here we merge rows with the same id into ONE card: */
+/*   - members      : how many freshers paid                           */
+/*   - memberNames  : their names (no duplicates)                      */
+/*   - earning      : total of every member's earning                  */
+/* ------------------------------------------------------------------ */
+const mergeGroupSessions = (list) => {
+  const map = new Map();
+
+  list.forEach((s) => {
+    const key = String(s.id);
+    const prev = map.get(key);
+
+    if (!prev) {
+      map.set(key, {
+        ...s,
+        members: 1,
+        memberNames: s.name ? [s.name] : [],
+      });
+      return;
+    }
+
+    prev.members += 1;
+    if (s.name && !prev.memberNames.includes(s.name)) {
+      prev.memberNames.push(s.name);
+    }
+    prev.earning = (Number(prev.earning) || 0) + (Number(s.earning) || 0);
+
+    // keep the furthest status if rows disagree (status only moves forward)
+    if ((STATUS_RANK[s.status] ?? 0) > (STATUS_RANK[prev.status] ?? 0)) {
+      prev.status = s.status;
+    }
+  });
+
+  return [...map.values()];
 };
 
 /* ------------------------------------------------------------------ */
@@ -244,17 +285,23 @@ const MentorSessions = () => {
     reloadRef.current = reload;
   }, [reload]);
 
+  // GROUP FIX: one booking = one card (merge duplicate rows with the same id)
+  const mergedServer = useMemo(
+    () => mergeGroupSessions(serverSessions || []),
+    [serverSessions],
+  );
+
   // Apply status overrides on top of server data (status only moves forward)
   const sessions = useMemo(
     () =>
-      serverSessions.map((s) => {
+      mergedServer.map((s) => {
         const o = statusOverrides[String(s.id)];
         if (!o) return s;
         const serverRank = STATUS_RANK[s.status] ?? 0;
         const overrideRank = STATUS_RANK[o] ?? 0;
         return overrideRank > serverRank ? { ...s, status: o } : s;
       }),
-    [serverSessions, statusOverrides],
+    [mergedServer, statusOverrides],
   );
 
   const setOverride = useCallback((id, status) => {
@@ -474,7 +521,7 @@ const MentorSessions = () => {
       (s) =>
         s.status === targetStatus &&
         (!kw ||
-          `${s.name} ${s.role} ${s.topic} ${s.type}`
+          `${s.name} ${(s.memberNames || []).join(" ")} ${s.role} ${s.topic} ${s.type}`
             .toLowerCase()
             .includes(kw)),
     );
@@ -620,6 +667,18 @@ const SessionCard = ({
   const isCompleted = session.status === "Completed";
   const isCancelled = session.status === "Cancelled";
 
+  // GROUP: several freshers inside ONE meeting
+  const memberCount = session.members || 1;
+  const isGroup = memberCount > 1 || session.mode === "group";
+  const names =
+    session.memberNames && session.memberNames.length
+      ? session.memberNames
+      : [session.name];
+  const NAMES_SHOWN = 4;
+  const namesText =
+    names.slice(0, NAMES_SHOWN).join(", ") +
+    (names.length > NAMES_SHOWN ? ` +${names.length - NAMES_SHOWN} more` : "");
+
   const base = getJoinStatus(session, nowMs);
   const c = countdownParts(base.msUntilStart);
   const pad = (n) => String(n).padStart(2, "0");
@@ -688,7 +747,7 @@ const SessionCard = ({
       className={secondaryBtn}
     >
       <UserRound size={15} />
-      Fresher details
+      {isGroup ? "Host details" : "Fresher details"}
     </button>
   );
 
@@ -697,22 +756,40 @@ const SessionCard = ({
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-200 hover:shadow-md">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-center">
           <div className="flex flex-1 items-center gap-4">
-            <img
-              src={session.avatar}
-              alt={session.name}
-              className="h-12 w-12 rounded-full border-2 border-blue-100 object-cover"
-            />
+            {isGroup ? (
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 border-indigo-100 bg-indigo-50 text-indigo-600">
+                <Users size={22} />
+              </div>
+            ) : (
+              <img
+                src={session.avatar}
+                alt={session.name}
+                className="h-12 w-12 rounded-full border-2 border-blue-100 object-cover"
+              />
+            )}
             <div className="min-w-0">
-              <h3 className="font-semibold text-slate-900">{session.name}</h3>
-              <p className="mt-0.5 text-xs text-slate-500">{session.role}</p>
+              <h3 className="font-semibold text-slate-900">
+                {isGroup ? namesText : session.name}
+              </h3>
+              <p className="mt-0.5 text-xs text-slate-500">
+                {isGroup
+                  ? `Group session · ${memberCount} freshers joined`
+                  : session.role}
+              </p>
               <div className="mt-2 flex flex-wrap gap-2">
+                {isGroup && (
+                  <span className="rounded-lg bg-indigo-50 px-2.5 py-1 text-[10px] font-semibold text-indigo-700">
+                    Group · {memberCount}
+                    {session.maxMembers ? `/${session.maxMembers}` : ""} members
+                  </span>
+                )}
                 {session.topic && (
                   <span className="rounded-lg bg-blue-50 px-2.5 py-1 text-[10px] font-medium text-blue-600">
                     {session.topic}
                   </span>
                 )}
                 <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-[10px] font-medium text-slate-500">
-                  {session.type}
+                  {isGroup ? "Group Video Call" : session.type}
                 </span>
               </div>
             </div>
@@ -736,7 +813,7 @@ const SessionCard = ({
             />
             <SessionInfo
               icon={<Star size={15} />}
-              label="You earn"
+              label={isGroup ? "You earn (total)" : "You earn"}
               value={inr(session.earning ?? 0)}
             />
           </div>
@@ -772,7 +849,9 @@ const SessionCard = ({
                   className={`text-[10px] ${isFinalWarning ? "text-amber-700" : "text-emerald-600"}`}
                 >
                   {isFinalWarning
-                    ? "Ask the fresher to confirm the session went well"
+                    ? isGroup
+                      ? "Ask the host to confirm the session went well"
+                      : "Ask the fresher to confirm the session went well"
                     : `Time left in the meeting · ${timeRange}`}
                 </p>
               </div>
@@ -811,7 +890,7 @@ const SessionCard = ({
               <>
                 <ShieldCheck size={16} className="text-amber-500" />
                 <span className="text-xs font-medium text-amber-700">
-                  Waiting for fresher to confirm
+                  Waiting for {isGroup ? "host" : "fresher"} to confirm
                 </span>
               </>
             )}
@@ -890,7 +969,7 @@ const SessionCard = ({
             <span className="h-2 w-2 animate-pulse rounded-full bg-yellow-500" />
             <span>
               The meeting room is open. Click "Join Now". The timer starts when
-              you and the fresher are both inside.
+              you and the {isGroup ? "host" : "fresher"} are both inside.
             </span>
           </div>
         )}
@@ -898,8 +977,8 @@ const SessionCard = ({
           <div className="mt-4 flex items-center gap-2 rounded-lg border border-green-100 bg-green-50 px-3 py-2 text-[11px] font-medium text-green-600">
             <span className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
             <span>
-              Session time reached. The timer starts when you and the fresher
-              are both inside.
+              Session time reached. The timer starts when you and the{" "}
+              {isGroup ? "host" : "fresher"} are both inside.
             </span>
           </div>
         )}
@@ -926,13 +1005,13 @@ const SessionCard = ({
           variant="modal"
           bookingId={chatFor.id}
           role="mentor"
-          title={`Chat with ${chatFor.name}`}
+          title={`Chat with ${isGroup ? "host" : chatFor.name}`}
           onClose={closeChat}
         />
       )}
       {showFresher && (
         <PersonDetailsModal
-          title="Fresher details"
+          title={isGroup ? "Host details" : "Fresher details"}
           fetcher={() => api(`${ENDPOINTS.booking(session.id)}/counterpart`)}
           onClose={closeFresher}
         />
