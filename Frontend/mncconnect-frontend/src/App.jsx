@@ -10,6 +10,7 @@ import {
 import LinearProgress from "./components/LinearProgress";
 import RouteProgress from "./Commoncomponents/RouteProgress";
 import SuspenseLoader from "./Commoncomponents/SuspenseLoader";
+import ScrollToTop from "./Commoncomponents/ScrollToTop";
 
 import { LoadingProvider, useLoading } from "./context/LoadingContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
@@ -59,6 +60,9 @@ function AppContent() {
     <div className="min-h-screen bg-white font-sans text-gray-900">
       <LinearProgress isLoading={isLoading} />
       <RouteProgress />
+
+      {/* every new page opens from the top */}
+      <ScrollToTop />
 
       <Suspense fallback={<SuspenseLoader />}>
         <Routes>

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   CalendarDays, CheckCircle2, ChevronRight, IndianRupee, Loader2,
@@ -79,6 +79,18 @@ export default function SessionBoard() {
   const companyName = useMemo(() => {
     try { return decodeURIComponent(company || ""); } catch { return company || ""; }
   }, [company]);
+
+  // always open this page from the TOP (Home's scroll position must not carry over)
+  useLayoutEffect(() => {
+    const toTop = () => {
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    };
+    toTop();
+    const id = requestAnimationFrame(toTop); // once more after the first paint
+    return () => cancelAnimationFrame(id);
+  }, [companyName]);
 
   const user = useMemo(() => getUser(), []);
   const userId = useMemo(() => getUserId(), []);
@@ -812,7 +824,6 @@ export default function SessionBoard() {
   );
 }
 
-/* ---------- invite link (group only) ---------- */
 /* ---------- invite link (group only) ---------- */
 const InviteBox = ({ booking, perPerson }) => {
   const [copied, setCopied] = useState(false);
