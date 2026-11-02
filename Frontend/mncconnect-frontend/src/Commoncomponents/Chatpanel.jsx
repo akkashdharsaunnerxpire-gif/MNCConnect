@@ -113,12 +113,24 @@ const colorFor = (key = "") => {
   return NAME_COLORS[h % NAME_COLORS.length];
 };
 
-const senderIdOf = (m) =>
-  String(m?.senderId || m?.sender?._id || m?.sender?.id || m?.sender || "");
+// "fresher:123" / "mentor:456" / "123"  ->  "123" / "456" / "123"
+const bare = (s) => String(s || "").split(":").pop();
 
-const senderNameOf = (m) =>
+const senderIdOf = (m) => {
+  if (!m) return "";
+  const raw =
+    m.senderId ||
+    m.sender?._id ||
+    m.sender?.id ||
+    (typeof m.sender === "string" ? m.sender : "");
+  return bare(raw);
+};
+
+// name: from the message itself, else from the live participant list, else a label
+const nameFor = (m, names = {}) =>
   m?.senderName ||
   m?.sender?.name ||
+  names[senderIdOf(m)] ||
   (m?.senderRole === "mentor" ? "Employee" : "Member");
 
 /**
@@ -163,10 +175,11 @@ const MessageRow = memo(function MessageRow({
   mine,
   firstInGroup,
   lastInGroup,
-  myRole,
-  myUserId,
   group,
-  peerName,
+  senderLabel,
+  quoteMine,
+  quoteLabel,
+  colorKey,
   highlight,
   onReply,
   onJump,
@@ -190,21 +203,8 @@ const MessageRow = memo(function MessageRow({
     </button>
   );
 
-  // is the quoted message mine?
-  const quoteMine =
-    group && myUserId && m.replyTo?.senderId
-      ? String(m.replyTo.senderId) === String(myUserId)
-      : m.replyTo?.senderRole === myRole;
-
-  const quoteName = quoteMine
-    ? "You"
-    : group
-      ? m.replyTo?.senderName || senderNameOf(m.replyTo)
-      : peerName;
-
   // GROUP: name above the message (only other people, not me)
   const showName = group && !mine && firstInGroup;
-  const nameColor = colorFor(senderIdOf(m) || senderNameOf(m));
   const isEmployee = m.senderRole === "mentor";
 
   return (
@@ -236,9 +236,9 @@ const MessageRow = memo(function MessageRow({
       >
         {showName && (
           <p
-            className={`mb-0.5 flex items-center gap-1.5 text-[12px] font-semibold ${nameColor}`}
+            className={`mb-0.5 flex items-center gap-1.5 text-[12px] font-semibold ${colorFor(colorKey)}`}
           >
-            <span className="truncate">{senderNameOf(m)}</span>
+            <span className="truncate">{senderLabel}</span>
             {isEmployee && (
               <span className="rounded-full bg-indigo-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-indigo-600">
                 Employee
@@ -263,7 +263,7 @@ const MessageRow = memo(function MessageRow({
                 quoteMine ? "text-emerald-700" : "text-blue-600"
               }`}
             >
-              {quoteName}
+              {quoteLabel}
             </span>
             <span className="line-clamp-2 block break-words text-xs text-slate-600">
               {m.replyTo.text}
@@ -306,10 +306,12 @@ const DayDivider = memo(function DayDivider({ label }) {
  * variant="panel"  -> right side panel (inside the meeting room). Keep it mounted
  *                     and toggle with `open` so new messages are still received.
  *
- * group={true}     -> GROUP chat (up to 5 members): everybody can write, and the
- *                     sender's name is shown on every message.
- *                     Needs `myUserId` so my own messages are recognised
- *                     (all freshers have the same role).
+ * group={true}     -> GROUP chat: EVERYBODY can write, and the sender's name is
+ *                     shown on every message from other people.
+ *                     myUserId : my user id (all freshers have the same role)
+ *                     names    : { [userId]: "Name" } fallback when the server
+ *                                message has no senderName
+ * group={false}    -> single chat: no names (only 2 people)
  *
  * Auth = HttpOnly cookie (credentials: "include" + socket handshake cookie).
  */
@@ -323,17 +325,26 @@ export default function ChatPanel({
   onIncoming,
   group = false,
   myUserId = "",
+  names = {},
 }) {
   const peerRole = role === "mentor" ? "fresher" : "mentor";
   const peerName = title.replace(/^chat with\s+/i, "").trim() || "Contact";
 
-  // single: the role tells who sent it. group: the sender id tells who sent it.
+  // ids of the messages I sent in this chat (works even if the server sends no senderId)
+  const mineIdsRef = useRef(new Set());
+
+  // single: the role tells who sent it.
+  // group : employee = role, fresher = sender id (all freshers share one role)
   const isMine = useCallback(
     (m) => {
-      if (group && myUserId && senderIdOf(m)) {
-        return senderIdOf(m) === String(myUserId);
-      }
-      return m.senderRole === role;
+      if (mineIdsRef.current.has(String(m._id))) return true;
+      if (!group) return m.senderRole === role;
+
+      if (role === "mentor") return m.senderRole === "mentor";
+
+      const sid = senderIdOf(m);
+      if (sid && myUserId) return sid === bare(myUserId);
+      return false;
     },
     [group, myUserId, role],
   );
@@ -449,6 +460,7 @@ export default function ChatPanel({
     loadingOlderRef.current = false;
     readSentRef.current = new Set();
     soundedRef.current = new Set();
+    mineIdsRef.current = new Set();
 
     const matches = (m) =>
       [m.bookingId, m.requestGroupId]
@@ -792,7 +804,10 @@ export default function ChatPanel({
           forceScroll.current = true;
           setText("");
           setReplyTo(null);
-          if (res.message) addMessage(res.message);
+          if (res.message) {
+            mineIdsRef.current.add(String(res.message._id));
+            addMessage(res.message);
+          }
           requestAnimationFrame(() => {
             if (textareaRef.current) textareaRef.current.style.height = "auto";
             textareaRef.current?.focus();
@@ -821,6 +836,16 @@ export default function ChatPanel({
     const sideOf = (m) =>
       isMine(m) ? "me" : group ? senderIdOf(m) || m.senderRole || "x" : "peer";
 
+    // is the quoted message mine?
+    const quoteMineOf = (m) => {
+      const r = m.replyTo;
+      if (!r) return false;
+      if (!group) return r.senderRole === role;
+      if (role === "mentor") return r.senderRole === "mentor";
+      const sid = bare(r.senderId);
+      return Boolean(sid && myUserId && sid === bare(myUserId));
+    };
+
     messages.forEach((m, i) => {
       const dk = dayKey(m.createdAt);
       const side = sideOf(m);
@@ -840,6 +865,9 @@ export default function ChatPanel({
       const lastInGroup =
         !next || sideOf(next) !== side || dayKey(next.createdAt) !== dk;
 
+      const quoteMine = quoteMineOf(m);
+      const senderLabel = nameFor(m, names);
+
       out.push({
         type: "msg",
         key: String(m._id),
@@ -847,12 +875,20 @@ export default function ChatPanel({
         mine: side === "me",
         firstInGroup,
         lastInGroup,
+        senderLabel,
+        colorKey: senderIdOf(m) || senderLabel,
+        quoteMine,
+        quoteLabel: quoteMine
+          ? "You"
+          : group
+            ? nameFor(m.replyTo, names)
+            : peerName,
       });
       lastSide = side;
     });
 
     return out;
-  }, [messages, isMine, group]);
+  }, [messages, isMine, group, names, role, myUserId, peerName]);
 
   /* ---------------- UI ---------------- */
   const statusText = !joined
@@ -956,10 +992,11 @@ export default function ChatPanel({
                     mine={row.mine}
                     firstInGroup={row.firstInGroup}
                     lastInGroup={row.lastInGroup}
-                    myRole={role}
-                    myUserId={myUserId}
                     group={group}
-                    peerName={peerName}
+                    senderLabel={row.senderLabel}
+                    colorKey={row.colorKey}
+                    quoteMine={row.quoteMine}
+                    quoteLabel={row.quoteLabel}
                     highlight={highlightId === row.key}
                     onReply={startReply}
                     onJump={jumpTo}
@@ -1007,7 +1044,7 @@ export default function ChatPanel({
                   {isMine(replyTo)
                     ? "You"
                     : group
-                      ? senderNameOf(replyTo)
+                      ? nameFor(replyTo, names)
                       : peerName}
                 </p>
                 <p className="truncate text-xs text-slate-600">

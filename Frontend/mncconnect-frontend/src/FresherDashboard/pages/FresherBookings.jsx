@@ -401,7 +401,12 @@ const MyBookings = () => {
 
   useEffect(() => {
     const onChatMessage = (message) => {
-      if (message.senderRole === "fresher") return;
+      // my own message -> no badge (group: compare the sender id, single: the role)
+      const sid = String(message.senderId || "")
+        .split(":")
+        .pop();
+      if (sid ? sid === String(userId) : message.senderRole === "fresher")
+        return;
 
       const messageId = String(message._id || message.id || "");
       if (messageId) {
@@ -418,7 +423,7 @@ const MyBookings = () => {
 
     socket.on("chat:message", onChatMessage);
     return () => socket.off("chat:message", onChatMessage);
-  }, []);
+  }, [userId]);
 
   const openChat = (b) => {
     const id = String(b.requestGroupId);
@@ -761,9 +766,9 @@ const MyBookings = () => {
                   : b.time;
 
               // group friends have no chat (chat is host <-> employee only)
+              // group friends have no chat (chat is host <-> employee only)
               const canChat =
                 Boolean(b.mentor) &&
-                !isGroupFriendOf(b, userId) &&
                 !NO_CHAT_STATUSES.includes(b.status) &&
                 v.key !== "pending";
               const canSeeMentor =
@@ -999,13 +1004,28 @@ const MyBookings = () => {
           }}
         />
       )}
-
       {chatFor && (
         <ChatPanel
           variant="modal"
           bookingId={chatFor.requestGroupId}
           role="fresher"
-          title={`Chat with ${chatFor.mentor?.name || "employee"}`}
+          group={chatFor.mode === "group"}
+          myUserId={userId}
+          names={Object.fromEntries(
+            (chatFor.members || [])
+              .map((m) => [
+                String(m.id || m._id || m.userId || "")
+                  .split(":")
+                  .pop(),
+                m.name,
+              ])
+              .filter(([k, n]) => k && n),
+          )}
+          title={
+            chatFor.mode === "group"
+              ? "Group chat"
+              : `Chat with ${chatFor.mentor?.name || "employee"}`
+          }
           onClose={closeChat}
         />
       )}

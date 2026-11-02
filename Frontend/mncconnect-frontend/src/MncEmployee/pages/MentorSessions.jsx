@@ -266,7 +266,10 @@ const eduText = (e) => {
   if (!e) return "";
   if (typeof e === "string") return e;
   return Object.values(e)
-    .filter((v) => (typeof v === "string" || typeof v === "number") && String(v).trim())
+    .filter(
+      (v) =>
+        (typeof v === "string" || typeof v === "number") && String(v).trim(),
+    )
     .join(" · ");
 };
 
@@ -359,7 +362,10 @@ const PersonDetail = ({ p }) => {
                 key={e}
                 className="flex items-start gap-2 text-sm text-slate-600"
               >
-                <GraduationCap size={14} className="mt-1 shrink-0 text-slate-400" />
+                <GraduationCap
+                  size={14}
+                  className="mt-1 shrink-0 text-slate-400"
+                />
                 {e}
               </li>
             ))}
@@ -401,7 +407,9 @@ const GroupDetailsModal = ({ bookingId, onClose }) => {
           .map((n, i) => ({ id: `m${i}`, name: n }));
         setPeople([...host, ...others]);
       })
-      .catch((e) => !cancelled && setErr(e.message || "Could not load details"));
+      .catch(
+        (e) => !cancelled && setErr(e.message || "Could not load details"),
+      );
     return () => {
       cancelled = true;
     };
@@ -1234,7 +1242,8 @@ const SessionCard = ({
           variant="modal"
           bookingId={chatFor.id}
           role="mentor"
-          title={`Chat with ${isGroup ? "host" : chatFor.name}`}
+          group={isGroup}
+          title={isGroup ? "Group chat" : `Chat with ${chatFor.name}`}
           onClose={closeChat}
         />
       )}

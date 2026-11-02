@@ -5,15 +5,14 @@
 //
 // GROUP layout (Zoom style)
 //   - Employee (mentor) sees the freshers BIG in a gallery grid (auto columns, pages of 12)
-//   - Fresher sees the employee BIG, and the other freshers in a bigger strip
+//   - Fresher sees the employee BIG, and everybody else in a centered strip
 //   - Active speaker gets a green ring, double-click / pin icon pins anybody to the big stage
 //   - Screen share (employee / host) takes the big stage automatically
 //   - Full-screen button (meeting only), grid / speaker view toggle
+//   - Chat opens on the right and the video stage SHIFTS left (nothing is hidden)
 // CHAT
-//   - single : employee <-> fresher (1 to 1)
-//   - group  : booking up to 5 members -> EVERYBODY (employee, host, friends) can chat,
-//              every message shows the sender's name
-//              bigger group (> 5)      -> only employee + host chat (as before)
+//   - single : employee <-> fresher (1 to 1, no names)
+//   - group  : EVERYBODY (employee, host, friends) can chat, every message shows the sender's name
 // POPUPS
 //   - "Did the session go well?" (Meeting Success)  -> only the single fresher / group HOST
 //   - Review (stars + feedback)                     -> EVERY fresher (host and friends)
@@ -70,8 +69,6 @@ const CONFIRMED_BANNER_MS = 20 * 1000;
 const AUTO_MEDIA_MAX = 6;
 // group gallery: tiles per page
 const GRID_PAGE = 12;
-// group chat: up to this many members, EVERYBODY can chat (with names)
-const GROUP_CHAT_MAX = 5;
 
 /* ---------- HD camera + mic (single meeting) ---------- */
 const HD_VIDEO = {
@@ -376,6 +373,8 @@ export default function MeetingRoom() {
   const [chatOpen, setChatOpen] = useState(false);
   const [unread, setUnread] = useState(0);
   const chatOpenRef = useRef(false);
+  // userId -> name (kept even after a person leaves, so old messages keep their name)
+  const nameCache = useRef({});
   const toggleChat = () => {
     const next = !chatOpenRef.current;
     chatOpenRef.current = next;
@@ -1143,6 +1142,13 @@ export default function MeetingRoom() {
     : null;
   const iAmSharing = Boolean(lkRoom?.localParticipant?.isScreenShareEnabled);
 
+  // chat: userId -> name  (so every message shows WHO wrote it, even when the server sends no name)
+  people.forEach((p) => {
+    const id = String(p.identity || "").split(":").pop();
+    if (id && p.name) nameCache.current[id] = p.name;
+  });
+  const chatNames = { ...nameCache.current };
+
   // which layout?  "spot" = one big tile + strip   |   "grid" = gallery
   let layout = "grid";
   let mainP = null;
@@ -1176,13 +1182,11 @@ export default function MeetingRoom() {
   const rows = Math.max(1, Math.ceil(pageItems.length / cols));
   const gridTileSize = pageItems.length <= 4 ? "xl" : "md";
 
-  // CHAT
-  //  single                      : employee <-> fresher
-  //  group, up to 5 members      : EVERYBODY (employee, host, friends)
-  //  group, bigger than 5        : only employee + host (as before)
-  const smallGroup = isGroup && (clock.maxMembers || 1) <= GROUP_CHAT_MAX;
-  const canChat = !isGroup || smallGroup || isMentor || isHost;
+  // CHAT: single = employee <-> fresher.  group = EVERYBODY.
+  const canChat = true;
   const canShare = isGroup && (isMentor || isHost);
+  // the stage moves left while the chat panel is open (nothing is hidden behind it)
+  const shiftForChat = canChat && chatOpen;
 
   const ctrlBtn = (on) =>
     `flex h-12 w-12 items-center justify-center rounded-full transition ${
@@ -1191,14 +1195,25 @@ export default function MeetingRoom() {
 
   return (
     <>
-      <div className="fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-slate-950 text-white">
+      <div
+        className={`fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-slate-950 text-white transition-[padding] duration-200 ${
+          shiftForChat ? "sm:pr-96" : ""
+        }`}
+      >
         <div className="flex shrink-0 items-center justify-between px-4 py-2">
-          <div>
-            <p className="text-sm font-semibold">
-              {booking?.companyName || "MNCConnect session"}
+          <div className="min-w-0">
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold">
+              <span className="truncate">
+                {booking?.companyName || "MNCConnect session"}
+              </span>
               {isGroup && (
-                <span className="ml-2 rounded-full bg-indigo-500/20 px-2 py-0.5 text-[11px] font-semibold text-indigo-300">
+                <span className="rounded-full bg-indigo-500/20 px-2 py-0.5 text-[11px] font-semibold text-indigo-300">
                   Group · {people.length || 1} online
+                </span>
+              )}
+              {isFresher && isGroup && mentorP && (
+                <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-medium text-slate-200">
+                  Employee: {mentorP.name || "Employee"}
                 </span>
               )}
             </p>
@@ -1215,7 +1230,7 @@ export default function MeetingRoom() {
             </p>
           </div>
           <div
-            className={`rounded-xl px-4 py-1.5 font-mono text-xl font-bold tabular-nums ${timerCls}`}
+            className={`shrink-0 rounded-xl px-4 py-1.5 font-mono text-xl font-bold tabular-nums ${timerCls}`}
           >
             {fmtClock(currentRemaining)}
           </div>
@@ -1254,9 +1269,10 @@ export default function MeetingRoom() {
                     )}
                   </div>
 
+                  {/* strip: centered when it fits, scrolls when there are many people */}
                   {stripList.length > 0 && (
                     <div
-                      className="flex shrink-0 gap-2 overflow-x-auto pb-1"
+                      className="flex shrink-0 gap-2 overflow-x-auto pb-1 [&>*:first-child]:ml-auto [&>*:last-child]:mr-auto"
                       style={{ height: "clamp(110px, 22vh, 190px)" }}
                     >
                       {stripList.map((p) => (
@@ -1562,7 +1578,11 @@ export default function MeetingRoom() {
 
       {/* PEOPLE LIST (group) */}
       {isGroup && peopleOpen && (
-        <div className="fixed bottom-24 right-4 z-40 w-72 max-w-[90vw] rounded-2xl border border-slate-700 bg-slate-900 p-3 shadow-2xl">
+        <div
+          className={`fixed bottom-24 z-40 w-72 max-w-[90vw] rounded-2xl border border-slate-700 bg-slate-900 p-3 text-white shadow-2xl ${
+            shiftForChat ? "right-4 sm:right-[25rem]" : "right-4"
+          }`}
+        >
           <div className="mb-2 flex items-center justify-between">
             <p className="text-sm font-bold">People ({people.length})</p>
             <button
@@ -1610,7 +1630,8 @@ export default function MeetingRoom() {
       )}
 
       {/* chat: always mounted while in the room, so messages arrive even when closed.
-          group = true  -> everybody can write, sender name is shown on every message */}
+          group = true  -> everybody can write, sender name is shown on every message
+          group = false -> single chat, no names */}
       {canChat && (
         <ChatPanel
           variant="panel"
@@ -1619,6 +1640,7 @@ export default function MeetingRoom() {
           role={isMentor ? "mentor" : "fresher"}
           group={isGroup}
           myUserId={myUserId}
+          names={chatNames}
           title={
             isGroup
               ? "Group chat"
