@@ -1,6 +1,7 @@
 // models/ChatMessage.js
 // Model + REST handlers (routes/chatRoutes.js imports getChatHistory, getUnreadCounts from here)
-// FIX: group chat -> host + friends (booking.participants) + mentor can all open / read / write.
+// group chat: host + friends (booking.participants) + mentor can open / read / write.
+// NEW: readers = who has read the message (name + photo) -> "seen by" avatars
 const mongoose = require("mongoose");
 const Booking = require("./Booking");
 
@@ -15,6 +16,17 @@ const replySchema = new mongoose.Schema(
   { _id: false },
 );
 
+const readerSchema = new mongoose.Schema(
+  {
+    id: { type: String, default: "" },
+    role: { type: String, default: "" },
+    name: { type: String, default: "" },
+    image: { type: String, default: "" },
+    at: { type: Date, default: Date.now },
+  },
+  { _id: false },
+);
+
 const chatMessageSchema = new mongoose.Schema(
   {
     bookingId: { type: String, required: true, index: true }, // = requestGroupId
@@ -25,7 +37,8 @@ const chatMessageSchema = new mongoose.Schema(
     replyTo: { type: replySchema, default: null },
     deliveredAt: { type: Date, default: null },
     readAt: { type: Date, default: null }, // first time someone else read it
-    readBy: { type: [String], default: [] }, // group: every user who read it
+    readBy: { type: [String], default: [] }, // user ids that read it
+    readers: { type: [readerSchema], default: [] }, // same people, with name + photo
   },
   { timestamps: true },
 );
@@ -69,6 +82,7 @@ const chatAccess = async (bookingId, user) => {
 
 const toClient = (m) => ({
   ...m,
+  readers: m.readers || [],
   requestGroupId: m.bookingId,
 });
 
@@ -108,8 +122,8 @@ const getChatHistory = async (req, res) => {
 
 /* ------------------------------------------------------------------ */
 /* GET /api/chat/unread  ->  { counts: { requestGroupId: n } }         */
-/* single : other side's messages with readAt = null                   */
-/* group  : messages not sent by me and me not in readBy               */
+/* Rule (same for single + group): message NOT sent by me AND I am     */
+/* not in readBy.  (old single messages without readBy: readAt null)   */
 /* ------------------------------------------------------------------ */
 const getUnreadCounts = async (req, res) => {
   try {
@@ -117,11 +131,7 @@ const getUnreadCounts = async (req, res) => {
     const role = req.user.role;
 
     const bookings = await Booking.find({
-      $or: [
-        { fresher: me },
-        { "participants.fresher": me },
-        { mentor: me },
-      ],
+      $or: [{ fresher: me }, { "participants.fresher": me }, { mentor: me }],
       status: { $nin: ["pending", "expired", "missed", "cancelled"] },
     })
       .select("requestGroupId sessionMode mentor")

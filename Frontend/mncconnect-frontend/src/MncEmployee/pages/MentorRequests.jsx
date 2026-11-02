@@ -40,7 +40,13 @@ const ROLE_OPTIONS = ["All", "Student", "Fresher", "Developer", "Other"];
 const DURATION_OPTIONS = ["All", "30 mins", "60 mins", "120 mins"];
 const AMOUNT_OPTIONS = ["All", "Below ₹300", "₹300 - ₹400", "Above ₹400"];
 
-/* ---------- filter helpers (pure, so they live outside the component) ---------- */
+const PENDING_SYNC_MS = 20000; // re-sync with the server
+const CLOCK_TICK_MS = 5000; // hide requests that expired meanwhile
+
+// "Video Call" AND "Group Video Call" (same rule as the header badge)
+const isVideoCall = (r) => /video call/i.test(String(r?.type || ""));
+
+/* ---------- filter helpers ---------- */
 
 const getTiming = (time) => {
   const match = String(time)
@@ -92,6 +98,7 @@ const MentorRequests = () => {
   const [actionLoading, setActionLoading] = useState(false);
   const [socketConnected, setSocketConnected] = useState(socket.connected);
   const [requests, setRequests] = useState([]);
+  const [clock, setClock] = useState(Date.now());
   const [filters, setFilters] = useState({
     timing: "All",
     role: "All",
@@ -99,7 +106,6 @@ const MentorRequests = () => {
     amount: "All",
   });
 
-  // server sessions = source of truth for the 30-minute gap rule
   const {
     sessions,
     loading: sessionsLoading,
@@ -110,17 +116,21 @@ const MentorRequests = () => {
     [sessions],
   );
 
+  /* The server list is the truth for PENDING requests:
+     it replaces the old pending ones (expired / taken ones disappear).
+     "Rejected" ones stay (local only). */
   const loadPending = useCallback(async () => {
     try {
       const d = await api(ENDPOINTS.mentorPending);
       const list = (d.requests || []).map((r) => ({
         ...normalizeSessionRequest(r),
+        expiresAt: r.expiresAt || null,
         status: "Pending",
       }));
-      setRequests((prev) => {
-        const ids = new Set(prev.map((r) => String(r.id)));
-        return [...prev, ...list.filter((r) => !ids.has(String(r.id)))];
-      });
+      setRequests((prev) => [
+        ...list,
+        ...prev.filter((r) => r.status !== "Pending"),
+      ]);
     } catch (e) {
       console.error("load pending:", e.message);
     }
@@ -128,12 +138,20 @@ const MentorRequests = () => {
 
   useEffect(() => {
     loadPending();
+    const poll = setInterval(loadPending, PENDING_SYNC_MS);
+    return () => clearInterval(poll);
   }, [loadPending]);
+
+  useEffect(() => {
+    const t = setInterval(() => setClock(Date.now()), CLOCK_TICK_MS);
+    return () => clearInterval(t);
+  }, []);
 
   /* ---------- live request feed ---------- */
   useEffect(() => {
     const handleConnect = () => {
       setSocketConnected(true);
+      loadPending(); // resync after reconnect
     };
 
     const handleDisconnect = () => setSocketConnected(false);
@@ -146,6 +164,7 @@ const MentorRequests = () => {
     const handleSessionRequest = (incoming) => {
       const request = {
         ...normalizeSessionRequest(incoming),
+        expiresAt: incoming?.expiresAt || null,
         status: "Pending",
       };
       if (!request.id) return;
@@ -157,8 +176,6 @@ const MentorRequests = () => {
       );
     };
 
-    // another mentor took it -> remove it so nobody tries to accept a dead request
-    // (the header listens to this same socket event, so no notify needed here)
     const handleTaken = ({ id, requestGroupId } = {}) => {
       const key = String(id ?? requestGroupId ?? "");
       if (!key) return;
@@ -175,7 +192,7 @@ const MentorRequests = () => {
     socket.on("session-request", handleSessionRequest);
     socket.on("session-request-taken", handleTaken);
 
-    if (socket.connected) handleConnect();
+    if (socket.connected) setSocketConnected(true);
     else socket.connect();
 
     return () => {
@@ -185,7 +202,7 @@ const MentorRequests = () => {
       socket.off("session-request", handleSessionRequest);
       socket.off("session-request-taken", handleTaken);
     };
-  }, []);
+  }, [loadPending]);
 
   /* ---------- filtering ---------- */
   const filteredRequests = useMemo(() => {
@@ -195,7 +212,13 @@ const MentorRequests = () => {
 
     return requests.filter((request) => {
       if (request.status !== activeTab) return false;
-      if (request.type !== "Video Call") return false;
+      if (!isVideoCall(request)) return false;
+
+      // a pending request that already expired is dead -> do not show it
+      if (request.status === "Pending" && request.expiresAt) {
+        const t = new Date(request.expiresAt).getTime();
+        if (Number.isFinite(t) && t <= clock) return false;
+      }
 
       if (search) {
         const text = [
@@ -229,7 +252,7 @@ const MentorRequests = () => {
 
       return true;
     });
-  }, [requests, activeTab, searchQuery, filters]);
+  }, [requests, activeTab, searchQuery, filters, clock]);
 
   /* ---------- confirmation modal ---------- */
   const resetModal = useCallback(() => {
@@ -244,7 +267,6 @@ const MentorRequests = () => {
     setAcceptError("");
   };
 
-  // user-initiated close (Cancel / X / Escape) is blocked while a request is in flight
   const closeConfirmation = useCallback(() => {
     if (!actionLoading) resetModal();
   }, [actionLoading, resetModal]);
@@ -260,7 +282,6 @@ const MentorRequests = () => {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [selectedRequest, closeConfirmation]);
 
-  // remove from the list AND tell the header so its Requests badge drops
   const removeRequest = (id) => {
     setRequests((prev) => prev.filter((r) => String(r.id) !== String(id)));
     notifyRequestsChanged(id);
@@ -309,10 +330,9 @@ const MentorRequests = () => {
 
         const session = {
           ...selectedRequest,
-          type: "Video Call",
           status: "Upcoming",
         };
-        persistAcceptedSession(session); // fallback copy for the gap check
+        persistAcceptedSession(session);
 
         removeRequest(selectedRequest.id);
         resetModal();
@@ -683,6 +703,12 @@ const RequestCard = ({ request, onAccept, onReject }) => (
             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
               {request.role}
             </span>
+
+            {/group/i.test(String(request.type || "")) && (
+              <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">
+                Group
+              </span>
+            )}
           </div>
 
           {request.company && (
@@ -717,7 +743,9 @@ const RequestCard = ({ request, onAccept, onReject }) => (
 
             <span className="flex items-center gap-1.5">
               <Video size={14} />
-              Video Call
+              {/group/i.test(String(request.type || ""))
+                ? "Group Video Call"
+                : "Video Call"}
             </span>
 
             <span className="flex items-center gap-1.5 font-semibold text-slate-700">

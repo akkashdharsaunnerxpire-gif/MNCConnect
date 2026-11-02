@@ -27,9 +27,14 @@ const navItems = [
   { name: "Reviews", path: "/mentor/reviews", icon: Star },
 ];
 
+const PENDING_SYNC_MS = 20000; // re-sync the Requests badge with the server
+const CLOCK_TICK_MS = 5000; // hide requests that expired meanwhile
+
+// "Video Call" AND "Group Video Call"
+const isVideoCall = (r) => /video call/i.test(String(r?.type || ""));
+
 /* ------------------------------------------------------------------
    AVATAR (same logic as MentorProfile)
-   uploaded photo -> ui-avatars -> first letter
 ------------------------------------------------------------------ */
 const PROFILE_IMAGE_KEYS = ["profilePic", "profileImage", "avatar", "photo", "photoUrl"];
 
@@ -43,7 +48,6 @@ const getRawAvatarUrl = (u) => {
 const getFallbackAvatarUrl = (name) =>
   `https://ui-avatars.com/api/?name=${encodeURIComponent(name || "Mentor")}&background=eff6ff&color=2563eb`;
 
-/* Shows the photo; if it is missing or fails to load, shows the initial letter */
 const Avatar = ({ src, initial }) => {
   const [failed, setFailed] = useState(false);
 
@@ -66,7 +70,6 @@ const Avatar = ({ src, initial }) => {
   return initial ? <span>{initial}</span> : <UserCircle size={21} className="text-slate-500" />;
 };
 
-/* Defined OUTSIDE the header so it is not re-created on every render */
 const CountBadge = ({ count, active, label = "upcoming" }) =>
   count > 0 ? (
     <span
@@ -84,14 +87,14 @@ const MentorHeader = () => {
   const navigate = useNavigate();
   const { user, refresh } = useAuth();
 
-  // id comes from the cookie-based session (AuthContext), not localStorage
   const userId = user?.id || user?._id || user?.mentor?.id || user?.mentor?._id || null;
 
   const [connected, setConnected] = useState(socket.connected);
   const [unread, setUnread] = useState(0);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [pending, setPending] = useState([]); // [{ id, group }]
-  const [me, setMe] = useState(null); // live profile (photo + name) from /auth/me
+  const [pending, setPending] = useState([]); // [{ id, group, expiresAt }]
+  const [clock, setClock] = useState(Date.now());
+  const [me, setMe] = useState(null);
 
   /* ---------- profile photo ---------- */
   const loadMe = useCallback(async () => {
@@ -99,7 +102,7 @@ const MentorHeader = () => {
       const d = await api("/auth/me");
       setMe(d?.user || d || null);
     } catch {
-      /* ignore: keep the last known photo */
+      /* ignore */
     }
   }, []);
 
@@ -107,7 +110,6 @@ const MentorHeader = () => {
     loadMe();
   }, [loadMe]);
 
-  // MentorProfile fires "profile:updated" after photo / details change -> refresh instantly
   useEffect(() => {
     window.addEventListener("profile:updated", loadMe);
     return () => window.removeEventListener("profile:updated", loadMe);
@@ -121,9 +123,7 @@ const MentorHeader = () => {
     getRawAvatarUrl(user?.mentor) ||
     (displayName ? getFallbackAvatarUrl(displayName) : null);
 
-  /* Sessions count: only Upcoming (finished / cancelled / awaiting are NOT counted).
-     GROUP FIX: the server sends one row per paying fresher, all with the SAME
-     session id. Count each meeting ONCE (unique id), same as the Sessions page. */
+  /* Sessions count: only Upcoming, each meeting ONCE (group = many rows, one id) */
   const { sessions } = useMentorSessions();
   const upcomingCount = useMemo(
     () =>
@@ -135,16 +135,19 @@ const MentorHeader = () => {
     [sessions],
   );
 
-  /* Pending requests count (same Video Call filter as the Requests page) */
+  /* ---------- Pending requests count ----------
+     The server list is the truth: it REPLACES the local list (so a stale
+     entry that was added from a socket event disappears). */
   const loadPending = useCallback(async () => {
     try {
       const d = await api(ENDPOINTS.mentorPending);
       const list = (d.requests || [])
-        .map(normalizeSessionRequest)
-        .filter((r) => r.id && r.type === "Video Call")
-        .map((r) => ({
-          id: String(r.id),
-          group: String(r.requestGroupId ?? ""),
+        .map((raw) => ({ raw, n: normalizeSessionRequest(raw) }))
+        .filter(({ n }) => n.id && isVideoCall(n))
+        .map(({ raw, n }) => ({
+          id: String(n.id),
+          group: String(n.requestGroupId ?? ""),
+          expiresAt: raw.expiresAt || n.expiresAt || null,
         }));
       setPending(list);
     } catch {
@@ -155,46 +158,75 @@ const MentorHeader = () => {
   useEffect(() => {
     loadPending();
 
-    // new request arrived
     const onRequest = (incoming) => {
       const r = normalizeSessionRequest(incoming);
-      if (!r.id || r.type !== "Video Call") return;
+      if (!r.id || !isVideoCall(r)) return;
       const id = String(r.id);
       setPending((prev) =>
         prev.some((p) => p.id === id)
           ? prev
-          : [...prev, { id, group: String(r.requestGroupId ?? "") }],
+          : [
+              ...prev,
+              {
+                id,
+                group: String(r.requestGroupId ?? ""),
+                expiresAt: incoming?.expiresAt || r.expiresAt || null,
+              },
+            ],
       );
     };
 
-    // another mentor took it
     const onTaken = ({ id, requestGroupId } = {}) => {
       const key = String(id ?? requestGroupId ?? "");
       if (!key) return;
       setPending((prev) => prev.filter((p) => p.id !== key && p.group !== key));
     };
 
-    // this mentor accepted / rejected from the Requests page
     const onChanged = (e) => {
       const key = e.detail?.id != null ? String(e.detail.id) : "";
-      if (key) setPending((prev) => prev.filter((p) => p.id !== key));
-      else loadPending(); // no id -> just re-sync with the server
+      if (key) setPending((prev) => prev.filter((p) => p.id !== key && p.group !== key));
+      else loadPending();
+    };
+
+    const onFocus = () => {
+      if (document.visibilityState === "visible") loadPending();
     };
 
     socket.on("session-request", onRequest);
     socket.on("session-request-taken", onTaken);
-    socket.on("connect", loadPending); // resync after reconnect
+    socket.on("connect", loadPending);
     window.addEventListener(REQUESTS_CHANGED, onChanged);
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+
+    const poll = setInterval(loadPending, PENDING_SYNC_MS);
 
     return () => {
+      clearInterval(poll);
       socket.off("session-request", onRequest);
       socket.off("session-request-taken", onTaken);
       socket.off("connect", loadPending);
       window.removeEventListener(REQUESTS_CHANGED, onChanged);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
     };
   }, [loadPending]);
 
-  const pendingCount = pending.length;
+  // clock so a request that expires is removed from the badge by itself
+  useEffect(() => {
+    const t = setInterval(() => setClock(Date.now()), CLOCK_TICK_MS);
+    return () => clearInterval(t);
+  }, []);
+
+  const pendingCount = useMemo(
+    () =>
+      pending.filter((p) => {
+        if (!p.expiresAt) return true;
+        const t = new Date(p.expiresAt).getTime();
+        return !Number.isFinite(t) || t > clock;
+      }).length,
+    [pending, clock],
+  );
 
   /* online / reconnecting pill */
   useEffect(() => {
@@ -209,7 +241,7 @@ const MentorHeader = () => {
     };
   }, []);
 
-  /* live unread badge + join the personal room so pushes reach every page */
+  /* live unread badge + join the personal room */
   useEffect(() => {
     let alive = true;
 
@@ -239,7 +271,6 @@ const MentorHeader = () => {
 
   const isActive = (path) => location.pathname.toLowerCase() === path;
 
-  // badge number + label for each nav item
   const badgeFor = (path) => {
     if (path === "/mentor/sessions") return upcomingCount;
     if (path === "/mentor/requests") return pendingCount;
@@ -248,12 +279,7 @@ const MentorHeader = () => {
   const badgeLabel = (path) =>
     path === "/mentor/requests" ? "pending" : "upcoming";
 
-  /* =======================================================================
-     LOGOUT  (same flow as the Fresher profile)
-     1. server clears the HttpOnly cookie (JS cannot do this itself)
-     2. realtime socket is closed -> mentor goes OFFLINE on the server
-     3. AuthContext is refreshed (it becomes "logged out")
-  ======================================================================= */
+  /* LOGOUT */
   const handleLogout = async () => {
     if (loggingOut) return;
     setLoggingOut(true);
@@ -261,7 +287,7 @@ const MentorHeader = () => {
     try {
       await performLogout();
     } catch {
-      /* ignore: we still leave the page below */
+      /* ignore */
     }
 
     try {
@@ -358,7 +384,6 @@ const MentorHeader = () => {
             )}
           </Link>
 
-          {/* profile photo -> opens the profile page */}
           <Link
             to="/mentor/profile"
             aria-label="Profile"

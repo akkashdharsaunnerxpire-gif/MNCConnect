@@ -31,6 +31,7 @@ import {
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 const MAX_LEN = 1000;
 const PAGE_SIZE = 50;
+const SEEN_SHOWN = 6; // max avatars under one message
 
 /* ---------------- helpers ---------------- */
 const fmtTime = (d) =>
@@ -94,7 +95,6 @@ const isEmojiOnly = (text = "") => {
 };
 
 /* ---------- GROUP helpers: who sent it ---------- */
-// name colours (WhatsApp group style) - each person keeps one colour
 const NAME_COLORS = [
   "text-rose-600",
   "text-indigo-600",
@@ -126,7 +126,6 @@ const senderIdOf = (m) => {
   return bare(raw);
 };
 
-// name: from the message itself, else from the live participant list, else a label
 const nameFor = (m, names = {}) =>
   m?.senderName ||
   m?.sender?.name ||
@@ -162,13 +161,61 @@ const initialsOf = (title = "") => {
   ).toUpperCase();
 };
 
+/* ---------- GROUP: tiny profile photo of one reader ---------- */
+const SeenAvatar = memo(function SeenAvatar({ r }) {
+  const [failed, setFailed] = useState(false);
+  const letter = (r.name || "?").charAt(0).toUpperCase();
+
+  return (
+    <span
+      title={`Seen by ${r.name || "Member"}`}
+      className="-ml-1 flex h-[18px] w-[18px] items-center justify-center overflow-hidden rounded-full border border-white bg-indigo-100 text-[9px] font-bold text-indigo-700 first:ml-0"
+    >
+      {r.image && !failed ? (
+        <img
+          src={r.image}
+          alt={r.name}
+          onError={() => setFailed(true)}
+          referrerPolicy="no-referrer"
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        letter
+      )}
+    </span>
+  );
+});
+
+/* ---------- GROUP: "seen by" row under a message ---------- */
+const SeenBy = memo(function SeenBy({ readers, senderId }) {
+  const list = (readers || []).filter((r) => bare(r.id) !== bare(senderId));
+  if (!list.length) return null;
+
+  const shown = list.slice(0, SEEN_SHOWN);
+  const more = list.length - shown.length;
+
+  return (
+    <div
+      className="mt-0.5 flex items-center px-1"
+      title={`Seen by ${list.map((r) => r.name).join(", ")}`}
+    >
+      {shown.map((r) => (
+        <SeenAvatar key={r.id} r={r} />
+      ))}
+      {more > 0 && (
+        <span className="ml-1 text-[10px] font-medium text-slate-500">
+          +{more}
+        </span>
+      )}
+    </div>
+  );
+});
+
 /**
  * One chat bubble.
  *  - tap / click the bubble  -> reply to it (WhatsApp style)
- *  - hover reply icon (desktop) does the same
  *  - tap the quoted part     -> jump to the original message
- *  - GROUP: the sender's name is shown on top of every message from others
- * Selecting text (to copy) does NOT trigger reply.
+ *  - GROUP: sender's name on top, "seen by" profile photos below
  */
 const MessageRow = memo(function MessageRow({
   m,
@@ -203,7 +250,6 @@ const MessageRow = memo(function MessageRow({
     </button>
   );
 
-  // GROUP: name above the message (only other people, not me)
   const showName = group && !mine && firstInGroup;
   const isEmployee = m.senderRole === "mentor";
 
@@ -219,71 +265,80 @@ const MessageRow = memo(function MessageRow({
       {mine && replyBtn}
 
       <div
-        onClick={handleReply}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => e.key === "Enter" && handleReply()}
-        title="Tap to reply"
-        className={`max-w-[80%] cursor-pointer select-text px-3 py-1.5 text-sm text-slate-900 shadow-sm ${
-          mine
-            ? `bg-[#d9fdd3] ${
-                lastInGroup ? "rounded-2xl rounded-tr-md" : "rounded-2xl"
-              }`
-            : `bg-white ${
-                lastInGroup ? "rounded-2xl rounded-tl-md" : "rounded-2xl"
-              }`
+        className={`flex max-w-[80%] flex-col ${
+          mine ? "items-end" : "items-start"
         }`}
       >
-        {showName && (
-          <p
-            className={`mb-0.5 flex items-center gap-1.5 text-[12px] font-semibold ${colorFor(colorKey)}`}
-          >
-            <span className="truncate">{senderLabel}</span>
-            {isEmployee && (
-              <span className="rounded-full bg-indigo-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-indigo-600">
-                Employee
-              </span>
-            )}
-          </p>
-        )}
-
-        {m.replyTo && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onJump(m.replyTo.messageId);
-            }}
-            className={`mb-1 block w-full rounded-lg border-l-4 px-2.5 py-1.5 text-left ${
-              mine ? "bg-black/5" : "bg-slate-100"
-            } ${quoteMine ? "border-emerald-500" : "border-blue-500"}`}
-          >
-            <span
-              className={`block text-[11px] font-semibold ${
-                quoteMine ? "text-emerald-700" : "text-blue-600"
-              }`}
-            >
-              {quoteLabel}
-            </span>
-            <span className="line-clamp-2 block break-words text-xs text-slate-600">
-              {m.replyTo.text}
-            </span>
-          </button>
-        )}
-
-        <p
-          className={`whitespace-pre-wrap break-words ${
-            big ? "text-4xl leading-tight" : "leading-relaxed"
+        <div
+          onClick={handleReply}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => e.key === "Enter" && handleReply()}
+          title="Tap to reply"
+          className={`max-w-full cursor-pointer select-text px-3 py-1.5 text-sm text-slate-900 shadow-sm ${
+            mine
+              ? `bg-[#d9fdd3] ${
+                  lastInGroup ? "rounded-2xl rounded-tr-md" : "rounded-2xl"
+                }`
+              : `bg-white ${
+                  lastInGroup ? "rounded-2xl rounded-tl-md" : "rounded-2xl"
+                }`
           }`}
         >
-          {m.text}
-        </p>
-        <div className="mt-0.5 flex items-center justify-end gap-1">
-          <span className="text-[10px] text-slate-500">
-            {fmtTime(m.createdAt)}
-          </span>
-          {mine && <Ticks message={m} />}
+          {showName && (
+            <p
+              className={`mb-0.5 flex items-center gap-1.5 text-[12px] font-semibold ${colorFor(colorKey)}`}
+            >
+              <span className="truncate">{senderLabel}</span>
+              {isEmployee && (
+                <span className="rounded-full bg-indigo-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-indigo-600">
+                  Employee
+                </span>
+              )}
+            </p>
+          )}
+
+          {m.replyTo && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onJump(m.replyTo.messageId);
+              }}
+              className={`mb-1 block w-full rounded-lg border-l-4 px-2.5 py-1.5 text-left ${
+                mine ? "bg-black/5" : "bg-slate-100"
+              } ${quoteMine ? "border-emerald-500" : "border-blue-500"}`}
+            >
+              <span
+                className={`block text-[11px] font-semibold ${
+                  quoteMine ? "text-emerald-700" : "text-blue-600"
+                }`}
+              >
+                {quoteLabel}
+              </span>
+              <span className="line-clamp-2 block break-words text-xs text-slate-600">
+                {m.replyTo.text}
+              </span>
+            </button>
+          )}
+
+          <p
+            className={`whitespace-pre-wrap break-words ${
+              big ? "text-4xl leading-tight" : "leading-relaxed"
+            }`}
+          >
+            {m.text}
+          </p>
+          <div className="mt-0.5 flex items-center justify-end gap-1">
+            <span className="text-[10px] text-slate-500">
+              {fmtTime(m.createdAt)}
+            </span>
+            {mine && <Ticks message={m} />}
+          </div>
         </div>
+
+        {/* GROUP: who has seen this message (profile photos) */}
+        {group && <SeenBy readers={m.readers} senderId={senderIdOf(m)} />}
       </div>
 
       {!mine && replyBtn}
@@ -303,17 +358,11 @@ const DayDivider = memo(function DayDivider({ label }) {
 
 /**
  * variant="modal"  -> centered popup (Sessions / My Bookings "Message" button)
- * variant="panel"  -> right side panel (inside the meeting room). Keep it mounted
- *                     and toggle with `open` so new messages are still received.
+ * variant="panel"  -> right side panel (inside the meeting room).
  *
- * group={true}     -> GROUP chat: EVERYBODY can write, and the sender's name is
- *                     shown on every message from other people.
- *                     myUserId : my user id (all freshers have the same role)
- *                     names    : { [userId]: "Name" } fallback when the server
- *                                message has no senderName
- * group={false}    -> single chat: no names (only 2 people)
- *
- * Auth = HttpOnly cookie (credentials: "include" + socket handshake cookie).
+ * group={true}     -> GROUP chat: everybody can write, sender name on every
+ *                     message, and "seen by" profile photos under each message.
+ *                     myUserId is optional now: the server tells the client who it is.
  */
 export default function ChatPanel({
   bookingId,
@@ -330,11 +379,12 @@ export default function ChatPanel({
   const peerRole = role === "mentor" ? "fresher" : "mentor";
   const peerName = title.replace(/^chat with\s+/i, "").trim() || "Contact";
 
-  // ids of the messages I sent in this chat (works even if the server sends no senderId)
+  // my user id: from the prop, or (fallback) from the server on chat:join
+  const [serverMeId, setServerMeId] = useState("");
+  const selfId = bare(myUserId || serverMeId);
+
   const mineIdsRef = useRef(new Set());
 
-  // single: the role tells who sent it.
-  // group : employee = role, fresher = sender id (all freshers share one role)
   const isMine = useCallback(
     (m) => {
       if (mineIdsRef.current.has(String(m._id))) return true;
@@ -343,10 +393,10 @@ export default function ChatPanel({
       if (role === "mentor") return m.senderRole === "mentor";
 
       const sid = senderIdOf(m);
-      if (sid && myUserId) return sid === bare(myUserId);
+      if (sid && selfId) return sid === selfId;
       return false;
     },
-    [group, myUserId, role],
+    [group, selfId, role],
   );
   const isMineRef = useRef(isMine);
   isMineRef.current = isMine;
@@ -368,8 +418,7 @@ export default function ChatPanel({
   const [hasMore, setHasMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
 
-  // reply state
-  const [replyTo, setReplyTo] = useState(null); // the message being replied to
+  const [replyTo, setReplyTo] = useState(null);
   const [highlightId, setHighlightId] = useState(null);
   const highlightTimer = useRef(null);
 
@@ -381,7 +430,6 @@ export default function ChatPanel({
   const incomingRef = useRef(onIncoming);
   incomingRef.current = onIncoming;
 
-  // latest `open` value for the socket handler (no need to re-subscribe)
   const openRef = useRef(open);
   openRef.current = open;
 
@@ -409,10 +457,9 @@ export default function ChatPanel({
 
   const cancelReply = useCallback(() => setReplyTo(null), []);
 
-  // scroll to the original message and flash it
   const jumpTo = useCallback((id) => {
     const el = scrollRef.current?.querySelector(`[data-mid="${id}"]`);
-    if (!el) return; // original is older than what is loaded
+    if (!el) return;
     el.scrollIntoView({ block: "center", behavior: "smooth" });
     setHighlightId(String(id));
     clearTimeout(highlightTimer.current);
@@ -486,11 +533,12 @@ export default function ChatPanel({
       .catch(() => !cancelled && setErr("Could not load chat."))
       .finally(() => !cancelled && setLoading(false));
 
-    // 2. live - the server knows the user from the socket cookie
+    // 2. live
     const join = () => {
       socket.emit("chat:join", { bookingId }, (res) => {
         if (cancelled) return;
         if (res?.ok) {
+          if (res.userId) setServerMeId(String(res.userId));
           setJoined(true);
           setErr("");
           setPeerOnline(Boolean(res.online?.[peerRole]));
@@ -510,7 +558,6 @@ export default function ChatPanel({
         const id = String(m._id);
         if (!soundedRef.current.has(id)) {
           soundedRef.current.add(id);
-          // panel closed -> the global notification hook plays the ding instead
           if (openRef.current) playReceiveSound();
         }
         incomingRef.current?.(m);
@@ -526,10 +573,18 @@ export default function ChatPanel({
           if (!ids.has(String(m._id))) return m;
 
           if (r.status === "read") {
+            // add the reader (once) -> "seen by" photo appears
+            const readers = m.readers || [];
+            const nextReaders =
+              r.reader && !readers.some((x) => bare(x.id) === bare(r.reader.id))
+                ? [...readers, r.reader]
+                : readers;
+
             return {
               ...m,
+              readers: nextReaders,
               deliveredAt: m.deliveredAt || r.deliveredAt || r.readAt,
-              readAt: r.readAt || m.readAt,
+              readAt: m.readAt || r.readAt,
             };
           }
 
@@ -670,7 +725,7 @@ export default function ChatPanel({
     }
   }, [open, loading, scrollToBottom]);
 
-  /* ---------------- is this tab visible? (read only when the user can see it) ---------------- */
+  /* ---------------- is this tab visible? ---------------- */
   useEffect(() => {
     const update = () =>
       setVisible(document.visibilityState === "visible" && document.hasFocus());
@@ -685,14 +740,23 @@ export default function ChatPanel({
     };
   }, []);
 
-  /* ---------------- read receipts (blue ticks) ---------------- */
+  /* ---------------- read receipts ----------------
+     single : "not mine and readAt is empty"
+     group  : "not mine and I am not in m.readers"
+              (readAt is already set after the FIRST person read it,
+               so it cannot be used to know if I read it)            */
   useEffect(() => {
     if (!open || !joined || !visible) return;
+
+    const iRead = (m) =>
+      group
+        ? (m.readers || []).some((r) => bare(r.id) === selfId)
+        : Boolean(m.readAt);
 
     const unread = messages
       .filter(
         (m) =>
-          !isMine(m) && !m.readAt && !readSentRef.current.has(String(m._id)),
+          !isMine(m) && !iRead(m) && !readSentRef.current.has(String(m._id)),
       )
       .map((m) => String(m._id));
 
@@ -705,7 +769,7 @@ export default function ChatPanel({
         unread.forEach((id) => readSentRef.current.delete(id));
       }
     });
-  }, [messages, open, joined, visible, isMine, bookingId]);
+  }, [messages, open, joined, visible, isMine, bookingId, group, selfId]);
 
   /* ---------------- modal: Esc to close ---------------- */
   useEffect(() => {
@@ -715,7 +779,7 @@ export default function ChatPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [variant, onClose]);
 
-  /* ---------------- emoji picker: outside click / Esc / panel closed ---------------- */
+  /* ---------------- emoji picker ---------------- */
   useEffect(() => {
     if (!showEmoji) return undefined;
 
@@ -832,18 +896,16 @@ export default function ChatPanel({
     let lastDay = "";
     let lastSide = "";
 
-    // single: "me" / "peer".  group: "me" / one key per person
     const sideOf = (m) =>
       isMine(m) ? "me" : group ? senderIdOf(m) || m.senderRole || "x" : "peer";
 
-    // is the quoted message mine?
     const quoteMineOf = (m) => {
       const r = m.replyTo;
       if (!r) return false;
       if (!group) return r.senderRole === role;
       if (role === "mentor") return r.senderRole === "mentor";
       const sid = bare(r.senderId);
-      return Boolean(sid && myUserId && sid === bare(myUserId));
+      return Boolean(sid && selfId && sid === selfId);
     };
 
     messages.forEach((m, i) => {
@@ -888,7 +950,7 @@ export default function ChatPanel({
     });
 
     return out;
-  }, [messages, isMine, group, names, role, myUserId, peerName]);
+  }, [messages, isMine, group, names, role, selfId, peerName]);
 
   /* ---------------- UI ---------------- */
   const statusText = !joined
@@ -1027,7 +1089,6 @@ export default function ChatPanel({
 
       {/* Composer */}
       <div className="shrink-0 border-t border-slate-200 bg-white">
-        {/* replying to ... */}
         {replyTo && (
           <div className="px-3 pt-3">
             <div

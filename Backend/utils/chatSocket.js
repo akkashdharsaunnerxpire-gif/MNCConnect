@@ -1,11 +1,12 @@
 // utils/chatSocket.js
 // Socket side of the chat: chat:join / chat:leave / chat:send / chat:read
-// FIX: group chat -> every paid member (host + friends) and the mentor can chat.
+// group chat -> every paid member (host + friends) and the mentor can chat.
+// NEW: chat:read stores WHO read (readers) and sends it to everybody (seen-by avatars)
+// NEW: new-message badge goes straight to every online socket of the other members
 const jwt = require("jsonwebtoken");
 const ChatMessage = require("../models/ChatMessage");
 const Mentor = require("../models/Mentor");
 const Fresher = require("../models/Fresher");
-const { emitToUser } = require("./realtime");
 
 const { chatAccess } = ChatMessage;
 
@@ -28,7 +29,6 @@ const verify = (token) => {
   }
 };
 
-// same way utils/meeting.js finds the user
 const identify = (socket, payload = {}) => {
   const u = socket.data?.user || socket.user;
   if (u && (u.id || u._id) && u.role) {
@@ -37,14 +37,31 @@ const identify = (socket, payload = {}) => {
   return verify(payload.token);
 };
 
+const modelOf = (user) => (user.role === "mentor" ? Mentor : Fresher);
+
 const nameOf = async (user) => {
   const key = `${user.role}:${user.id}`;
   if (nameCache.has(key)) return nameCache.get(key);
-  const Model = user.role === "mentor" ? Mentor : Fresher;
-  const doc = await Model.findById(user.id).select("name").lean().catch(() => null);
+  const doc = await modelOf(user).findById(user.id).select("name").lean().catch(() => null);
   const name = doc?.name || (user.role === "mentor" ? "Employee" : "Fresher");
   nameCache.set(key, name);
   return name;
+};
+
+// name + profile photo of the person who read a message
+const readerOf = async (user) => {
+  const doc = await modelOf(user)
+    .findById(user.id)
+    .select("name profilePic")
+    .lean()
+    .catch(() => null);
+  return {
+    id: user.id,
+    role: user.role,
+    name: doc?.name || (user.role === "mentor" ? "Employee" : "Fresher"),
+    image: doc?.profilePic || "",
+    at: new Date(),
+  };
 };
 
 // who is inside this chat room right now
@@ -137,6 +154,7 @@ exports.initChat = (io) => {
         return ack({
           ok: true,
           role: access.role,
+          userId: user.id, // the client uses this to know "which one is me"
           online,
           lastSeen: seen[peerRole] || null,
         });
@@ -198,6 +216,7 @@ exports.initChat = (io) => {
           text,
           replyTo,
           readBy: [user.id],
+          readers: [],
           deliveredAt: someoneElseInside ? new Date() : null,
         });
 
@@ -207,18 +226,28 @@ exports.initChat = (io) => {
           requestGroupId: bookingId,
         };
 
-        // people inside the chat room (not me)
+        // 1) sockets that are inside the chat room (not me)
         socket.to(room(bookingId)).emit("chat:message", message);
 
-        // everybody else of this booking (not inside the room): unread badge / sound
+        // 2) every other member of the booking who is NOT inside the chat room:
+        //    send to ALL their online sockets (unread badge + sound)
         const recipients = new Set(
-          [idOf(b.fresher), idOf(b.mentor), ...(b.participants || []).map((p) => idOf(p.fresher))].filter(Boolean),
+          [
+            idOf(b.fresher),
+            idOf(b.mentor),
+            ...(b.participants || []).map((p) => idOf(p.fresher)),
+          ].filter(Boolean),
         );
         recipients.delete(user.id);
-        inside.forEach((u) => recipients.delete(u));
-        recipients.forEach((id) => emitToUser(id, "chat:message", message));
 
-        // tell the other members that it was delivered
+        for (const s of io.sockets.sockets.values()) {
+          if (s.id === socket.id) continue;
+          const uid = s.data?.user?.id;
+          if (!uid || !recipients.has(String(uid))) continue;
+          if (s.rooms.has(room(bookingId))) continue; // already got it from the room
+          s.emit("chat:message", message);
+        }
+
         if (someoneElseInside) {
           socket.to(room(bookingId)).emit("chat:receipt", {
             bookingId,
@@ -235,7 +264,7 @@ exports.initChat = (io) => {
       }
     });
 
-    /* ---------------- READ (blue ticks) ---------------- */
+    /* ---------------- READ (blue ticks + seen-by avatars) ---------------- */
     socket.on("chat:read", async (payload = {}, ack = () => {}) => {
       try {
         const user = identify(socket, payload);
@@ -251,28 +280,42 @@ exports.initChat = (io) => {
           .slice(0, 200);
         if (!ids.length) return ack({ ok: true });
 
+        // only messages from others that I have not read yet
+        const fresh = await ChatMessage.find({
+          _id: { $in: ids },
+          bookingId,
+          senderId: { $ne: user.id },
+          readBy: { $ne: user.id },
+        })
+          .select("_id")
+          .lean();
+
+        if (!fresh.length) return ack({ ok: true });
+
+        const freshIds = fresh.map((m) => m._id);
         const now = new Date();
+        const reader = await readerOf(user);
+
         await ChatMessage.updateMany(
-          { _id: { $in: ids }, bookingId, senderId: { $ne: user.id } },
-          [
-            {
-              $set: {
-                readBy: {
-                  $setUnion: [{ $ifNull: ["$readBy", []] }, [user.id]],
-                },
-                readAt: { $ifNull: ["$readAt", now] },
-                deliveredAt: { $ifNull: ["$deliveredAt", now] },
-              },
-            },
-          ],
+          { _id: { $in: freshIds }, readBy: { $ne: user.id } },
+          { $addToSet: { readBy: user.id }, $push: { readers: reader } },
+        );
+        await ChatMessage.updateMany(
+          { _id: { $in: freshIds }, readAt: null },
+          { $set: { readAt: now } },
+        );
+        await ChatMessage.updateMany(
+          { _id: { $in: freshIds }, deliveredAt: null },
+          { $set: { deliveredAt: now } },
         );
 
         io.to(room(bookingId)).emit("chat:receipt", {
           bookingId,
-          messageIds: ids,
+          messageIds: freshIds.map(String),
           status: "read",
           readAt: now,
           deliveredAt: now,
+          reader, // -> "seen by" avatar on every message
         });
 
         return ack({ ok: true });
