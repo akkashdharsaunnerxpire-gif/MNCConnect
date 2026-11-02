@@ -28,6 +28,8 @@ import {
   Users,
   Mail,
   X,
+  MapPin,
+  GraduationCap,
 } from "lucide-react";
 import useMentorSessions from "../../hooks/useMentorSessions";
 import { inr, api, ENDPOINTS, EVENTS } from "../../services/mentorApi";
@@ -255,47 +257,132 @@ const getJoinStatus = (session, nowMs) => {
 };
 
 /* ------------------------------------------------------------------ */
-/* GROUP details modal: host + every other fresher of the group        */
-/* Uses  people[]  from the backend (see getCounterpart change).       */
-/* If the backend has not been updated yet it still shows the host     */
-/* and the other members' names.                                       */
+/* GROUP details modal                                                 */
+/* LEFT  : every fresher of the group (host first)                     */
+/* RIGHT : full details of the selected fresher                        */
+/* A field is shown only when the fresher has a value for it.          */
 /* ------------------------------------------------------------------ */
-const PersonRow = ({ p }) => (
-  <li className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 p-3">
-    {p.image ? (
-      <img
-        src={p.image}
-        alt={p.name}
-        className="h-11 w-11 shrink-0 rounded-full object-cover"
-      />
-    ) : (
-      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-700">
-        {(p.name || "?").charAt(0).toUpperCase()}
+const eduText = (e) => {
+  if (!e) return "";
+  if (typeof e === "string") return e;
+  return Object.values(e)
+    .filter((v) => (typeof v === "string" || typeof v === "number") && String(v).trim())
+    .join(" · ");
+};
+
+const Avatar = ({ p, size = "h-10 w-10", text = "text-sm" }) =>
+  p.image ? (
+    <img
+      src={p.image}
+      alt={p.name}
+      className={`${size} shrink-0 rounded-full object-cover`}
+    />
+  ) : (
+    <div
+      className={`${size} ${text} flex shrink-0 items-center justify-center rounded-full bg-blue-100 font-bold text-blue-700`}
+    >
+      {(p.name || "?").charAt(0).toUpperCase()}
+    </div>
+  );
+
+const Chips = ({ items, tone = "blue" }) => (
+  <div className="flex flex-wrap gap-1.5">
+    {items.map((x) => (
+      <span
+        key={x}
+        className={`rounded-lg px-2.5 py-1 text-[11px] font-medium ${
+          tone === "blue"
+            ? "bg-blue-50 text-blue-700"
+            : "bg-indigo-50 text-indigo-700"
+        }`}
+      >
+        {x}
+      </span>
+    ))}
+  </div>
+);
+
+const Section = ({ title, children }) => (
+  <div className="mt-4">
+    <p className="mb-1.5 text-[11px] font-semibold text-slate-400">{title}</p>
+    {children}
+  </div>
+);
+
+const PersonDetail = ({ p }) => {
+  const skills = (p.skills || []).filter(Boolean);
+  const interests = (p.interests || []).filter(Boolean);
+  const education = (p.education || []).map(eduText).filter(Boolean);
+  const place = [p.location, p.nationality].filter(Boolean).join(" · ");
+
+  return (
+    <div>
+      <div className="flex items-center gap-3">
+        <Avatar p={p} size="h-16 w-16" text="text-xl" />
+        <div className="min-w-0">
+          <p className="flex flex-wrap items-center gap-2 text-base font-bold text-slate-900">
+            {p.name}
+            {p.isHost && (
+              <span className="rounded-md bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">
+                Host
+              </span>
+            )}
+          </p>
+          {p.email && (
+            <p className="mt-0.5 flex items-center gap-1.5 break-all text-xs text-slate-500">
+              <Mail size={12} /> {p.email}
+            </p>
+          )}
+          {place && (
+            <p className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-500">
+              <MapPin size={12} /> {place}
+            </p>
+          )}
+          {p.gender && (
+            <p className="mt-0.5 text-xs capitalize text-slate-400">
+              {p.gender}
+            </p>
+          )}
+        </div>
       </div>
-    )}
-    <div className="min-w-0 flex-1">
-      <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-900">
-        <span className="truncate">{p.name}</span>
-        {p.isHost && (
-          <span className="rounded-md bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">
-            Host
-          </span>
-        )}
-      </p>
-      {p.email && (
-        <p className="mt-0.5 flex items-center gap-1.5 break-all text-xs text-slate-500">
-          <Mail size={12} /> {p.email}
-        </p>
+
+      {p.bio && (
+        <Section title="About">
+          <p className="text-sm leading-6 text-slate-600">{p.bio}</p>
+        </Section>
       )}
-      {p.gender && (
-        <p className="mt-0.5 text-xs capitalize text-slate-400">{p.gender}</p>
+      {education.length > 0 && (
+        <Section title="Education">
+          <ul className="space-y-1">
+            {education.map((e) => (
+              <li
+                key={e}
+                className="flex items-start gap-2 text-sm text-slate-600"
+              >
+                <GraduationCap size={14} className="mt-1 shrink-0 text-slate-400" />
+                {e}
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+      {skills.length > 0 && (
+        <Section title="Skills">
+          <Chips items={skills} />
+        </Section>
+      )}
+      {interests.length > 0 && (
+        <Section title="Interests">
+          <Chips items={interests} tone="indigo" />
+        </Section>
       )}
     </div>
-  </li>
-);
+  );
+};
 
 const GroupDetailsModal = ({ bookingId, onClose }) => {
   const [people, setPeople] = useState(null);
+  const [selected, setSelected] = useState(0);
   const [err, setErr] = useState("");
 
   useEffect(() => {
@@ -320,16 +407,18 @@ const GroupDetailsModal = ({ bookingId, onClose }) => {
     };
   }, [bookingId]);
 
+  const current = people?.[selected] || null;
+
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 px-4"
       onClick={onClose}
     >
       <div
-        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl"
+        className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
           <h3 className="flex items-center gap-2 text-base font-bold text-slate-900">
             <Users size={18} className="text-indigo-600" /> Group details
             {people ? ` (${people.length})` : ""}
@@ -345,17 +434,47 @@ const GroupDetailsModal = ({ bookingId, onClose }) => {
         </div>
 
         {err ? (
-          <p className="text-sm text-red-600">{err}</p>
+          <p className="p-5 text-sm text-red-600">{err}</p>
         ) : !people ? (
-          <div className="flex justify-center py-10">
+          <div className="flex justify-center py-12">
             <Loader2 className="animate-spin text-blue-600" />
           </div>
         ) : (
-          <ul className="space-y-2">
-            {people.map((p) => (
-              <PersonRow key={p.id || p.name} p={p} />
-            ))}
-          </ul>
+          <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+            {/* LEFT: users */}
+            <ul className="max-h-40 shrink-0 space-y-1 overflow-y-auto border-b border-slate-100 p-3 sm:max-h-none sm:w-60 sm:border-b-0 sm:border-r">
+              {people.map((p, i) => (
+                <li key={p.id || p.name}>
+                  <button
+                    type="button"
+                    onClick={() => setSelected(i)}
+                    className={`flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition ${
+                      i === selected
+                        ? "bg-blue-50 ring-1 ring-blue-200"
+                        : "hover:bg-slate-50"
+                    }`}
+                  >
+                    <Avatar p={p} size="h-9 w-9" text="text-xs" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold text-slate-800">
+                        {p.name}
+                      </span>
+                      {p.isHost && (
+                        <span className="text-[10px] font-medium text-indigo-600">
+                          Host
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+
+            {/* RIGHT: selected user's details */}
+            <div className="min-h-0 flex-1 overflow-y-auto p-5">
+              {current && <PersonDetail p={current} />}
+            </div>
+          </div>
         )}
       </div>
     </div>

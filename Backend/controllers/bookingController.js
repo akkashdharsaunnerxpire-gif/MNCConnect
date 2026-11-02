@@ -216,7 +216,7 @@ const paymentUsed = (paymentId) =>
   });
 
 const makeInviteCode = () =>
-  crypto.randomBytes(4).toString("hex").toUpperCase();
+  crypto.randomBytes(6).toString("hex").toUpperCase();
 
 const emitBooking = (b) => {
   const payload = toClient(b);

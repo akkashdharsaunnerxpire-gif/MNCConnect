@@ -813,28 +813,49 @@ export default function SessionBoard() {
 }
 
 /* ---------- invite link (group only) ---------- */
+/* ---------- invite link (group only) ---------- */
 const InviteBox = ({ booking, perPerson }) => {
   const [copied, setCopied] = useState(false);
   if (!booking || booking.mode !== "group" || !booking.inviteCode) return null;
 
   const link = `${window.location.origin}/Home/join/${booking.inviteCode}`;
   const joined = booking.members?.length || 1;
-  const text = `Join my MNCConnect group session (${inr(perPerson)} per person): ${link}`;
+  const host = booking.members?.[0]?.name;
+  const seatsLeft = Math.max(0, (booking.maxMembers || 0) - joined);
+
+  // ONE message with the link inside it (the link must NOT be sent again as `url`,
+  // otherwise WhatsApp shows it twice)
+  const message = [
+    `Hi! 👋 ${host ? `${host} here. ` : ""}I booked a live MNCConnect group meeting with an employee from ${booking.companyName || "a top company"} and I'd love for you to join me.`,
+    "",
+    `📌 Topic: ${booking.sessionType || "Career guidance"}`,
+    `📅 Date: ${booking.date}`,
+    `🕒 Time: ${booking.time} (${durationLabel(booking.durationMinutes)})`,
+    `💰 Your share: only ${inr(perPerson)} per person`,
+    `👥 Seats: ${seatsLeft > 0 ? `${seatsLeft} left` : "limited"} (max ${booking.maxMembers} people)`,
+    "",
+    "Tap the link below, pay your share and your seat is confirmed. You can join until the session starts:",
+    link,
+  ].join("\n");
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(link);
+      await navigator.clipboard.writeText(message);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      window.prompt("Copy this link", link);
+      window.prompt("Copy this message", message);
     }
   };
 
   const share = async () => {
     try {
-      if (navigator.share) await navigator.share({ title: "MNCConnect group session", text, url: link });
-      else window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener");
+      if (navigator.share) {
+        // only `text` (it already contains the link)
+        await navigator.share({ title: "MNCConnect group session", text: message });
+      } else {
+        window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, "_blank", "noopener");
+      }
     } catch {
       /* cancelled */
     }
