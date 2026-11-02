@@ -93,6 +93,34 @@ const isEmojiOnly = (text = "") => {
   return rest.length === 0;
 };
 
+/* ---------- GROUP helpers: who sent it ---------- */
+// name colours (WhatsApp group style) - each person keeps one colour
+const NAME_COLORS = [
+  "text-rose-600",
+  "text-indigo-600",
+  "text-amber-600",
+  "text-teal-600",
+  "text-fuchsia-600",
+  "text-sky-600",
+  "text-orange-600",
+  "text-lime-700",
+];
+
+const colorFor = (key = "") => {
+  let h = 0;
+  const s = String(key);
+  for (let i = 0; i < s.length; i += 1) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return NAME_COLORS[h % NAME_COLORS.length];
+};
+
+const senderIdOf = (m) =>
+  String(m?.senderId || m?.sender?._id || m?.sender?.id || m?.sender || "");
+
+const senderNameOf = (m) =>
+  m?.senderName ||
+  m?.sender?.name ||
+  (m?.senderRole === "mentor" ? "Employee" : "Member");
+
 /**
  * WhatsApp style ticks
  * ✓   grey = sent
@@ -127,6 +155,7 @@ const initialsOf = (title = "") => {
  *  - tap / click the bubble  -> reply to it (WhatsApp style)
  *  - hover reply icon (desktop) does the same
  *  - tap the quoted part     -> jump to the original message
+ *  - GROUP: the sender's name is shown on top of every message from others
  * Selecting text (to copy) does NOT trigger reply.
  */
 const MessageRow = memo(function MessageRow({
@@ -135,6 +164,8 @@ const MessageRow = memo(function MessageRow({
   firstInGroup,
   lastInGroup,
   myRole,
+  myUserId,
+  group,
   peerName,
   highlight,
   onReply,
@@ -159,7 +190,22 @@ const MessageRow = memo(function MessageRow({
     </button>
   );
 
-  const quoteMine = m.replyTo?.senderRole === myRole;
+  // is the quoted message mine?
+  const quoteMine =
+    group && myUserId && m.replyTo?.senderId
+      ? String(m.replyTo.senderId) === String(myUserId)
+      : m.replyTo?.senderRole === myRole;
+
+  const quoteName = quoteMine
+    ? "You"
+    : group
+      ? m.replyTo?.senderName || senderNameOf(m.replyTo)
+      : peerName;
+
+  // GROUP: name above the message (only other people, not me)
+  const showName = group && !mine && firstInGroup;
+  const nameColor = colorFor(senderIdOf(m) || senderNameOf(m));
+  const isEmployee = m.senderRole === "mentor";
 
   return (
     <div
@@ -188,6 +234,19 @@ const MessageRow = memo(function MessageRow({
               }`
         }`}
       >
+        {showName && (
+          <p
+            className={`mb-0.5 flex items-center gap-1.5 text-[12px] font-semibold ${nameColor}`}
+          >
+            <span className="truncate">{senderNameOf(m)}</span>
+            {isEmployee && (
+              <span className="rounded-full bg-indigo-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-indigo-600">
+                Employee
+              </span>
+            )}
+          </p>
+        )}
+
         {m.replyTo && (
           <button
             type="button"
@@ -204,7 +263,7 @@ const MessageRow = memo(function MessageRow({
                 quoteMine ? "text-emerald-700" : "text-blue-600"
               }`}
             >
-              {quoteMine ? "You" : peerName}
+              {quoteName}
             </span>
             <span className="line-clamp-2 block break-words text-xs text-slate-600">
               {m.replyTo.text}
@@ -247,8 +306,12 @@ const DayDivider = memo(function DayDivider({ label }) {
  * variant="panel"  -> right side panel (inside the meeting room). Keep it mounted
  *                     and toggle with `open` so new messages are still received.
  *
+ * group={true}     -> GROUP chat (up to 5 members): everybody can write, and the
+ *                     sender's name is shown on every message.
+ *                     Needs `myUserId` so my own messages are recognised
+ *                     (all freshers have the same role).
+ *
  * Auth = HttpOnly cookie (credentials: "include" + socket handshake cookie).
- * The old `token` prop is accepted but no longer used.
  */
 export default function ChatPanel({
   bookingId,
@@ -258,12 +321,24 @@ export default function ChatPanel({
   open = true,
   onClose,
   onIncoming,
+  group = false,
+  myUserId = "",
 }) {
   const peerRole = role === "mentor" ? "fresher" : "mentor";
   const peerName = title.replace(/^chat with\s+/i, "").trim() || "Contact";
 
-  // mentor and fresher are different roles, so the sender role tells who sent it
-  const isMine = useCallback((m) => m.senderRole === role, [role]);
+  // single: the role tells who sent it. group: the sender id tells who sent it.
+  const isMine = useCallback(
+    (m) => {
+      if (group && myUserId && senderIdOf(m)) {
+        return senderIdOf(m) === String(myUserId);
+      }
+      return m.senderRole === role;
+    },
+    [group, myUserId, role],
+  );
+  const isMineRef = useRef(isMine);
+  isMineRef.current = isMine;
 
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
@@ -419,7 +494,7 @@ export default function ChatPanel({
 
       addMessage(m);
 
-      if (m.senderRole !== role) {
+      if (!isMineRef.current(m)) {
         const id = String(m._id);
         if (!soundedRef.current.has(id)) {
           soundedRef.current.add(id);
@@ -742,9 +817,13 @@ export default function ChatPanel({
     let lastDay = "";
     let lastSide = "";
 
+    // single: "me" / "peer".  group: "me" / one key per person
+    const sideOf = (m) =>
+      isMine(m) ? "me" : group ? senderIdOf(m) || m.senderRole || "x" : "peer";
+
     messages.forEach((m, i) => {
       const dk = dayKey(m.createdAt);
-      const side = isMine(m) ? "me" : "peer";
+      const side = sideOf(m);
 
       if (dk !== lastDay) {
         out.push({
@@ -759,9 +838,7 @@ export default function ChatPanel({
       const next = messages[i + 1];
       const firstInGroup = side !== lastSide;
       const lastInGroup =
-        !next ||
-        (isMine(next) ? "me" : "peer") !== side ||
-        dayKey(next.createdAt) !== dk;
+        !next || sideOf(next) !== side || dayKey(next.createdAt) !== dk;
 
       out.push({
         type: "msg",
@@ -775,14 +852,16 @@ export default function ChatPanel({
     });
 
     return out;
-  }, [messages, isMine]);
+  }, [messages, isMine, group]);
 
   /* ---------------- UI ---------------- */
   const statusText = !joined
     ? "Connecting…"
-    : peerOnline
-      ? "Online"
-      : formatLastSeen(peerLastSeen) || "Offline";
+    : group
+      ? "Group chat · everyone in this session"
+      : peerOnline
+        ? "Online"
+        : formatLastSeen(peerLastSeen) || "Offline";
 
   const body = (
     <>
@@ -793,7 +872,13 @@ export default function ChatPanel({
             {initialsOf(title)}
             <span
               className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white ${
-                peerOnline ? "bg-emerald-500" : "bg-slate-300"
+                group
+                  ? joined
+                    ? "bg-emerald-500"
+                    : "bg-slate-300"
+                  : peerOnline
+                    ? "bg-emerald-500"
+                    : "bg-slate-300"
               }`}
             />
           </div>
@@ -805,7 +890,7 @@ export default function ChatPanel({
               className={`flex items-center gap-1 text-[11px] font-medium ${
                 !joined
                   ? "text-slate-400"
-                  : peerOnline
+                  : group || peerOnline
                     ? "text-emerald-600"
                     : "text-slate-400"
               }`}
@@ -872,6 +957,8 @@ export default function ChatPanel({
                     firstInGroup={row.firstInGroup}
                     lastInGroup={row.lastInGroup}
                     myRole={role}
+                    myUserId={myUserId}
+                    group={group}
                     peerName={peerName}
                     highlight={highlightId === row.key}
                     onReply={startReply}
@@ -917,7 +1004,11 @@ export default function ChatPanel({
                     isMine(replyTo) ? "text-emerald-700" : "text-blue-600"
                   }`}
                 >
-                  {isMine(replyTo) ? "You" : peerName}
+                  {isMine(replyTo)
+                    ? "You"
+                    : group
+                      ? senderNameOf(replyTo)
+                      : peerName}
                 </p>
                 <p className="truncate text-xs text-slate-600">
                   {replyTo.text}

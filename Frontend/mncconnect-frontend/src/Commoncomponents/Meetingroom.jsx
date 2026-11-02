@@ -2,6 +2,21 @@
 // SINGLE meeting : peer-to-peer WebRTC (same as before)
 // GROUP meeting  : LiveKit (SFU) - works for 2 to 60 people
 //   npm i livekit-client
+//
+// GROUP layout (Zoom style)
+//   - Employee (mentor) sees the freshers BIG in a gallery grid (auto columns, pages of 12)
+//   - Fresher sees the employee BIG, and the other freshers in a bigger strip
+//   - Active speaker gets a green ring, double-click / pin icon pins anybody to the big stage
+//   - Screen share (employee / host) takes the big stage automatically
+//   - Full-screen button (meeting only), grid / speaker view toggle
+// CHAT
+//   - single : employee <-> fresher (1 to 1)
+//   - group  : booking up to 5 members -> EVERYBODY (employee, host, friends) can chat,
+//              every message shows the sender's name
+//              bigger group (> 5)      -> only employee + host chat (as before)
+// POPUPS
+//   - "Did the session go well?" (Meeting Success)  -> only the single fresher / group HOST
+//   - Review (stars + feedback)                     -> EVERY fresher (host and friends)
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
@@ -18,6 +33,15 @@ import {
   MessageSquare,
   Users,
   X,
+  Maximize,
+  Minimize,
+  Pin,
+  PinOff,
+  LayoutGrid,
+  ScreenShare,
+  ScreenShareOff,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { Room, RoomEvent, Track, VideoPresets } from "livekit-client";
 import { socket } from "../utils/socket";
@@ -44,8 +68,10 @@ const CONFIRMED_BANNER_MS = 20 * 1000;
 
 // group: students join with mic + camera OFF when the group is bigger than this
 const AUTO_MEDIA_MAX = 6;
-// group: how many student tiles are drawn at once (the rest are listed under "People")
-const GRID_MAX = 11;
+// group gallery: tiles per page
+const GRID_PAGE = 12;
+// group chat: up to this many members, EVERYBODY can chat (with names)
+const GROUP_CHAT_MAX = 5;
 
 /* ---------- HD camera + mic (single meeting) ---------- */
 const HD_VIDEO = {
@@ -119,7 +145,10 @@ const initialsOf = (name = "") =>
     .slice(0, 2)
     .toUpperCase() || "?";
 
-/* ---------- Fresher (host / single): last 1 minute, stars + feedback REQUIRED ---------- */
+// gallery columns by number of tiles (rows are filled so the grid uses the whole stage)
+const colsFor = (n) => (n <= 1 ? 1 : n <= 4 ? 2 : n <= 9 ? 3 : 4);
+
+/* ---------- Fresher (host / single / friend): last 1 minute, stars + feedback REQUIRED ---------- */
 const ReviewGate = ({ booking, onDone }) => {
   const [rating, setRating] = useState(0);
   const [hover, setHover] = useState(0);
@@ -241,55 +270,101 @@ const SuccessConfirmModal = ({ onYes, onNo }) => (
   </div>
 );
 
-/* ---------- GROUP: one participant tile (LiveKit) ---------- */
-const Tile = ({ participant, version, big = false }) => {
+/* ---------- GROUP: one participant tile (LiveKit) ----------
+   size : "xl" (few big tiles) | "md" (gallery) | "sm" (strip)           */
+const AVATAR = {
+  xl: "h-28 w-28 text-4xl",
+  md: "h-16 w-16 text-xl",
+  sm: "h-12 w-12 text-sm",
+};
+
+const Tile = ({
+  participant,
+  version,
+  big = false,
+  size = "md",
+  source = Track.Source.Camera,
+  pinned = false,
+  onPin,
+}) => {
   const ref = useRef(null);
-  const pub = participant.getTrackPublication(Track.Source.Camera);
-  const camOn = Boolean(pub?.track) && !pub.isMuted;
+  const pub = participant.getTrackPublication(source);
+  const videoOn = Boolean(pub?.track) && !pub.isMuted;
   const micOn = participant.isMicrophoneEnabled;
+  const speaking = participant.isSpeaking;
   const name = participant.name || participant.identity;
   const mentor = participant.identity.startsWith("mentor:");
+  const isScreen = source === Track.Source.ScreenShare;
 
   useEffect(() => {
     const el = ref.current;
-    const p = participant.getTrackPublication(Track.Source.Camera);
+    const p = participant.getTrackPublication(source);
     const track = p?.track;
     if (!el || !track || p.isMuted) return undefined;
     track.attach(el);
     return () => {
       track.detach(el);
     };
-  }, [participant, version, camOn]);
+  }, [participant, version, videoOn, source]);
 
   return (
-    <div className="relative h-full w-full overflow-hidden rounded-xl bg-slate-900">
+    <div
+      onDoubleClick={() => onPin && onPin(participant.identity)}
+      className={`group relative h-full w-full overflow-hidden rounded-xl bg-slate-900 transition-shadow ${
+        speaking && !isScreen ? "ring-2 ring-emerald-400" : ""
+      }`}
+    >
       <video
         ref={ref}
         autoPlay
         playsInline
         muted
-        className={`h-full w-full ${big ? "object-contain" : "object-cover"} ${camOn ? "" : "hidden"}`}
+        className={`h-full w-full ${big || isScreen ? "object-contain" : "object-cover"} ${videoOn ? "" : "hidden"}`}
       />
-      {!camOn && (
-        <div className="absolute inset-0 flex items-center justify-center">
+      {!videoOn && (
+        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900">
           <div
-            className={`flex items-center justify-center rounded-full bg-slate-700 font-bold text-slate-100 ${big ? "h-24 w-24 text-3xl" : "h-12 w-12 text-sm"}`}
+            className={`flex items-center justify-center rounded-full bg-slate-700 font-bold text-slate-100 ${AVATAR[size] || AVATAR.md}`}
           >
             {initialsOf(name)}
           </div>
         </div>
       )}
+
+      {onPin && !isScreen && (
+        <button
+          type="button"
+          title={pinned ? "Unpin" : "Pin to big screen"}
+          onClick={(e) => {
+            e.stopPropagation();
+            onPin(participant.identity);
+          }}
+          className="absolute right-1.5 top-1.5 hidden rounded-md bg-black/60 p-1.5 text-white hover:bg-black/80 group-hover:block"
+        >
+          {pinned ? <PinOff size={13} /> : <Pin size={13} />}
+        </button>
+      )}
+
       <div className="absolute bottom-1.5 left-1.5 flex max-w-[92%] items-center gap-1 rounded-md bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white">
         {!micOn && <MicOff size={11} className="shrink-0 text-red-400" />}
         <span className="truncate">
-          {name}
-          {participant.isLocal ? " (You)" : ""}
-          {mentor ? " · Employee" : ""}
+          {isScreen ? `${name}'s screen` : name}
+          {!isScreen && participant.isLocal ? " (You)" : ""}
+          {!isScreen && mentor ? " · Employee" : ""}
         </span>
       </div>
     </div>
   );
 };
+
+const WaitingStage = ({ text }) => (
+  <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
+    <div className="flex h-20 w-20 items-center justify-center rounded-full bg-slate-800">
+      <UserRound size={36} />
+    </div>
+    <p className="mt-4 text-sm">{text}</p>
+  </div>
+);
 
 export default function MeetingRoom() {
   const { bookingId } = useParams();
@@ -354,6 +429,32 @@ export default function MeetingRoom() {
   const clockRef = useRef(clock);
   clockRef.current = clock;
 
+  // group layout controls
+  // employee: gallery of freshers (grid)   |   fresher: employee big (speaker)
+  const [viewMode, setViewMode] = useState(isMentor ? "grid" : "speaker");
+  const [pinnedId, setPinnedId] = useState(null);
+  const [page, setPage] = useState(0);
+  const togglePin = useCallback(
+    (id) => setPinnedId((prev) => (prev === id ? null : id)),
+    [],
+  );
+
+  // full screen (the whole page goes full screen; the meeting already covers the page)
+  const [isFs, setIsFs] = useState(false);
+  useEffect(() => {
+    const on = () => setIsFs(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", on);
+    return () => document.removeEventListener("fullscreenchange", on);
+  }, []);
+  const toggleFullscreen = () => {
+    try {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else document.documentElement.requestFullscreen?.();
+    } catch {
+      /* not supported */
+    }
+  };
+
   const localVideo = useRef(null);
   const remoteVideo = useRef(null);
   const remoteStream = useRef(null);
@@ -372,8 +473,10 @@ export default function MeetingRoom() {
 
   const isGroup = clock.mode === "group";
   const isHost = !isMentor && myUserId && String(clock.hostId) === myUserId;
-  // single meeting fresher OR the group host: can review / confirm / chat
+  // single meeting fresher OR the group host: confirms "did it go well?"
   const isHostFresher = !isMentor && (!isGroup || isHost);
+  // every fresher (host AND friends) writes a review
+  const isFresher = !isMentor;
 
   /* ---------- WebRTC (single) ---------- */
   const dropPeer = useCallback(() => {
@@ -569,6 +672,8 @@ export default function MeetingRoom() {
       localStream.current = null;
       localReadyRef.current = false;
       mediaStarted.current = false;
+      // leave full screen when the meeting page closes
+      if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookingId]);
@@ -660,6 +765,7 @@ export default function MeetingRoom() {
           .on(RoomEvent.TrackUnmuted, bump)
           .on(RoomEvent.LocalTrackPublished, bump)
           .on(RoomEvent.LocalTrackUnpublished, bump)
+          .on(RoomEvent.ActiveSpeakersChanged, bump)
           .on(RoomEvent.TrackSubscribed, (track) => {
             if (track.kind === Track.Kind.Audio) {
               const el = track.attach();
@@ -781,15 +887,21 @@ export default function MeetingRoom() {
     socket.emit("meeting:success-confirm", { bookingId, accepted });
   };
 
-  // review + "did it go well?" are for the single-meeting fresher / the group HOST only
-  const alreadyReviewed = reviewDone || Boolean(booking?.reviewed);
+  // REVIEW  -> every fresher (single fresher, group host AND group friends)
+  //   host / single : booking.reviewed
+  //   friend        : booking.myReviewed (if the backend sends it) or the local reviewDone
+  const alreadyReviewed =
+    reviewDone ||
+    Boolean(booking?.myReviewed) ||
+    (isHostFresher && Boolean(booking?.reviewed));
   const showReviewGate =
-    isHostFresher &&
+    isFresher &&
     phase === "in" &&
     Boolean(booking) &&
     inLast1 &&
     !alreadyReviewed;
 
+  // "Did the session go well?" (Meeting Success) -> ONLY single fresher / group HOST
   const showSuccessConfirm =
     isHostFresher &&
     phase === "in" &&
@@ -831,8 +943,28 @@ export default function MeetingRoom() {
     kind === "mic" ? setMicOn(next) : setCamOn(next);
   };
 
-  const leaveRoom = () =>
+  // GROUP: screen share (employee + host)
+  const toggleShare = async () => {
+    const lp = lkRoomRef.current?.localParticipant;
+    if (!lp) return;
+    try {
+      await lp.setScreenShareEnabled(!lp.isScreenShareEnabled);
+      setLkVersion((v) => v + 1);
+    } catch {
+      setMediaNote("Could not share the screen.");
+    }
+  };
+
+  const toggleView = () => {
+    setPinnedId(null);
+    setPage(0);
+    setViewMode((v) => (v === "grid" ? "speaker" : "grid"));
+  };
+
+  const leaveRoom = () => {
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
     navigate(isMentor ? "/mentor/sessions" : "/Home/my-bookings");
+  };
   const otherHere = isMentor ? clock.fresherPresent : clock.mentorPresent;
 
   /* ---------- screens ---------- */
@@ -891,8 +1023,8 @@ export default function MeetingRoom() {
             <Clock3 size={44} className="text-amber-400" />
             <h2 className="mt-4 text-2xl font-bold">Session time completed</h2>
             <p className="mt-2 max-w-md text-sm text-slate-400">
-              Waiting for the fresher to confirm the session. Once confirmed,
-              your earnings will be released.
+              Waiting for the {isGroup ? "host" : "fresher"} to confirm the
+              session. Once confirmed, your earnings will be released.
             </p>
             <button
               onClick={leaveRoom}
@@ -992,11 +1124,12 @@ export default function MeetingRoom() {
   const people = lkRoom
     ? [lkRoom.localParticipant, ...Array.from(lkRoom.remoteParticipants.values())]
     : [];
-  const mentorP = people.find((p) => p.identity.startsWith("mentor:"));
-  const camOnOf = (p) => {
-    const pub = p.getTrackPublication(Track.Source.Camera);
+  const hasTrack = (p, src) => {
+    const pub = p.getTrackPublication(src);
     return Boolean(pub?.track) && !pub.isMuted;
   };
+  const camOnOf = (p) => hasTrack(p, Track.Source.Camera);
+  const mentorP = people.find((p) => p.identity.startsWith("mentor:"));
   const students = people
     .filter((p) => p !== mentorP)
     .sort(
@@ -1004,21 +1137,68 @@ export default function MeetingRoom() {
         Number(b.isLocal) - Number(a.isLocal) ||
         Number(camOnOf(b)) - Number(camOnOf(a)),
     );
-  const shownStudents = students.slice(0, GRID_MAX);
-  const hiddenStudents = Math.max(0, students.length - shownStudents.length);
+  const sharer = people.find((p) => hasTrack(p, Track.Source.ScreenShare));
+  const pinnedP = pinnedId
+    ? people.find((p) => p.identity === pinnedId)
+    : null;
+  const iAmSharing = Boolean(lkRoom?.localParticipant?.isScreenShareEnabled);
 
-  const canChat = !isGroup || isMentor || isHost;
+  // which layout?  "spot" = one big tile + strip   |   "grid" = gallery
+  let layout = "grid";
+  let mainP = null;
+  let mainSrc = Track.Source.Camera;
+  let stripList = [];
+  let gridList = [];
+
+  if (pinnedP) {
+    layout = "spot";
+    mainP = pinnedP;
+    stripList = people.filter((p) => p !== pinnedP);
+  } else if (sharer) {
+    layout = "spot";
+    mainP = sharer;
+    mainSrc = Track.Source.ScreenShare;
+    stripList = people;
+  } else if (viewMode === "speaker") {
+    layout = "spot";
+    mainP = isMentor
+      ? students.find((p) => p.isSpeaking) || students[0] || null
+      : mentorP || null;
+    stripList = students.filter((p) => p !== mainP);
+  } else {
+    gridList = isMentor ? students : people;
+  }
+
+  const pages = Math.max(1, Math.ceil(gridList.length / GRID_PAGE));
+  const curPage = Math.min(page, pages - 1);
+  const pageItems = gridList.slice(curPage * GRID_PAGE, (curPage + 1) * GRID_PAGE);
+  const cols = colsFor(pageItems.length);
+  const rows = Math.max(1, Math.ceil(pageItems.length / cols));
+  const gridTileSize = pageItems.length <= 4 ? "xl" : "md";
+
+  // CHAT
+  //  single                      : employee <-> fresher
+  //  group, up to 5 members      : EVERYBODY (employee, host, friends)
+  //  group, bigger than 5        : only employee + host (as before)
+  const smallGroup = isGroup && (clock.maxMembers || 1) <= GROUP_CHAT_MAX;
+  const canChat = !isGroup || smallGroup || isMentor || isHost;
+  const canShare = isGroup && (isMentor || isHost);
+
+  const ctrlBtn = (on) =>
+    `flex h-12 w-12 items-center justify-center rounded-full transition ${
+      on ? "bg-blue-600" : "bg-slate-700 hover:bg-slate-600"
+    }`;
 
   return (
     <>
       <div className="fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-slate-950 text-white">
-        <div className="flex shrink-0 items-center justify-between px-5 py-3">
+        <div className="flex shrink-0 items-center justify-between px-4 py-2">
           <div>
             <p className="text-sm font-semibold">
               {booking?.companyName || "MNCConnect session"}
               {isGroup && (
                 <span className="ml-2 rounded-full bg-indigo-500/20 px-2 py-0.5 text-[11px] font-semibold text-indigo-300">
-                  Group · {students.length + (mentorP ? 1 : 0) || 1} online
+                  Group · {people.length || 1} online
                 </span>
               )}
             </p>
@@ -1035,47 +1215,132 @@ export default function MeetingRoom() {
             </p>
           </div>
           <div
-            className={`rounded-xl px-4 py-2 font-mono text-xl font-bold tabular-nums ${timerCls}`}
+            className={`rounded-xl px-4 py-1.5 font-mono text-xl font-bold tabular-nums ${timerCls}`}
           >
             {fmtClock(currentRemaining)}
           </div>
         </div>
 
         <div
-          className="relative min-h-0 flex-1 px-4 pb-4"
+          className="relative min-h-0 flex-1 px-2 pb-2"
           style={{ minHeight: 0 }}
         >
           {isGroup ? (
             /* ================= GROUP STAGE ================= */
-            <div className="flex h-full w-full flex-col gap-2">
-              <div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl bg-black">
-                {mentorP ? (
-                  <Tile participant={mentorP} version={lkVersion} big />
-                ) : (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
-                    <div className="flex h-20 w-20 items-center justify-center rounded-full bg-slate-800">
-                      <UserRound size={36} />
-                    </div>
-                    <p className="mt-4 text-sm">Waiting for the employee…</p>
+            <div className="relative flex h-full w-full flex-col gap-2">
+              {layout === "spot" ? (
+                <>
+                  <div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl bg-black">
+                    {mainP ? (
+                      <Tile
+                        participant={mainP}
+                        version={lkVersion}
+                        big
+                        size="xl"
+                        source={mainSrc}
+                        pinned={pinnedId === mainP.identity}
+                        onPin={
+                          mainSrc === Track.Source.Camera ? togglePin : undefined
+                        }
+                      />
+                    ) : (
+                      <WaitingStage
+                        text={
+                          isMentor
+                            ? "Waiting for the freshers…"
+                            : "Waiting for the employee…"
+                        }
+                      />
+                    )}
                   </div>
-                )}
-              </div>
 
-              {students.length > 0 && (
-                <div className="grid max-h-[34%] shrink-0 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4 lg:grid-cols-6">
-                  {shownStudents.map((p) => (
-                    <div key={p.identity} className="aspect-video">
-                      <Tile participant={p} version={lkVersion} />
-                    </div>
-                  ))}
-                  {hiddenStudents > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setPeopleOpen(true)}
-                      className="flex aspect-video items-center justify-center rounded-xl bg-slate-800 text-sm font-semibold text-slate-200 hover:bg-slate-700"
+                  {stripList.length > 0 && (
+                    <div
+                      className="flex shrink-0 gap-2 overflow-x-auto pb-1"
+                      style={{ height: "clamp(110px, 22vh, 190px)" }}
                     >
-                      +{hiddenStudents} more
-                    </button>
+                      {stripList.map((p) => (
+                        <div
+                          key={p.identity}
+                          className="aspect-video h-full shrink-0"
+                        >
+                          <Tile
+                            participant={p}
+                            version={lkVersion}
+                            size="sm"
+                            pinned={pinnedId === p.identity}
+                            onPin={togglePin}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl bg-black p-1.5">
+                  {pageItems.length > 0 ? (
+                    <div
+                      className="grid h-full w-full gap-1.5"
+                      style={{
+                        gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+                        gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
+                      }}
+                    >
+                      {pageItems.map((p) => (
+                        <div key={p.identity} className="min-h-0 min-w-0">
+                          <Tile
+                            participant={p}
+                            version={lkVersion}
+                            size={gridTileSize}
+                            pinned={pinnedId === p.identity}
+                            onPin={togglePin}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <WaitingStage
+                      text={
+                        isMentor
+                          ? "Waiting for the freshers…"
+                          : "Waiting for the employee…"
+                      }
+                    />
+                  )}
+
+                  {pages > 1 && (
+                    <div className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/70 px-2 py-1 text-xs">
+                      <button
+                        type="button"
+                        disabled={curPage === 0}
+                        onClick={() => setPage(curPage - 1)}
+                        className="rounded-full p-1 hover:bg-white/10 disabled:opacity-30"
+                      >
+                        <ChevronLeft size={16} />
+                      </button>
+                      <span className="tabular-nums">
+                        {curPage + 1} / {pages}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={curPage >= pages - 1}
+                        onClick={() => setPage(curPage + 1)}
+                        className="rounded-full p-1 hover:bg-white/10 disabled:opacity-30"
+                      >
+                        <ChevronRight size={16} />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* employee: my own small preview */}
+                  {isMentor && lkRoom && pageItems.length > 0 && (
+                    <div className="absolute bottom-3 right-3 z-20 aspect-video w-40 sm:w-52">
+                      <Tile
+                        participant={lkRoom.localParticipant}
+                        version={lkVersion}
+                        size="sm"
+                      />
+                    </div>
                   )}
                 </div>
               )}
@@ -1165,12 +1430,12 @@ export default function MeetingRoom() {
           )}
 
           {inLast5 && (
-            <p className="absolute right-8 top-4 z-20 rounded-lg bg-red-600/95 px-3 py-1.5 text-xs font-semibold text-white shadow-lg">
+            <p className="absolute right-6 top-3 z-20 rounded-lg bg-red-600/95 px-3 py-1.5 text-xs font-semibold text-white shadow-lg">
               ⏱ Last 5 minutes. Please start wrapping up.
             </p>
           )}
           {mediaNote && (
-            <p className="absolute left-8 top-4 z-20 max-w-[60%] rounded-lg bg-amber-500/90 px-3 py-1.5 text-xs font-medium text-slate-950">
+            <p className="absolute left-6 top-3 z-20 max-w-[60%] rounded-lg bg-amber-500/90 px-3 py-1.5 text-xs font-medium text-slate-950">
               {mediaNote}
             </p>
           )}
@@ -1178,7 +1443,7 @@ export default function MeetingRoom() {
           {isMentor && confirmedBanner && (
             <div className="absolute left-1/2 top-4 z-30 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white shadow-xl">
               <CheckCircle size={18} />
-              The fresher confirmed: the meeting went well ✅
+              The {isGroup ? "host" : "fresher"} confirmed: the meeting went well ✅
             </div>
           )}
           {isMentor &&
@@ -1186,13 +1451,13 @@ export default function MeetingRoom() {
             !clock.successRequested &&
             !clock.fresherConfirmed && (
               <div className="absolute left-1/2 top-4 z-30 -translate-x-1/2 rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-xl">
-                The fresher said the session is not complete yet. You can ask
-                again.
+                The {isGroup ? "host" : "fresher"} said the session is not
+                complete yet. You can ask again.
               </div>
             )}
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center justify-center gap-3 pb-3">
+        <div className="flex shrink-0 flex-wrap items-center justify-center gap-3 pb-2">
           {isMentor &&
             showSuccessBtn &&
             !clock.successRequested &&
@@ -1206,27 +1471,57 @@ export default function MeetingRoom() {
             )}
           {isMentor && clock.successRequested && !clock.fresherConfirmed && (
             <span className="flex h-12 items-center gap-2 rounded-full bg-slate-800 px-5 text-xs font-semibold text-amber-300">
-              <Loader2 size={14} className="animate-spin" /> Waiting for the
-              fresher to confirm…
+              <Loader2 size={14} className="animate-spin" /> Waiting for the{" "}
+              {isGroup ? "host" : "fresher"} to confirm…
             </span>
           )}
 
           <button
             onClick={() => toggle("mic")}
-            className={`flex h-12 w-12 items-center justify-center rounded-full ${micOn ? "bg-slate-700" : "bg-red-600"}`}
+            title={micOn ? "Mute" : "Unmute"}
+            className={`flex h-12 w-12 items-center justify-center rounded-full ${micOn ? "bg-slate-700 hover:bg-slate-600" : "bg-red-600"}`}
           >
             {micOn ? <Mic size={20} /> : <MicOff size={20} />}
           </button>
           <button
             onClick={() => toggle("cam")}
-            className={`flex h-12 w-12 items-center justify-center rounded-full ${camOn ? "bg-slate-700" : "bg-red-600"}`}
+            title={camOn ? "Stop video" : "Start video"}
+            className={`flex h-12 w-12 items-center justify-center rounded-full ${camOn ? "bg-slate-700 hover:bg-slate-600" : "bg-red-600"}`}
           >
             {camOn ? <Camera size={20} /> : <CameraOff size={20} />}
           </button>
+
+          {canShare && (
+            <button
+              onClick={toggleShare}
+              title={iAmSharing ? "Stop sharing" : "Share screen"}
+              className={ctrlBtn(iAmSharing)}
+            >
+              {iAmSharing ? (
+                <ScreenShareOff size={20} />
+              ) : (
+                <ScreenShare size={20} />
+              )}
+            </button>
+          )}
+          {isGroup && (
+            <button
+              onClick={toggleView}
+              title={
+                viewMode === "grid"
+                  ? "Switch to speaker view"
+                  : "Switch to gallery view"
+              }
+              className={ctrlBtn(viewMode === "grid" && !pinnedId && !sharer)}
+            >
+              <LayoutGrid size={20} />
+            </button>
+          )}
           {isGroup && (
             <button
               onClick={() => setPeopleOpen((v) => !v)}
-              className={`relative flex h-12 items-center gap-1.5 rounded-full px-4 text-sm font-semibold ${peopleOpen ? "bg-blue-600" : "bg-slate-700"}`}
+              title="People"
+              className={`relative flex h-12 items-center gap-1.5 rounded-full px-4 text-sm font-semibold ${peopleOpen ? "bg-blue-600" : "bg-slate-700 hover:bg-slate-600"}`}
             >
               <Users size={18} /> {people.length}
             </button>
@@ -1234,7 +1529,8 @@ export default function MeetingRoom() {
           {canChat && (
             <button
               onClick={toggleChat}
-              className={`relative flex h-12 w-12 items-center justify-center rounded-full ${chatOpen ? "bg-blue-600" : "bg-slate-700"}`}
+              title={isGroup ? "Group chat" : "Chat"}
+              className={`relative flex h-12 w-12 items-center justify-center rounded-full ${chatOpen ? "bg-blue-600" : "bg-slate-700 hover:bg-slate-600"}`}
             >
               <MessageSquare size={20} />
               {unread > 0 && (
@@ -1245,13 +1541,20 @@ export default function MeetingRoom() {
             </button>
           )}
           <button
+            onClick={toggleFullscreen}
+            title={isFs ? "Exit full screen" : "Full screen"}
+            className={ctrlBtn(isFs)}
+          >
+            {isFs ? <Minimize size={20} /> : <Maximize size={20} />}
+          </button>
+          <button
             onClick={leaveRoom}
-            className="flex h-12 items-center gap-2 rounded-full bg-red-600 px-6 text-sm font-bold"
+            className="flex h-12 items-center gap-2 rounded-full bg-red-600 px-6 text-sm font-bold hover:bg-red-700"
           >
             <PhoneOff size={18} /> Leave
           </button>
         </div>
-        <p className="shrink-0 pb-3 text-center text-[11px] text-slate-500">
+        <p className="shrink-0 pb-2 text-center text-[11px] text-slate-500">
           Once the session starts, the timer runs to zero even if someone
           leaves.
         </p>
@@ -1259,24 +1562,46 @@ export default function MeetingRoom() {
 
       {/* PEOPLE LIST (group) */}
       {isGroup && peopleOpen && (
-        <div className="fixed bottom-20 right-4 z-40 w-72 max-w-[90vw] rounded-2xl border border-slate-700 bg-slate-900 p-3 shadow-2xl">
+        <div className="fixed bottom-24 right-4 z-40 w-72 max-w-[90vw] rounded-2xl border border-slate-700 bg-slate-900 p-3 shadow-2xl">
           <div className="mb-2 flex items-center justify-between">
             <p className="text-sm font-bold">People ({people.length})</p>
-            <button onClick={() => setPeopleOpen(false)} className="text-slate-400 hover:text-white">
+            <button
+              onClick={() => setPeopleOpen(false)}
+              className="text-slate-400 hover:text-white"
+            >
               <X size={16} />
             </button>
           </div>
           <ul className="max-h-72 space-y-1 overflow-y-auto pr-1">
             {[...(mentorP ? [mentorP] : []), ...students].map((p) => (
-              <li key={p.identity} className="flex items-center justify-between rounded-lg px-2 py-1.5 text-sm hover:bg-slate-800">
+              <li
+                key={p.identity}
+                className="flex items-center justify-between rounded-lg px-2 py-1.5 text-sm hover:bg-slate-800"
+              >
                 <span className="truncate">
                   {p.name || p.identity}
                   {p.isLocal ? " (You)" : ""}
                   {p.identity.startsWith("mentor:") ? " · Employee" : ""}
                 </span>
                 <span className="ml-2 flex shrink-0 items-center gap-1.5 text-slate-400">
-                  {p.isMicrophoneEnabled ? <Mic size={13} /> : <MicOff size={13} className="text-red-400" />}
-                  {camOnOf(p) ? <Camera size={13} /> : <CameraOff size={13} className="text-red-400" />}
+                  <button
+                    type="button"
+                    title="Pin"
+                    onClick={() => togglePin(p.identity)}
+                    className={pinnedId === p.identity ? "text-blue-400" : ""}
+                  >
+                    <Pin size={13} />
+                  </button>
+                  {p.isMicrophoneEnabled ? (
+                    <Mic size={13} />
+                  ) : (
+                    <MicOff size={13} className="text-red-400" />
+                  )}
+                  {camOnOf(p) ? (
+                    <Camera size={13} />
+                  ) : (
+                    <CameraOff size={13} className="text-red-400" />
+                  )}
                 </span>
               </li>
             ))}
@@ -1284,14 +1609,23 @@ export default function MeetingRoom() {
         </div>
       )}
 
-      {/* chat: always mounted while in the room, so messages arrive even when closed */}
+      {/* chat: always mounted while in the room, so messages arrive even when closed.
+          group = true  -> everybody can write, sender name is shown on every message */}
       {canChat && (
         <ChatPanel
           variant="panel"
           open={chatOpen}
           bookingId={bookingId}
           role={isMentor ? "mentor" : "fresher"}
-          title={isMentor ? "Chat with fresher" : "Chat with employee"}
+          group={isGroup}
+          myUserId={myUserId}
+          title={
+            isGroup
+              ? "Group chat"
+              : isMentor
+                ? "Chat with fresher"
+                : "Chat with employee"
+          }
           onClose={closeChat}
           onIncoming={() => {
             if (!chatOpenRef.current) setUnread((n) => n + 1);
@@ -1299,9 +1633,11 @@ export default function MeetingRoom() {
         />
       )}
 
+      {/* review: EVERY fresher (host + friends) */}
       {showReviewGate && (
         <ReviewGate booking={booking} onDone={() => setReviewDone(true)} />
       )}
+      {/* "did it go well?": ONLY the single fresher / group host */}
       {showSuccessConfirm && (
         <SuccessConfirmModal
           onYes={() => answerSuccess(true)}
