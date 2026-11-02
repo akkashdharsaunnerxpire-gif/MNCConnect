@@ -338,7 +338,9 @@ const MessageRow = memo(function MessageRow({
         </div>
 
         {/* GROUP: who has seen this message (profile photos) */}
-        {group && <SeenBy readers={m.readers} senderId={senderIdOf(m)} />}
+        {group && mine && (
+          <SeenBy readers={m.readers} senderId={senderIdOf(m)} />
+        )}
       </div>
 
       {!mine && replyBtn}
