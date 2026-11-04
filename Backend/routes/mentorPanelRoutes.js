@@ -28,6 +28,10 @@ router.patch("/notifications/:id/read", requireAuth("mentor"), panel.markNotific
 router.get("/mentor/stats", requireAuth("mentor"), panel.getMentorStats);
 
 // ---------- payment <-> mentor link ----------
-router.post("/payments/assign-to-me", requireAuth("mentor"), payments.assignToMe);
+router.post(
+  "/payments/assign-to-me",
+  requireAuth("mentor"),
+  panel.assignToMe
+);
 
 module.exports = router;

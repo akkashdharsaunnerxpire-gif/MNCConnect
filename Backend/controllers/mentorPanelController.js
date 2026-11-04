@@ -375,3 +375,41 @@ exports.getProfileStats = async (req, res) => {
     return fail(res, 500, "Unable to load stats.");
   }
 };
+// ---------- ASSIGN PAYMENT TO LOGGED-IN MENTOR ----------
+exports.assignToMe = async (req, res) => {
+  try {
+    const {
+      requestGroupId,
+      razorpayPaymentId,
+      paymentId,
+    } = req.body || {};
+
+    const result = await require("../controllers/paymentController")
+      .assignMentorToRequest({
+        requestGroupId,
+        razorpayPaymentId: razorpayPaymentId || paymentId,
+        mentorId: req.user.id,
+      });
+
+    if (!result || result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No eligible paid payment found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Payment assigned successfully",
+      modifiedCount: result.modifiedCount,
+    });
+
+  } catch (error) {
+    console.error("Assign payment error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to assign payment",
+    });
+  }
+};
