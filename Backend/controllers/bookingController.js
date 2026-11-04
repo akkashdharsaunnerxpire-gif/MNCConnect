@@ -403,12 +403,23 @@ const refundPayment = async (payment, reason = "", options = {}) => {
   const refundFee = getConfig().refundable ? feePart : 0;
   const amount = round2(sessionAmount + refundFee);
 
-  const markDone = () =>
-    Payment.updateOne(
-      { _id: before._id },
-      { $set: { refundAmount: amount, convenienceFeeRefunded: refundFee } },
-    ).catch(() => {});
+  const markDone = async () => {
+    const result = await Payment.updateOne(
+      { _id: before._id, status: "refunded" },
+      {
+        $set: {
+          refundAmount: amount,
+          convenienceFeeRefunded: refundFee,
+        },
+      },
+    );
 
+    if (!result.matchedCount) {
+      throw new Error("Refund accounting record could not be updated");
+    }
+
+    return true;
+  };
   try {
     if (toWallet) {
       if (!before.fresher) {

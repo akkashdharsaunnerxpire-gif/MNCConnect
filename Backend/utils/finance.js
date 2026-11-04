@@ -15,16 +15,23 @@ const getFinanceSummary = async () => {
   const isRefunded = { $eq: ["$status", "refunded"] };
   const done = { $eq: ["$sessionStatus", "completed"] };
   const open = {
-    $and: [{ $ne: ["$sessionStatus", "completed"] }, { $ne: ["$sessionStatus", "cancelled"] }],
+    $and: [
+      { $ne: ["$sessionStatus", "completed"] },
+      { $ne: ["$sessionStatus", "cancelled"] },
+    ],
   };
   const paidDone = { $and: [isPaid, done] };
   const paidOpen = { $and: [isPaid, open] };
   const paidOrRefunded = { $or: [isPaid, isRefunded] };
 
   // what the customer really paid (old docs: = amount)
-  const checkoutExpr = { $cond: [{ $gt: [f("checkoutAmount"), 0] }, f("checkoutAmount"), "$amount"] };
+  const checkoutExpr = {
+    $cond: [{ $gt: [f("checkoutAmount"), 0] }, f("checkoutAmount"), "$amount"],
+  };
   // what went back to the customer (old docs: = amount)
-  const refundTotalExpr = { $cond: [{ $gt: [f("refundAmount"), 0] }, f("refundAmount"), "$amount"] };
+  const refundTotalExpr = {
+    $cond: [{ $gt: [f("refundAmount"), 0] }, f("refundAmount"), "$amount"],
+  };
 
   const [payAgg, wdAgg, coAgg] = await Promise.all([
     Payment.aggregate([
@@ -59,7 +66,12 @@ const getFinanceSummary = async () => {
                 {
                   $cond: [
                     isRefunded,
-                    { $subtract: [f("gatewayFeeCollected"), f("convenienceFeeRefunded")] },
+                    {
+                      $subtract: [
+                        f("gatewayFeeCollected"),
+                        f("convenienceFeeRefunded"),
+                      ],
+                    },
                     0,
                   ],
                 },
@@ -70,12 +82,19 @@ const getFinanceSummary = async () => {
           // ---- what Razorpay really charged us ----
           // Razorpay keeps its fee even when we refund, so refunded rows count too
           gatewayCost: sumIf(paidOrRefunded, "$gatewayFee"),
-          estimatedRows: sumIf({ $and: [paidOrRefunded, { $eq: ["$feeEstimated", true] }] }, 1),
+          estimatedRows: sumIf(
+            { $and: [paidOrRefunded, { $eq: ["$feeEstimated", true] }] },
+            1,
+          ),
         },
       },
     ]),
-    Withdrawal.aggregate([{ $group: { _id: "$status", total: { $sum: "$amount" } } }]),
-    CompanyPayout.aggregate([{ $group: { _id: null, total: { $sum: "$amount" } } }]),
+    Withdrawal.aggregate([
+      { $group: { _id: "$status", total: { $sum: "$amount" } } },
+    ]),
+    CompanyPayout.aggregate([
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]),
   ]);
 
   const p = payAgg[0] || {};
@@ -83,17 +102,23 @@ const getFinanceSummary = async () => {
   wdAgg.forEach((r) => {
     if (wd[r._id] !== undefined) wd[r._id] = r.total;
   });
-
-  const convenienceRetained = round2((p.convenienceCollected || 0) - (p.convenienceRefunded || 0));
+  const convenienceRetained =
+    (p.convenienceCollected || 0) - (p.refundedConvenience || 0);
   const convenienceRecognized = round2(p.convenienceRecognized);
 
   // Profit = platform fee (completed sessions) + convenience fees that are really ours - Razorpay cost
-  const netProfit = round2((p.grossProfit || 0) + convenienceRecognized - (p.gatewayCost || 0));
+  const netProfit = round2(
+    (p.grossProfit || 0) + convenienceRecognized - (p.gatewayCost || 0),
+  );
   const companyTaken = round2(coAgg[0] ? coAgg[0].total : 0);
-  const mentorOwed = round2(Math.max((p.mentorEarned || 0) - wd.paid - wd.requested, 0));
+  const mentorOwed = round2(
+    Math.max((p.mentorEarned || 0) - wd.paid - wd.requested, 0),
+  );
 
   // gateway cost minus every convenience fee still in hand (recognised + held)
-  const gap = round2((p.gatewayCost || 0) - convenienceRecognized - (p.convenienceHeld || 0));
+  const gap = round2(
+    (p.gatewayCost || 0) - convenienceRecognized - (p.convenienceHeld || 0),
+  );
 
   return {
     count: p.count || 0,
@@ -136,17 +161,50 @@ const getFinanceSummary = async () => {
     mentorOwed,
 
     // money that must STAY in the bank: mentors' money + refundable money (session + held convenience fee)
-    mustKeep: round2(mentorOwed + wd.requested + (p.heldAmount || 0) + (p.convenienceHeld || 0)),
+    mustKeep: round2(
+      mentorOwed +
+        wd.requested +
+        (p.heldAmount || 0) +
+        (p.convenienceHeld || 0),
+    ),
   };
 };
 
 const getTopMentors = (limit = 10) =>
   Payment.aggregate([
-    { $match: { status: "paid", sessionStatus: "completed", mentor: { $ne: null } } },
-    { $group: { _id: "$mentor", earned: { $sum: "$mentorEarning" }, fee: { $sum: "$platformFee" }, sessions: { $sum: 1 } } },
-    { $lookup: { from: "mentors", localField: "_id", foreignField: "_id", as: "m" } },
+    {
+      $match: {
+        status: "paid",
+        sessionStatus: "completed",
+        mentor: { $ne: null },
+      },
+    },
+    {
+      $group: {
+        _id: "$mentor",
+        earned: { $sum: "$mentorEarning" },
+        fee: { $sum: "$platformFee" },
+        sessions: { $sum: 1 },
+      },
+    },
+    {
+      $lookup: {
+        from: "mentors",
+        localField: "_id",
+        foreignField: "_id",
+        as: "m",
+      },
+    },
     { $unwind: "$m" },
-    { $project: { name: "$m.name", email: "$m.email", earned: 1, fee: 1, sessions: 1 } },
+    {
+      $project: {
+        name: "$m.name",
+        email: "$m.email",
+        earned: 1,
+        fee: 1,
+        sessions: 1,
+      },
+    },
     { $sort: { earned: -1 } },
     { $limit: limit },
   ]);

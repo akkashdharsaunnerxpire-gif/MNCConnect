@@ -24,10 +24,10 @@ const { buildSessionFields } = require("../utils/sessionTime");
 const { splitAmount } = require("../utils/wallet");
 const {
   calcConvenienceFee,
+  getConfig,
   validateGatewayAmounts,
   toPaise,
   toRupees,
-  round2,
 } = require("../utils/pricing");
 
 const PLATFORM_FEE_PERCENT = Number(process.env.PLATFORM_FEE_PERCENT || 25);
@@ -106,72 +106,126 @@ exports.quoteFee = (req, res) => {
 exports.createOrder = async (req, res) => {
   try {
     const body = req.body || {};
-    const amount = round2(Number(body.amount));
+    const amount = Math.round(Number(body.amount) * 100) / 100;
 
     if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) {
       return res.status(400).json({ message: "Invalid amount" });
     }
 
-    const fee = calcConvenienceFee({ amount, channel: "razorpay" });
-    const modeStored = fee.mode === "off" ? "none" : fee.mode;
-
-    const order = await getRazorpay().orders.create({
-      amount: toPaise(fee.orderAmount), // paise, always an integer
-      currency: "INR",
-      receipt: `receipt_${Date.now()}`,
-      notes: {
-        sessionAmount: String(amount),
-        convenienceFee: String(fee.convenienceFee),
-        convenienceFeeMode: modeStored,
-      },
+    // Server-side calculation only. Never trust frontend fee values.
+    const quote = calcConvenienceFee({
+      amount,
+      channel: "razorpay",
     });
 
-    // The stored record is now REQUIRED: verifyPayment compares against it.
-    // If we cannot save it, we do not hand the order to the browser (nothing was paid yet).
-    try {
-      const fresher = await currentFresher(req);
-      const { fee: platformFee, earning } = splitAmount(amount, PLATFORM_FEE_PERCENT); // session price ONLY
+    const orderAmountPaise = toPaise(quote.orderAmount);
 
+    if (orderAmountPaise <= 0) {
+      return res.status(400).json({ message: "Invalid checkout amount" });
+    }
+
+    const receipt = `receipt_${Date.now()}`;
+    const fresher = await currentFresher(req);
+
+    const { fee, earning } = splitAmount(
+      amount,
+      PLATFORM_FEE_PERCENT,
+    );
+
+    // Create the order.
+    const order = await getRazorpay().orders.create({
+      amount: orderAmountPaise,
+      currency: "INR",
+      receipt,
+    });
+
+    // Save the payment record BEFORE returning the order to frontend.
+    try {
       await Payment.create({
         razorpayOrderId: order.id,
-        receipt: order.receipt || "",
+        receipt: order.receipt || receipt,
+
+        // Original session price. Never include convenience fee here.
         amount,
+
         currency: order.currency || "INR",
+
+        // Existing mentor/platform split remains unchanged.
         platformFeePercent: PLATFORM_FEE_PERCENT,
-        platformFee,
+        platformFee: fee,
         mentorEarning: earning,
-        convenienceFeeMode: modeStored,
-        convenienceFee: fee.convenienceFee,
-        checkoutAmount: fee.checkoutAmount,
-        orderAmount: fee.orderAmount,
+
+        // Separate convenience fee accounting.
+        convenienceFeeMode: quote.bearerManaged
+          ? "razorpay_bearer"
+          : quote.convenienceFee > 0
+            ? "platform"
+            : "none",
+
+        convenienceFee: quote.convenienceFee,
+        checkoutAmount: quote.checkoutAmount,
+        orderAmount: quote.orderAmount,
+
+        gatewayFeeCollected: 0,
+        convenienceFeeRefunded: 0,
+
+        amountVerified: false,
+        verifyRejected: false,
+
         status: "created",
+
         fresher: fresher ? fresher._id : null,
         fresherName: fresher ? fresher.name : "",
         fresherEmail: fresher ? fresher.email : "",
-        topic: body.topic ? String(body.topic).slice(0, 120) : "",
-        requestGroupId: body.requestGroupId ? String(body.requestGroupId) : "",
+
+        topic: body.topic
+          ? String(body.topic).slice(0, 120)
+          : "",
+
+        requestGroupId: body.requestGroupId
+          ? String(body.requestGroupId)
+          : "",
+
         ...(body.requestGroupId
-          ? buildSessionFields({ date: body.date, time: body.time, duration: body.duration })
+          ? buildSessionFields({
+              date: body.date,
+              time: body.time,
+              duration: body.duration,
+            })
           : {}),
       });
     } catch (dbError) {
-      console.error("Payment record not saved, order NOT returned:", dbError.message);
-      return res.status(500).json({ message: "Could not start the payment. Please try again." });
+      console.error(
+        "Payment record save failed:",
+        order.id,
+        dbError.message,
+      );
+
+      // Do not send an unusable order to the frontend.
+      return res.status(500).json({
+        success: false,
+        message: "Unable to prepare payment. Please try again.",
+      });
     }
 
     return res.json({
       ...order,
-      breakdown: {
-        sessionAmount: fee.sessionAmount,
-        convenienceFee: fee.convenienceFee,
-        checkoutAmount: fee.checkoutAmount,
-        mode: fee.mode,
-        bearerManaged: fee.bearerManaged,
-      },
+      sessionAmount: amount,
+      convenienceFee: quote.convenienceFee,
+      checkoutAmount: quote.checkoutAmount,
+      convenienceFeeMode: quote.bearerManaged
+        ? "razorpay_bearer"
+        : quote.convenienceFee > 0
+          ? "platform"
+          : "none",
     });
   } catch (error) {
-    console.error("Create order error:", error.message);
-    return res.status(500).json({ message: "Razorpay order creation failed" });
+    console.error("Create order error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Razorpay order creation failed",
+    });
   }
 };
 
@@ -340,15 +394,30 @@ const settleGatewayPayment = async ({ payment, order, paymentId, signature = "",
 // ============================================================
 
 exports.verifyPayment = async (req, res) => {
-  const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {};
+  const {
+    razorpay_order_id,
+    razorpay_payment_id,
+    razorpay_signature,
+  } = req.body || {};
 
-  if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-    return res.status(400).json({ success: false, message: "Missing payment details" });
+  if (
+    !razorpay_order_id ||
+    !razorpay_payment_id ||
+    !razorpay_signature
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "Missing payment details",
+    });
   }
 
   const secret = process.env.RAZORPAY_KEY_SECRET;
+
   if (!secret) {
-    return res.status(500).json({ success: false, message: "Payment gateway is not configured" });
+    return res.status(500).json({
+      success: false,
+      message: "Payment gateway is not configured",
+    });
   }
 
   const expected = crypto
@@ -356,108 +425,169 @@ exports.verifyPayment = async (req, res) => {
     .update(`${razorpay_order_id}|${razorpay_payment_id}`)
     .digest("hex");
 
-  // ---------- invalid signature ----------
   if (!safeEqual(expected, razorpay_signature)) {
-    try {
-      await Payment.updateOne(
-        { razorpayOrderId: razorpay_order_id, status: "created" },
-        { $set: { status: "failed", failureReason: "Invalid payment signature" } }
-      );
-    } catch (_) { /* ignore */ }
+    await Payment.updateOne(
+      {
+        razorpayOrderId: razorpay_order_id,
+        status: "created",
+      },
+      {
+        $set: {
+          status: "failed",
+          failureReason: "Invalid payment signature",
+        },
+      },
+    ).catch(() => {});
 
-    return res.status(400).json({ success: false, message: "Invalid payment signature" });
+    return res.status(400).json({
+      success: false,
+      message: "Invalid payment signature",
+    });
   }
 
-  // ---------- valid signature ----------
   try {
-    let payment = await Payment.findOne({ razorpayOrderId: razorpay_order_id });
-
-    // ---- duplicate / replayed verification ----
-    if (payment && payment.status === "paid") {
-      if (payment.razorpayPaymentId === razorpay_payment_id) {
-        return res.json({ success: true, paymentId: razorpay_payment_id, duplicate: true });
-      }
-      return res.status(409).json({ success: false, message: "This order is already paid with another payment." });
-    }
-    if (payment && payment.status === "refunded") {
-      return res.status(409).json({ success: false, message: "This payment was already refunded." });
-    }
-    if (payment && payment.verifyRejected) {
-      return res.status(400).json({ success: false, message: "This payment was rejected and refunded." });
-    }
-
-    // ---- the Razorpay ORDER (source of truth for the order amount) ----
-    let order = null;
-    try {
-      order = await withRetry(() => getRazorpay().orders.fetch(razorpay_order_id), 2);
-    } catch (e) {
-      console.error("orders.fetch failed:", razorpay_order_id, e?.error?.description || e.message);
-    }
-
-    // old orders that never got a record: rebuild one from the order itself
-    if (!payment) {
-      if (!order) {
-        return res.status(502).json({ success: false, message: "Could not confirm the payment right now. Please retry in a moment." });
-      }
-      const notes = order.notes || {};
-      const sessionAmount = Number(notes.sessionAmount) > 0 ? Number(notes.sessionAmount) : toRupees(order.amount);
-      const fee = Number(notes.convenienceFee) || 0;
-      const { fee: platformFee, earning } = splitAmount(sessionAmount, PLATFORM_FEE_PERCENT);
-      try {
-        payment = await Payment.create({
-          razorpayOrderId: razorpay_order_id,
-          amount: sessionAmount,
-          currency: order.currency || "INR",
-          platformFeePercent: PLATFORM_FEE_PERCENT,
-          platformFee,
-          mentorEarning: earning,
-          convenienceFeeMode: notes.convenienceFeeMode || "none",
-          convenienceFee: fee,
-          checkoutAmount: toRupees(order.amount),
-          orderAmount: toRupees(order.amount),
-        });
-      } catch (e) {
-        payment = await Payment.findOne({ razorpayOrderId: razorpay_order_id }); // created by a parallel call
-        if (!payment) throw e;
-      }
-    }
-
-    // Razorpay unreachable for the order: use OUR stored order amount (signature already ties payment to our order)
-    if (!order) {
-      order = {
-        id: razorpay_order_id,
-        amount: toPaise(payment.orderAmount > 0 ? payment.orderAmount : payment.amount),
-      };
-    }
-
-    const fresher = payment.fresher ? null : await currentFresher(req);
-    const result = await settleGatewayPayment({
-      payment,
-      order,
-      paymentId: razorpay_payment_id,
-      signature: razorpay_signature,
-      fresher,
+    const payment = await Payment.findOne({
+      razorpayOrderId: razorpay_order_id,
     });
 
-    if (result.rejected) {
-      return res.status(400).json({
+    if (!payment) {
+      console.error(
+        "Verified Razorpay payment has no local Payment record:",
+        razorpay_order_id,
+      );
+
+      return res.status(409).json({
         success: false,
-        code: "AMOUNT_MISMATCH",
-        message: "The paid amount did not match the order. It is being refunded automatically.",
+        message: "Payment record missing. Please contact support.",
       });
     }
-    if (result.pending) {
-      return res.status(409).json({ success: false, message: `Payment is not completed yet (${result.reason}).` });
-    }
-    if (!result.ok) {
-      return res.status(409).json({ success: false, message: "This payment cannot be used." });
-    }
-  } catch (dbError) {
-    // keep the old behaviour: the signature is valid, the money is real. The reconcile job completes the record.
-    console.error("PAYMENT VERIFIED BUT NOT SAVED:", razorpay_payment_id, dbError.message);
-  }
 
-  return res.json({ success: true, paymentId: razorpay_payment_id });
+    // Idempotency: already verified payments should not be processed again.
+    if (payment.status === "paid" && payment.amountVerified) {
+      return res.json({
+        success: true,
+        paymentId: payment.razorpayPaymentId,
+      });
+    }
+
+    const [order, details] = await Promise.all([
+      getRazorpay().orders.fetch(razorpay_order_id),
+      getRazorpay().payments.fetch(razorpay_payment_id),
+    ]);
+
+    if (details.status !== "captured") {
+      return res.status(400).json({
+        success: false,
+        message: "Payment is not captured yet.",
+      });
+    }
+
+    const validation = validateGatewayAmounts({
+      payment,
+      order,
+      rzPayment: details,
+    });
+
+    if (!validation.ok) {
+      await Payment.updateOne(
+        { _id: payment._id },
+        {
+          $set: {
+            verifyRejected: true,
+            failureReason: validation.reason,
+          },
+        },
+      );
+
+      console.error("PAYMENT AMOUNT VALIDATION FAILED:", {
+        orderId: razorpay_order_id,
+        paymentId: razorpay_payment_id,
+        reason: validation.reason,
+      });
+
+      return res.status(400).json({
+        success: false,
+        message: "Payment amount verification failed. Please contact support.",
+      });
+    }
+
+    const fresher = payment.fresher
+      ? null
+      : await currentFresher(req);
+
+    payment.status = "paid";
+    payment.failureReason = "";
+    payment.verifyRejected = false;
+
+    payment.razorpayPaymentId = razorpay_payment_id;
+    payment.razorpaySignature = razorpay_signature;
+    payment.paidAt = new Date();
+
+    payment.amountVerified = true;
+
+    // Keep original session price unchanged.
+    // Update only separately tracked convenience fee values.
+    if (payment.convenienceFeeMode === "razorpay_bearer") {
+      payment.convenienceFee = validation.convenienceFee;
+    }
+
+    payment.checkoutAmount = validation.checkoutAmount;
+
+    if (fresher) {
+      payment.fresher = fresher._id;
+      payment.fresherName = fresher.name;
+      payment.fresherEmail = fresher.email;
+    }
+
+    payment.method = details.method || "";
+    payment.payerEmail = details.email || "";
+    payment.payerContact = details.contact || "";
+
+    // Razorpay fee includes GST.
+    if (details.fee !== null && details.fee !== undefined) {
+      payment.gatewayFee = toRupees(details.fee);
+      payment.gatewayTax = toRupees(details.tax || 0);
+      payment.feeEstimated = false;
+    } else {
+      const pct = Number(process.env.RAZORPAY_FEE_PERCENT || 2);
+
+      payment.gatewayFee =
+        Math.round(
+          payment.amount * (pct / 100) * 1.18 * 100,
+        ) / 100;
+
+      payment.feeEstimated = true;
+    }
+
+    payment.gatewayFeeCollected = payment.convenienceFee || 0;
+
+    await payment.save();
+
+    if (payment.fresher) {
+      notify({
+        user: payment.fresher,
+        role: "fresher",
+        title: "Payment successful",
+        message: `We received ${rupees(payment.checkoutAmount)}. Your session request is on its way to mentors.`,
+        type: "payment",
+      });
+    }
+
+    return res.json({
+      success: true,
+      paymentId: razorpay_payment_id,
+      sessionAmount: payment.amount,
+      convenienceFee: payment.convenienceFee,
+      checkoutAmount: payment.checkoutAmount,
+    });
+  } catch (error) {
+    console.error("Verify payment error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to verify payment. Please contact support if money was deducted.",
+    });
+  }
 };
 
 // ============================================================
