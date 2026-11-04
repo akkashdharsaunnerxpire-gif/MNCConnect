@@ -304,7 +304,10 @@ const Header = () => {
 
   const nextBooking = upcoming[0];
   const nextStart = toMs(nextBooking?.startsAt);
-  const msToStart = nextStart !== null ? nextStart - now : null;
+ const msToStart =
+  nextStart !== null
+    ? nextStart - 2 * 60 * 1000 - now
+    : null;
   const joinOpen =
     Boolean(nextBooking) && msToStart !== null && msToStart <= OPEN_BEFORE_MS;
   const nextId = nextBooking?.requestGroupId || nextBooking?.id;
