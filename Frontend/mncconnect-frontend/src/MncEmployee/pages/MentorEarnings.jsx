@@ -519,28 +519,68 @@ const WITHDRAW_LABEL = {
   rejected: "Rejected",
 };
 
-const WithdrawalRow = ({ w }) => (
-  <div className="flex flex-col gap-3 p-5 transition hover:bg-blue-50/40 sm:flex-row sm:items-center sm:justify-between">
-    <div>
-      <p className="text-sm font-semibold text-slate-900">{w.upiId}</p>
-      <p className="mt-1 text-xs text-slate-500">
-        {new Date(w.createdAt).toLocaleString("en-IN", {
-          day: "2-digit",
-          month: "short",
-          hour: "2-digit",
-          minute: "2-digit",
-        })}
-        {w.note ? ` · ${w.note}` : ""}
-      </p>
+const Stepper = ({ status }) => {
+  const rejected = status === "rejected";
+  const paid = status === "paid";
+  const steps = [
+    { label: "Requested", state: "done" },
+    { label: "Processing", state: paid || rejected ? "done" : "current" },
+    { label: rejected ? "Rejected" : "Paid", state: paid ? "done" : rejected ? "bad" : "todo" },
+  ];
+  const dot = {
+    done: "bg-emerald-500",
+    current: "bg-amber-400 animate-pulse ring-4 ring-amber-200",
+    bad: "bg-red-500",
+    todo: "bg-slate-300",
+  };
+  return (
+    <div className="mt-4 flex items-center">
+      {steps.map((s, i) => (
+        <React.Fragment key={s.label}>
+          <div className="flex flex-col items-center">
+            <span className={`h-3 w-3 rounded-full ${dot[s.state]}`} />
+            <span className="mt-1 text-[10px] text-slate-500">{s.label}</span>
+          </div>
+          {i < steps.length - 1 && (
+            <div
+              className={`mx-2 mb-4 h-0.5 w-12 ${
+                steps[i + 1].state === "done" || steps[i + 1].state === "bad"
+                  ? "bg-emerald-500"
+                  : "bg-slate-200"
+              }`}
+            />
+          )}
+        </React.Fragment>
+      ))}
     </div>
-    <span
-      className={`w-fit rounded-full border px-3 py-1.5 text-[11px] font-semibold ${WITHDRAW_STYLE[w.status] || WITHDRAW_STYLE.requested}`}
-    >
-      {WITHDRAW_LABEL[w.status] || w.status}
-    </span>
-    <span className="text-sm font-bold text-slate-900 sm:min-w-[100px] sm:text-right">
-      {inr(w.amount)}
-    </span>
+  );
+};
+
+const WithdrawalRow = ({ w }) => (
+  <div className="p-5 transition hover:bg-blue-50/40">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <p className="text-sm font-semibold text-slate-900">{w.upiId}</p>
+        <p className="mt-1 text-xs text-slate-500">
+          {new Date(w.createdAt).toLocaleString("en-IN", {
+            day: "2-digit",
+            month: "short",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+          {w.note ? ` · ${w.note}` : ""}
+        </p>
+      </div>
+      <span
+        className={`w-fit rounded-full border px-3 py-1.5 text-[11px] font-semibold ${WITHDRAW_STYLE[w.status] || WITHDRAW_STYLE.requested}`}
+      >
+        {WITHDRAW_LABEL[w.status] || w.status}
+      </span>
+      <span className="text-sm font-bold text-slate-900 sm:min-w-[100px] sm:text-right">
+        {inr(w.amount)}
+      </span>
+    </div>
+    <Stepper status={w.status} />
   </div>
 );
 

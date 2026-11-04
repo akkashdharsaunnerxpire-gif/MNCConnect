@@ -37,7 +37,9 @@ const audit = async (req, action, extra = {}) => {
 // GET /admin/withdrawals?status=requested|paid|rejected|all&page=1
 exports.listWithdrawals = async (req, res) => {
   try {
-    const status = [...STATUSES, "all"].includes(req.query.status) ? req.query.status : "requested";
+    const status = [...STATUSES, "all"].includes(req.query.status)
+      ? req.query.status
+      : "requested";
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const limit = PAGE_SIZE;
     const skip = (page - 1) * limit;
@@ -51,7 +53,15 @@ exports.listWithdrawals = async (req, res) => {
         .populate("mentor", "name email currentCompany")
         .lean(),
       Withdrawal.countDocuments(filter),
-      Withdrawal.aggregate([{ $group: { _id: "$status", total: { $sum: "$amount" }, count: { $sum: 1 } } }]),
+      Withdrawal.aggregate([
+        {
+          $group: {
+            _id: "$status",
+            total: { $sum: "$amount" },
+            count: { $sum: 1 },
+          },
+        },
+      ]),
     ]);
 
     const sums = {
@@ -71,7 +81,12 @@ exports.listWithdrawals = async (req, res) => {
       status,
       withdrawals,
       sums,
-      pagination: { page, limit, total, pages: Math.max(Math.ceil(total / limit), 1) },
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.max(Math.ceil(total / limit), 1),
+      },
       baseQuery: `status=${status}`,
     });
   } catch (error) {
@@ -88,11 +103,14 @@ exports.markPaid = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid id." });
     }
 
-    const utr = String((req.body && req.body.utr) || "").trim().slice(0, 60);
+    const utr = String((req.body && req.body.utr) || "")
+      .trim()
+      .slice(0, 60);
     if (utr.length < 6) {
       return res.status(400).json({
         success: false,
-        message: "Enter the UPI transaction / UTR number (at least 6 characters).",
+        message:
+          "Enter the UPI transaction / UTR number (at least 6 characters).",
       });
     }
 
@@ -101,16 +119,32 @@ exports.markPaid = async (req, res) => {
     // only a still-"requested" one can be processed (prevents double payout)
     const w = await Withdrawal.findOneAndUpdate(
       { _id: id, status: "requested" },
-      { $set: { status: "paid", utr, note: `UTR: ${utr}`, processedAt: new Date(), processedBy: actor.email } },
-      { returnDocument: "after" }
+      {
+        $set: {
+          status: "paid",
+          utr,
+          note: `UTR: ${utr}`,
+          processedAt: new Date(),
+          processedBy: actor.email,
+        },
+      },
+      { returnDocument: "after" },
     );
     if (!w) {
-      return res.status(404).json({ success: false, message: "Request not found or already processed." });
+      return res.status(404).json({
+        success: false,
+        message: "Request not found or already processed.",
+      });
     }
 
     await audit(req, "withdrawal_paid", {
       mentor: w.mentor,
-      meta: { withdrawalId: String(w._id), amount: w.amount, upiId: w.upiId, utr },
+      meta: {
+        withdrawalId: String(w._id),
+        amount: w.amount,
+        upiId: w.upiId,
+        utr,
+      },
     });
 
     notify({
@@ -121,12 +155,26 @@ exports.markPaid = async (req, res) => {
       type: "payment",
       link: "/mentor/earnings",
     });
-    emitToUser(String(w.mentor), "wallet:updated", { withdrawalId: w._id, status: "paid" });
+    emitToUser(String(w.mentor), "wallet:updated", {
+      withdrawalId: w._id,
+      status: "paid",
+    });
 
-    return res.json({ success: true, message: "Marked as paid. The mentor has been notified." });
+    return res.json({
+      success: true,
+      message: "Marked as paid. The mentor has been notified.",
+    });
   } catch (error) {
+    if (error && error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "This UTR is already used for another payout.",
+      });
+    }
     console.error("markPaid error:", error);
-    return res.status(500).json({ success: false, message: "Unable to update withdrawal." });
+    return res
+      .status(500)
+      .json({ success: false, message: "Unable to update withdrawal." });
   }
 };
 
@@ -138,20 +186,35 @@ exports.markRejected = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid id." });
     }
 
-    const reason = String((req.body && req.body.reason) || "").trim().slice(0, 300);
+    const reason = String((req.body && req.body.reason) || "")
+      .trim()
+      .slice(0, 300);
     if (reason.length < 5) {
-      return res.status(400).json({ success: false, message: "Give a short reason (the mentor will see it)." });
+      return res.status(400).json({
+        success: false,
+        message: "Give a short reason (the mentor will see it).",
+      });
     }
 
     const actor = actorOf(req);
 
     const w = await Withdrawal.findOneAndUpdate(
       { _id: id, status: "requested" },
-      { $set: { status: "rejected", note: reason, processedAt: new Date(), processedBy: actor.email } },
-      { returnDocument: "after" }
+      {
+        $set: {
+          status: "rejected",
+          note: reason,
+          processedAt: new Date(),
+          processedBy: actor.email,
+        },
+      },
+      { returnDocument: "after" },
     );
     if (!w) {
-      return res.status(404).json({ success: false, message: "Request not found or already processed." });
+      return res.status(404).json({
+        success: false,
+        message: "Request not found or already processed.",
+      });
     }
 
     await audit(req, "withdrawal_rejected", {
@@ -168,11 +231,19 @@ exports.markRejected = async (req, res) => {
       type: "payment",
       link: "/mentor/earnings",
     });
-    emitToUser(String(w.mentor), "wallet:updated", { withdrawalId: w._id, status: "rejected" });
+    emitToUser(String(w.mentor), "wallet:updated", {
+      withdrawalId: w._id,
+      status: "rejected",
+    });
 
-    return res.json({ success: true, message: "Rejected. The amount is back in the mentor's balance." });
+    return res.json({
+      success: true,
+      message: "Rejected. The amount is back in the mentor's balance.",
+    });
   } catch (error) {
     console.error("markRejected error:", error);
-    return res.status(500).json({ success: false, message: "Unable to update withdrawal." });
+    return res
+      .status(500)
+      .json({ success: false, message: "Unable to update withdrawal." });
   }
 };

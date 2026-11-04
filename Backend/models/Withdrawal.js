@@ -9,7 +9,7 @@ const { Schema } = mongoose;
 
 const withdrawalSchema = new Schema(
   {
-    mentor: { type: Schema.Types.ObjectId, ref: "Mentor", required: true,},
+    mentor: { type: Schema.Types.ObjectId, ref: "Mentor", required: true },
     amount: { type: Number, required: true, min: 1 },
     upiId: { type: String, required: true, trim: true },
     status: {
@@ -23,14 +23,21 @@ const withdrawalSchema = new Schema(
     processedBy: { type: String, default: "" }, // admin email
     processedAt: { type: Date, default: null },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // DATABASE-LEVEL guard: one mentor can have only ONE "requested" withdrawal at a time.
 // Two tabs / double click -> the second insert fails with E11000.
 withdrawalSchema.index(
   { mentor: 1 },
-  { unique: true, partialFilterExpression: { status: "requested" } }
+  { unique: true, partialFilterExpression: { status: "requested" } },
+);
+withdrawalSchema.index(
+  { utr: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { utr: { $type: "string", $gt: "" } },
+  },
 );
 
 module.exports = mongoose.model("Withdrawal", withdrawalSchema);

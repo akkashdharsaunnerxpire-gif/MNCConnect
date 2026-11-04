@@ -40,15 +40,19 @@
                     </td>
                     <td class="mono">
                         <%= w.upiId %>
-                        <button type="button" onclick="copyText('<%= w.upiId %>')" style="margin-left:6px;cursor:pointer;">Copy</button>
+                        <button type="button" class="copyBtn" data-text="<%= w.upiId %>" style="margin-left:6px;cursor:pointer;">Copy</button>
                     </td>
                     <td><b>₹<%= fmt(w.amount) %></b></td>
                     <td><span class="badge <%= stBadge(w.status) %>"><i class="dot"></i><%= stLabel(w.status) %></span></td>
                     <td class="muted small"><%= new Date(w.createdAt).toLocaleString('en-GB') %></td>
                     <td>
                         <% if (w.status === 'requested') { %>
-                            <button type="button" onclick="act('<%= w._id %>','paid')" style="cursor:pointer;">Mark paid</button>
-                            <button type="button" onclick="act('<%= w._id %>','reject')" style="cursor:pointer;">Reject</button>
+                            <button type="button" class="payBtn" style="cursor:pointer;"
+                                data-id="<%= w._id %>"
+                                data-upi="<%= w.upiId %>"
+                                data-name="<%= w.mentor ? w.mentor.name : 'Mentor' %>"
+                                data-amount="<%= Number(w.amount).toFixed(2) %>">Pay</button>
+                            <button type="button" class="rejBtn" data-id="<%= w._id %>" style="cursor:pointer;">Reject</button>
                         <% } else { %>
                             <span class="muted small"><%= w.note || '—' %></span>
                         <% } %>
@@ -65,29 +69,31 @@
 </div>
 
 <p class="muted small" style="margin-top:14px;">
-    Steps: 1) Copy the UPI ID and pay the amount from your bank / GPay. 2) Click "Mark paid" and enter the UPI reference (UTR).
+    Steps: 1) Click Pay, scan the QR (amount is locked) or open in a UPI app. 2) After the money is sent, enter the UTR and click "Mark paid".
     Never mark paid before the money is actually sent.
 </p>
 
+<div id="payModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99;align-items:center;justify-content:center;">
+    <div class="card" style="padding:24px;max-width:340px;width:90%;text-align:center;">
+        <h3 id="pmName"></h3>
+        <p class="muted small mono" id="pmUpi"></p>
+        <h2 id="pmAmt"></h2>
+        <div id="pmQr" style="background:#fff;padding:10px;display:inline-block;margin:12px 0;"></div><br>
+        <a id="pmLink" class="small">Open in UPI app (mobile)</a>
+        <p class="muted small">After paying, enter the UTR</p>
+        <input id="pmUtr" placeholder="UTR / UPI Ref no" style="width:100%;padding:8px;margin:8px 0;">
+        <button type="button" id="pmDone" style="cursor:pointer;">Mark paid</button>
+        <button type="button" id="pmClose" style="cursor:pointer;">Close</button>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
-    function copyText(t) {
-        navigator.clipboard.writeText(t).then(function () { alert('UPI ID copied'); });
-    }
+    var currentId = null, currentAmount = null, currentUpi = null;
 
-    async function act(id, kind) {
-        var body = {};
-        if (kind === 'paid') {
-            var utr = prompt('Enter the UPI transaction / UTR number you paid with:');
-            if (!utr) return;
-            body.utr = utr.trim();
-        } else {
-            var reason = prompt('Reason for rejecting (the mentor will see this):');
-            if (!reason) return;
-            body.reason = reason.trim();
-        }
-
+    async function patch(url, body) {
         try {
-            var res = await fetch('/admin/withdrawals/' + id + '/' + kind, {
+            var res = await fetch(url, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body)
@@ -95,10 +101,50 @@
             var data = await res.json().catch(function () { return {}; });
             alert(data.message || (res.ok ? 'Done' : 'Failed'));
             if (res.ok) location.reload();
-        } catch (e) {
-            alert('Network error. Please try again.');
-        }
+        } catch (e) { alert('Network error. Please try again.'); }
     }
+
+    document.querySelectorAll('.copyBtn').forEach(function (b) {
+        b.addEventListener('click', function () {
+            navigator.clipboard.writeText(b.dataset.text).then(function () { alert('UPI ID copied'); });
+        });
+    });
+
+    document.querySelectorAll('.rejBtn').forEach(function (b) {
+        b.addEventListener('click', function () {
+            var reason = prompt('Reason for rejecting (the mentor will see this):');
+            if (!reason) return;
+            patch('/admin/withdrawals/' + b.dataset.id + '/reject', { reason: reason.trim() });
+        });
+    });
+
+    document.querySelectorAll('.payBtn').forEach(function (b) {
+        b.addEventListener('click', function () {
+            var d = b.dataset;
+            currentId = d.id; currentAmount = d.amount; currentUpi = d.upi;
+            var link = 'upi://pay?pa=' + encodeURIComponent(d.upi) + '&pn=' + encodeURIComponent(d.name) +
+                       '&am=' + d.amount + '&cu=INR&tn=' + encodeURIComponent('MNCConnect payout');
+            document.getElementById('pmName').textContent = d.name;
+            document.getElementById('pmUpi').textContent = d.upi;
+            document.getElementById('pmAmt').textContent = '₹' + d.amount;
+            document.getElementById('pmLink').href = link;
+            document.getElementById('pmUtr').value = '';
+            var box = document.getElementById('pmQr'); box.innerHTML = '';
+            new QRCode(box, { text: link, width: 190, height: 190 });
+            document.getElementById('payModal').style.display = 'flex';
+        });
+    });
+
+    document.getElementById('pmClose').addEventListener('click', function () {
+        document.getElementById('payModal').style.display = 'none';
+    });
+
+    document.getElementById('pmDone').addEventListener('click', function () {
+        var utr = document.getElementById('pmUtr').value.trim();
+        if (utr.length < 6) return alert('Enter a valid UTR (min 6 characters)');
+        if (!confirm('Confirm: ₹' + currentAmount + ' was SENT to ' + currentUpi + ' ?')) return;
+        patch('/admin/withdrawals/' + currentId + '/paid', { utr: utr });
+    });
 </script>
 
 <%- include('partials/layout-end') %>

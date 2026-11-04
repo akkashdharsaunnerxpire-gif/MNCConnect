@@ -11,7 +11,11 @@ const auditSchema = new mongoose.Schema(
       // login_success, login_failed, logout, review_saved,
       // mentor_approve, mentor_reject, mentor_pending, bulk_*, export_mentors, user_toggle
     },
-    mentor: { type: mongoose.Schema.Types.ObjectId, ref: "Mentor", required: true },
+    mentor: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Mentor",
+      default: null,
+    },
     mentorName: String,
     adminEmail: { type: String, index: true },
     adminName: String,
@@ -20,7 +24,7 @@ const auditSchema = new mongoose.Schema(
     ip: String,
     userAgent: String,
   },
-  { timestamps: { createdAt: true, updatedAt: false } }
+  { timestamps: { createdAt: true, updatedAt: false } },
 );
 
 auditSchema.index({ createdAt: -1 });

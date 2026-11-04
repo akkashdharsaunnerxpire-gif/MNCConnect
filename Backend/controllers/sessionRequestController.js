@@ -15,7 +15,7 @@ const hasConflict = (mentorId, startsAt, endsAt) =>
 
 const normalizeText = (value) =>
   String(value || "")
-    .trim()
+    .trim() 
     .toLowerCase()
     .replace(/\s+/g, " ");
 

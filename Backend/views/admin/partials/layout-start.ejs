@@ -29,6 +29,18 @@
       icon: "fa-credit-card",
       label: "Payments",
     },
+    {
+      k: "withdrawals",
+      href: "/admin/withdrawals",
+      icon: "fa-wallet",
+      label: "Withdrawals",
+    },
+    {
+      k: "finance",
+      href: "/admin/finance",
+      icon: "fa-sack-dollar",
+      label: "Finance",
+    },
   ];
 %>
 
@@ -128,7 +140,7 @@
       </button>
 
       <div>
-        <h2><%= locals.title || "Dashboard" %></h2>
+        <h2><%= locals.pageTitle || locals.title || "Dashboard" %></h2>
         <p><%= locals.pageSubtitle || "" %></p>
       </div>
 

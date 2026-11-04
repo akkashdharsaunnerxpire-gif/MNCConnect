@@ -8,7 +8,7 @@ const ctrl = require("../controllers/adminController");
 const withdrawals = require("../controllers/adminWithdrawalController");
 const Mentor = require("../models/Mentor");
 const { loginLimiter, sameOriginOnly } = require("../middleware/adminSecurity");
-
+const finance = require("../controllers/adminFinanceController");
 // ============================================================
 // SECURITY HELPERS
 // ============================================================
@@ -114,6 +114,10 @@ router.patch("/mentors/:id/pending", ctrl.resetMentor);
 
 // Payments
 router.get("/payments", ctrl.listPayments);
+
+router.get("/finance", finance.showFinance);
+router.post("/finance/company-payout", finance.recordCompanyPayout);
+router.post("/finance/sync-fees", finance.syncGatewayFees);
 
 // Mentor withdrawals (manual UPI payout)
 router.get("/withdrawals", withdrawals.listWithdrawals);

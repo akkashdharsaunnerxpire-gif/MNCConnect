@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   CalendarDays, CheckCircle2, ChevronRight, IndianRupee, Loader2,
   ShieldCheck, Send, UserRound, Briefcase, Mail, TimerReset, AlertTriangle, RotateCcw, X, Wallet,
-  Users, Copy, Share2, Check,
+  Users, Copy, Share2, Check, Lock,
 } from "lucide-react";
 import useUserEvents from "../../hooks/useUserEvents";
 import useLive from "../../hooks/useLive";
@@ -20,7 +20,14 @@ const SESSION_TYPES = [
   { value: "any_queries", label: "Any queries" },
 ];
 
-const GENDER_OPTIONS = [
+// GROUP meeting: the host chooses. "" = no preference (any employee)
+const GROUP_GENDER_OPTIONS = [
+  { value: "", label: "No preference (any employee)" },
+  { value: "male", label: "Male employee" },
+  { value: "female", label: "Female employee" },
+];
+// old accounts that have no gender saved yet (single meeting)
+const SINGLE_GENDER_FALLBACK = [
   { value: "", label: "Select your gender" },
   { value: "male", label: "Male" },
   { value: "female", label: "Female" },
@@ -50,21 +57,25 @@ const hasEnoughLead = (date, time) => {
   return Number.isFinite(ms) && ms >= Date.now() + MIN_LEAD_MIN * 60000;
 };
 
-const makeEmptyForm = (user) => {
-  const g = String(user?.gender || "").trim().toLowerCase();
-  return {
-    mode: "single", // "single" | "group"
-    members: 3, // group size INCLUDING you (2..MAX_GROUP)
-    sessionType: SESSION_TYPES[0].value,
-    reason: "",
-    date: "",
-    time: "",
-    role: "",
-    gender: g === "male" || g === "female" ? g : "",
-    language: "",
-    minutes: 60,
-  };
+const cleanGender = (v) => {
+  const g = String(v || "").trim().toLowerCase();
+  return g === "male" || g === "female" ? g : "";
 };
+
+const makeEmptyForm = (user) => ({
+  mode: "single", // "single" | "group"
+  members: 3, // group size INCLUDING you (2..MAX_GROUP)
+  sessionType: SESSION_TYPES[0].value,
+  reason: "",
+  date: "",
+  time: "",
+  role: "",
+  // single: only used when the profile has no gender (old accounts)
+  // group : the host's choice ("" = no preference)
+  gender: cleanGender(user?.gender),
+  language: "",
+  minutes: 60,
+});
 
 const inputCls =
   "h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-400";
@@ -103,6 +114,10 @@ export default function SessionBoard() {
   const [f, setF] = useState(() => makeEmptyForm(user));
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
+  // switching single <-> group resets the gender choice (group default = no preference)
+  const chooseMode = (m) =>
+    setF((p) => (p.mode === m ? p : { ...p, mode: m, gender: m === "group" ? "" : cleanGender(user?.gender) }));
+
   const [stage, setStage] = useState(null);
   const [booking, setBooking] = useState(null);
   const [notifiedCount, setNotifiedCount] = useState(0);
@@ -129,7 +144,7 @@ export default function SessionBoard() {
   const groupTotal = price * f.members;
   const type = SESSION_TYPES.find((t) => t.value === f.sessionType) || SESSION_TYPES[0];
 
-  /* ---------- wallet ---------- */
+  /* ---------- wallet + profile (gender comes from the registration) ---------- */
   const { data: meData, reload: reloadMe } = useLive({
     fetcher: () => api("/auth/me"),
     events: [EVENTS.notification, "wallet:updated"],
@@ -137,6 +152,11 @@ export default function SessionBoard() {
   });
   const me = meData?.user || meData || null;
   const walletBalance = Math.max(0, Number(me?.walletBalance) || 0);
+
+  // SINGLE: the fresher's own gender (from the account). GROUP: the host's choice.
+  const profileGender = cleanGender(me?.gender) || cleanGender(user?.gender);
+  const effectiveGender = isGroup ? cleanGender(f.gender) : profileGender || cleanGender(f.gender);
+  const genderLocked = !isGroup && Boolean(profileGender);
 
   const [useWallet, setUseWallet] = useState(true);
   const canWallet = walletBalance >= price;
@@ -195,12 +215,13 @@ export default function SessionBoard() {
       if (!deptLoading && departments.length === 0)
         p.push(deptError || `No ${companyName} employees have registered yet`);
       else if (!f.role) p.push("Select a role");
-      if (!f.gender) p.push("Select your gender");
+      // single meeting needs a gender (normally already saved at registration)
+      if (!isGroup && !effectiveGender) p.push("Select your gender");
       if (!f.language) p.push("Select your language before paying");
     }
     return p;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [f, rebook, departments, deptLoading, deptError, companyName, tick]);
+  }, [f, rebook, departments, deptLoading, deptError, companyName, tick, isGroup, effectiveGender]);
 
   /* ---------- live booking updates ---------- */
   const applyBooking = useCallback((b) => {
@@ -242,7 +263,8 @@ export default function SessionBoard() {
             reason: f.reason.trim(),
             role: f.role,
             otherRole: "",
-            gender: f.gender,
+            // single: the fresher's own gender | group: the host's choice ("" = any)
+            gender: effectiveGender,
             language: f.language,
             duration: f.minutes,
             amount: price,
@@ -266,7 +288,7 @@ export default function SessionBoard() {
       if (!canRetryRef.current) paymentIdRef.current = null;
       refreshWallet();
     }
-  }, [companyName, user, type, f, price, rebook, refreshWallet, isGroup]);
+  }, [companyName, user, type, f, price, rebook, refreshWallet, isGroup, effectiveGender]);
 
   /* ---------- pay ---------- */
   const startPayment = async () => {
@@ -371,6 +393,12 @@ export default function SessionBoard() {
   const mentor = booking?.mentor;
   const when = f.date && f.time ? `${toApiDate(f.date)} at ${toApiTime(f.time)}` : "Not selected";
 
+  const genderSummary = effectiveGender
+    ? `${effectiveGender === "male" ? "Male" : "Female"} employee`
+    : isGroup
+      ? "No preference"
+      : "Not selected";
+
   const summaryRows = [
     ["Company", companyName],
     ["Purpose", type.label],
@@ -382,6 +410,7 @@ export default function SessionBoard() {
       : [
           ["Role", f.role || "Not selected"],
           ["Language", f.language || "Not selected"],
+          ["Guide", genderSummary],
         ]),
   ];
 
@@ -428,7 +457,7 @@ export default function SessionBoard() {
                 <button
                   type="button"
                   disabled={Boolean(stage)}
-                  onClick={() => set("mode", "single")}
+                  onClick={() => chooseMode("single")}
                   className={`flex items-start gap-3 rounded-2xl border p-4 text-left transition ${
                     !isGroup ? "border-blue-500 bg-blue-50 shadow-sm" : "border-slate-200 hover:border-blue-300"
                   }`}
@@ -445,7 +474,7 @@ export default function SessionBoard() {
                 <button
                   type="button"
                   disabled={Boolean(stage)}
-                  onClick={() => set("mode", "group")}
+                  onClick={() => chooseMode("group")}
                   className={`flex items-start gap-3 rounded-2xl border p-4 text-left transition ${
                     isGroup ? "border-blue-500 bg-blue-50 shadow-sm" : "border-slate-200 hover:border-blue-300"
                   }`}
@@ -575,7 +604,7 @@ export default function SessionBoard() {
             {/* PREFERENCES */}
             {!rebook && (
               <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <h2 className="text-xl font-bold text-slate-950">Who should guide you?</h2>
+                <h2 className="text-xl font-bold text-slate-950">Who should guide {isGroup ? "your group" : "you"}?</h2>
                 <div className="mt-5 grid gap-4 sm:grid-cols-2">
                   <div>
                     <Label>Role you want guidance for</Label>
@@ -606,13 +635,35 @@ export default function SessionBoard() {
                     <p className="mt-1.5 text-xs text-slate-400">Only employees who speak this language get your request.</p>
                   </div>
 
-                  <div>
-                    <Label>Your gender</Label>
-                    <select value={f.gender} onChange={(e) => set("gender", e.target.value)} className={inputCls}>
-                      {GENDER_OPTIONS.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
-                    </select>
-                    <p className="mt-1.5 text-xs text-slate-400">You are matched with an employee of the same gender.</p>
-                  </div>
+                  {/* GENDER */}
+                  {isGroup ? (
+                    <div>
+                      <Label>Employee gender for your group</Label>
+                      <select value={f.gender} onChange={(e) => set("gender", e.target.value)} className={inputCls}>
+                        {GROUP_GENDER_OPTIONS.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
+                      </select>
+                      <p className="mt-1.5 text-xs text-slate-400">Group meeting: you choose. "No preference" sends it to any employee.</p>
+                    </div>
+                  ) : genderLocked ? (
+                    <div>
+                      <Label>Your gender</Label>
+                      <div className="flex h-12 items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm font-semibold capitalize text-slate-700">
+                        {profileGender}
+                        <Lock size={15} className="text-slate-400" />
+                      </div>
+                      <p className="mt-1.5 text-xs text-slate-400">
+                        Single meetings are matched with a {profileGender} employee (from your account).
+                      </p>
+                    </div>
+                  ) : (
+                    <div>
+                      <Label>Your gender</Label>
+                      <select value={f.gender} onChange={(e) => set("gender", e.target.value)} className={inputCls}>
+                        {SINGLE_GENDER_FALLBACK.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
+                      </select>
+                      <p className="mt-1.5 text-xs text-slate-400">You are matched with an employee of the same gender.</p>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

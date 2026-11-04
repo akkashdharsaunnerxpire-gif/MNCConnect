@@ -43,14 +43,28 @@ const paymentSchema = new Schema(
     paidAt: { type: Date, default: null },
 
     // ---------- Refund ----------
-    refundMethod: { type: String, enum: ["", "wallet", "original"], default: "" },
+    refundMethod: {
+      type: String,
+      enum: ["", "wallet", "original"],
+      default: "",
+    },
     refundedAt: { type: Date, default: null },
 
     // ---------- People ----------
-    fresher: { type: Schema.Types.ObjectId, ref: "Fresher", default: null, index: true },
+    fresher: {
+      type: Schema.Types.ObjectId,
+      ref: "Fresher",
+      default: null,
+      index: true,
+    },
     fresherName: { type: String, default: "" },
     fresherEmail: { type: String, default: "" },
-    mentor: { type: Schema.Types.ObjectId, ref: "Mentor", default: null, index: true },
+    mentor: {
+      type: Schema.Types.ObjectId,
+      ref: "Mentor",
+      default: null,
+      index: true,
+    },
 
     // ---------- Session ----------
     requestGroupId: { type: String, default: "", index: true },
@@ -67,9 +81,12 @@ const paymentSchema = new Schema(
     // when the mentor's share became withdrawable
     releasedAt: { type: Date, default: null },
     refundError: { type: String, default: "" },
-refundFailedAt: { type: Date, default: null },
+    refundFailedAt: { type: Date, default: null },
+    gatewayFee: { type: Number, default: 0 }, // Razorpay fee incl. GST, in rupees
+    gatewayTax: { type: Number, default: 0 }, // GST part (info only, already inside gatewayFee)
+    feeEstimated: { type: Boolean, default: false },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 paymentSchema.index({ mentor: 1, status: 1, paidAt: -1 });

@@ -8,7 +8,7 @@ const Mentor = require("../models/Mentor");
 const MentorReview = require("../models/MentorReview");
 const AdminAuditLog = require("../models/AdminAuditLog");
 const { sendMail, approvalEmail, rejectionEmail } = require("../utils/mailer");
-
+const { getFinanceSummary } = require("../utils/finance");
 const { REVIEW_CHECKS, isComplete } = MentorReview;
 
 // ============================================================
@@ -1110,7 +1110,7 @@ const toggleUser = async (req, res) => {
 const listPayments = async (req, res) => {
   try {
     const Payment = loadModel("Payment", "Payment", "Transaction");
-    const status = ["success", "pending", "failed"].includes(req.query.status)
+    const status = ["success", "pending", "failed", "refunded"].includes(req.query.status)
       ? req.query.status
       : "all";
     const { page, limit, skip } = getPage(req);
@@ -1119,7 +1119,7 @@ const listPayments = async (req, res) => {
       admin: req.session.admin,
       currentPage: "payments",
       pageTitle: "Payments",
-      pageSubtitle: "Track transactions and revenue",
+      pageSubtitle: "Track transactions, fees and platform profit",
       status,
     };
 
@@ -1128,7 +1128,7 @@ const listPayments = async (req, res) => {
         ...base,
         payments: [],
         modelMissing: true,
-        summary: { count: 0, revenue: 0, failed: 0 },
+        finance: {},
         pagination: makePagination(1, limit, 0),
         baseQuery: "",
       });
@@ -1137,35 +1137,21 @@ const listPayments = async (req, res) => {
     const filter = {};
     if (status === "success") filter.status = { $in: PAID_STATUSES };
     else if (status === "failed") filter.status = { $in: FAILED_STATUSES };
+    else if (status === "refunded") filter.status = "refunded";
     else if (status === "pending")
-      filter.status = {
-        $nin: [...PAID_STATUSES, ...FAILED_STATUSES, "refunded"],
-      };
+      filter.status = { $nin: [...PAID_STATUSES, ...FAILED_STATUSES, "refunded"] };
 
-    const [payments, total, count, revenueAgg, failed] = await Promise.all([
-      Payment.find(filter)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean(),
+    const [payments, total, finance] = await Promise.all([
+      Payment.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
       Payment.countDocuments(filter),
-      Payment.countDocuments(),
-      Payment.aggregate([
-        { $match: { status: { $in: PAID_STATUSES } } },
-        { $group: { _id: null, total: { $sum: "$amount" } } },
-      ]),
-      Payment.countDocuments({ status: { $in: FAILED_STATUSES } }),
+      getFinanceSummary(),
     ]);
 
     return res.render("admin/payments", {
       ...base,
       payments,
       modelMissing: false,
-      summary: {
-        count,
-        revenue: revenueAgg[0] ? revenueAgg[0].total : 0,
-        failed,
-      },
+      finance,
       pagination: makePagination(page, limit, total),
       baseQuery: buildQuery({ status }),
     });

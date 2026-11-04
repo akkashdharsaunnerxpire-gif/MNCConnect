@@ -1,4 +1,4 @@
-// middleware/adminAuth.js
+// middleware/adminMiddleware.js
 // Single auth guard for every protected /admin route.
 //  - Pages (GET)        -> redirect to the login page
 //  - API calls (PATCH / POST / ...) -> 401 JSON, so admin.js can show

@@ -36,12 +36,18 @@ const shouldShowIntro = () => !introSeen;
 const initialForm = {
   name: "",
   email: "",
+  gender: "", // "male" | "female"  (required when registering)
   mobileNumber: "",
   countryCode: "+91",
   password: "",
   confirmPassword: "",
   otp: "",
 };
+
+const GENDERS = [
+  { value: "male", label: "Male" },
+  { value: "female", label: "Female" },
+];
 
 export default function LoginRegister() {
   const navigate = useNavigate();
@@ -167,6 +173,7 @@ export default function LoginRegister() {
 
     if (isRegister) {
       if (!form.name.trim()) return setError("Please enter your full name.");
+      if (!form.gender) return setError("Please select your gender.");
       if (!form.mobileNumber.trim())
         return setError("Please enter your mobile number.");
       if (!/^[0-9]{10}$/.test(form.mobileNumber.trim()))
@@ -195,6 +202,7 @@ export default function LoginRegister() {
         ? {
             name: form.name.trim(),
             email: form.email.trim(),
+            gender: form.gender,
             mobile: form.mobileNumber.trim(),
             countryCode: form.countryCode,
             password: form.password,
@@ -253,8 +261,6 @@ export default function LoginRegister() {
       // update AuthContext BEFORE navigating
       const me = await refresh();
       if (!me) {
-        // login API said OK but /auth/me says not logged in
-        // = cookie was not saved / not sent
         throw new Error(
           "Login worked but your session was not saved. Please enable cookies and try again.",
         );
@@ -431,6 +437,40 @@ export default function LoginRegister() {
                     />
                   </div>
                 </label>
+              )}
+
+              {/* GENDER (register only) - decides which employee gets your single meeting */}
+              {isRegister && (
+                <div>
+                  <span className="mb-2 block text-xs font-semibold text-slate-700">
+                    Gender
+                  </span>
+                  <div className="grid grid-cols-2 gap-3">
+                    {GENDERS.map((g) => {
+                      const active = form.gender === g.value;
+                      return (
+                        <button
+                          key={g.value}
+                          type="button"
+                          onClick={() => updateForm("gender", g.value)}
+                          aria-pressed={active}
+                          className={`flex items-center justify-center gap-2 rounded-2xl border py-3.5 text-sm font-semibold transition ${
+                            active
+                              ? "border-cyan-500 bg-cyan-50 text-cyan-700 ring-4 ring-cyan-500/10"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-cyan-300"
+                          }`}
+                        >
+                          {active && <Check className="h-4 w-4" />}
+                          {g.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-1.5 text-xs text-slate-400">
+                    Single meetings are matched with an employee of the same
+                    gender. You cannot change this later.
+                  </p>
+                </div>
               )}
 
               <label className="block">

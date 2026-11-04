@@ -88,6 +88,7 @@ const sanitizeFresher = (user) => {
     mobile: user.mobile || "",
     countryCode: user.countryCode || "+91",
     role: "fresher",
+    gender: user.gender || "", // male | female (set at registration)
     profilePic: user.profilePic || "",
     isEmailVerified: user.isEmailVerified || false,
     walletBalance: user.walletBalance || 0,
@@ -148,7 +149,7 @@ const rewardReferrer = async ({ fresher, referralCode }) => {
 
 exports.registerFresher = async (req, res) => {
   try {
-    const { name, email, mobile, countryCode, password, referralInput } =
+    const { name, email, mobile, countryCode, password, referralInput, gender } =
       req.body;
 
     // ---------- validations ----------
@@ -167,6 +168,15 @@ exports.registerFresher = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Name must be between 2 and 50 characters.",
+      });
+    }
+
+    // gender is required: it decides which employee gets a single meeting
+    const cleanGender = String(gender || "").trim().toLowerCase();
+    if (!["male", "female"].includes(cleanGender)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select your gender (Male or Female).",
       });
     }
 
@@ -212,8 +222,6 @@ exports.registerFresher = async (req, res) => {
     const cleanMobile = cleanCountryCode + cleanMobileForValidation;
 
     // ---------- uniqueness checks ----------
-    // A "Temp" record is only the placeholder that send-otp created for this
-    // email. It is NOT a real account, so register is allowed to claim it.
     const existingFresher = await Fresher.findOne({ email: normalizedEmail });
     const isPlaceholder = Boolean(
       existingFresher && existingFresher.name === TEMP_NAME,
@@ -265,15 +273,15 @@ exports.registerFresher = async (req, res) => {
     let needsOtp = true;
 
     if (isPlaceholder) {
-      // email may already be verified through the inline send-otp / verify-otp step
       needsOtp = !existingFresher.isEmailVerified;
 
       existingFresher.name = cleanName;
+      existingFresher.gender = cleanGender;
       existingFresher.mobile = cleanMobile;
       existingFresher.countryCode = cleanCountryCode;
       existingFresher.password = hashedPassword;
       existingFresher.referralCode = myReferralCode;
-      existingFresher.walletBalance = WELCOME_BONUS; // Welcome Bonus
+      existingFresher.walletBalance = WELCOME_BONUS;
       existingFresher.welcomeBonusClaimed = true;
 
       if (needsOtp) {
@@ -289,17 +297,17 @@ exports.registerFresher = async (req, res) => {
       fresher = await Fresher.create({
         name: cleanName,
         email: normalizedEmail,
+        gender: cleanGender,
         mobile: cleanMobile,
         countryCode: cleanCountryCode,
         password: hashedPassword,
         referralCode: myReferralCode,
-        walletBalance: WELCOME_BONUS, // Welcome Bonus
+        walletBalance: WELCOME_BONUS,
         welcomeBonusClaimed: true,
 
-        // ✅ OTP Fields
         isEmailVerified: false,
         emailOtp: generateOtp(),
-        emailOtpExpiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 mins
+        emailOtpExpiresAt: new Date(Date.now() + 10 * 60 * 1000),
       });
     }
 
@@ -308,7 +316,6 @@ exports.registerFresher = async (req, res) => {
       try {
         await rewardReferrer({ fresher, referralCode: referralInput });
       } catch (refErr) {
-        // a referral problem must never block sign up
         console.error("Referral reward error:", refErr.message);
       }
     }
@@ -326,7 +333,7 @@ exports.registerFresher = async (req, res) => {
       });
     }
 
-    // ---------- ✅ Send OTP Email ----------
+    // ---------- send OTP email ----------
     const emailContent = otpVerificationEmail(cleanName, fresher.emailOtp);
     await sendMail({ to: normalizedEmail, toName: cleanName, ...emailContent });
 

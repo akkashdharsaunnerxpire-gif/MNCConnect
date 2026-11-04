@@ -28,7 +28,7 @@ const CATEGORIES = [
   "Logistics",
   "Real Estate",
   "Other",
-];
+];  
 
 const redirectWith = (res, type, text) =>
   res.redirect(`/admin/companies?${type}=${encodeURIComponent(text)}`);

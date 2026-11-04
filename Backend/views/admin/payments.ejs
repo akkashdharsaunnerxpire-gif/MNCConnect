@@ -1,34 +1,52 @@
 <%- include('partials/layout-start') %>
 
 <%
-  const fmt = (n) => Number(n || 0).toLocaleString('en-IN');
+  const fmt = (n) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
   const stBadge = (s) => {
     s = String(s || '').toLowerCase();
     if (['success', 'paid', 'captured', 'completed', 'successful'].includes(s)) return 'b-ok';
     if (['failed', 'cancelled', 'canceled', 'error'].includes(s)) return 'b-bad';
-    if (['refunded'].includes(s)) return 'b-purple';
+    if (s === 'refunded') return 'b-purple';
     return 'b-warn';
   };
   const tabs = [
     { k: 'all', l: 'All' },
     { k: 'success', l: 'Successful' },
     { k: 'pending', l: 'Pending' },
-    { k: 'failed', l: 'Failed' }
+    { k: 'failed', l: 'Failed' },
+    { k: 'refunded', l: 'Refunded' }
   ];
 %>
 
 <% if (modelMissing) { %>
     <div class="alert alert-warn">
         <i class="fas fa-triangle-exclamation"></i>
-        <div>Payment model was not found. Make sure <code>models/Payment.js</code> exists and exports a Mongoose model named <b>Payment</b>.</div>
+        <div>Payment model was not found. Make sure <code>models/Payment.js</code> exists.</div>
+    </div>
+<% } else { %>
+
+<div class="grid g-3 mb">
+    <div class="card stat t-primary"><div><small>Total Payments</small><h3><%= fmt(finance.count) %></h3></div><div class="stat-ico"><i class="fas fa-receipt"></i></div></div>
+    <div class="card stat t-ok"><div><small>Gross received (paid)</small><h3>₹<%= fmt(finance.gross) %></h3></div><div class="stat-ico"><i class="fas fa-indian-rupee-sign"></i></div></div>
+    <div class="card stat t-bad"><div><small>Refunded</small><h3>₹<%= fmt(finance.refunded) %></h3></div><div class="stat-ico"><i class="fas fa-rotate-left"></i></div></div>
+</div>
+
+<div class="grid g-3 mb">
+    <div class="card stat t-ok"><div><small>Platform profit (net, earned)</small><h3>₹<%= fmt(finance.netProfit) %></h3>
+        <small class="muted">Fee ₹<%= fmt(finance.grossProfit) %> − gateway ₹<%= fmt(finance.gatewayCost) %></small></div><div class="stat-ico"><i class="fas fa-chart-line"></i></div></div>
+    <div class="card stat t-primary"><div><small>Profit on hold (sessions pending)</small><h3>₹<%= fmt(finance.heldProfit) %></h3></div><div class="stat-ico"><i class="fas fa-hourglass-half"></i></div></div>
+    <div class="card stat t-primary"><div><small>Mentors owed now</small><h3>₹<%= fmt(finance.mentorOwed) %></h3>
+        <small class="muted">Earned ₹<%= fmt(finance.mentorEarned) %> · Paid ₹<%= fmt(finance.mentorPaid) %></small></div><div class="stat-ico"><i class="fas fa-users"></i></div></div>
+</div>
+
+<% if (finance.estimatedRows > 0) { %>
+    <div class="alert alert-warn" style="margin-bottom:14px;">
+        <i class="fas fa-circle-info"></i>
+        <div><%= finance.estimatedRows %> payment(s) use an estimated gateway fee. <a href="/admin/finance">Open Finance</a> and click "Sync fees" for exact numbers.</div>
     </div>
 <% } %>
 
-<div class="grid g-3 mb">
-    <div class="card stat t-primary"><div><small>Total Payments</small><h3><%= fmt(summary.count) %></h3></div><div class="stat-ico"><i class="fas fa-receipt"></i></div></div>
-    <div class="card stat t-ok"><div><small>Revenue (successful)</small><h3>₹<%= fmt(summary.revenue) %></h3></div><div class="stat-ico"><i class="fas fa-indian-rupee-sign"></i></div></div>
-    <div class="card stat t-bad"><div><small>Failed</small><h3><%= fmt(summary.failed) %></h3></div><div class="stat-ico"><i class="fas fa-circle-xmark"></i></div></div>
-</div>
+<% } %>
 
 <div class="tabs">
     <% tabs.forEach(function (t) { %>
@@ -41,17 +59,20 @@
     <div class="table-wrap">
         <table>
             <thead>
-                <tr><th>Payment ID</th><th>Payer</th><th>Amount</th><th>Status</th><th>Date</th></tr>
+                <tr><th>Payment ID</th><th>Fresher</th><th>Amount</th><th>Platform fee</th><th>Mentor share</th><th>Gateway</th><th>Status</th><th>Date</th></tr>
             </thead>
             <tbody>
             <% payments.forEach(function (p) {
-                const pid = p.paymentId || p.razorpayPaymentId || p.razorpay_payment_id || p.transactionId || p.orderId || String(p._id);
-                const payer = p.email || p.userEmail || p.name || (p.user ? String(p.user) : '') || (p.fresher ? String(p.fresher) : '');
+                const pid = p.razorpayPaymentId || p.razorpayOrderId || String(p._id);
+                const payer = p.fresherName || p.fresherEmail || (p.fresher ? String(p.fresher) : '');
             %>
                 <tr>
                     <td class="mono"><%= pid %></td>
-                    <td class="muted"><%= payer || '—' %></td>
-                    <td><b><%= (p.currency && p.currency !== 'INR' ? p.currency + ' ' : '₹') %><%= fmt(p.amount) %></b></td>
+                    <td class="muted"><%= payer || '—' %><% if (p.method === 'wallet') { %> <span class="small">(wallet)</span><% } %></td>
+                    <td><b>₹<%= fmt(p.amount) %></b></td>
+                    <td class="muted">₹<%= fmt(p.platformFee) %></td>
+                    <td class="muted">₹<%= fmt(p.mentorEarning) %></td>
+                    <td class="muted">₹<%= fmt(p.gatewayFee) %><%= p.feeEstimated ? ' (est.)' : '' %></td>
                     <td><span class="badge <%= stBadge(p.status) %>"><i class="dot"></i><%= p.status || 'unknown' %></span></td>
                     <td class="muted small"><%= p.createdAt ? new Date(p.createdAt).toLocaleString('en-GB') : '—' %></td>
                 </tr>
@@ -66,7 +87,7 @@
 </div>
 
 <p class="muted small" style="margin-top:14px;">
-    Amounts are shown exactly as stored in the database. If you store amounts in paise, divide by 100 in the controller.
+    Profit is counted only after a session is completed. Held money may still be refunded, so it is not counted as profit.
 </p>
 
 <%- include('partials/layout-end') %>

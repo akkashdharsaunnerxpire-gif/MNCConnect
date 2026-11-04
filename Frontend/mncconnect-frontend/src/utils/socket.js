@@ -19,4 +19,4 @@ socket.on("connect_error", (err) =>
 export const reconnectSocket = () => {
   if (socket.connected) socket.disconnect();
   socket.connect();
-};
+};    

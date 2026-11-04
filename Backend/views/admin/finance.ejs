@@ -1,0 +1,107 @@
+<%- include('partials/layout-start') %>
+
+<%
+  const fmt = (n) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+%>
+
+<div class="grid g-3 mb">
+    <div class="card stat t-ok"><div><small>Safe to take as company profit</small><h3>₹<%= fmt(finance.profitAvailable) %></h3></div><div class="stat-ico"><i class="fas fa-building-columns"></i></div></div>
+    <div class="card stat t-primary"><div><small>Must stay in bank (mentors + refund hold)</small><h3>₹<%= fmt(finance.mustKeep) %></h3></div><div class="stat-ico"><i class="fas fa-lock"></i></div></div>
+    <div class="card stat t-primary"><div><small>Already taken by company</small><h3>₹<%= fmt(finance.companyTaken) %></h3></div><div class="stat-ico"><i class="fas fa-vault"></i></div></div>
+</div>
+
+<div class="card" style="padding:18px;margin-bottom:16px;">
+    <h4 style="margin-bottom:10px;">Profit calculation (<%= feePercent %>% platform fee)</h4>
+    <div class="table-wrap">
+    <table>
+        <tbody>
+            <tr><td>Platform fee from completed sessions</td><td><b>₹<%= fmt(finance.grossProfit) %></b></td></tr>
+            <tr><td>− Razorpay gateway cost <% if (finance.estimatedRows) { %><span class="muted small">(<%= finance.estimatedRows %> estimated)</span><% } %></td><td><b>₹<%= fmt(finance.gatewayCost) %></b></td></tr>
+            <tr><td>= Net platform profit</td><td><b>₹<%= fmt(finance.netProfit) %></b></td></tr>
+            <tr><td>− Already taken by company</td><td><b>₹<%= fmt(finance.companyTaken) %></b></td></tr>
+            <tr><td>= Safe to take now</td><td><b>₹<%= fmt(finance.profitAvailable) %></b></td></tr>
+            <tr><td class="muted">Profit on hold (sessions not finished)</td><td class="muted">₹<%= fmt(finance.heldProfit) %></td></tr>
+            <tr><td class="muted">Mentors: earned / paid / pending request / owed</td>
+                <td class="muted">₹<%= fmt(finance.mentorEarned) %> / ₹<%= fmt(finance.mentorPaid) %> / ₹<%= fmt(finance.mentorRequested) %> / ₹<%= fmt(finance.mentorOwed) %></td></tr>
+        </tbody>
+    </table>
+    </div>
+    <div style="margin-top:12px;">
+        <button type="button" id="syncBtn" style="cursor:pointer;">Sync real Razorpay fees</button>
+    </div>
+</div>
+
+<div class="card" style="padding:18px;margin-bottom:16px;">
+    <h4 style="margin-bottom:10px;">Move profit to company account</h4>
+    <p class="muted small">1) Transfer from your Razorpay-settled bank to the company account. 2) Enter the bank reference here. The system blocks anything above the safe amount.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+        <input id="coAmount" type="number" min="1" step="0.01" placeholder="Amount" style="padding:8px;">
+        <input id="coRef" placeholder="Bank / UTR reference" style="padding:8px;">
+        <input id="coNote" placeholder="Note (optional)" style="padding:8px;">
+        <button type="button" id="coBtn" style="cursor:pointer;">Record payout</button>
+    </div>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-bottom:16px;">
+    <div class="card" style="padding:18px;">
+        <h4 style="margin-bottom:10px;">Top mentors (completed sessions)</h4>
+        <% if (topMentors.length) { %>
+        <div class="table-wrap"><table>
+            <thead><tr><th>Mentor</th><th>Sessions</th><th>Mentor earned</th><th>Platform fee</th></tr></thead>
+            <tbody>
+            <% topMentors.forEach(function (m) { %>
+                <tr><td><b><%= m.name %></b><br><span class="muted small"><%= m.email %></span></td>
+                    <td><%= m.sessions %></td><td>₹<%= fmt(m.earned) %></td><td>₹<%= fmt(m.fee) %></td></tr>
+            <% }) %>
+            </tbody>
+        </table></div>
+        <% } else { %><p class="muted small">No completed sessions yet.</p><% } %>
+    </div>
+
+    <div class="card" style="padding:18px;">
+        <h4 style="margin-bottom:10px;">Company payout history</h4>
+        <% if (payouts.length) { %>
+        <div class="table-wrap"><table>
+            <thead><tr><th>Date</th><th>Amount</th><th>Reference</th><th>By</th></tr></thead>
+            <tbody>
+            <% payouts.forEach(function (p) { %>
+                <tr><td class="muted small"><%= new Date(p.paidAt).toLocaleString('en-GB') %></td>
+                    <td><b>₹<%= fmt(p.amount) %></b></td><td class="mono"><%= p.reference %></td>
+                    <td class="muted small"><%= p.paidBy %></td></tr>
+            <% }) %>
+            </tbody>
+        </table></div>
+        <% } else { %><p class="muted small">No company payouts yet.</p><% } %>
+    </div>
+</div>
+
+<script>
+    async function post(url, body) {
+        try {
+            var res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body || {})
+            });
+            var data = await res.json().catch(function () { return {}; });
+            alert(data.message || (res.ok ? 'Done' : 'Failed'));
+            if (res.ok) location.reload();
+        } catch (e) { alert('Network error. Please try again.'); }
+    }
+
+    document.getElementById('syncBtn').addEventListener('click', function () {
+        post('/admin/finance/sync-fees');
+    });
+
+    document.getElementById('coBtn').addEventListener('click', function () {
+        var amount = document.getElementById('coAmount').value;
+        var ref = document.getElementById('coRef').value.trim();
+        if (!amount || !ref) return alert('Enter amount and reference');
+        if (!confirm('Record ₹' + amount + ' as taken by the company? This cannot be undone.')) return;
+        post('/admin/finance/company-payout', {
+            amount: amount, reference: ref, note: document.getElementById('coNote').value
+        });
+    });
+</script>
+
+<%- include('partials/layout-end') %>

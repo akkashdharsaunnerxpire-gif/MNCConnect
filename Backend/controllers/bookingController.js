@@ -789,20 +789,35 @@ exports.createRequest = async (req, res) => {
       ? await Fresher.findById(fresherId).select("name email gender").lean()
       : null;
 
-    const fresherGender =
-      [fresherDoc?.gender, sd.gender]
-        .map(norm)
-        .find((g) => g === "male" || g === "female") || "";
+    // ---- WHO may receive this request (gender rule) ----
+    //  single : the fresher's OWN gender from the profile (boy -> male employee,
+    //           girl -> female employee). Old accounts without gender: use the form value.
+    //  group  : whatever the host selected ("" = no preference, any employee)
+    const profileGender = norm(fresherDoc?.gender);
+    const profileKnown = profileGender === "male" || profileGender === "female";
+    const pickedGender = norm(sd.gender);
+    const pickedKnown = pickedGender === "male" || pickedGender === "female";
+
+    let fresherGender = "";
+    if (mode === "group") {
+      fresherGender = pickedKnown ? pickedGender : ""; // "" = any
+    } else {
+      fresherGender = profileKnown
+        ? profileGender
+        : pickedKnown
+          ? pickedGender
+          : "";
+    }
 
     const department = String(sd.role || "")
       .trim()
       .replace(/\s+/g, " ");
 
     if (!preferredMentor) {
-      if (!fresherGender) return reject(400, "Please select your gender.");
+      if (mode === "single" && !fresherGender)
+        return reject(400, "Please select your gender.");
       if (!department) return reject(400, "Please select a department.");
     }
-
     const hostName = fresherDoc?.name || body.requester?.fullName || "Fresher";
 
     const booking = await Booking.create({

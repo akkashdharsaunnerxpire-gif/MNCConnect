@@ -1,8 +1,7 @@
 // controllers/paymentController.js
 //
 // Razorpay createOrder / verifyPayment keep the SAME request and response shape.
-// NEW: payWithWallet  -> pay a session fully from the fresher's wallet balance.
-//      If the balance is less than the amount, it throws an "insufficient balance" error.
+// payWithWallet  -> pay a session fully from the fresher's wallet balance.
 //
 // Extra exports used by other controllers:
 //   linkPaymentToRequest(...)   call when a session request is created
@@ -184,6 +183,17 @@ exports.verifyPayment = async (req, res) => {
         payment.method = details.method || "";
         payment.payerEmail = details.email || "";
         payment.payerContact = details.contact || "";
+
+        // Razorpay "fee" already includes GST. It can be empty right after payment.
+        if (details.fee !== null && details.fee !== undefined) {
+          payment.gatewayFee = Number(details.fee) / 100;
+          payment.gatewayTax = Number(details.tax || 0) / 100;
+          payment.feeEstimated = false;
+        } else {
+          const pct = Number(process.env.RAZORPAY_FEE_PERCENT || 2);
+          payment.gatewayFee = Math.round(payment.amount * (pct / 100) * 1.18 * 100) / 100;
+          payment.feeEstimated = true; // replaced by the real fee when admin clicks "Sync fees"
+        }
       } catch (_) { /* optional */ }
 
       await payment.save();
@@ -352,7 +362,7 @@ const linkPaymentToRequest = async ({
         ...buildSessionFields({ date, time, duration }),
       },
     },
-   { returnDocument: "after" }
+    { returnDocument: "after" }
   );
 };
 
