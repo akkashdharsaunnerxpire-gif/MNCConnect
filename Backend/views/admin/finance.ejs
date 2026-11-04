@@ -4,28 +4,61 @@
   const fmt = (n) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 %>
 
+<% if (convenienceMode === 'off') { %>
+<div class="alert alert-warn" style="margin-bottom:14px;">
+    <i class="fas fa-circle-info"></i>
+    <div>Convenience fee is <b>OFF</b> (<code>CONVENIENCE_FEE_MODE=off</code>). Razorpay charges are fully borne by the platform.</div>
+</div>
+<% } %>
+
+<!-- 1) Revenue / gateway / fees -->
 <div class="grid g-3 mb">
+    <div class="card stat t-primary"><div><small>Total session revenue (paid, not refunded)</small><h3>₹<%= fmt(finance.sessionRevenue) %></h3>
+        <small class="muted">Completed ₹<%= fmt(finance.completedRevenue) %> · customers paid ₹<%= fmt(finance.checkoutGross) %> incl. fees</small></div><div class="stat-ico"><i class="fas fa-indian-rupee-sign"></i></div></div>
+    <div class="card stat t-ok"><div><small>Convenience fees collected (after refunds)</small><h3>₹<%= fmt(finance.convenienceRetained) %></h3>
+        <small class="muted">Gross ₹<%= fmt(finance.convenienceCollected) %> − refunded ₹<%= fmt(finance.refundedConvenience) %></small></div><div class="stat-ico"><i class="fas fa-hand-holding-dollar"></i></div></div>
+    <div class="card stat t-bad"><div><small>Actual Razorpay gateway charges</small><h3>₹<%= fmt(finance.gatewayCost) %></h3>
+        <% if (finance.estimatedRows) { %><small class="muted"><%= finance.estimatedRows %> estimated</small><% } %></div><div class="stat-ico"><i class="fas fa-credit-card"></i></div></div>
+</div>
+
+<!-- 2) Unrecovered / profit / mentors -->
+<div class="grid g-3 mb">
+    <div class="card stat <%= finance.unrecoveredGatewayCharges > 0 ? 't-bad' : 't-ok' %>"><div><small>Unrecovered gateway charges</small><h3>₹<%= fmt(finance.unrecoveredGatewayCharges) %></h3>
+        <% if (finance.convenienceSurplus > 0) { %><small class="muted">Surplus (fees &gt; charges): ₹<%= fmt(finance.convenienceSurplus) %></small><% } %></div><div class="stat-ico"><i class="fas fa-triangle-exclamation"></i></div></div>
+    <div class="card stat t-ok"><div><small>Platform profit (net)</small><h3>₹<%= fmt(finance.netProfit) %></h3>
+        <small class="muted">On hold: ₹<%= fmt(finance.heldProfit) %></small></div><div class="stat-ico"><i class="fas fa-chart-line"></i></div></div>
+    <div class="card stat t-primary"><div><small>Mentor earnings</small><h3>₹<%= fmt(finance.mentorEarned) %></h3>
+        <small class="muted">Paid ₹<%= fmt(finance.mentorPaid) %> · owed ₹<%= fmt(finance.mentorOwed) %></small></div><div class="stat-ico"><i class="fas fa-users"></i></div></div>
+</div>
+
+<!-- 3) Refunds + cash position -->
+<div class="grid g-3 mb">
+    <div class="card stat t-bad"><div><small>Refunds (returned to customers)</small><h3>₹<%= fmt(finance.refundedTotal) %></h3>
+        <small class="muted">Session ₹<%= fmt(finance.refunded) %> · convenience ₹<%= fmt(finance.refundedConvenience) %></small></div><div class="stat-ico"><i class="fas fa-rotate-left"></i></div></div>
     <div class="card stat t-ok"><div><small>Safe to take as company profit</small><h3>₹<%= fmt(finance.profitAvailable) %></h3></div><div class="stat-ico"><i class="fas fa-building-columns"></i></div></div>
-    <div class="card stat t-primary"><div><small>Must stay in bank (mentors + refund hold)</small><h3>₹<%= fmt(finance.mustKeep) %></h3></div><div class="stat-ico"><i class="fas fa-lock"></i></div></div>
-    <div class="card stat t-primary"><div><small>Already taken by company</small><h3>₹<%= fmt(finance.companyTaken) %></h3></div><div class="stat-ico"><i class="fas fa-vault"></i></div></div>
+    <div class="card stat t-primary"><div><small>Must stay in bank (mentors + refund hold)</small><h3>₹<%= fmt(finance.mustKeep) %></h3>
+        <small class="muted">Already taken by company ₹<%= fmt(finance.companyTaken) %></small></div><div class="stat-ico"><i class="fas fa-lock"></i></div></div>
 </div>
 
 <div class="card" style="padding:18px;margin-bottom:16px;">
-    <h4 style="margin-bottom:10px;">Profit calculation (<%= feePercent %>% platform fee)</h4>
+    <h4 style="margin-bottom:10px;">Profit calculation (<%= feePercent %>% platform fee, convenience fee mode: <%= convenienceMode %>)</h4>
     <div class="table-wrap">
     <table>
         <tbody>
-            <tr><td>Platform fee from completed sessions</td><td><b>₹<%= fmt(finance.grossProfit) %></b></td></tr>
+            <tr><td>Platform fee from completed sessions (session price only)</td><td><b>₹<%= fmt(finance.grossProfit) %></b></td></tr>
+            <tr><td>+ Convenience fees that are ours (completed sessions, or kept after a refund)</td><td><b>₹<%= fmt(finance.convenienceRecognized) %></b></td></tr>
             <tr><td>− Razorpay gateway cost <% if (finance.estimatedRows) { %><span class="muted small">(<%= finance.estimatedRows %> estimated)</span><% } %></td><td><b>₹<%= fmt(finance.gatewayCost) %></b></td></tr>
             <tr><td>= Net platform profit</td><td><b>₹<%= fmt(finance.netProfit) %></b></td></tr>
             <tr><td>− Already taken by company</td><td><b>₹<%= fmt(finance.companyTaken) %></b></td></tr>
             <tr><td>= Safe to take now</td><td><b>₹<%= fmt(finance.profitAvailable) %></b></td></tr>
             <tr><td class="muted">Profit on hold (sessions not finished)</td><td class="muted">₹<%= fmt(finance.heldProfit) %></td></tr>
+            <tr><td class="muted">Convenience fees on hold (sessions not finished, may still be refunded)</td><td class="muted">₹<%= fmt(finance.convenienceHeld) %></td></tr>
             <tr><td class="muted">Mentors: earned / paid / pending request / owed</td>
                 <td class="muted">₹<%= fmt(finance.mentorEarned) %> / ₹<%= fmt(finance.mentorPaid) %> / ₹<%= fmt(finance.mentorRequested) %> / ₹<%= fmt(finance.mentorOwed) %></td></tr>
         </tbody>
     </table>
     </div>
+    <p class="muted small" style="margin-top:10px;">Mentor earnings and the platform fee are always calculated from the original session price. Convenience fees never reach mentors.</p>
     <div style="margin-top:12px;">
         <button type="button" id="syncBtn" style="cursor:pointer;">Sync real Razorpay fees</button>
     </div>

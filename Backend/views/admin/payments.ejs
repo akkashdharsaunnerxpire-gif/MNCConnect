@@ -27,14 +27,16 @@
 
 <div class="grid g-3 mb">
     <div class="card stat t-primary"><div><small>Total Payments</small><h3><%= fmt(finance.count) %></h3></div><div class="stat-ico"><i class="fas fa-receipt"></i></div></div>
-    <div class="card stat t-ok"><div><small>Gross received (paid)</small><h3>₹<%= fmt(finance.gross) %></h3></div><div class="stat-ico"><i class="fas fa-indian-rupee-sign"></i></div></div>
-    <div class="card stat t-bad"><div><small>Refunded</small><h3>₹<%= fmt(finance.refunded) %></h3></div><div class="stat-ico"><i class="fas fa-rotate-left"></i></div></div>
+    <div class="card stat t-ok"><div><small>Session revenue (paid, not refunded)</small><h3>₹<%= fmt(finance.sessionRevenue) %></h3>
+        <small class="muted">Convenience fees kept ₹<%= fmt(finance.convenienceRetained) %></small></div><div class="stat-ico"><i class="fas fa-indian-rupee-sign"></i></div></div>
+    <div class="card stat t-bad"><div><small>Refunded (to customers)</small><h3>₹<%= fmt(finance.refundedTotal) %></h3>
+        <small class="muted">Session ₹<%= fmt(finance.refunded) %> · convenience ₹<%= fmt(finance.refundedConvenience) %></small></div><div class="stat-ico"><i class="fas fa-rotate-left"></i></div></div>
 </div>
 
 <div class="grid g-3 mb">
     <div class="card stat t-ok"><div><small>Platform profit (net, earned)</small><h3>₹<%= fmt(finance.netProfit) %></h3>
-        <small class="muted">Fee ₹<%= fmt(finance.grossProfit) %> − gateway ₹<%= fmt(finance.gatewayCost) %></small></div><div class="stat-ico"><i class="fas fa-chart-line"></i></div></div>
-    <div class="card stat t-primary"><div><small>Profit on hold (sessions pending)</small><h3>₹<%= fmt(finance.heldProfit) %></h3></div><div class="stat-ico"><i class="fas fa-hourglass-half"></i></div></div>
+        <small class="muted">Fee ₹<%= fmt(finance.grossProfit) %> + conv. ₹<%= fmt(finance.convenienceRecognized) %> − gateway ₹<%= fmt(finance.gatewayCost) %></small></div><div class="stat-ico"><i class="fas fa-chart-line"></i></div></div>
+    <div class="card stat <%= finance.unrecoveredGatewayCharges > 0 ? 't-bad' : 't-ok' %>"><div><small>Unrecovered gateway charges</small><h3>₹<%= fmt(finance.unrecoveredGatewayCharges) %></h3></div><div class="stat-ico"><i class="fas fa-triangle-exclamation"></i></div></div>
     <div class="card stat t-primary"><div><small>Mentors owed now</small><h3>₹<%= fmt(finance.mentorOwed) %></h3>
         <small class="muted">Earned ₹<%= fmt(finance.mentorEarned) %> · Paid ₹<%= fmt(finance.mentorPaid) %></small></div><div class="stat-ico"><i class="fas fa-users"></i></div></div>
 </div>
@@ -59,7 +61,7 @@
     <div class="table-wrap">
         <table>
             <thead>
-                <tr><th>Payment ID</th><th>Fresher</th><th>Amount</th><th>Platform fee</th><th>Mentor share</th><th>Gateway</th><th>Status</th><th>Date</th></tr>
+                <tr><th>Payment ID</th><th>Fresher</th><th>Session price</th><th>Conv. fee</th><th>Customer paid</th><th>Platform fee</th><th>Mentor share</th><th>Razorpay cost</th><th>Status</th><th>Date</th></tr>
             </thead>
             <tbody>
             <% payments.forEach(function (p) {
@@ -70,6 +72,8 @@
                     <td class="mono"><%= pid %></td>
                     <td class="muted"><%= payer || '—' %><% if (p.method === 'wallet') { %> <span class="small">(wallet)</span><% } %></td>
                     <td><b>₹<%= fmt(p.amount) %></b></td>
+                    <td class="muted">₹<%= fmt(p.convenienceFee) %></td>
+                    <td class="muted">₹<%= fmt(p.checkoutAmount > 0 ? p.checkoutAmount : p.amount) %></td>
                     <td class="muted">₹<%= fmt(p.platformFee) %></td>
                     <td class="muted">₹<%= fmt(p.mentorEarning) %></td>
                     <td class="muted">₹<%= fmt(p.gatewayFee) %><%= p.feeEstimated ? ' (est.)' : '' %></td>
@@ -88,6 +92,7 @@
 
 <p class="muted small" style="margin-top:14px;">
     Profit is counted only after a session is completed. Held money may still be refunded, so it is not counted as profit.
+    Mentor share and platform fee are always calculated from the session price, never from the convenience fee.
 </p>
 
 <%- include('partials/layout-end') %>

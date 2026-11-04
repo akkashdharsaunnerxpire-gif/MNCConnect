@@ -4,6 +4,7 @@ const Payment = require("../models/Payment");
 const CompanyPayout = require("../models/CompanyPayout");
 const AdminAuditLog = require("../models/AdminAuditLog");
 const { getFinanceSummary, getTopMentors, round2 } = require("../utils/finance");
+const { getConfig, toPaise } = require("../utils/pricing");
 
 const actorOf = (req) => {
   const a = (req.session && req.session.admin) || {};
@@ -44,6 +45,7 @@ exports.showFinance = async (req, res) => {
       payouts,
       topMentors,
       feePercent: Number(process.env.PLATFORM_FEE_PERCENT || 25),
+      convenienceMode: getConfig().mode,
     });
   } catch (error) {
     console.error("Finance page error:", error);
@@ -91,7 +93,9 @@ exports.recordCompanyPayout = async (req, res) => {
   }
 };
 
-// POST /admin/finance/sync-fees  -> pulls the REAL Razorpay fee for payments that have none / only an estimate
+// POST /admin/finance/sync-fees
+// Pulls the REAL Razorpay fee (and re-checks the paid amount) for payments that have
+// no fee yet, only an estimate, or were saved without an amount check.
 exports.syncGatewayFees = async (req, res) => {
   try {
     const { RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET } = process.env;
@@ -99,26 +103,51 @@ exports.syncGatewayFees = async (req, res) => {
       return res.status(500).json({ success: false, message: "Razorpay keys are not configured." });
     }
     const rzp = new Razorpay({ key_id: RAZORPAY_KEY_ID, key_secret: RAZORPAY_KEY_SECRET });
+    const cfg = getConfig();
 
     const rows = await Payment.find({
       status: { $in: ["paid", "refunded"] },
       razorpayPaymentId: /^pay_/,
-      $or: [{ gatewayFee: 0 }, { feeEstimated: true }],
-    })
-      .select("razorpayPaymentId")
-      .limit(50);
+      $or: [
+        { gatewayFee: 0, gatewayFeeSyncedAt: null }, // never synced (also catches old documents)
+        { feeEstimated: true },
+        { amountVerified: false, createdAt: { $gte: new Date("2020-01-01") }, convenienceFeeMode: { $in: ["platform", "razorpay_bearer"] } },
+      ],
+    }).limit(50);
 
     let updated = 0;
     for (const p of rows) {
       try {
         const d = await rzp.payments.fetch(p.razorpayPaymentId);
-        if (d && d.fee !== null && d.fee !== undefined) {
+        if (!d) continue;
+
+        if (d.fee !== null && d.fee !== undefined) {
           p.gatewayFee = Number(d.fee) / 100;
           p.gatewayTax = Number(d.tax || 0) / 100;
           p.feeEstimated = false;
-          await p.save();
-          updated++;
+          p.gatewayFeeSyncedAt = new Date();
         }
+
+        // re-check the amount that was really paid
+        if (!p.amountVerified && d.amount) {
+          const paidPaise = Number(d.amount);
+          const orderPaise = toPaise(Number(p.orderAmount) > 0 ? p.orderAmount : p.amount);
+
+          if (p.convenienceFeeMode === "razorpay_bearer") {
+            const diff = paidPaise - orderPaise;
+            if (diff >= 0 && diff <= cfg.maxPaise) {
+              p.convenienceFee = diff / 100;
+              p.gatewayFeeCollected = diff / 100;
+              p.checkoutAmount = paidPaise / 100;
+              p.amountVerified = true;
+            }
+          } else if (paidPaise === orderPaise) {
+            p.amountVerified = true;
+          }
+        }
+
+        await p.save();
+        updated++;
       } catch (_) {
         /* skip this one */
       }

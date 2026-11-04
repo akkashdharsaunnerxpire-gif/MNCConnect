@@ -1,15 +1,19 @@
 // models/Payment.js
 // One document per Razorpay order (or wallet payment). Amounts are stored in RUPEES.
 //
+//   amount            = ORIGINAL SESSION PRICE (unchanged meaning, platform fee + mentor earning come from this ONLY)
+//   convenienceFee    = extra fee charged to the fresher to recover gateway cost (0 for wallet / when off)
+//   checkoutAmount    = amount + convenienceFee  (what the customer really paid; 0 on old docs => use amount)
+//   gatewayFeeCollected = convenience fee actually collected from the customer (set only when verified paid)
+//   gatewayFee / gatewayTax = what Razorpay really charged US (incl. GST)
+//
 // Lifecycle:
 //   created  -> order created, user is at the checkout
-//   paid     -> signature verified (money is held by the platform)
-//   failed   -> checkout failed / signature invalid
+//   paid     -> signature + amounts verified (money is held by the platform)
+//   failed   -> checkout failed / abandoned / signature invalid / amount mismatch
 //   refunded -> refunded (Razorpay refund API, wallet refund, or manually from the dashboard)
 //
-// A paid payment belongs to a mentor once the mentor accepts the session
-// (mentor + sessionStatus "upcoming"). When the session is confirmed / auto-confirmed
-// sessionStatus becomes "completed" and the mentor's share becomes withdrawable.
+// OLD DOCUMENTS: every new field has a default, so nothing needs migrating.
 
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
@@ -23,11 +27,29 @@ const paymentSchema = new Schema(
     receipt: { type: String, default: "" },
 
     // ---------- Money (rupees) ----------
-    amount: { type: Number, required: true, min: 0 },
+    amount: { type: Number, required: true, min: 0 }, // ORIGINAL session price
     currency: { type: String, default: "INR" },
     platformFeePercent: { type: Number, default: 25 },
-    platformFee: { type: Number, default: 0 },
-    mentorEarning: { type: Number, default: 0 },
+    platformFee: { type: Number, default: 0 }, // from `amount` only
+    mentorEarning: { type: Number, default: 0 }, // from `amount` only
+
+    // ---------- Convenience fee (NEW) ----------
+    convenienceFeeMode: {
+      type: String,
+      enum: ["", "none", "platform", "razorpay_bearer"],
+      default: "",
+    },
+    convenienceFee: { type: Number, default: 0, min: 0 },
+    checkoutAmount: { type: Number, default: 0, min: 0 },
+    orderAmount: { type: Number, default: 0, min: 0 }, // amount the Razorpay ORDER was created for
+    gatewayFeeCollected: { type: Number, default: 0, min: 0 },
+    convenienceFeeRefunded: { type: Number, default: 0, min: 0 },
+    refundAmount: { type: Number, default: 0, min: 0 }, // total returned to the fresher
+    amountVerified: { type: Boolean, default: false }, // true once order/payment amounts were checked against Razorpay
+    verifyRejected: { type: Boolean, default: false }, // amount mismatch -> never flip to paid again
+
+    // one booking / join may claim a paid payment, ONCE (prevents duplicate bookings)
+    claimedBy: { type: String, default: "", index: true },
 
     // ---------- Status ----------
     status: {
@@ -82,14 +104,18 @@ const paymentSchema = new Schema(
     releasedAt: { type: Date, default: null },
     refundError: { type: String, default: "" },
     refundFailedAt: { type: Date, default: null },
+
+    // ---------- What Razorpay charged us ----------
     gatewayFee: { type: Number, default: 0 }, // Razorpay fee incl. GST, in rupees
     gatewayTax: { type: Number, default: 0 }, // GST part (info only, already inside gatewayFee)
     feeEstimated: { type: Boolean, default: false },
+    gatewayFeeSyncedAt: { type: Date, default: null },
   },
   { timestamps: true },
 );
 
 paymentSchema.index({ mentor: 1, status: 1, paidAt: -1 });
 paymentSchema.index({ mentor: 1, status: 1, sessionStatus: 1 });
+paymentSchema.index({ status: 1, createdAt: 1 }); // reconcile / abandoned job
 
 module.exports = mongoose.model("Payment", paymentSchema);

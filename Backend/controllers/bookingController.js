@@ -25,7 +25,16 @@ const { splitAmount } = require("../utils/wallet");
 const {
   linkPaymentToRequest,
   assignMentorToRequest,
+  claimPayment,
+  reconcileStaleOrders,
 } = require("./paymentController");
+const {
+  refundableAmountOf,
+  checkoutOf,
+  getConfig,
+  toPaise,
+  round2,
+} = require("../utils/pricing");
 
 /* ============================ CONFIG ============================ */
 const MENTOR_PUBLIC_FIELDS =
@@ -365,7 +374,8 @@ const refundPayment = async (payment, reason = "", options = {}) => {
       $set: {
         status: "refunded",
         sessionStatus: "cancelled",
-        ...(toWallet ? { refundMethod: "wallet" } : {}),
+        refundMethod: toWallet ? "wallet" : "original",
+        refundedAt: new Date(),
       },
     },
     { returnDocument: "before" },
@@ -377,7 +387,7 @@ const refundPayment = async (payment, reason = "", options = {}) => {
   }
 
   const unlock = async () => {
-    const back = { status: "paid" };
+    const back = { status: "paid", refundMethod: "", refundedAt: null };
     if (before.sessionStatus) back.sessionStatus = before.sessionStatus;
     await Payment.updateOne(
       { _id: before._id, status: "refunded" },
@@ -385,7 +395,19 @@ const refundPayment = async (payment, reason = "", options = {}) => {
     ).catch(() => {});
   };
 
-  const amount = Number(before.amount) || 0;
+  // session price + (convenience fee if CONVENIENCE_FEE_REFUNDABLE). Wallet payments have no fee.
+  const sessionAmount = Number(before.amount) || 0;
+  const feePart = isWalletPayment(before)
+    ? 0
+    : Number(before.convenienceFee) || 0;
+  const refundFee = getConfig().refundable ? feePart : 0;
+  const amount = round2(sessionAmount + refundFee);
+
+  const markDone = () =>
+    Payment.updateOne(
+      { _id: before._id },
+      { $set: { refundAmount: amount, convenienceFeeRefunded: refundFee } },
+    ).catch(() => {});
 
   try {
     if (toWallet) {
@@ -397,6 +419,7 @@ const refundPayment = async (payment, reason = "", options = {}) => {
         { _id: before.fresher },
         { $inc: { walletBalance: amount, totalRefunds: amount } },
       );
+      await markDone();
       emitToUser(String(before.fresher), "wallet:updated", { amount });
       return "refunded";
     }
@@ -406,18 +429,23 @@ const refundPayment = async (payment, reason = "", options = {}) => {
       return "failed";
     }
 
+    // never ask Razorpay for more than it captured
+    const paise = Math.min(toPaise(amount), toPaise(checkoutOf(before)));
     await getRazorpay().payments.refund(before.razorpayPaymentId, {
-      amount: Math.round(amount * 100),
+      amount: paise,
       speed: "normal",
       notes: { reason: String(reason).slice(0, 100) },
     });
+    await markDone();
     return "refunded";
   } catch (error) {
     const rz = error?.error || {};
     const desc = rz.description || error.message || "";
 
-    if (!toWallet && /already.*refund|fully refunded/i.test(desc))
+    if (!toWallet && /already.*refund|fully refunded/i.test(desc)) {
+      await markDone();
       return "refunded";
+    }
 
     console.error("REFUND FAILED:", {
       payment: before.razorpayPaymentId,
@@ -474,7 +502,7 @@ const notifyRefunds = (
       (p) => p.razorpayPaymentId === mem.razorpayPaymentId,
     );
     const wallet = isWalletPayment(pay) || refundTo === "wallet";
-    const amt = mem.amount || fresh.amount;
+    const amt = pay ? refundableAmountOf(pay) : mem.amount || fresh.amount;
     const refundedText = wallet
       ? `Your payment of ₹${amt} was added back to your wallet.`
       : `Your payment of ₹${amt} is being refunded.`;
@@ -702,6 +730,9 @@ exports.createRequest = async (req, res) => {
     if (await paymentUsed(paymentId)) {
       return fail(res, 409, "This payment is already used for another booking");
     }
+    const claimed = await claimPayment(paymentId, requestGroupId);
+    if (!claimed)
+      return fail(res, 409, "This payment is already used for another booking");
 
     const reject = async (status, message) => {
       const result = await refundPayment(payment, message);
@@ -977,6 +1008,12 @@ exports.joinGroup = async (req, res) => {
       return fail(res, 403, "This payment belongs to another account");
 
     if (await paymentUsed(paymentId))
+      return fail(res, 409, "This payment is already used for another booking");
+    const claimed = await claimPayment(
+      paymentId,
+      `join:${code}:${req.user.id}`,
+    );
+    if (!claimed)
       return fail(res, 409, "This payment is already used for another booking");
 
     const reject = async (status, message) => {
@@ -1677,7 +1714,10 @@ exports.confirmCompletion = async (req, res) => {
 
     for (const mem of membersOf(updated)) {
       if (!mem.fresher) continue;
-      const amt = mem.amount || updated.amount;
+      const pay = payments.find(
+        (p) => p.razorpayPaymentId === mem.razorpayPaymentId,
+      );
+      const amt = pay ? refundableAmountOf(pay) : mem.amount || updated.amount;
       notify({
         user: mem.fresher,
         role: "fresher",
@@ -1755,8 +1795,8 @@ exports.markAllFresherNotificationsRead = async (req, res) => {
 };
 
 /* ============================ SCHEDULERS ============================ */
-
 let schedulerBusy = false;
+let lastReconcileAt = 0; // <-- add this
 
 exports.startSchedulers = (app) => {
   setInterval(async () => {
@@ -1896,30 +1936,47 @@ exports.startSchedulers = (app) => {
           { $set: { reminderSent: true } },
         );
 
-      // 7) wallet money was taken but the booking / group join never happened -> give it back
-      const orphanWallet = await Payment.find({
+      // 7) money was taken (wallet OR Razorpay) but the booking / group join never happened -> give it back
+      const orphanPaid = await Payment.find({
         status: "paid",
-        method: "wallet",
         sessionStatus: "unassigned",
-        paidAt: { $lte: new Date(now.getTime() - 10 * 60 * 1000) },
+        $or: [
+          {
+            method: "wallet",
+            paidAt: { $lte: new Date(now.getTime() - 10 * 60 * 1000) },
+          },
+          {
+            method: { $ne: "wallet" },
+            paidAt: { $lte: new Date(now.getTime() - 30 * 60 * 1000) },
+          },
+        ],
       }).limit(20);
 
-      for (const p of orphanWallet) {
+      for (const p of orphanPaid) {
         if (await paymentUsed(p.razorpayPaymentId)) continue;
 
+        const viaWallet = isWalletPayment(p);
         const result = await refundPayment(p, "Booking was not created", {
-          to: "wallet",
+          to: viaWallet ? "wallet" : "original",
         });
         if (result === "refunded" && p.fresher) {
           notify({
             user: p.fresher,
             role: "fresher",
-            title: "Wallet refund",
-            message: `₹${p.amount} was added back to your wallet because the booking was not completed.`,
+            title: viaWallet ? "Wallet refund" : "Payment refunded",
+            message: viaWallet
+              ? `₹${p.amount} was added back to your wallet because the booking was not completed.`
+              : `₹${refundableAmountOf(p)} is being refunded to your payment method because the booking was not completed.`,
             type: "payment",
-            link: "/Home/bonus-wallet",
+            link: viaWallet ? "/Home/bonus-wallet" : "/Home",
           });
         }
+      }
+
+      // 8) Razorpay money captured but verify never reached us / abandoned or failed checkouts (every 5 min)
+      if (Date.now() - lastReconcileAt > 5 * 60 * 1000) {
+        lastReconcileAt = Date.now();
+        await reconcileStaleOrders();
       }
     } catch (e) {
       console.error("scheduler error:", e);

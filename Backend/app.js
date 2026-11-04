@@ -10,6 +10,7 @@ const { MongoStore } = require("connect-mongo");
 
 const authRoutes = require("./routes/authRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
+const { razorpayWebhook } = require("./controllers/paymentController");
 const mentorRoutes = require("./routes/mentorRoutes");
 const sessionRoutes = require("./routes/sessionroutes");
 const adminRoutes = require("./routes/adminRoutes");
@@ -83,6 +84,16 @@ app.use(
   }),
 );
 
+// ================= RAZORPAY WEBHOOK (RAW BODY) =================
+// MUST be registered BEFORE express.json(): the signature is checked on the raw bytes.
+// Razorpay calls this server-to-server (no Origin header), so CORS lets it through.
+// Dashboard URL: https://<your-backend>/api/payments/webhook
+app.post(
+  "/api/payments/webhook",
+  express.raw({ type: "application/json", limit: "1mb" }),
+  razorpayWebhook,
+);
+
 // ================= BODY PARSER =================
 // MUST come before any route that reads req.body
 
@@ -98,9 +109,7 @@ if (isProd && !process.env.SESSION_SECRET) {
 
 app.use(
   session({
-    secret:
-      process.env.SESSION_SECRET ||
-      "mncconnect-local-dev-secret",
+    secret: process.env.SESSION_SECRET || "mncconnect-local-dev-secret",
     resave: false,
     saveUninitialized: false,
 
@@ -115,8 +124,9 @@ app.use(
       sameSite: isProd ? "none" : "lax",
       maxAge: 24 * 60 * 60 * 1000,
     },
-  })
+  }),
 );
+
 // ================= STATIC FILES =================
 
 app.use("/public", express.static(path.join(__dirname, "public")));
@@ -159,7 +169,7 @@ app.use("/api", mentorPanelRoutes);
 app.use("/api/instructions", instructionRoutes);
 app.use("/company", publicCompanyRoutes);
 
-app.use("/admin", injectCompanyBadge); // ✅ before admin routes
+app.use("/admin", injectCompanyBadge); // before admin routes
 app.use("/admin/companies", adminCompanyRoutes);
 app.use("/admin", adminRoutes);
 
