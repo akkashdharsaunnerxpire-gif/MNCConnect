@@ -6,6 +6,7 @@
 const crypto = require("crypto");
 const mongoose = require("mongoose");
 const Razorpay = require("razorpay");
+const Review = require("../models/Review"); // <-- add
 
 const Booking = require("../models/Booking");
 const Payment = require("../models/Payment");
@@ -1304,6 +1305,35 @@ exports.getCounterpart = async (req, res) => {
         .lean();
       if (!m) return fail(res, 404, "Employee not found");
 
+      // rating + reviews + sessions (calculated live, no schema fields needed)
+      const [byStar, recent, completedCount] = await Promise.all([
+        Review.aggregate([
+          { $match: { mentor: m._id } },
+          { $group: { _id: "$rating", count: { $sum: 1 } } },
+        ]),
+        Review.find({ mentor: m._id })
+          .sort({ createdAt: -1 })
+          .limit(20)
+          .select(
+            "fresherName fresherRole session rating comment reply createdAt",
+          )
+          .lean(),
+        Booking.countDocuments({ mentor: m._id, status: "completed" }),
+      ]);
+
+      const ratingBreakdown = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+      let reviewCount = 0;
+      let ratingSum = 0;
+      byStar.forEach(({ _id, count }) => {
+        if (ratingBreakdown[_id] === undefined) return;
+        ratingBreakdown[_id] = count;
+        reviewCount += count;
+        ratingSum += _id * count;
+      });
+      const rating = reviewCount
+        ? Math.round((ratingSum / reviewCount) * 10) / 10
+        : 0;
+
       return res.json({
         success: true,
         kind: "mentor",
@@ -1322,10 +1352,23 @@ exports.getCounterpart = async (req, res) => {
           skills: m.skills || [],
           bio: m.bio || "",
           linkedinProfile: m.linkedinProfile || "",
-          rating: m.rating || 0,
-          totalReviews: m.totalReviews || 0,
-          totalSessions: m.totalSessions || 0,
           isVerified: Boolean(m.isVerified),
+
+          rating,
+          reviewCount,
+          totalReviews: reviewCount,
+          ratingBreakdown,
+          totalSessions: completedCount,
+          reviews: recent.map((r) => ({
+            id: String(r._id),
+            name: r.fresherName || "Fresher",
+            role: r.fresherRole || "Fresher",
+            rating: r.rating,
+            comment: r.comment || "",
+            session: r.session || "Mentoring session",
+            reply: r.reply?.text || "",
+            createdAt: r.createdAt,
+          })),
         },
         session,
       });

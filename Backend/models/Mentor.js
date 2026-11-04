@@ -210,11 +210,6 @@ const mentorSchema = new mongoose.Schema(
       default: "",
       select: false,
     },
-    profilePicPublicId: {
-      type: String,
-      default: "",
-      select: false,
-    },
   },
   {
     timestamps: true,

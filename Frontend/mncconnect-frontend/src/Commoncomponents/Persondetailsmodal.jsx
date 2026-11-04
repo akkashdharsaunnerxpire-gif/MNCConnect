@@ -1,19 +1,15 @@
 // src/Commoncomponents/PersonDetailsModal.jsx
 // Shows the OTHER person of a booking.
-//  - fresher page  -> mentor (MncEmployee) details   (single compact profile, no tabs)
+//  - fresher page  -> mentor (MncEmployee) details   (single profile + RATING & REVIEWS)
 //  - mentor page   -> fresher details                (two-pane candidate card)
 // The data comes from GET <booking>/counterpart (see bookingController.getCounterpart)
 // Props are unchanged: { title, fetcher, onClose }
 //
-// THEME: full white surfaces + light-dark (slate) text / accents.
-// PERFORMANCE: no backdrop-blur, memoized, small avatar image, light animation.
-import React, {
-  memo,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+// Mentor reviews are read from:  data.person.reviews  (or data.reviews)
+//   review = { id, name, role, rating, comment, session, reply, createdAt }
+// Rating / count are read from:  person.rating, person.reviewCount
+// (if missing, they are calculated from the reviews array)
+import React, { memo, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   X,
@@ -43,7 +39,9 @@ import {
   Users,
   FileText,
   ZoomIn,
+  CheckCircle2,
 } from "lucide-react";
+import { timeAgo } from "../services/mentorApi";
 
 /* ---------------------------- helpers ---------------------------- */
 
@@ -88,10 +86,7 @@ const hd = (url, width = 256) => {
   // Cloudinary
   if (url.includes("res.cloudinary.com") && url.includes("/upload/")) {
     if (/\/upload\/[^/]*(w_|q_|f_)/.test(url)) return url;
-    return url.replace(
-      "/upload/",
-      `/upload/f_auto,q_auto,w_${width},c_limit/`,
-    );
+    return url.replace("/upload/", `/upload/f_auto,q_auto,w_${width},c_limit/`);
   }
   // Google profile photos (=s96-c  ->  =sN-c)
   if (/googleusercontent\.com/.test(url)) {
@@ -102,13 +97,25 @@ const hd = (url, width = 256) => {
 
 /* Brand icons were removed from newer lucide-react versions, so we draw our own */
 const GithubIcon = ({ size = 16 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="currentColor"
+    aria-hidden="true"
+  >
     <path d="M12 .5A11.5 11.5 0 0 0 .5 12c0 5.08 3.29 9.38 7.86 10.9.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.74.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5Z" />
   </svg>
 );
 
 const LinkedinIcon = ({ size = 16 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="currentColor"
+    aria-hidden="true"
+  >
     <path d="M20.45 20.45h-3.56v-5.57c0-1.33-.03-3.04-1.85-3.04-1.86 0-2.14 1.45-2.14 2.94v5.67H9.34V9h3.42v1.56h.05a3.75 3.75 0 0 1 3.37-1.85c3.6 0 4.27 2.37 4.27 5.46v6.28ZM5.34 7.43a2.07 2.07 0 1 1 0-4.14 2.07 2.07 0 0 1 0 4.14ZM7.12 20.45H3.56V9h3.56v11.45ZM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0Z" />
   </svg>
 );
@@ -205,6 +212,74 @@ const LinkBtn = ({ href, icon, children }) => (
   </a>
 );
 
+/* Row of 5 stars (filled up to `value`) */
+const Stars = ({ value = 0, size = 14 }) => {
+  const filled = Math.round(Number(value) || 0);
+  return (
+    <div className="flex gap-0.5" aria-label={`${filled} out of 5 stars`}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <Star
+          key={n}
+          size={size}
+          fill={n <= filled ? "currentColor" : "none"}
+          className={n <= filled ? "text-yellow-400" : "text-slate-200"}
+        />
+      ))}
+    </div>
+  );
+};
+
+/* One review card */
+const ReviewCard = ({ r }) => (
+  <div className="rounded-2xl border border-slate-200 bg-white p-3.5">
+    <div className="flex items-start justify-between gap-3">
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-bold text-blue-600 ring-1 ring-blue-100">
+          {initials(r.name)}
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-slate-800">
+            {r.name}
+          </p>
+          {r.role && (
+            <p className="truncate text-[11px] text-slate-400">{r.role}</p>
+          )}
+        </div>
+      </div>
+      {r.createdAt && (
+        <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-slate-400">
+          <Clock3 size={11} />
+          {timeAgo(r.createdAt)}
+        </span>
+      )}
+    </div>
+
+    <div className="mt-2.5 flex flex-wrap items-center gap-2">
+      <Stars value={r.rating} />
+      {r.session && (
+        <span className="rounded-md bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-600">
+          {r.session}
+        </span>
+      )}
+    </div>
+
+    {r.comment && (
+      <p className="mt-2.5 whitespace-pre-line text-sm leading-6 text-slate-600">
+        “{r.comment}”
+      </p>
+    )}
+
+    {r.reply && (
+      <div className="mt-2.5 rounded-xl border border-emerald-100 bg-emerald-50/70 p-3">
+        <p className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700">
+          <CheckCircle2 size={12} /> Mentor reply
+        </p>
+        <p className="mt-0.5 text-sm leading-6 text-slate-600">{r.reply}</p>
+      </div>
+    )}
+  </div>
+);
+
 /* Avatar: small optimized image, falls back to initials if the image fails */
 const Avatar = memo(({ src, name, onZoom, big }) => {
   const [failed, setFailed] = useState(false);
@@ -250,6 +325,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
   const [state, setState] = useState({ loading: true, error: "", data: null });
   const [copied, setCopied] = useState(false);
   const [zoom, setZoom] = useState(false);
+  const [showAllReviews, setShowAllReviews] = useState(false);
 
   // keep latest fetcher without re-running the effect on every parent render
   const fetcherRef = useRef(fetcher);
@@ -315,9 +391,11 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
   const isMentor = data?.kind === "mentor";
 
   /* ---- values (several possible field names, so it works with your schema) ---- */
+  const image = pick(p, ["image", "profilePic", "avatar", "photo"]);
   const phone = pick(p, ["phone", "mobile", "phoneNumber", "mobileNumber"]);
+  const company = pick(p, ["company", "currentCompany"]);
   const location = isMentor
-    ? pick(p, ["officeLocation"])
+    ? pick(p, ["officeLocation", "location"])
     : pick(p, ["location", "city", "currentLocation", "address", "state"]);
   const college = pick(p, [
     "college",
@@ -354,8 +432,47 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
     ? `${p.yearsOfExperience} year${p.yearsOfExperience > 1 ? "s" : ""}`
     : "";
 
+  /* ---- mentor rating + reviews ---- */
+  const rawReviews = Array.isArray(p.reviews)
+    ? p.reviews
+    : Array.isArray(data?.reviews)
+      ? data.reviews
+      : [];
+
+  // normalise (supports both `comment` and `review`, `name` and `fresherName`)
+  const reviews = rawReviews.map((r, i) => ({
+    id: r._id || r.id || i,
+    name: r.name || r.fresherName || "Fresher",
+    role: r.role || r.fresherRole || "",
+    rating: Number(r.rating) || 0,
+    comment: r.comment || r.review || "",
+    session: r.session || "",
+    reply: r.reply?.text || (typeof r.reply === "string" ? r.reply : ""),
+    createdAt: r.createdAt,
+  }));
+
+  const reviewCount =
+    Number(p.reviewCount ?? data?.reviewCount) || reviews.length;
+  const avgRating =
+    Number(p.rating ?? data?.rating) ||
+    (reviews.length
+      ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
+      : 0);
+
+  // 5..1 star breakdown (from the reviews we have)
+  const breakdown = [5, 4, 3, 2, 1].map((n) => ({
+    n,
+    c: p.ratingBreakdown
+      ? Number(p.ratingBreakdown[n]) || 0
+      : reviews.filter((r) => r.rating === n).length,
+  }));
+  const REVIEWS_PREVIEW = 3;
+  const visibleReviews = showAllReviews
+    ? reviews
+    : reviews.slice(0, REVIEWS_PREVIEW);
+
   const roleLine = isMentor
-    ? [p.designation, p.company].filter(Boolean).join(" at ")
+    ? [p.designation, company].filter(Boolean).join(" at ")
     : [degree, college].filter(Boolean).join(" · ") ||
       (s.role ? `Fresher · Looking for ${s.role}` : "Fresher");
 
@@ -363,7 +480,15 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
   const hasLinks = !!(linkedin || github || resume);
   const fresherHasExtras =
     hasEducation ||
-    !!(phone || location || targetRole || bio || skills.length || languages.length || hasLinks);
+    !!(
+      phone ||
+      location ||
+      targetRole ||
+      bio ||
+      skills.length ||
+      languages.length ||
+      hasLinks
+    );
 
   const copyEmail = async () => {
     try {
@@ -405,7 +530,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
         {/* ---------- left: identity ---------- */}
         <aside className="pdm-scroll relative border-b border-slate-200 bg-slate-50 p-6 text-slate-800 md:w-72 md:shrink-0 md:overflow-y-auto md:overscroll-contain md:border-b-0 md:border-r">
           <div className="relative flex flex-col items-center text-center">
-            <Avatar big src={p.image} name={p.name} onZoom={openZoom} />
+            <Avatar big src={image} name={p.name} onZoom={openZoom} />
 
             <h3 className="mt-4 flex max-w-full items-center gap-1.5 text-xl font-bold text-slate-900">
               <span className="truncate">{p.name || "-"}</span>
@@ -566,7 +691,10 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
                 <InfoRow icon={<BookOpen size={16} />} label="Degree">
                   {[degree, branch].filter(Boolean).join(" · ")}
                 </InfoRow>
-                <InfoRow icon={<CalendarDays size={16} />} label="Graduation year">
+                <InfoRow
+                  icon={<CalendarDays size={16} />}
+                  label="Graduation year"
+                >
                   {gradYear && String(gradYear)}
                 </InfoRow>
                 <InfoRow icon={<Award size={16} />} label="CGPA / %">
@@ -600,8 +728,8 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
   };
 
   /* =====================================================================
-     MENTOR VIEW (what the fresher sees): ONE compact profile page.
-     No tabs, no booking section.
+     MENTOR VIEW (what the fresher sees): ONE profile page with
+     rating + reviews included. No tabs, no booking section.
      ===================================================================== */
   const renderMentor = () => (
     <>
@@ -615,7 +743,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
       <div className="relative z-10 px-5 pb-6 sm:px-6">
         {/* avatar half overlaps the banner; actions on the right */}
         <div className="-mt-12 flex items-end justify-between gap-3">
-          <Avatar src={p.image} name={p.name} onZoom={openZoom} />
+          <Avatar src={image} name={p.name} onZoom={openZoom} />
 
           <div className="mb-1 flex flex-wrap items-center justify-end gap-2">
             {p.email && (
@@ -672,8 +800,8 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
         <div className="mt-4 grid grid-cols-3 gap-2.5">
           <Stat
             icon={<Star size={15} />}
-            value={Number(p.rating || 0).toFixed(1)}
-            label="Rating"
+            value={avgRating.toFixed(1)}
+            label={`Rating · ${reviewCount} review${reviewCount !== 1 ? "s" : ""}`}
             tone="bg-amber-50 text-amber-700"
           />
           <Stat
@@ -707,7 +835,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
               {phone}
             </InfoRow>
             <InfoRow icon={<Building2 size={16} />} label="Company">
-              {p.company}
+              {company}
             </InfoRow>
             <InfoRow icon={<Briefcase size={16} />} label="Role">
               {[p.designation, p.department]
@@ -752,6 +880,82 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
             </div>
           </Block>
         )}
+
+        {/* ---------- RATING & REVIEWS ---------- */}
+        <Block title="Ratings & reviews" icon={<Star size={15} />}>
+          {reviews.length === 0 && reviewCount === 0 ? (
+            <p className="rounded-2xl border border-dashed border-slate-200 p-4 text-center text-sm text-slate-400">
+              No reviews yet
+            </p>
+          ) : (
+            <>
+              {/* summary: big average + 5..1 breakdown */}
+              <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center">
+                <div className="flex shrink-0 flex-col items-center sm:w-32">
+                  <span className="text-4xl font-bold text-slate-900">
+                    {avgRating.toFixed(1)}
+                  </span>
+                  <div className="mt-1.5">
+                    <Stars value={avgRating} size={16} />
+                  </div>
+                  <span className="mt-1.5 text-xs text-slate-500">
+                    {reviewCount} review{reviewCount !== 1 ? "s" : ""}
+                  </span>
+                </div>
+
+                {reviews.length > 0 && (
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    {breakdown.map(({ n, c }) => {
+                      const pct = reviewCount ? (c / reviewCount) * 100 : 0;
+                      return (
+                        <div key={n} className="flex items-center gap-2.5">
+                          <span className="flex w-8 items-center gap-1 text-xs font-medium text-slate-600">
+                            {n}
+                            <Star
+                              size={11}
+                              fill="currentColor"
+                              className="text-yellow-400"
+                            />
+                          </span>
+                          <div className="h-2 flex-1 overflow-hidden rounded-full bg-white ring-1 ring-inset ring-slate-200">
+                            <div
+                              className="h-full rounded-full bg-yellow-400"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <span className="w-5 text-right text-xs text-slate-400">
+                            {c}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* review list */}
+              {reviews.length > 0 && (
+                <div className="mt-3 space-y-2.5">
+                  {visibleReviews.map((r) => (
+                    <ReviewCard key={r.id} r={r} />
+                  ))}
+
+                  {reviews.length > REVIEWS_PREVIEW && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllReviews((v) => !v)}
+                      className="w-full rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-semibold text-blue-600 transition-colors hover:bg-blue-50"
+                    >
+                      {showAllReviews
+                        ? "Show fewer reviews"
+                        : `Show all ${reviews.length} reviews`}
+                    </button>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </Block>
       </div>
     </>
   );
@@ -822,7 +1026,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
       </div>
 
       {/* ---------- full-size photo viewer (big image loads only now) ---------- */}
-      {zoom && p.image && (
+      {zoom && image && (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4"
           onClick={(e) => {
@@ -845,7 +1049,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
             <X size={20} />
           </button>
           <img
-            src={hd(p.image, 1200)}
+            src={hd(image, 1200)}
             alt={p.name}
             decoding="async"
             onClick={(e) => e.stopPropagation()}
