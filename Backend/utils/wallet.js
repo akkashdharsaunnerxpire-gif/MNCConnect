@@ -1,15 +1,4 @@
 // utils/wallet.js
-// Pure functions (no database) so the maths is easy to test.
-//
-// A payment is "released" (counts as earned) ONLY when the session is completed:
-//   - the fresher confirmed it, or
-//   - the fresher did not answer and it was auto-confirmed (bookingController.settleCompleted)
-// Before that it is "pending". Refunded / cancelled payments never reach here.
-//
-//   lifetime  = sum of released earnings
-//   pending   = sum of earnings whose session is not completed yet
-//   available = lifetime - reserved   (reserved = withdrawals requested/paid)
-
 const PLATFORM_FEE_PERCENT = Number(process.env.PLATFORM_FEE_PERCENT || 25);
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -31,6 +20,10 @@ const computeWallet = (payments, reserved = 0, now = new Date()) => {
   };
 
   for (const p of payments) {
+    // refunded / cancelled / unpaid money is never the mentor's
+    if (p.status && p.status !== "paid") continue;
+    if (p.sessionStatus === "cancelled") continue;
+
     const earning = Number(p.mentorEarning) || 0;
 
     if (!isReleased(p)) {
@@ -60,7 +53,6 @@ const computeWallet = (payments, reserved = 0, now = new Date()) => {
   return wallet;
 };
 
-// amount (rupees) -> { fee, earning }
 // Done in paise so fee + earning is ALWAYS exactly equal to the amount.
 const splitAmount = (amountRupees, percent = PLATFORM_FEE_PERCENT) => {
   const paise = Math.round(Number(amountRupees) * 100);

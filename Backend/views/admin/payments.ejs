@@ -61,7 +61,7 @@
     <div class="table-wrap">
         <table>
             <thead>
-                <tr><th>Payment ID</th><th>Fresher</th><th>Session price</th><th>Conv. fee</th><th>Customer paid</th><th>Platform fee</th><th>Mentor share</th><th>Razorpay cost</th><th>Status</th><th>Date</th></tr>
+                <tr><th>Payment ID</th><th>Fresher</th><th>Session price</th><th>Conv. fee</th><th>Customer paid</th><th>Platform fee</th><th>Mentor share</th><th>Razorpay cost</th><th>Refund</th><th>Status</th><th>Date</th></tr>
             </thead>
             <tbody>
             <% payments.forEach(function (p) {
@@ -77,6 +77,7 @@
                     <td class="muted">₹<%= fmt(p.platformFee) %></td>
                     <td class="muted">₹<%= fmt(p.mentorEarning) %></td>
                     <td class="muted">₹<%= fmt(p.gatewayFee) %><%= p.feeEstimated ? ' (est.)' : '' %></td>
+                    <td class="muted"><%= p.status === 'refunded' ? '₹' + fmt(p.refundAmount > 0 ? p.refundAmount : p.amount) + ' → ' + (p.refundMethod || '—') : '—' %></td>
                     <td><span class="badge <%= stBadge(p.status) %>"><i class="dot"></i><%= p.status || 'unknown' %></span></td>
                     <td class="muted small"><%= p.createdAt ? new Date(p.createdAt).toLocaleString('en-GB') : '—' %></td>
                 </tr>

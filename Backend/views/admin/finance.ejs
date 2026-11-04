@@ -47,7 +47,8 @@
         <tbody>
             <tr><td>Platform fee from completed sessions (session price only)</td><td><b>₹<%= fmt(finance.grossProfit) %></b></td></tr>
             <tr><td>+ Convenience fees that are ours (completed sessions, or kept after a refund)</td><td><b>₹<%= fmt(finance.convenienceRecognized) %></b></td></tr>
-            <tr><td>− Razorpay gateway cost <% if (finance.estimatedRows) { %><span class="muted small">(<%= finance.estimatedRows %> estimated)</span><% } %></td><td><b>₹<%= fmt(finance.gatewayCost) %></b></td></tr>
+           <tr><td class="muted">Razorpay cost on sessions not finished yet (not counted yet)</td><td class="muted">₹<%= fmt(finance.gatewayCostHeld) %></td></tr>
+<tr><td class="muted">Refunds sitting in fresher wallets (we owe this)</td><td class="muted">₹<%= fmt(finance.walletLiability) %></td></tr>
             <tr><td>= Net platform profit</td><td><b>₹<%= fmt(finance.netProfit) %></b></td></tr>
             <tr><td>− Already taken by company</td><td><b>₹<%= fmt(finance.companyTaken) %></b></td></tr>
             <tr><td>= Safe to take now</td><td><b>₹<%= fmt(finance.profitAvailable) %></b></td></tr>

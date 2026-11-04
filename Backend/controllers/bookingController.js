@@ -238,23 +238,19 @@ const emitBooking = (b) => {
 };
 
 // payments of EVERY member -> assigned to the accepting mentor
+// payments of EVERY member -> assigned to the accepting mentor
 const assignMentorToAll = async (b, mentorId) => {
-  await assignMentorToRequest({
-    requestGroupId: b.requestGroupId,
-    mentorId,
-  }).catch(() => {});
-  const ids = paymentIdsOf(b);
-  if (ids.length > 1) {
-    await Payment.updateMany(
-      {
-        razorpayPaymentId: { $in: ids },
-        status: "paid",
-        mentor: null,
-        sessionStatus: { $ne: "cancelled" },
-      },
-      { $set: { mentor: mentorId, sessionStatus: "upcoming" } },
-    ).catch(() => {});
-  }
+  await Payment.updateMany(
+    {
+      $or: [
+        { requestGroupId: b.requestGroupId },
+        { razorpayPaymentId: { $in: paymentIdsOf(b) } },
+      ],
+      status: "paid",
+      sessionStatus: { $nin: ["cancelled", "completed"] },
+    },
+    { $set: { mentor: mentorId, sessionStatus: "upcoming" } },
+  ).catch((e) => console.error("assignMentorToAll:", e.message));
 };
 
 const toMentorPayload = (b) => ({
@@ -357,37 +353,85 @@ const fail = (res, status, message, extra = {}) =>
 
 /* ============================ REFUNDS ============================ */
 
+/* ============================ REFUNDS ============================ */
+
+// "wallet"   (default): instant, can never fail, shows in Bonus Wallet > Total Refunds
+// "original" : back to card / UPI via Razorpay (5-7 days, can fail if Razorpay balance is low)
+const REFUND_DESTINATION =
+  String(process.env.REFUND_DESTINATION || "wallet").toLowerCase() ===
+  "original"
+    ? "original"
+    : "wallet";
+
 const isWalletPayment = (p) =>
   Boolean(p) &&
   (p.method === "wallet" ||
     String(p.razorpayPaymentId || "").startsWith("wallet_pay_"));
 
+// returns "refunded" | "failed"
 const refundPayment = async (payment, reason = "", options = {}) => {
   if (!payment) return "failed";
-  if (payment.status === "refunded") return "refunded";
 
-  const toWallet = options.to === "wallet" || isWalletPayment(payment);
+  // always work on the latest copy of the payment
+  const fresh = await Payment.findById(payment._id || payment);
+  if (!fresh) return "failed";
+  if (fresh.status === "refunded") return "refunded";
+  if (fresh.status !== "paid") return "failed";
 
+  const walletPaid = isWalletPayment(fresh);
+  let toWallet =
+    walletPaid ||
+    options.to === "wallet" ||
+    (options.to !== "original" && REFUND_DESTINATION === "wallet");
+
+  // no fresher on the payment -> cannot credit a wallet, use Razorpay instead
+  if (toWallet && !fresh.fresher) {
+    if (walletPaid) return "failed";
+    toWallet = false;
+  }
+  if (!toWallet && !fresh.razorpayPaymentId) return "failed";
+
+  // session price + convenience fee (if CONVENIENCE_FEE_REFUNDABLE). Wallet payments have no fee.
+  const sessionAmount = round2(Number(fresh.amount) || 0);
+  const refundFee =
+    walletPaid || !getConfig().refundable
+      ? 0
+      : round2(Number(fresh.convenienceFee) || 0);
+  // never refund more than the customer really paid
+  const amount = round2(Math.min(sessionAmount + refundFee, checkoutOf(fresh)));
+  if (!(amount > 0)) return "failed";
+  const feePart = round2(Math.max(amount - sessionAmount, 0));
+
+  // ATOMIC lock. Refund amounts are written here, so the books are right even if something fails later.
   const before = await Payment.findOneAndUpdate(
-    { _id: payment._id, status: "paid" },
+    { _id: fresh._id, status: "paid" },
     {
       $set: {
         status: "refunded",
         sessionStatus: "cancelled",
         refundMethod: toWallet ? "wallet" : "original",
         refundedAt: new Date(),
+        refundAmount: amount,
+        convenienceFeeRefunded: feePart,
+        refundError: "",
       },
     },
     { returnDocument: "before" },
   );
 
   if (!before) {
-    const cur = await Payment.findById(payment._id).select("status").lean();
+    const cur = await Payment.findById(fresh._id).select("status").lean();
     return cur?.status === "refunded" ? "refunded" : "failed";
   }
 
   const unlock = async () => {
-    const back = { status: "paid", refundMethod: "", refundedAt: null };
+    const back = {
+      status: "paid",
+      refundMethod: "",
+      refundedAt: null,
+      refundAmount: 0,
+      convenienceFeeRefunded: 0,
+    };
     if (before.sessionStatus) back.sessionStatus = before.sessionStatus;
     await Payment.updateOne(
       { _id: before._id, status: "refunded" },
@@ -395,78 +439,62 @@ const refundPayment = async (payment, reason = "", options = {}) => {
     ).catch(() => {});
   };
 
-  // session price + (convenience fee if CONVENIENCE_FEE_REFUNDABLE). Wallet payments have no fee.
-  const sessionAmount = Number(before.amount) || 0;
-  const feePart = isWalletPayment(before)
-    ? 0
-    : Number(before.convenienceFee) || 0;
-  const refundFee = getConfig().refundable ? feePart : 0;
-  const amount = round2(sessionAmount + refundFee);
-
-  const markDone = async () => {
-    const result = await Payment.updateOne(
-      { _id: before._id, status: "refunded" },
-      {
-        $set: {
-          refundAmount: amount,
-          convenienceFeeRefunded: refundFee,
-        },
-      },
+  const creditWallet = async () => {
+    await Fresher.updateOne(
+      { _id: before.fresher },
+      { $inc: { walletBalance: amount, totalRefunds: amount } },
     );
-
-    if (!result.matchedCount) {
-      throw new Error("Refund accounting record could not be updated");
-    }
-
-    return true;
+    emitToUser(String(before.fresher), "wallet:updated", { amount });
   };
+
   try {
     if (toWallet) {
-      if (!before.fresher) {
-        await unlock();
-        return "failed";
-      }
-      await Fresher.updateOne(
-        { _id: before.fresher },
-        { $inc: { walletBalance: amount, totalRefunds: amount } },
-      );
-      await markDone();
-      emitToUser(String(before.fresher), "wallet:updated", { amount });
+      await creditWallet(); // money is given from here: NEVER unlock after this line
       return "refunded";
     }
 
-    if (!before.razorpayPaymentId) {
-      await unlock();
-      return "failed";
-    }
-
-    // never ask Razorpay for more than it captured
-    const paise = Math.min(toPaise(amount), toPaise(checkoutOf(before)));
     await getRazorpay().payments.refund(before.razorpayPaymentId, {
-      amount: paise,
+      amount: toPaise(amount),
       speed: "normal",
       notes: { reason: String(reason).slice(0, 100) },
     });
-    await markDone();
     return "refunded";
   } catch (error) {
     const rz = error?.error || {};
     const desc = rz.description || error.message || "";
 
-    if (!toWallet && /already.*refund|fully refunded/i.test(desc)) {
-      await markDone();
+    if (!toWallet && /already.*refund|fully refunded/i.test(desc))
       return "refunded";
-    }
 
     console.error("REFUND FAILED:", {
       payment: before.razorpayPaymentId,
       amount,
+      toWallet,
       statusCode: error?.statusCode,
       code: rz.code,
-      field: rz.field,
-      reason: rz.reason,
       description: desc,
     });
+
+    // Razorpay clearly said NO (4xx, e.g. low balance) -> give the money to the wallet instead
+    const definiteNo =
+      Number(error?.statusCode) >= 400 && Number(error?.statusCode) < 500;
+    if (!toWallet && definiteNo && before.fresher) {
+      try {
+        await creditWallet();
+        await Payment.updateOne(
+          { _id: before._id },
+          {
+            $set: {
+              refundMethod: "wallet",
+              refundError: `Razorpay refund failed (${String(desc).slice(0, 150)}). Credited to wallet.`,
+            },
+          },
+        );
+        return "refunded";
+      } catch (e2) {
+        console.error("Wallet fallback failed:", e2.message);
+      }
+    }
 
     await Payment.updateOne(
       { _id: before._id },
@@ -477,60 +505,61 @@ const refundPayment = async (payment, reason = "", options = {}) => {
         },
       },
     ).catch(() => {});
-
     await unlock();
     return "failed";
   }
 };
 
-// Refund EVERY member's payment of a booking. Safe to call again (already refunded ones are skipped).
-// returns { result: "refunded" | "failed", payments }
+// Refund EVERY member's payment. Safe to call again. Returns FRESH payment docs.
 const refundAll = async (booking, reason, options = {}) => {
   const ids = paymentIdsOf(booking);
   if (!ids.length) return { result: "failed", payments: [] };
 
-  const payments = await Payment.find({ razorpayPaymentId: { $in: ids } });
-  if (!payments.length) return { result: "failed", payments: [] };
+  const list = await Payment.find({ razorpayPaymentId: { $in: ids } });
+  if (!list.length) return { result: "failed", payments: [] };
 
   let allOk = true;
-  for (const p of payments) {
+  for (const p of list) {
     const r = await refundPayment(p, reason, options);
     if (r !== "refunded") allOk = false;
   }
+
+  const payments = await Payment.find({
+    razorpayPaymentId: { $in: ids },
+  }).lean();
   return { result: allOk ? "refunded" : "failed", payments };
 };
 
-// tell each member that their refund started
-const notifyRefunds = (
-  fresh,
-  payments,
-  result,
-  { title, reason, refundTo },
-) => {
+// tell each member what really happened to THEIR payment
+const notifyRefunds = (fresh, payments, result, { title, reason }) => {
   for (const mem of membersOf(fresh)) {
     if (!mem.fresher) continue;
     const pay = payments.find(
       (p) => p.razorpayPaymentId === mem.razorpayPaymentId,
     );
-    const wallet = isWalletPayment(pay) || refundTo === "wallet";
-    const amt = pay ? refundableAmountOf(pay) : mem.amount || fresh.amount;
-    const refundedText = wallet
-      ? `Your payment of ₹${amt} was added back to your wallet.`
-      : `Your payment of ₹${amt} is being refunded.`;
+    const done = Boolean(pay && pay.status === "refunded");
+    const wallet =
+      done && (pay.refundMethod === "wallet" || isWalletPayment(pay));
+    const amt =
+      pay && Number(pay.refundAmount) > 0
+        ? pay.refundAmount
+        : mem.amount || fresh.amount;
+
+    const text = done
+      ? wallet
+        ? `${reason} ₹${amt} was added back to your wallet.`
+        : `${reason} ₹${amt} is being refunded to your original payment method (5-7 working days).`
+      : `${reason} Refund is processing, we will update you soon.`;
 
     notify({
       user: mem.fresher,
       role: "fresher",
-      title:
-        result === "refunded"
-          ? `${title || "Request closed"} - refund started`
-          : title || "Request closed",
-      message:
-        result === "refunded"
-          ? `${reason} ${refundedText}`
-          : `${reason} Refund is processing, we will update you soon.`,
+      title: done
+        ? `${title || "Request closed"} - refund done`
+        : title || "Request closed",
+      message: text,
       type: "payment",
-      link: wallet ? "/Home/wallet" : "/Home",
+      link: wallet ? "/Home/bonus-wallet" : "/Home",
     });
   }
 };
@@ -562,7 +591,7 @@ const closeAndRefund = async (
   );
   if (!fresh) return null;
 
-  notifyRefunds(fresh, payments, result, { title, reason, refundTo });
+  notifyRefunds(fresh, payments, result, { title, reason });
   participantUserIds(fresh).forEach((id) =>
     emitToUser(id, "booking:updated", toClient(fresh)),
   );
@@ -744,6 +773,15 @@ exports.createRequest = async (req, res) => {
     const claimed = await claimPayment(paymentId, requestGroupId);
     if (!claimed)
       return fail(res, 409, "This payment is already used for another booking");
+
+    // payment without an owner cannot be refunded to a wallet -> attach the logged-in fresher
+    if (req.user?.role === "fresher" && !payment.fresher) {
+      await Payment.updateOne(
+        { _id: payment._id, fresher: null },
+        { $set: { fresher: req.user.id } },
+      ).catch(() => {});
+      payment.fresher = req.user.id;
+    }
 
     const reject = async (status, message) => {
       const result = await refundPayment(payment, message);
@@ -1026,6 +1064,15 @@ exports.joinGroup = async (req, res) => {
     );
     if (!claimed)
       return fail(res, 409, "This payment is already used for another booking");
+
+    // payment without an owner cannot be refunded to a wallet -> attach the logged-in fresher
+    if (req.user?.role === "fresher" && !payment.fresher) {
+      await Payment.updateOne(
+        { _id: payment._id, fresher: null },
+        { $set: { fresher: req.user.id } },
+      ).catch(() => {});
+      payment.fresher = req.user.id;
+    }
 
     const reject = async (status, message) => {
       const result = await refundPayment(payment, message, { to: "wallet" });
@@ -1728,7 +1775,10 @@ exports.confirmCompletion = async (req, res) => {
       const pay = payments.find(
         (p) => p.razorpayPaymentId === mem.razorpayPaymentId,
       );
-      const amt = pay ? refundableAmountOf(pay) : mem.amount || updated.amount;
+      const amt =
+        pay && Number(pay.refundAmount) > 0
+          ? pay.refundAmount
+          : mem.amount || updated.amount;
       notify({
         user: mem.fresher,
         role: "fresher",
@@ -1902,7 +1952,7 @@ exports.startSchedulers = (app) => {
         );
 
         const { result } = await refundAll(b, "Retry: session refund", {
-          to: ["disputed", "expired"].includes(b.status) ? "wallet" : "auto",
+          to: undefined, // uses REFUND_DESTINATION (wallet by default)
         });
 
         if (result === "refunded") {
@@ -1967,19 +2017,22 @@ exports.startSchedulers = (app) => {
         if (await paymentUsed(p.razorpayPaymentId)) continue;
 
         const viaWallet = isWalletPayment(p);
-        const result = await refundPayment(p, "Booking was not created", {
-          to: viaWallet ? "wallet" : "original",
-        });
+        const result = await refundPayment(p, "Booking was not created", {});
         if (result === "refunded" && p.fresher) {
+          const done = await Payment.findById(p._id)
+            .select("refundMethod refundAmount")
+            .lean();
+          const toWallet = done?.refundMethod === "wallet";
+          const amt = done?.refundAmount || p.amount;
           notify({
             user: p.fresher,
             role: "fresher",
-            title: viaWallet ? "Wallet refund" : "Payment refunded",
-            message: viaWallet
-              ? `₹${p.amount} was added back to your wallet because the booking was not completed.`
-              : `₹${refundableAmountOf(p)} is being refunded to your payment method because the booking was not completed.`,
+            title: toWallet ? "Wallet refund" : "Payment refunded",
+            message: toWallet
+              ? `₹${amt} was added back to your wallet because the booking was not completed.`
+              : `₹${amt} is being refunded to your payment method because the booking was not completed.`,
             type: "payment",
-            link: viaWallet ? "/Home/bonus-wallet" : "/Home",
+            link: toWallet ? "/Home/bonus-wallet" : "/Home",
           });
         }
       }
