@@ -1,6 +1,7 @@
 // src/Commoncomponents/MeetingInstructionsGate.jsx
 // Full-page "Before we start" screen. White + black theme.
-// Props / socket logic are unchanged.
+// Opens 5 min before the session. Even after accepting, the person enters the
+// meeting only in the last 20 seconds before the start time (entryInMs hits 0).
 import React, { useEffect, useState } from "react";
 import {
   CheckCircle2,
@@ -9,6 +10,7 @@ import {
   AlertTriangle,
   Circle,
   ShieldCheck,
+  Clock3,
 } from "lucide-react";
 import { socket } from "../utils/socket";
 
@@ -22,6 +24,12 @@ const LANGS = [
   { code: "te", label: "తెలుగు" },
   { code: "kn", label: "ಕನ್ನಡ" },
 ];
+
+const mmss = (ms) => {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  const m = Math.floor(s / 60);
+  return `${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+};
 
 const StatusRow = ({ label, done }) => (
   <div className="flex items-center justify-between rounded-xl border border-white/15 px-4 py-3">
@@ -43,6 +51,7 @@ export default function MeetingInstructionsGate({
   role,
   peerAccepted = false,
   alreadyAccepted = false,
+  entryInMs = null, // ms left until the meeting door opens (null = unknown yet)
 }) {
   const [lang, setLang] = useState("en");
   const [items, setItems] = useState([]);
@@ -95,6 +104,7 @@ export default function MeetingInstructionsGate({
   const isMentor = role === "mentor";
   const youLabel = isMentor ? "You (Employee)" : "You (Fresher)";
   const otherLabel = isMentor ? "Fresher" : "Employee";
+  const waitingForDoor = entryInMs !== null && entryInMs > 0;
 
   return (
     <div className="fixed inset-0 z-[130] flex h-[100dvh] flex-col overflow-hidden bg-white text-slate-900 md:flex-row">
@@ -112,13 +122,31 @@ export default function MeetingInstructionsGate({
             Before we start
           </h1>
           <p className="mt-3 text-sm leading-6 text-white/65">
-            Please read the {isMentor ? "employee" : "fresher"} guidelines. The
-            camera turns on and the meeting starts only after both of you
-            accept.
+            Please read the {isMentor ? "employee" : "fresher"} guidelines and
+            accept them. You will enter the meeting automatically in the last
+            20 seconds before the start time.
           </p>
         </div>
 
-        <div className="mt-6 space-y-2.5 md:mt-10">
+        {/* countdown to the meeting door */}
+        {entryInMs !== null && (
+          <div className="mt-6 rounded-xl border border-white/20 px-4 py-3">
+            <p className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/60">
+              <Clock3 size={13} />
+              {waitingForDoor ? "Meeting opens in" : "Opening now"}
+            </p>
+            <p className="mt-1 font-mono text-3xl font-bold tabular-nums">
+              {mmss(entryInMs)}
+            </p>
+            <p className="mt-1 text-xs text-white/50">
+              {submitting
+                ? "Accepted. You will go in automatically."
+                : "Read and accept before the timer ends."}
+            </p>
+          </div>
+        )}
+
+        <div className="mt-6 space-y-2.5 md:mt-8">
           <StatusRow label={youLabel} done={submitting} />
           <StatusRow label={otherLabel} done={peerAccepted} />
         </div>
@@ -222,7 +250,11 @@ export default function MeetingInstructionsGate({
               ) : (
                 <CheckCircle2 size={16} />
               )}
-              {submitting ? "Accepted. Waiting…" : "Accept & continue"}
+              {submitting
+                ? waitingForDoor
+                  ? `Accepted. Entering in ${mmss(entryInMs)}`
+                  : "Accepted. Entering…"
+                : "Accept & continue"}
             </button>
           </div>
         </div>

@@ -1,17 +1,23 @@
 // utils/meeting.js  (single + GROUP meetings)
 //
+// Timing rules
+//  - room opens 5 min before startsAt (instructions screen is shown)
+//  - the frontend lets people in during the last 20 sec before startsAt
+//  - the TIMER starts only at startsAt (never earlier, even if everybody accepted)
+//    and only when: mentor inside + accepted, HOST inside + accepted
+//  - late start: if everyone is ready after startsAt, the timer ends at the scheduled end
+//
 // Group rules
 //  - room = 1 mentor + 1..N freshers (host + friends who paid)
-//  - timer starts ONCE when: mentor inside + accepted instructions, HOST inside + accepted instructions
 //  - only the HOST answers "success / not success" at the end
-//  - WebRTC signalling is now addressed: payload.to = target socket id (mesh).
+//  - WebRTC signalling is addressed: payload.to = target socket id (mesh).
 //    Without `to` it still broadcasts, so the old 1:1 client keeps working.
 const jwt = require("jsonwebtoken");
 const Booking = require("../models/Booking");
 const { completeBooking } = require("../controllers/bookingController");
 const { emitToUser } = require("./realtime");
 
-const OPEN_BEFORE_MS = 5 * 60 * 1000;
+const OPEN_BEFORE_MS = 5 * 60 * 1000; // room + instructions open
 const SUCCESS_WINDOW_MS = 3 * 60 * 1000;
 const BROADCAST_EVERY_TICKS = 5;
 const SAVE_EVERY_MS = 10 * 1000;
@@ -64,6 +70,7 @@ const stateOf = (r) => ({
   successRequested: Boolean(r.successRequested),
   fresherConfirmed: Boolean(r.fresherConfirmed),
   fresherDeclined: Boolean(r.fresherDeclined),
+  startsAtMs: r.startsAtMs,
   serverNow: Date.now(),
 });
 
@@ -153,11 +160,23 @@ const save = (r) =>
     }
   ).catch(() => {});
 
+// everything needed to start the timer. NOTE: the time check is the important part:
+// accepting the instructions early must NOT start the timer.
+const canStart = (r) =>
+  !r.startedOnce &&
+  !r.running &&
+  Date.now() >= r.startsAtMs &&
+  r.mentor.size > 0 &&
+  hostInside(r) &&
+  r.instructionsAccepted.mentor &&
+  r.instructionsAccepted.fresher;
+
 const startTimer = (r) => {
   const now = Date.now();
   r.startedOnce = true;
   r.running = true;
-  r.endsAtMs = now < r.startsAtMs ? now + r.totalMs : r.scheduledEndMs;
+  // we are always at/after startsAt here -> the session ends at its scheduled end
+  r.endsAtMs = Math.min(r.scheduledEndMs, now + r.totalMs);
   r.remainingMs = Math.max(0, r.endsAtMs - now);
   r.lastSave = now;
 
@@ -178,12 +197,7 @@ const startTimer = (r) => {
 
 const refresh = (io, r) => {
   r.lastActivity = Date.now();
-  const ready =
-    r.mentor.size > 0 &&
-    hostInside(r) &&
-    r.instructionsAccepted.mentor &&
-    r.instructionsAccepted.fresher;
-  if (!r.startedOnce && ready) startTimer(r);
+  if (canStart(r)) startTimer(r);
   io.to(channel(r.id)).emit("meeting:state", stateOf(r));
 };
 
@@ -325,7 +339,7 @@ exports.initMeetings = (io) => {
 
       sendInstructions(io, r);
       save(r);
-      refresh(io, r);
+      refresh(io, r); // starts the timer only if startsAt already passed
     });
 
     // MENTOR: "Meeting Success"
@@ -399,6 +413,14 @@ exports.initMeetings = (io) => {
         }
         continue;
       }
+
+      // NOT running yet: everybody accepted early -> start exactly when startsAt arrives
+      if (canStart(r)) {
+        startTimer(r);
+        io.to(channel(r.id)).emit("meeting:state", stateOf(r));
+        continue;
+      }
+
       const empty = r.mentor.size === 0 && r.fresher.size === 0;
       if (empty && now - r.lastActivity > ORPHAN_ROOM_TTL_MS) rooms.delete(r.id);
     }

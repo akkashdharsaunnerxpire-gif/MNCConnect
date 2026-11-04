@@ -13,6 +13,7 @@ const Payment = require("../models/Payment");
 const Mentor = require("../models/Mentor");
 const Fresher = require("../models/Fresher");
 const Notification = require("../models/Notification");
+const TOKEN_OPEN_BEFORE_MS = 60 * 1000;
 
 const { optionalAuth } = require("../middleware/panelAuth");
 const {
@@ -43,7 +44,7 @@ const MENTOR_PUBLIC_FIELDS =
 const PAYMENT_GRACE_MS = (Number(process.env.PAYMENT_GRACE_SEC) || 60) * 1000;
 
 const GAP_MS = 30 * 60 * 1000;
-const OPEN_BEFORE_MS = 2 * 60 * 1000;
+const OPEN_BEFORE_MS = 5 * 60 * 1000;
 const PLATFORM_FEE_PERCENT = Number(process.env.PLATFORM_FEE_PERCENT || 25);
 
 const PENDING_CUTOFF_MIN = Number(process.env.PENDING_CUTOFF_MIN) || 10;
@@ -2137,7 +2138,8 @@ exports.livekitToken = async (req, res) => {
 
     if (!["accepted", "in_progress"].includes(b.status))
       return fail(res, 409, "This session is not active");
-    if (Date.now() < new Date(b.startsAt).getTime() - 5 * 60 * 1000)
+    // livekitToken
+    if (Date.now() < new Date(b.startsAt).getTime() - TOKEN_OPEN_BEFORE_MS)
       return fail(res, 409, "The meeting room is not open yet");
 
     let name = "Guest";

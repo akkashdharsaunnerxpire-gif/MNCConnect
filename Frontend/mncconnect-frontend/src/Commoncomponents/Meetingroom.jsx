@@ -48,7 +48,12 @@ import ReviewModal from "../FresherDashboard/pages/Reviewmodal";
 import MeetingInstructionsGate from "../Commoncomponents/MeetingInstructionsGate";
 import SessionCompletionModal from "../Commoncomponents/SessionCompletionModal";
 import ChatPanel from "../Commoncomponents/Chatpanel";
-import { API_URL, ENDPOINTS, fmtClock, getUserId } from "../services/fresherApi";
+import {
+  API_URL,
+  ENDPOINTS,
+  fmtClock,
+  getUserId,
+} from "../services/fresherApi";
 
 const ICE = {
   iceServers: [
@@ -62,8 +67,9 @@ const ONE_MIN = 60 * 1000;
 const THREE_MIN = 3 * 60 * 1000;
 const FIVE_MIN = 5 * 60 * 1000;
 const REVIEW_AT_MS = ONE_MIN;
-const OPEN_BEFORE_MIN = 2;
+const OPEN_BEFORE_MIN = 5;
 const CONFIRMED_BANNER_MS = 20 * 1000;
+const ENTRY_BEFORE_MS = 20 * 1000;
 
 // group: students join with mic + camera OFF when the group is bigger than this
 const AUTO_MEDIA_MAX = 6;
@@ -672,7 +678,8 @@ export default function MeetingRoom() {
       localReadyRef.current = false;
       mediaStarted.current = false;
       // leave full screen when the meeting page closes
-      if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+      if (document.fullscreenElement)
+        document.exitFullscreen?.().catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookingId]);
@@ -682,7 +689,18 @@ export default function MeetingRoom() {
      I need MY OWN acceptance too (so every friend reads the instructions). */
   const inst = clock.instructions || {};
   const startReady = Boolean(inst.mentor && inst.fresher);
-  const mediaAllowed = myAcc && (startReady || clock.running);
+
+  // door opens at (startsAt - 20s). If the session is already running (rejoin), no wait.
+  const startsAtMs = booking?.startsAt
+    ? new Date(booking.startsAt).getTime()
+    : null;
+  const entryAtMs = startsAtMs !== null ? startsAtMs - ENTRY_BEFORE_MS : null;
+  const entryInMs =
+    entryAtMs !== null ? Math.max(0, entryAtMs - Date.now()) : null;
+  const doorOpen =
+    clock.running || (entryAtMs !== null && Date.now() >= entryAtMs);
+
+  const mediaAllowed = myAcc && (startReady || clock.running) && doorOpen;
 
   // what the "waiting for the other side" line of the gate should check
   const peerDone = isMentor
@@ -808,11 +826,9 @@ export default function MeetingRoom() {
           );
         } else {
           let blocked = false;
-          await room.localParticipant
-            .setMicrophoneEnabled(true)
-            .catch(() => {
-              blocked = true;
-            });
+          await room.localParticipant.setMicrophoneEnabled(true).catch(() => {
+            blocked = true;
+          });
           await room.localParticipant.setCameraEnabled(true).catch(() => {
             blocked = true;
           });
@@ -1097,6 +1113,7 @@ export default function MeetingRoom() {
         role={isMentor ? "mentor" : "fresher"}
         alreadyAccepted={myAcc}
         peerAccepted={peerDone}
+        entryInMs={entryInMs}
       />
     );
   }
@@ -1121,7 +1138,10 @@ export default function MeetingRoom() {
   /* ---------- group stage data ---------- */
   const lkRoom = lkRoomRef.current;
   const people = lkRoom
-    ? [lkRoom.localParticipant, ...Array.from(lkRoom.remoteParticipants.values())]
+    ? [
+        lkRoom.localParticipant,
+        ...Array.from(lkRoom.remoteParticipants.values()),
+      ]
     : [];
   const hasTrack = (p, src) => {
     const pub = p.getTrackPublication(src);
@@ -1137,14 +1157,14 @@ export default function MeetingRoom() {
         Number(camOnOf(b)) - Number(camOnOf(a)),
     );
   const sharer = people.find((p) => hasTrack(p, Track.Source.ScreenShare));
-  const pinnedP = pinnedId
-    ? people.find((p) => p.identity === pinnedId)
-    : null;
+  const pinnedP = pinnedId ? people.find((p) => p.identity === pinnedId) : null;
   const iAmSharing = Boolean(lkRoom?.localParticipant?.isScreenShareEnabled);
 
   // chat: userId -> name  (so every message shows WHO wrote it, even when the server sends no name)
   people.forEach((p) => {
-    const id = String(p.identity || "").split(":").pop();
+    const id = String(p.identity || "")
+      .split(":")
+      .pop();
     if (id && p.name) nameCache.current[id] = p.name;
   });
   const chatNames = { ...nameCache.current };
@@ -1177,7 +1197,10 @@ export default function MeetingRoom() {
 
   const pages = Math.max(1, Math.ceil(gridList.length / GRID_PAGE));
   const curPage = Math.min(page, pages - 1);
-  const pageItems = gridList.slice(curPage * GRID_PAGE, (curPage + 1) * GRID_PAGE);
+  const pageItems = gridList.slice(
+    curPage * GRID_PAGE,
+    (curPage + 1) * GRID_PAGE,
+  );
   const cols = colsFor(pageItems.length);
   const rows = Math.max(1, Math.ceil(pageItems.length / cols));
   const gridTileSize = pageItems.length <= 4 ? "xl" : "md";
@@ -1255,7 +1278,9 @@ export default function MeetingRoom() {
                         source={mainSrc}
                         pinned={pinnedId === mainP.identity}
                         onPin={
-                          mainSrc === Track.Source.Camera ? togglePin : undefined
+                          mainSrc === Track.Source.Camera
+                            ? togglePin
+                            : undefined
                         }
                       />
                     ) : (
@@ -1368,7 +1393,9 @@ export default function MeetingRoom() {
                 <button
                   type="button"
                   onClick={() => {
-                    lkRoomRef.current?.startAudio().then(() => setNeedAudio(false));
+                    lkRoomRef.current
+                      ?.startAudio()
+                      .then(() => setNeedAudio(false));
                   }}
                   className="absolute left-1/2 top-16 z-30 -translate-x-1/2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold shadow-xl hover:bg-blue-700"
                 >
@@ -1459,7 +1486,8 @@ export default function MeetingRoom() {
           {isMentor && confirmedBanner && (
             <div className="absolute left-1/2 top-4 z-30 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white shadow-xl">
               <CheckCircle size={18} />
-              The {isGroup ? "host" : "fresher"} confirmed: the meeting went well ✅
+              The {isGroup ? "host" : "fresher"} confirmed: the meeting went
+              well ✅
             </div>
           )}
           {isMentor &&
