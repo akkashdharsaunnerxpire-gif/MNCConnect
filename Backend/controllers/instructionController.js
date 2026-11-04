@@ -1,4 +1,3 @@
-
 // controllers/instructionController.js
 
 const Instruction = require("../models/Instruction");
@@ -41,7 +40,7 @@ const DEFAULT_INSTRUCTIONS = {
       "Do not share meeting links or session access with unauthorized people.",
       "Report suspicious activities, harassment, scams, or inappropriate requests through the official platform.",
       "Keep all mentoring discussions professional, respectful, and focused on the selected topic.",
-      "If a technical issue occurs, communicate clearly and follow the official platform process."
+      "If a technical issue occurs, communicate clearly and follow the official platform process.",
     ],
 
     fresher: [
@@ -75,8 +74,8 @@ const DEFAULT_INSTRUCTIONS = {
       "Keep your conversations respectful and focused on learning and professional development.",
       "If a mentor makes you uncomfortable or asks for sensitive information, you can end the interaction and report it.",
       "A mentor should guide your career, not request your personal credentials or private information.",
-      "Do not feel pressured to accept personal requests or communicate outside the platform."
-    ]
+      "Do not feel pressured to accept personal requests or communicate outside the platform.",
+    ],
   },
 
   // ============================================================
@@ -115,7 +114,7 @@ const DEFAULT_INSTRUCTIONS = {
       "அனுமதியில்லாத நபர்களுடன் சந்திப்பு லிங்க் அல்லது செஷன் அணுகலைப் பகிரக்கூடாது.",
       "மோசடி, துன்புறுத்தல் அல்லது சந்தேகத்திற்கிடமான செயல்பாடுகள் இருந்தால் அதிகாரப்பூர்வ தளத்தின் மூலம் புகாரளிக்க வேண்டும்.",
       "அனைத்து உரையாடல்களும் தொழில்முறை, மரியாதையான மற்றும் தேர்ந்தெடுக்கப்பட்ட தலைப்பை மையமாகக் கொண்டதாக இருக்க வேண்டும்.",
-      "தொழில்நுட்பப் பிரச்சினை ஏற்பட்டால் தெளிவாகத் தெரிவித்து அதிகாரப்பூர்வ தளத்தின் நடைமுறையைப் பின்பற்றுங்கள்."
+      "தொழில்நுட்பப் பிரச்சினை ஏற்பட்டால் தெளிவாகத் தெரிவித்து அதிகாரப்பூர்வ தளத்தின் நடைமுறையைப் பின்பற்றுங்கள்.",
     ],
 
     fresher: [
@@ -149,8 +148,8 @@ const DEFAULT_INSTRUCTIONS = {
       "உரையாடல்களை மரியாதையாகவும் கற்றல் மற்றும் தொழில் வளர்ச்சியை மையமாகக் கொண்டும் வைத்திருங்கள்.",
       "மென்டர் உங்களைத் தவறாக நடத்தினால் அல்லது முக்கியமான தகவல்களைக் கேட்டால், உரையாடலை நிறுத்திவிட்டு புகாரளிக்கலாம்.",
       "மென்டரின் நோக்கம் உங்களுக்கு வழிகாட்டுவதுதான்; உங்கள் தனிப்பட்ட விவரங்களையோ கணக்கின் ரகசியங்களையோ கேட்பது அல்ல.",
-      "தளத்திற்கு வெளியே தனிப்பட்ட முறையில் தொடர்புகொள்ளும் கோரிக்கைகளை ஏற்க வேண்டிய கட்டாயம் உங்களுக்கு இல்லை."
-    ]
+      "தளத்திற்கு வெளியே தனிப்பட்ட முறையில் தொடர்புகொள்ளும் கோரிக்கைகளை ஏற்க வேண்டிய கட்டாயம் உங்களுக்கு இல்லை.",
+    ],
   },
 
   // ============================================================
@@ -189,7 +188,7 @@ const DEFAULT_INSTRUCTIONS = {
       "अनधिकृत व्यक्तियों के साथ मीटिंग लिंक या सत्र की पहुंच साझा न करें।",
       "संदिग्ध गतिविधि, उत्पीड़न या धोखाधड़ी की सूचना आधिकारिक प्लेटफॉर्म पर दें।",
       "सभी बातचीत पेशेवर, सम्मानजनक और चुने गए विषय पर केंद्रित रखें।",
-      "तकनीकी समस्या होने पर स्पष्ट रूप से बताएं और प्लेटफॉर्म की आधिकारिक प्रक्रिया का पालन करें।"
+      "तकनीकी समस्या होने पर स्पष्ट रूप से बताएं और प्लेटफॉर्म की आधिकारिक प्रक्रिया का पालन करें।",
     ],
 
     fresher: [
@@ -223,9 +222,9 @@ const DEFAULT_INSTRUCTIONS = {
       "अपनी बातचीत को सम्मानजनक और सीखने तथा करियर विकास पर केंद्रित रखें।",
       "यदि मेंटर आपको असहज महसूस कराता है या संवेदनशील जानकारी मांगता है, तो बातचीत समाप्त करके रिपोर्ट कर सकते हैं।",
       "मेंटर का काम आपको मार्गदर्शन देना है, न कि आपकी निजी जानकारी या अकाउंट के गोपनीय विवरण मांगना।",
-      "प्लेटफॉर्म के बाहर व्यक्तिगत रूप से संपर्क करने के अनुरोध को स्वीकार करना आपके लिए अनिवार्य नहीं है।"
-    ]
-  }
+      "प्लेटफॉर्म के बाहर व्यक्तिगत रूप से संपर्क करने के अनुरोध को स्वीकार करना आपके लिए अनिवार्य नहीं है।",
+    ],
+  },
 };
 
 // ============================================================
@@ -237,7 +236,16 @@ const mergeInstructions = (defaults = [], databaseItems = []) => {
   const seen = new Set();
 
   const addItem = (item, source) => {
-    const text = String(item.text || "").trim();
+    let text = item?.text;
+
+    // Handle object-based instruction text safely
+    if (typeof text === "object" && text !== null) {
+      text = text.en || text.ta || text.hi || text.text || "";
+    }
+
+    if (typeof text !== "string") return;
+
+    text = text.trim();
 
     if (!text) return;
 
@@ -254,19 +262,18 @@ const mergeInstructions = (defaults = [], databaseItems = []) => {
       text,
       order: result.length,
       isActive: true,
-      source
+      source,
     });
   };
-
   // Mandatory default instructions first
   defaults.forEach((text) => {
     addItem(
       {
         text,
         role: undefined,
-        language: undefined
+        language: undefined,
       },
-      "default"
+      "default",
     );
   });
 
@@ -289,7 +296,7 @@ exports.getInstructions = async (req, res) => {
     if (!["mentor", "fresher"].includes(role)) {
       return res.status(403).json({
         success: false,
-        message: "Only mentors and freshers can load instructions."
+        message: "Only mentors and freshers can load instructions.",
       });
     }
 
@@ -302,14 +309,13 @@ exports.getInstructions = async (req, res) => {
       language = "en";
     }
 
-    const defaultTexts =
-      DEFAULT_INSTRUCTIONS[language][role] || [];
+    const defaultTexts = DEFAULT_INSTRUCTIONS[language][role] || [];
 
     // Fetch active instructions from MongoDB
     const databaseItems = await Instruction.find({
       role,
       language,
-      isActive: true
+      isActive: true,
     })
       .sort({ order: 1 })
       .lean();
@@ -317,7 +323,7 @@ exports.getInstructions = async (req, res) => {
     // If DB is empty, seed the default instructions
     if (!databaseItems || databaseItems.length === 0) {
       console.log(
-        `No instructions found for ${language}-${role}. Seeding defaults.`
+        `No instructions found for ${language}-${role}. Seeding defaults.`,
       );
 
       const docs = defaultTexts.map((text, index) => ({
@@ -325,16 +331,13 @@ exports.getInstructions = async (req, res) => {
         language,
         text,
         order: index,
-        isActive: true
+        isActive: true,
       }));
 
       try {
         await Instruction.insertMany(docs);
       } catch (seedError) {
-        console.error(
-          "Instruction default seeding failed:",
-          seedError.message
-        );
+        console.error("Instruction default seeding failed:", seedError.message);
       }
     }
 
@@ -345,9 +348,9 @@ exports.getInstructions = async (req, res) => {
       defaultTexts.map((text) => ({
         text,
         role,
-        language
+        language,
       })),
-      databaseItems || []
+      databaseItems || [],
     );
 
     return res.status(200).json({
@@ -355,18 +358,14 @@ exports.getInstructions = async (req, res) => {
       language,
       role,
       count: instructions.length,
-      instructions
+      instructions,
     });
-
   } catch (err) {
-    console.error(
-      "getInstructions error:",
-      err.message
-    );
+    console.error("getInstructions error:", err.message);
 
     return res.status(500).json({
       success: false,
-      message: "Unable to load instructions."
+      message: "Unable to load instructions.",
     });
   }
 };
