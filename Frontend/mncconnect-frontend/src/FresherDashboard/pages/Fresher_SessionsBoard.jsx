@@ -190,6 +190,7 @@ export default function SessionBoard() {
   const [deptError, setDeptError] = useState("");
 
   const reqIdRef = useRef(null);
+  const paymentStartingRef = useRef(false);
   const paymentIdRef = useRef(null);
   const paidByWalletRef = useRef(false);
   const canRetryRef = useRef(false);
@@ -420,8 +421,11 @@ export default function SessionBoard() {
 
   /* ---------- pay ---------- */
   const startPayment = async () => {
-    if (stage) return; // a payment / request is already in progress
+    // Synchronous protection against multiple clicks
+    if (paymentStartingRef.current || stage) return;
+
     if (problems.length) return;
+
     setError("");
 
     if (!hasEnoughLead(f.date, f.time)) {
@@ -431,6 +435,9 @@ export default function SessionBoard() {
       );
       return;
     }
+
+    // Lock BEFORE any asynchronous operation
+    paymentStartingRef.current = true;
 
     reqIdRef.current = makeRequestId();
     paymentIdRef.current = null;
@@ -451,6 +458,7 @@ export default function SessionBoard() {
         canRetryRef.current = true;
         refreshWallet();
       } catch (e) {
+        paymentStartingRef.current = false;
         setError(e.message);
         setStage("error");
         canRetryRef.current = false;
@@ -485,9 +493,8 @@ export default function SessionBoard() {
       } else {
         // The order amount is the authoritative paise value returned by Razorpay.
         // Keep a rupee fallback for refund/status UI if older backend code is deployed.
-        paidTotalRef.current = Number(order?.amount) > 0
-          ? Number(order.amount) / 100
-          : totalPayable;
+        paidTotalRef.current =
+          Number(order?.amount) > 0 ? Number(order.amount) / 100 : totalPayable;
       }
 
       const rz = new window.Razorpay({
@@ -522,7 +529,10 @@ export default function SessionBoard() {
           }
         },
         modal: {
-          ondismiss: () => setStage((s) => (s === "paying" ? null : s)),
+          ondismiss: () => {
+            paymentStartingRef.current = false;
+            setStage((s) => (s === "paying" ? null : s));
+          },
         },
       });
 
@@ -539,6 +549,7 @@ export default function SessionBoard() {
 
       rz.open();
     } catch (e) {
+      paymentStartingRef.current = false;
       setError(e.message);
       setStage(null);
     }
@@ -558,6 +569,7 @@ export default function SessionBoard() {
 
   const bookAnother = () => {
     closeAll();
+    paymentStartingRef.current = false;
     setF(makeEmptyForm(user));
     setNotifiedCount(0);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -739,9 +751,9 @@ export default function SessionBoard() {
                     <b className="text-slate-800">{inr(price)}</b> per person.
                     After booking you get a link: each friend opens it and pays
                     their own <b className="text-slate-800">{inr(price)}</b>. If
-                    all {f.members} join, the group total is{" "}
-                    {inr(groupTotal)}. Card / UPI payments may add a small
-                    convenience fee; wallet payments never do.
+                    all {f.members} join, the group total is {inr(groupTotal)}.
+                    Card / UPI payments may add a small convenience fee; wallet
+                    payments never do.
                   </p>
                 </div>
               )}
@@ -1046,9 +1058,7 @@ export default function SessionBoard() {
                       </dd>
                     </div>
                     <div className="flex justify-between gap-4">
-                      <dt className="text-slate-500">
-                        Convenience fee
-                      </dt>
+                      <dt className="text-slate-500">Convenience fee</dt>
                       <dd className="text-right font-semibold text-slate-900">
                         {inr(convenienceFee)}
                       </dd>
