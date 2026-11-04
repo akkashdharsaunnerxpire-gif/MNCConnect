@@ -28,6 +28,7 @@ const {
   validateGatewayAmounts,
   toPaise,
   toRupees,
+  round2,
 } = require("../utils/pricing");
 
 const PLATFORM_FEE_PERCENT = Number(process.env.PLATFORM_FEE_PERCENT || 25);
@@ -218,6 +219,18 @@ exports.createOrder = async (req, res) => {
         : quote.convenienceFee > 0
           ? "platform"
           : "none",
+      // Keep both the legacy top-level fields and a structured breakdown.
+      // Session amount remains the original amount used for mentor/platform split.
+      breakdown: {
+        sessionAmount: amount,
+        convenienceFee: quote.convenienceFee,
+        checkoutAmount: quote.checkoutAmount,
+        convenienceFeeMode: quote.bearerManaged
+          ? "razorpay_bearer"
+          : quote.convenienceFee > 0
+            ? "platform"
+            : "none",
+      },
     });
   } catch (error) {
     console.error("Create order error:", error);
@@ -281,7 +294,6 @@ const rejectMismatch = async (payment, rzPayment, reason) => {
     }
   }
 };
-
 const settleGatewayPayment = async ({ payment, order, paymentId, signature = "", fresher = null }) => {
   let rzPayment = null;
   try {
@@ -589,7 +601,6 @@ exports.verifyPayment = async (req, res) => {
     });
   }
 };
-
 // ============================================================
 // 2b. PAY WITH WALLET   POST /api/payments/pay-with-wallet   (fresher)
 //     { amount, topic, requestGroupId, date, time, duration }
@@ -611,49 +622,42 @@ exports.payWithWallet = async (req, res) => {
     const fresher = await Fresher.findOneAndUpdate(
       { _id: fresherId, walletBalance: { $gte: amount } },
       { $inc: { walletBalance: -amount } },
-      { returnDocument: "after" }
-    ).select("name email walletBalance");
+      { new: true }
+    );
 
     if (!fresher) {
-      const current = await Fresher.findById(fresherId).select("walletBalance").lean();
-      const balance = Number(current?.walletBalance) || 0;
-
-      return res.status(400).json({
+      return res.status(402).json({
         success: false,
-        code: "INSUFFICIENT_WALLET",
-        message: `Insufficient wallet balance. You have ${rupees(balance)} but this session needs ${rupees(amount)}.`,
-        balance,
-        required: amount,
-        shortBy: Math.max(amount - balance, 0),
+        message: "Insufficient wallet balance",
       });
     }
 
-    const ref = `${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
     const { fee, earning } = splitAmount(amount, PLATFORM_FEE_PERCENT);
+    const paymentId = `wallet_pay_${new mongoose.Types.ObjectId()}`;
+    const orderId = `wallet_order_${new mongoose.Types.ObjectId()}`;
 
-    let payment;
     try {
-      payment = await Payment.create({
-        razorpayOrderId: `wallet_order_${ref}`,
-        razorpayPaymentId: `wallet_pay_${ref}`,
-        receipt: `wallet_${ref}`,
+      const payment = await Payment.create({
+        razorpayOrderId: orderId,
+        razorpayPaymentId: paymentId,
         amount,
         currency: "INR",
         platformFeePercent: PLATFORM_FEE_PERCENT,
         platformFee: fee,
         mentorEarning: earning,
-        // wallet: no convenience fee, no Razorpay cost
         convenienceFeeMode: "none",
         convenienceFee: 0,
         checkoutAmount: amount,
         orderAmount: amount,
         gatewayFeeCollected: 0,
+        convenienceFeeRefunded: 0,
         gatewayFee: 0,
         gatewayTax: 0,
         feeEstimated: false,
         amountVerified: true,
-        status: "paid",
+        verifyRejected: false,
         method: "wallet",
+        status: "paid",
         paidAt: new Date(),
         fresher: fresher._id,
         fresherName: fresher.name || "",
@@ -661,309 +665,253 @@ exports.payWithWallet = async (req, res) => {
         topic: body.topic ? String(body.topic).slice(0, 120) : "",
         requestGroupId: body.requestGroupId ? String(body.requestGroupId) : "",
         ...(body.requestGroupId
-          ? buildSessionFields({ date: body.date, time: body.time, duration: body.duration })
+          ? buildSessionFields({
+              date: body.date,
+              time: body.time,
+              duration: body.duration,
+            })
           : {}),
       });
+
+      return res.json({
+        success: true,
+        paymentId: payment.razorpayPaymentId,
+        amount: payment.amount,
+        checkoutAmount: payment.checkoutAmount,
+        walletBalance: fresher.walletBalance,
+      });
     } catch (dbError) {
-      // could not save the payment -> give the money back
-      console.error("Wallet payment not saved, refunding wallet:", dbError.message);
-      await Fresher.updateOne({ _id: fresherId }, { $inc: { walletBalance: amount } });
-      return res.status(500).json({ success: false, message: "Unable to complete wallet payment." });
+      // Restore the wallet if the payment record could not be created.
+      await Fresher.updateOne(
+        { _id: fresherId },
+        { $inc: { walletBalance: amount } },
+      ).catch((e) => console.error("Wallet rollback failed:", e.message));
+
+      console.error("Wallet payment record save failed:", dbError);
+      return res.status(500).json({
+        success: false,
+        message: "Unable to complete wallet payment. Your balance was restored if possible.",
+      });
     }
-
-    notify({
-      user: fresher._id,
-      role: "fresher",
-      title: "Paid from wallet",
-      message: `${rupees(amount)} was paid from your wallet. Balance: ${rupees(fresher.walletBalance)}.`,
-      type: "payment",
-    });
-    emitToUser(String(fresher._id), "wallet:updated", { balance: fresher.walletBalance });
-
-    return res.json({
-      success: true,
-      paymentId: payment.razorpayPaymentId,
-      balance: fresher.walletBalance,
-    });
   } catch (error) {
-    console.error("payWithWallet error:", error.message);
-    return res.status(500).json({ success: false, message: "Unable to pay from wallet." });
+    console.error("Wallet payment error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Unable to process wallet payment",
+    });
   }
 };
 
 // ============================================================
-// 3. MARK FAILED   POST /api/payments/failed  { razorpay_order_id, reason }
-//    Only a "created" payment can fail. A paid / refunded one is never touched.
+// 3. LINK PAYMENT TO REQUEST
 // ============================================================
 
-exports.markFailed = async (req, res) => {
-  try {
-    const { razorpay_order_id, reason } = req.body || {};
-    if (!razorpay_order_id) {
-      return res.status(400).json({ success: false, message: "Order id is required." });
-    }
+exports.linkPaymentToRequest = async (paymentId, requestGroupId) => {
+  if (!paymentId || !requestGroupId) return null;
 
-    const existing = await Payment.findOne({ razorpayOrderId: String(razorpay_order_id) }).select("fresher status").lean();
-    if (!existing) return res.json({ success: true });
-
-    // someone else's order? ignore
-    const me = await currentFresher(req);
-    if (existing.fresher && (!me || String(me._id) !== String(existing.fresher))) {
-      return res.status(403).json({ success: false, message: "Not your payment." });
-    }
-
-    await Payment.updateOne(
-      { razorpayOrderId: String(razorpay_order_id), status: "created" },
-      { $set: { status: "failed", failureReason: String(reason || "Payment failed").slice(0, 200) } }
-    );
-
-    return res.json({ success: true });
-  } catch (error) {
-    console.error("Mark failed error:", error.message);
-    return res.status(500).json({ success: false, message: "Unable to update payment." });
-  }
-};
-
-// ============================================================
-// 3b. CLAIM A PAID PAYMENT (one booking / one group-join per payment)
-//     claimId = requestGroupId for a booking, `join:<code>:<userId>` for a friend joining
-//     Calling it again with the SAME claimId is fine (Retry button).
-// ============================================================
-
-exports.claimPayment = (razorpayPaymentId, claimId) =>
-  Payment.findOneAndUpdate(
+  return Payment.findOneAndUpdate(
     {
-      razorpayPaymentId: String(razorpayPaymentId),
-      status: "paid",
-      claimedBy: { $in: [null, "", String(claimId)] }, // null also matches old documents without the field
+      $or: [
+        { razorpayPaymentId: paymentId },
+        { razorpayOrderId: paymentId },
+      ],
     },
-    { $set: { claimedBy: String(claimId) } },
-    { returnDocument: "after" }
+    { $set: { requestGroupId: String(requestGroupId) } },
+    { new: true },
   );
-
-// ============================================================
-// 3c. RECONCILE (scheduler, every ~5 min)
-//     - captured at Razorpay but the browser never called verify  -> mark paid
-//     - every attempt failed (30 min)                              -> failed
-//     - nobody ever paid (24 h)                                    -> failed "abandoned"
-// ============================================================
-
-exports.reconcileStaleOrders = async () => {
-  const now = Date.now();
-  const MIN10 = 10 * 60 * 1000;
-  const MIN30 = 30 * 60 * 1000;
-  const H24 = 24 * 60 * 60 * 1000;
-  const D7 = 7 * H24;
-
-  // very old "created" rows: abandoned, no API call needed
-  await Payment.updateMany(
-    { status: "created", method: { $ne: "wallet" }, createdAt: { $lte: new Date(now - D7) } },
-    { $set: { status: "failed", failureReason: "Abandoned (no payment within 7 days)" } }
-  ).catch(() => {});
-
-  const rows = await Payment.find({
-    status: "created",
-    method: { $ne: "wallet" },
-    razorpayOrderId: /^order_/,
-    createdAt: { $lte: new Date(now - MIN10), $gte: new Date(now - D7) },
-  })
-    .sort({ createdAt: 1 })
-    .limit(20);
-
-  for (const p of rows) {
-    try {
-      const rz = getRazorpay();
-      const list = await rz.orders.fetchPayments(p.razorpayOrderId);
-      const items = (list && list.items) || [];
-      const captured = items.find((i) => i.status === "captured" || i.status === "authorized");
-
-      if (captured) {
-        const order = await rz.orders.fetch(p.razorpayOrderId);
-        await settleGatewayPayment({ payment: p, order, paymentId: captured.id });
-        continue;
-      }
-
-      const age = now - new Date(p.createdAt).getTime();
-      if (items.length && items.every((i) => i.status === "failed") && age >= MIN30) {
-        await Payment.updateOne(
-          { _id: p._id, status: "created" },
-          { $set: { status: "failed", failureReason: "Payment failed at the gateway" } }
-        );
-      } else if (!items.length && age >= H24) {
-        await Payment.updateOne(
-          { _id: p._id, status: "created" },
-          { $set: { status: "failed", failureReason: "Abandoned (checkout never completed)" } }
-        );
-      }
-    } catch (e) {
-      console.error("reconcile skip:", p.razorpayOrderId, e?.error?.description || e.message);
-    }
-  }
 };
 
 // ============================================================
-// 3d. WEBHOOK (optional but recommended)  POST /api/payments/webhook
-//     Route MUST use express.raw({ type: "application/json" }) (see PATCHES.md).
-//     Dashboard events: payment.captured, payment.failed
+// 4. ASSIGN MENTOR TO REQUEST
+// ============================================================
+
+exports.assignMentorToRequest = async (paymentId, mentorId) => {
+  if (!paymentId || !mentorId) return null;
+
+  return Payment.findOneAndUpdate(
+    {
+      $or: [
+        { razorpayPaymentId: paymentId },
+        { razorpayOrderId: paymentId },
+      ],
+    },
+    { $set: { mentor: mentorId } },
+    { new: true },
+  );
+};
+
+// ============================================================
+// 5. CLAIM PAYMENT
+//     A paid payment can be claimed by only one booking / join.
+// ============================================================
+
+exports.claimPayment = async (paymentId, bookingId) => {
+  if (!paymentId || !bookingId) return null;
+
+  return Payment.findOneAndUpdate(
+    {
+      $or: [
+        { razorpayPaymentId: paymentId },
+        { razorpayOrderId: paymentId },
+      ],
+      status: "paid",
+      $or: [
+        { claimedBy: { $exists: false } },
+        { claimedBy: null },
+        { claimedBy: "" },
+        { claimedBy: String(bookingId) },
+      ],
+    },
+    { $set: { claimedBy: String(bookingId) } },
+    { new: true },
+  );
+};
+
+// ============================================================
+// 6. RAZORPAY WEBHOOK
+//     Configure express.raw({ type: "application/json" }) for this route.
 // ============================================================
 
 exports.razorpayWebhook = async (req, res) => {
   try {
     const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
-    if (!secret) return res.status(503).json({ success: false, message: "Webhook not configured" });
+    const signature = req.headers["x-razorpay-signature"];
 
-    const raw = req.body;
-    const sig = req.get("x-razorpay-signature") || "";
-    if (!Buffer.isBuffer(raw)) return res.status(400).json({ success: false, message: "Raw body required" });
+    if (!secret || !signature) {
+      return res.status(400).json({
+        success: false,
+        message: "Webhook configuration missing",
+      });
+    }
 
-    const expected = crypto.createHmac("sha256", secret).update(raw).digest("hex");
-    if (!safeEqual(expected, sig)) return res.status(400).json({ success: false, message: "Bad signature" });
+    const body = Buffer.isBuffer(req.body)
+      ? req.body
+      : Buffer.from(JSON.stringify(req.body || {}));
 
-    const evt = JSON.parse(raw.toString("utf8"));
-    const ent = evt?.payload?.payment?.entity;
+    const expected = crypto
+      .createHmac("sha256", secret)
+      .update(body)
+      .digest("hex");
 
-    if (ent && ent.order_id) {
-      if (evt.event === "payment.captured") {
-        const payment = await Payment.findOne({ razorpayOrderId: ent.order_id });
-        if (payment && ["created", "failed"].includes(payment.status) && !payment.verifyRejected) {
-          const order = await getRazorpay().orders.fetch(ent.order_id);
-          await settleGatewayPayment({ payment, order, paymentId: ent.id });
+    if (!safeEqual(expected, signature)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid webhook signature",
+      });
+    }
+
+    const event = JSON.parse(body.toString("utf8"));
+    const paymentEntity = event?.payload?.payment?.entity;
+
+    if (!paymentEntity?.id || !paymentEntity?.order_id) {
+      return res.json({ success: true, ignored: true });
+    }
+
+    if (
+      event.event === "payment.captured" ||
+      event.event === "order.paid"
+    ) {
+      const payment = await Payment.findOne({
+        razorpayOrderId: paymentEntity.order_id,
+      });
+
+      if (payment && payment.status !== "paid") {
+        const order = await getRazorpay().orders.fetch(paymentEntity.order_id);
+
+        await settleGatewayPayment({
+          payment,
+          order,
+          paymentId: paymentEntity.id,
+        });
+      }
+    }
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("Razorpay webhook error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Webhook processing failed",
+    });
+  }
+};
+
+// ============================================================
+// 7. RECONCILE STALE ORDERS
+//     Call this from your existing scheduler.
+// ============================================================
+
+exports.reconcileStaleOrders = async () => {
+  try {
+    const cutoff = new Date(Date.now() - 5 * 60 * 1000);
+
+    const stalePayments = await Payment.find({
+      status: { $in: ["created", "failed"] },
+      verifyRejected: { $ne: true },
+      createdAt: { $lte: cutoff },
+      razorpayOrderId: { $exists: true, $ne: "" },
+      razorpayOrderId: { $not: /^wallet_order_/ },
+    }).limit(100);
+
+    let processed = 0;
+    let pending = 0;
+    let failed = 0;
+
+    for (const payment of stalePayments) {
+      try {
+        const order = await getRazorpay().orders.fetch(payment.razorpayOrderId);
+        const payments = await getRazorpay().orders.fetchPayments(payment.razorpayOrderId);
+        const items = Array.isArray(payments?.items) ? payments.items : [];
+
+        const captured = items.find((p) => p.status === "captured");
+        const authorized = items.find((p) => p.status === "authorized");
+
+        const candidate = captured || authorized;
+
+        if (!candidate) {
+          pending += 1;
+          continue;
         }
-      } else if (evt.event === "payment.failed") {
-        await Payment.updateOne(
-          { razorpayOrderId: ent.order_id, status: "created" },
-          { $set: { status: "failed", failureReason: String(ent.error_description || "Payment failed").slice(0, 200) } }
+
+        const result = await settleGatewayPayment({
+          payment,
+          order,
+          paymentId: candidate.id,
+        });
+
+        if (result.ok) processed += 1;
+        else if (result.pending) pending += 1;
+        else failed += 1;
+      } catch (error) {
+        failed += 1;
+        console.error(
+          "Stale payment reconciliation failed:",
+          payment.razorpayOrderId,
+          error?.error?.description || error.message,
         );
       }
     }
 
-    return res.json({ received: true });
+    return {
+      success: true,
+      checked: stalePayments.length,
+      processed,
+      pending,
+      failed,
+    };
   } catch (error) {
-    console.error("webhook error:", error.message);
-    return res.status(500).json({ success: false }); // Razorpay retries
+    console.error("reconcileStaleOrders error:", error);
+    return {
+      success: false,
+      message: error.message,
+    };
   }
 };
 
 // ============================================================
-// 4. LINK PAYMENT TO A SESSION REQUEST
+// 8. EXPORT HELPERS FOR OTHER CONTROLLERS
 // ============================================================
 
-const linkPaymentToRequest = async ({
-  razorpayPaymentId,
-  razorpayOrderId,
-  requestGroupId,
-  topic,
-  date,
-  time,
-  duration,
-}) => {
-  if (!requestGroupId || (!razorpayPaymentId && !razorpayOrderId)) return null;
-
-  const filter = razorpayPaymentId
-    ? { razorpayPaymentId: String(razorpayPaymentId) }
-    : { razorpayOrderId: String(razorpayOrderId) };
-
-  return Payment.findOneAndUpdate(
-    { ...filter, status: "paid" },
-    {
-      $set: {
-        requestGroupId: String(requestGroupId),
-        topic: topic ? String(topic).slice(0, 120) : "",
-        ...buildSessionFields({ date, time, duration }),
-      },
-    },
-    { returnDocument: "after" }
-  );
-};
-
-exports.linkPaymentToRequest = linkPaymentToRequest;
-
-exports.linkPayment = async (req, res) => {
-  try {
-    const { razorpay_payment_id, requestGroupId, topic, date, time, duration } = req.body || {};
-
-    if (!razorpay_payment_id || !requestGroupId) {
-      return res
-        .status(400)
-        .json({ success: false, message: "razorpay_payment_id and requestGroupId are required." });
-    }
-
-    const owned = await Payment.exists({
-      razorpayPaymentId: String(razorpay_payment_id),
-      fresher: req.user.id,
-    });
-    if (!owned) {
-      return res.status(404).json({ success: false, message: "Payment not found for this account." });
-    }
-
-    const payment = await linkPaymentToRequest({
-      razorpayPaymentId: razorpay_payment_id,
-      requestGroupId,
-      topic,
-      date,
-      time,
-      duration,
-    });
-
-    return res.json({ success: true, linked: Boolean(payment) });
-  } catch (error) {
-    console.error("Link payment error:", error.message);
-    return res.status(500).json({ success: false, message: "Unable to link payment." });
-  }
-};
-
-// ============================================================
-// 5. ASSIGN THE ACCEPTING MENTOR TO THE PAYMENT
-// ============================================================
-
-const assignMentorToRequest = async ({ requestGroupId, mentorId }) => {
-  if (!requestGroupId || !mongoose.Types.ObjectId.isValid(mentorId)) {
-    return { assigned: false, reason: "invalid input" };
-  }
-
-  const payment = await Payment.findOneAndUpdate(
-    {
-      requestGroupId: String(requestGroupId),
-      status: "paid",
-      mentor: null,
-      sessionStatus: { $ne: "cancelled" },
-    },
-    { $set: { mentor: mentorId, sessionStatus: "upcoming" } },
-    { returnDocument: "after" }
-  );
-
-  if (payment) {
-    notify({
-      user: mentorId,
-      role: "mentor",
-      title: "Session booked",
-      message: `${payment.fresherName || "A fresher"} booked a session. You will earn ${rupees(
-        payment.mentorEarning // from the session price only, never the convenience fee
-      )} once it is completed.`,
-      type: "payment",
-      link: "/mentor/sessions",
-    });
-    emitToUser(mentorId, "wallet:updated", { paymentId: payment._id });
-    return { assigned: true };
-  }
-
-  const mine = await Payment.exists({ requestGroupId: String(requestGroupId), mentor: mentorId });
-  return mine ? { assigned: true } : { assigned: false, reason: "not available" };
-};
-
-exports.assignMentorToRequest = assignMentorToRequest;
-
-exports.assignToMe = async (req, res) => {
-  try {
-    const { requestGroupId } = req.body || {};
-    if (!requestGroupId) {
-      return res.status(400).json({ success: false, message: "requestGroupId is required." });
-    }
-
-    const result = await assignMentorToRequest({ requestGroupId, mentorId: req.user.id });
-    return res.json({ success: true, ...result });
-  } catch (error) {
-    console.error("Assign payment error:", error.message);
-    return res.status(500).json({ success: false, message: "Unable to assign payment." });
-  }
-};
+exports.getRazorpay = getRazorpay;
+exports.settleGatewayPayment = settleGatewayPayment;
+exports.rejectMismatch = rejectMismatch;

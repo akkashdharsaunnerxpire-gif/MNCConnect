@@ -477,8 +477,17 @@ export default function SessionBoard() {
       });
 
       // use the exact total the server put on the order
-      if (order?.breakdown?.checkoutAmount) {
-        paidTotalRef.current = Number(order.breakdown.checkoutAmount);
+      const serverCheckoutAmount = Number(
+        order?.breakdown?.checkoutAmount ?? order?.checkoutAmount,
+      );
+      if (Number.isFinite(serverCheckoutAmount) && serverCheckoutAmount > 0) {
+        paidTotalRef.current = serverCheckoutAmount;
+      } else {
+        // The order amount is the authoritative paise value returned by Razorpay.
+        // Keep a rupee fallback for refund/status UI if older backend code is deployed.
+        paidTotalRef.current = Number(order?.amount) > 0
+          ? Number(order.amount) / 100
+          : totalPayable;
       }
 
       const rz = new window.Razorpay({
@@ -1028,7 +1037,7 @@ export default function SessionBoard() {
                   </div>
                 ))}
 
-                {convenienceFee > 0 && (
+                {!payWallet && (
                   <>
                     <div className="flex justify-between gap-4 border-t border-slate-100 pt-3">
                       <dt className="text-slate-500">Session price</dt>
@@ -1038,7 +1047,7 @@ export default function SessionBoard() {
                     </div>
                     <div className="flex justify-between gap-4">
                       <dt className="text-slate-500">
-                        Convenience fee (payment gateway)
+                        Convenience fee
                       </dt>
                       <dd className="text-right font-semibold text-slate-900">
                         {inr(convenienceFee)}
