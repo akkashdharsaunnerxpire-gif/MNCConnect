@@ -2,11 +2,13 @@
 //
 // Rendered by Header.jsx. Plays when the logged-in fresher EARNS a referral
 // reward (referralEarnings goes up while the app is open):
-//   coin pops in the middle -> spins -> flies into the navbar wallet -> balance counts up.
+//   coin pops in the middle -> flies into the navbar wallet -> balance counts up.
 //
-// Events fired on window (the wallet page listens to them so its balance card waits too):
-//   "referral-bonus:start"  detail: { base }   (balance WITHOUT the new reward)
+// Events fired on window (the wallet page listens so its cards wait too):
+//   "referral-bonus:start"  detail: { base, earningsBase }
 //   "referral-bonus:land"
+//
+// Only referralEarnings increases trigger this. The welcome bonus (+25) never does.
 
 import React, { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
@@ -15,6 +17,11 @@ import { Users } from "lucide-react";
 const COIN = 110;
 const COLORS = ["#8b5cf6", "#6366f1", "#0ea5e9", "#10b981", "#f59e0b", "#f43f5e"];
 const inr = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
+
+// ---- timings (ms). Old values were 1600 / 1000 / 1000 -> felt very late ----
+const POP_MS = 800; // coin shows in the middle
+const FLY_MS = 700; // coin flies to the wallet
+const IMPACT_MS = 650; // spark burst at the wallet
 
 /* 3D coin (stacked discs = thickness) */
 const CoinBody = ({ amount, size = COIN }) => {
@@ -89,7 +96,7 @@ const ReferralBonus = ({ me, targetRef, fallbackRef, onHold, onLand }) => {
   cb.current = { onHold, onLand };
   phaseRef.current = phase;
 
-  const CENTER_OFFSET = 30; // coin sits a little above the exact screen centre
+  const CENTER_OFFSET = 30;
 
   const startNext = () => {
     if (phaseRef.current !== "idle") return;
@@ -99,14 +106,21 @@ const ReferralBonus = ({ me, targetRef, fallbackRef, onHold, onLand }) => {
     // balance WITHOUT this reward (and without rewards still waiting in the queue)
     const rest = queue.current.reduce((s, x) => s + x.delta, 0);
     const base = Math.max(walletRef.current - item.delta - rest, 0);
+    // referral earnings WITHOUT this reward
+    const earningsBase = Math.max(item.earnings - item.delta, 0);
+
+    // set the phase ref right away so a 2nd reward arriving in the same tick can't start twice
+    phaseRef.current = "pop";
 
     setAmount(item.delta);
     cb.current.onHold?.(base);
-    window.dispatchEvent(new CustomEvent("referral-bonus:start", { detail: { base } }));
+    window.dispatchEvent(
+      new CustomEvent("referral-bonus:start", { detail: { base, earningsBase } })
+    );
     setPhase("pop");
   };
 
-  // detect a new referral reward
+  // detect a new referral reward (ONLY referralEarnings going up)
   useEffect(() => {
     if (!me) return;
 
@@ -122,7 +136,7 @@ const ReferralBonus = ({ me, targetRef, fallbackRef, onHold, onLand }) => {
     prevEarnings.current = earnings;
 
     if (delta > 0 && walletRef.current >= delta) {
-      queue.current.push({ delta });
+      queue.current.push({ delta, earnings });
       startNext();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -159,7 +173,7 @@ const ReferralBonus = ({ me, targetRef, fallbackRef, onHold, onLand }) => {
         const sy = window.innerHeight / 2 - CENTER_OFFSET;
         setDest({ cx, cy, dx: cx - sx, dy: cy - sy, my: (cy - sy) * 0.5 - 120 });
         setPhase("fly");
-      }, 1600);
+      }, POP_MS);
       return () => clearTimeout(t);
     }
 
@@ -169,16 +183,16 @@ const ReferralBonus = ({ me, targetRef, fallbackRef, onHold, onLand }) => {
         cb.current.onLand?.(); // navbar button bumps + glows
         window.dispatchEvent(new Event("referral-bonus:land"));
         setPhase("impact");
-      }, 1000);
+      }, FLY_MS);
       return () => clearTimeout(t);
     }
 
     if (phase === "impact") {
       const t = setTimeout(() => {
-        setPhase("idle");
         phaseRef.current = "idle";
+        setPhase("idle");
         startNext(); // another referral waiting? play it too
-      }, 1000);
+      }, IMPACT_MS);
       return () => clearTimeout(t);
     }
 
@@ -202,8 +216,8 @@ const ReferralBonus = ({ me, targetRef, fallbackRef, onHold, onLand }) => {
           0%   { opacity: 1; transform: translate(0,0) scale(1); }
           100% { opacity: 0; transform: translate(var(--sx), var(--sy)) scale(.2); }
         }
-        .mc-rb-impact { animation: mc-rb-impact .85s ease-out both; }
-        .mc-rb-spark { animation: mc-rb-spark .8s ease-out both; }
+        .mc-rb-impact { animation: mc-rb-impact .65s ease-out both; }
+        .mc-rb-spark { animation: mc-rb-spark .6s ease-out both; }
         @media (prefers-reduced-motion: reduce) {
           .mc-rb-impact, .mc-rb-spark { animation: none; }
         }
@@ -220,7 +234,7 @@ const ReferralBonus = ({ me, targetRef, fallbackRef, onHold, onLand }) => {
             }}
             initial={{ opacity: 0 }}
             animate={{ opacity: isFly ? 0 : 1 }}
-            transition={{ duration: isFly ? 0.7 : 0.4 }}
+            transition={{ duration: isFly ? 0.5 : 0.25 }}
           />
 
           <div className="absolute left-1/2 top-1/2" style={{ width: 0, height: 0 }}>
@@ -230,7 +244,7 @@ const ReferralBonus = ({ me, targetRef, fallbackRef, onHold, onLand }) => {
               style={{ top: COIN / 2 - CENTER_OFFSET + 14 }}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: isFly ? 0 : 1, y: 0 }}
-              transition={{ duration: isFly ? 0.25 : 0.4, delay: isFly ? 0 : 0.3 }}
+              transition={{ duration: isFly ? 0.2 : 0.3, delay: isFly ? 0 : 0.1 }}
             >
               <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.25em] text-emerald-200">
                 <Users size={14} /> Referral reward
@@ -253,7 +267,7 @@ const ReferralBonus = ({ me, targetRef, fallbackRef, onHold, onLand }) => {
                 perspective: 700,
                 willChange: "transform",
               }}
-              initial={isFly ? { x: 0, y: 0, scale: 1 } : { y: 80, scale: 0.3, opacity: 0 }}
+              initial={isFly ? { x: 0, y: 0, scale: 1 } : { y: 60, scale: 0.3, opacity: 0 }}
               animate={
                 isFly
                   ? { x: [0, dest.dx * 0.5, dest.dx], y: [0, dest.my, dest.dy], scale: [1, 1.1, 0.25] }
@@ -261,8 +275,8 @@ const ReferralBonus = ({ me, targetRef, fallbackRef, onHold, onLand }) => {
               }
               transition={
                 isFly
-                  ? { duration: 1, ease: "easeInOut", times: [0, 0.45, 1] }
-                  : { type: "spring", stiffness: 80, damping: 11 }
+                  ? { duration: FLY_MS / 1000, ease: "easeInOut", times: [0, 0.45, 1] }
+                  : { type: "spring", stiffness: 160, damping: 14 }
               }
             >
               <motion.div
@@ -271,8 +285,8 @@ const ReferralBonus = ({ me, targetRef, fallbackRef, onHold, onLand }) => {
                 animate={isFly ? { rotateY: 720 } : { rotateY: 360 }}
                 transition={
                   isFly
-                    ? { duration: 1, ease: "easeOut" }
-                    : { duration: 1.6, repeat: Infinity, ease: "linear" }
+                    ? { duration: FLY_MS / 1000, ease: "easeOut" }
+                    : { duration: 1.2, repeat: Infinity, ease: "linear" }
                 }
               >
                 <CoinBody amount={amount} />
@@ -292,7 +306,7 @@ const ReferralBonus = ({ me, targetRef, fallbackRef, onHold, onLand }) => {
           <span className="mc-rb-impact absolute -ml-7 -mt-7 h-14 w-14 rounded-full border-2 border-indigo-500" />
           <span
             className="mc-rb-impact absolute -ml-7 -mt-7 h-14 w-14 rounded-full border-2 border-amber-400"
-            style={{ animationDelay: ".12s" }}
+            style={{ animationDelay: ".08s" }}
           />
 
           {Array.from({ length: 10 }, (_, i) => {
@@ -314,7 +328,7 @@ const ReferralBonus = ({ me, targetRef, fallbackRef, onHold, onLand }) => {
             className="absolute -ml-8 whitespace-nowrap rounded-full bg-emerald-500 px-2.5 py-1 text-xs font-bold text-white shadow-lg"
             initial={{ y: 10, opacity: 0, scale: 0.7 }}
             animate={{ y: 34, opacity: [0, 1, 1, 0], scale: 1 }}
-            transition={{ duration: 1.1, times: [0, 0.2, 0.75, 1] }}
+            transition={{ duration: 0.9, times: [0, 0.2, 0.75, 1] }}
           >
             +{inr(amount)}
           </motion.span>

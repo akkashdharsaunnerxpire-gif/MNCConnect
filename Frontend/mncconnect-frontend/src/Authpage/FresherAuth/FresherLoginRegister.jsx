@@ -1,4 +1,11 @@
-import React, { useContext, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowRight,
@@ -17,6 +24,7 @@ import {
   Loader2,
   Check,
   Globe,
+  ChevronDown,
 } from "lucide-react";
 import { LoadingContext } from "../../context/LoadingContext";
 import { useAuth } from "../../context/AuthContext";
@@ -70,6 +78,10 @@ export default function LoginRegister() {
   const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [otpError, setOtpError] = useState("");
 
+  // scroll container + "more content below" state (drives the scroll-down hint)
+  const scrollRef = useRef(null);
+  const [canScrollDown, setCanScrollDown] = useState(false);
+
   const isRegister = mode === "register";
 
   // country list is static, so build the <option>s only once
@@ -82,6 +94,34 @@ export default function LoginRegister() {
       )),
     [],
   );
+
+  // is there still hidden content below? (drives the scroll-down hint)
+  const updateFade = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setCanScrollDown(el.scrollTop + el.clientHeight < el.scrollHeight - 8);
+  }, []);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return undefined;
+
+    updateFade();
+    window.addEventListener("resize", updateFade);
+
+    // form height changes (login <-> register, OTP box, errors) -> recompute
+    let observer;
+    if (typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(updateFade);
+      observer.observe(el);
+      if (el.firstElementChild) observer.observe(el.firstElementChild);
+    }
+
+    return () => {
+      window.removeEventListener("resize", updateFade);
+      observer?.disconnect();
+    };
+  }, [updateFade]);
 
   useEffect(() => {
     if (!showIntro) return undefined;
@@ -104,6 +144,8 @@ export default function LoginRegister() {
     setIsEmailVerified(false);
     setOtp("");
     setOtpError("");
+    // start the new form from the top
+    scrollRef.current?.scrollTo({ top: 0 });
   };
 
   // SEND OTP (register only)
@@ -280,7 +322,9 @@ export default function LoginRegister() {
     "w-full rounded-2xl border border-slate-200 bg-white py-3.5 pl-11 pr-4 text-sm text-slate-900 outline-none transition duration-300 placeholder:text-slate-400 focus:border-cyan-500 focus:ring-4 focus:ring-cyan-500/10 disabled:opacity-60";
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-white text-slate-900 selection:bg-cyan-100 selection:text-slate-900">
+    // Desktop (lg+): the page is exactly one screen tall and never scrolls.
+    // Only the form card (right side) scrolls.  Mobile/tablet: normal page scroll.
+    <div className="relative min-h-screen overflow-hidden bg-white text-slate-900 selection:bg-cyan-100 selection:text-slate-900 lg:flex lg:h-screen lg:flex-col">
       {/* Background (radial gradients instead of heavy blur filters = fast paint) */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div
@@ -300,7 +344,7 @@ export default function LoginRegister() {
         <div className="absolute inset-0 opacity-[0.12] [background-image:linear-gradient(rgba(148,163,184,.2)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,.2)_1px,transparent_1px)] [background-size:48px_48px]" />
       </div>
 
-      <header className="relative z-10 mx-auto flex w-full max-w-7xl items-center justify-between px-5 py-5 sm:px-8 lg:px-12">
+      <header className="relative z-10 mx-auto flex w-full max-w-7xl shrink-0 items-center justify-between px-5 py-5 sm:px-8 lg:px-12">
         <button
           type="button"
           onClick={() => navigate("/")}
@@ -329,8 +373,9 @@ export default function LoginRegister() {
         </button>
       </header>
 
-      <main className="relative z-10 mx-auto grid min-h-[calc(100vh-84px)] w-full max-w-7xl items-start gap-12 px-5 pb-12 pt-4 sm:px-8 lg:grid-cols-[1.05fr_.95fr] lg:gap-16 lg:px-12 lg:pb-16">
-        <section className="hidden lg:block pt-0">
+      <main className="relative z-10 mx-auto grid w-full max-w-7xl items-start gap-12 px-5 pb-12 pt-4 sm:px-8 lg:min-h-0 lg:flex-1 lg:grid-cols-[1.05fr_.95fr] lg:grid-rows-[minmax(0,1fr)] lg:gap-16 lg:px-12 lg:pb-4">
+        {/* LEFT hero: stays fixed */}
+        <section className="hidden pt-0 lg:block">
           <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-4 py-2 text-xs font-semibold text-cyan-700">
             <Sparkles className="h-4 w-4" /> Built for the next generation
           </div>
@@ -340,7 +385,7 @@ export default function LoginRegister() {
               opportunity starts here.
             </span>
           </h1>
-          <p className="mt-6 max-w-xl text-base leading-8 text-slate-400">
+          <p className="mt-6 max-w-xl text-base leading-8 text-slate-500">
             Connect with MNC Employees, discover career opportunities, and build
             the future you want — one step at a time.
           </p>
@@ -366,13 +411,19 @@ export default function LoginRegister() {
           </div>
         </section>
 
-        <section
-          className="mx-auto w-full max-w-[490px]"
+        {/* RIGHT: only this column scrolls on desktop (the form card) */}
+        <div
+          className="relative mx-auto w-full max-w-[490px] lg:h-full lg:min-h-0 lg:max-w-[522px]"
           style={{
             animation: "mncCardEnter .45s cubic-bezier(.2,.8,.2,1) both",
           }}
         >
-          <div className="rounded-[30px] border border-slate-200 bg-white p-5 shadow-[0_20px_60px_rgba(15,23,42,0.10)] sm:p-8">
+        <section
+          ref={scrollRef}
+          onScroll={updateFade}
+          className="mnc-scroll lg:h-full lg:overflow-y-auto lg:overscroll-contain lg:p-4"
+        >
+          <div className="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-[0_4px_24px_-8px_rgba(15,23,42,0.10)] sm:p-8">
             <div className="hidden lg:block">
               <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-cyan-700">
                 Fresher portal
@@ -601,19 +652,6 @@ export default function LoginRegister() {
                     className={`${inputClass} pr-12`}
                   />
 
-                  {/* Forgot password: LOGIN mode only */}
-                  {!isRegister && (
-                    <div className="flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => navigate("/forgot-password")}
-                        className="text-xs font-bold text-cyan-700 transition hover:text-cyan-800 hover:underline"
-                      >
-                        Forgot password?
-                      </button>
-                    </div>
-                  )}
-
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
@@ -626,6 +664,20 @@ export default function LoginRegister() {
                     )}
                   </button>
                 </div>
+
+                {/* Forgot password: LOGIN mode only (moved outside the input's relative box
+                    so the eye icon stays centred on the input) */}
+                {!isRegister && (
+                  <div className="mt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => navigate("/forgot-password")}
+                      className="text-xs font-bold text-cyan-700 transition hover:text-cyan-800 hover:underline"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                )}
               </label>
 
               {isRegister && (
@@ -674,6 +726,24 @@ export default function LoginRegister() {
             </form>
           </div>
         </section>
+
+        {/* scroll-down hint: only on desktop, only while content is hidden below */}
+        <button
+          type="button"
+          aria-label="Scroll down"
+          tabIndex={canScrollDown ? 0 : -1}
+          onClick={() =>
+            scrollRef.current?.scrollBy({ top: 260, behavior: "smooth" })
+          }
+          className={`absolute bottom-6 left-1/2 hidden h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full border border-slate-200 bg-white/95 text-cyan-700 shadow-md backdrop-blur transition duration-300 hover:-translate-y-0.5 hover:border-cyan-300 hover:text-cyan-800 lg:flex ${
+            canScrollDown
+              ? "opacity-100"
+              : "pointer-events-none translate-y-2 opacity-0"
+          }`}
+        >
+          <ChevronDown className="h-5 w-5 animate-bounce" />
+        </button>
+        </div>
       </main>
 
       {showIntro && (
@@ -700,11 +770,15 @@ export default function LoginRegister() {
         </div>
       )}
 
-      {/* all keyframes in one place */}
+      {/* all keyframes + hidden scrollbar in one place */}
       <style>{`
         @keyframes mncZoom { 0% { transform: scale(.85); opacity: 0; } 25% { transform: scale(1); opacity: 1; } 60% { transform: scale(1.05); opacity: 1; } 100% { transform: scale(4); opacity: 0; } }
         @keyframes mncCurtain { 0%, 55% { opacity: 1; } 100% { opacity: 0; } }
         @keyframes mncCardEnter { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* ---- Hidden scrollbar for the form card (still scrolls with wheel / touch / keys) ---- */
+        .mnc-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+        .mnc-scroll::-webkit-scrollbar { display: none; width: 0; height: 0; }
       `}</style>
     </div>
   );

@@ -44,6 +44,7 @@ const DEFAULT_INSTRUCTIONS = {
     ],
 
     fresher: [
+      "Keep a pen and paper ready during the session. Write down important points, tips, and guidance shared by the mentor for future reference.",
       "Join within 5 minutes of the meeting opening.",
       "Keep your microphone muted unless you are speaking.",
       "Be respectful. The mentor is giving their personal time to help you.",
