@@ -1,4 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useCallback,
+} from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -27,6 +33,12 @@ import {
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { performLogout } from "../../utils/logout";
+import {
+  PROFILE_IMAGE_KEYS,
+  REQUIRED_PERCENT,
+  getRawAvatarUrl,
+  getProfileStatus,
+} from "../../utils/profileCompletion";
 
 /* =========================================================================
    API LAYER (cookie based, nothing in localStorage / sessionStorage)
@@ -49,7 +61,8 @@ async function apiGetCurrentUser() {
     headers: jsonHeaders,
   });
   if (response.status === 401) throw new Error("UNAUTHENTICATED");
-  if (!response.ok) throw new Error(`Failed to load profile: ${response.status}`);
+  if (!response.ok)
+    throw new Error(`Failed to load profile: ${response.status}`);
   const data = await response.json();
   return data?.user ?? data;
 }
@@ -94,55 +107,97 @@ async function apiRemoveAvatar() {
   return data?.user ?? data;
 }
 
-/* =========================================================================
-   AVATAR
-========================================================================= */
-
-const PROFILE_IMAGE_KEYS = ["profilePic", "profileImage", "avatar", "photo", "photoUrl"];
-
-function getRawAvatarUrl(user) {
-  for (const key of PROFILE_IMAGE_KEYS) {
-    if (user?.[key]) return user[key];
-  }
-  return null;
-}
-
-function getGenderAvatarUrl(user) {
-  const seed = encodeURIComponent(
-    user?.email || user?.name || user?._id || user?.id || "fresher",
-  );
-  const gender = String(user?.gender || "").trim().toLowerCase();
-
-  if (gender.startsWith("m")) {
-    return `https://avatar.iran.liara.run/public/boy?username=${seed}`;
-  }
-  if (gender.startsWith("f")) {
-    return `https://avatar.iran.liara.run/public/girl?username=${seed}`;
-  }
-  return `https://api.dicebear.com/9.x/personas/svg?seed=${seed}&backgroundType=solid&backgroundColor=e5e5e5`;
-}
-
-const resolveAvatar = (user) => getRawAvatarUrl(user) || getGenderAvatarUrl(user);
+// tells the Header (and anything else listening) to reload /auth/me
+const notifyProfileChanged = () =>
+  window.dispatchEvent(new Event("profile:updated"));
 
 /* =========================================================================
    FIELD REGISTRY
 ========================================================================= */
 
 const FIELD_DEFS = {
-  name: { label: "Full name", group: "basic", editable: true, icon: User, required: true, placeholder: "Enter your full name" },
-  gender: { label: "Gender", group: "basic", editable: true, type: "select", options: ["Male", "Female", "Other", "Prefer not to say"], icon: User },
-  dateOfBirth: { label: "Date of birth", group: "basic", editable: true, type: "date", icon: Calendar },
-  location: { label: "Location", group: "basic", editable: true, icon: MapPin, placeholder: "City, Country" },
-  nationality: { label: "Nationality", group: "basic", editable: true, icon: Globe, placeholder: "Your nationality" },
-  email: { label: "Email", group: "contact", editable: false, icon: Mail, required: true },
-  phone: { label: "Phone", group: "contact", editable: true, icon: Phone, required: true, placeholder: "+91 1234567890" },
-  mobile: { label: "Mobile", group: "contact", editable: true, icon: Phone, placeholder: "+91 1234567890" },
-  bio: { label: "About me", group: "about", editable: true, type: "textarea", icon: User, placeholder: "Tell us about yourself..." },
+  name: {
+    label: "Full name",
+    group: "basic",
+    editable: true,
+    icon: User,
+    required: true,
+    placeholder: "Enter your full name",
+  },
+  gender: {
+    label: "Gender",
+    group: "basic",
+    editable: true,
+    type: "select",
+    options: ["Male", "Female", "Other", "Prefer not to say"],
+    icon: User,
+  },
+  dateOfBirth: {
+    label: "Date of birth",
+    group: "basic",
+    editable: true,
+    type: "date",
+    icon: Calendar,
+  },
+  location: {
+    label: "Location",
+    group: "basic",
+    editable: true,
+    icon: MapPin,
+    placeholder: "City, Country",
+  },
+  nationality: {
+    label: "Nationality",
+    group: "basic",
+    editable: true,
+    icon: Globe,
+    placeholder: "Your nationality",
+  },
+  email: {
+    label: "Email",
+    group: "contact",
+    editable: false,
+    icon: Mail,
+    required: true,
+  },
+  phone: {
+    label: "Phone",
+    group: "contact",
+    editable: true,
+    icon: Phone,
+    required: true,
+    placeholder: "+91 1234567890",
+  },
+  mobile: {
+    label: "Mobile",
+    group: "contact",
+    editable: true,
+    icon: Phone,
+    placeholder: "+91 1234567890",
+  },
+  bio: {
+    label: "About me",
+    group: "about",
+    editable: true,
+    type: "textarea",
+    icon: User,
+    placeholder: "Tell us about yourself...",
+  },
 };
 
 const HIDDEN_KEYS = new Set([
-  "_id", "id", "password", "token", "__v", "createdAt", "updatedAt",
-  "isVerified", "accountType", "role", "countryCode", "website",
+  "_id",
+  "id",
+  "password",
+  "token",
+  "__v",
+  "createdAt",
+  "updatedAt",
+  "isVerified",
+  "accountType",
+  "role",
+  "countryCode",
+  "website",
   ...PROFILE_IMAGE_KEYS,
 ]);
 
@@ -173,10 +228,58 @@ const NAV_ITEMS = [
 ];
 
 /* =========================================================================
+   AVATAR: uploaded photo, or the FIRST LETTER of the name (no placeholder image)
+========================================================================= */
+
+const AvatarCircle = ({
+  src,
+  name,
+  className = "",
+  fallbackClass = "bg-black text-white",
+  textClass = "text-base",
+}) => {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  const initial = (name || "").trim().charAt(0).toUpperCase() || "F";
+
+  if (src && !failed) {
+    return (
+      <img
+        src={src}
+        alt={name || "Profile"}
+        onError={() => setFailed(true)}
+        className={`${className} bg-neutral-200 object-cover`}
+      />
+    );
+  }
+
+  return (
+    <div
+      role="img"
+      aria-label={name || "Profile"}
+      className={`${className} flex items-center justify-center font-semibold ${fallbackClass} ${textClass}`}
+    >
+      {initial}
+    </div>
+  );
+};
+
+/* =========================================================================
    SIDEBAR (desktop) - never scrolls with the page
 ========================================================================= */
 
-const Sidebar = ({ user, avatarUrl, displayName, activeTab, setActiveTab, onLogout }) => (
+const Sidebar = ({
+  user,
+  avatarUrl,
+  displayName,
+  activeTab,
+  setActiveTab,
+  onLogout,
+}) => (
   <aside className="hidden h-full w-72 shrink-0 flex-col bg-black lg:flex">
     <div className="flex shrink-0 items-center gap-2.5 px-6 pb-2 pt-6">
       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-sm font-bold text-black">
@@ -189,13 +292,17 @@ const Sidebar = ({ user, avatarUrl, displayName, activeTab, setActiveTab, onLogo
 
     <div className="mx-4 mt-8 shrink-0 rounded-xl border border-white/15 p-4">
       <div className="flex items-center gap-3">
-        <img
+        <AvatarCircle
           src={avatarUrl}
-          alt={displayName}
-          className="h-11 w-11 rounded-full bg-neutral-200 object-cover ring-2 ring-white/70"
+          name={displayName}
+          className="h-11 w-11 rounded-full ring-2 ring-white/70"
+          fallbackClass="bg-white text-black"
+          textClass="text-base"
         />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-white">{displayName}</p>
+          <p className="truncate text-sm font-semibold text-white">
+            {displayName}
+          </p>
           <p className="truncate text-xs text-neutral-400">{user?.email}</p>
         </div>
       </div>
@@ -241,14 +348,23 @@ const Sidebar = ({ user, avatarUrl, displayName, activeTab, setActiveTab, onLogo
    TOP BAR - always visible (sits outside the scrolling area)
 ========================================================================= */
 
-const TopBar = ({ activeTab, setActiveTab, displayName, avatarUrl, profileCompletion, onEdit }) => {
+const TopBar = ({
+  activeTab,
+  setActiveTab,
+  displayName,
+  avatarUrl,
+  profileCompletion,
+  onEdit,
+}) => {
   const current = NAV_ITEMS.find((n) => n.id === activeTab);
 
   return (
     <header className="z-30 shrink-0 border-b border-neutral-200 bg-white">
       <div className="flex h-16 items-center justify-between gap-4 px-4 lg:px-8">
         <div className="min-w-0">
-          <p className="truncate text-xs text-neutral-500">Fresher / {current?.label}</p>
+          <p className="truncate text-xs text-neutral-500">
+            Fresher / {current?.label}
+          </p>
           <h1 className="truncate font-serif text-lg font-semibold text-black">
             {current?.label}
           </h1>
@@ -262,7 +378,9 @@ const TopBar = ({ activeTab, setActiveTab, displayName, avatarUrl, profileComple
                 style={{ width: `${profileCompletion}%` }}
               />
             </div>
-            <span className="text-xs font-medium text-neutral-600">{profileCompletion}%</span>
+            <span className="text-xs font-medium text-neutral-600">
+              {profileCompletion}%
+            </span>
           </div>
 
           <button
@@ -273,10 +391,11 @@ const TopBar = ({ activeTab, setActiveTab, displayName, avatarUrl, profileComple
             Edit profile
           </button>
 
-          <img
+          <AvatarCircle
             src={avatarUrl}
-            alt={displayName}
-            className="h-9 w-9 rounded-full bg-neutral-200 object-cover ring-1 ring-neutral-300"
+            name={displayName}
+            className="h-9 w-9 rounded-full ring-1 ring-neutral-300"
+            textClass="text-sm"
           />
         </div>
       </div>
@@ -333,7 +452,16 @@ const ModalShell = ({ title, onClose, children }) => (
   </div>
 );
 
-const ModalInput = ({ label, name, value, onChange, placeholder, type = "text", required = false, disabled = false }) => (
+const ModalInput = ({
+  label,
+  name,
+  value,
+  onChange,
+  placeholder,
+  type = "text",
+  required = false,
+  disabled = false,
+}) => (
   <div>
     <label className="mb-1 block text-sm font-medium text-neutral-700">
       {label}
@@ -354,7 +482,9 @@ const ModalInput = ({ label, name, value, onChange, placeholder, type = "text", 
 
 const ModalTextarea = ({ name, value, onChange, placeholder }) => (
   <div>
-    <label className="mb-1 block text-sm font-medium text-neutral-700">Description</label>
+    <label className="mb-1 block text-sm font-medium text-neutral-700">
+      Description
+    </label>
     <textarea
       name={name}
       value={value}
@@ -388,11 +518,19 @@ const ModalButtons = ({ onClose, submitText }) => (
    ADD EDUCATION / CAREER / TAGS MODALS
 ========================================================================= */
 
-const EMPTY_EDUCATION = { institution: "", degree: "", field: "", graduationYear: "", cgpa: "", description: "" };
+const EMPTY_EDUCATION = {
+  institution: "",
+  degree: "",
+  field: "",
+  graduationYear: "",
+  cgpa: "",
+  description: "",
+};
 
 const AddEducationModal = ({ isOpen, onClose, onAdd }) => {
   const [formData, setFormData] = useState(EMPTY_EDUCATION);
-  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+  const handleChange = (e) =>
+    setFormData({ ...formData, [e.target.name]: e.target.value });
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -410,21 +548,67 @@ const AddEducationModal = ({ isOpen, onClose, onAdd }) => {
   return (
     <ModalShell title="Add education" onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
-        <ModalInput label="Institution / University" name="institution" value={formData.institution} onChange={handleChange} placeholder="e.g. MIT, Stanford, IIT" required />
-        <ModalInput label="Degree" name="degree" value={formData.degree} onChange={handleChange} placeholder="e.g. B.Tech, M.Sc, MBA" required />
-        <ModalInput label="Field / Specialization" name="field" value={formData.field} onChange={handleChange} placeholder="e.g. Computer Science, Finance" />
+        <ModalInput
+          label="Institution / University"
+          name="institution"
+          value={formData.institution}
+          onChange={handleChange}
+          placeholder="e.g. MIT, Stanford, IIT"
+          required
+        />
+        <ModalInput
+          label="Degree"
+          name="degree"
+          value={formData.degree}
+          onChange={handleChange}
+          placeholder="e.g. B.Tech, M.Sc, MBA"
+          required
+        />
+        <ModalInput
+          label="Field / Specialization"
+          name="field"
+          value={formData.field}
+          onChange={handleChange}
+          placeholder="e.g. Computer Science, Finance"
+        />
         <div className="grid grid-cols-2 gap-4">
-          <ModalInput label="Graduation year" name="graduationYear" type="number" value={formData.graduationYear} onChange={handleChange} placeholder="2024" />
-          <ModalInput label="CGPA / Percentage" name="cgpa" value={formData.cgpa} onChange={handleChange} placeholder="8.5 / 85%" />
+          <ModalInput
+            label="Graduation year"
+            name="graduationYear"
+            type="number"
+            value={formData.graduationYear}
+            onChange={handleChange}
+            placeholder="2024"
+          />
+          <ModalInput
+            label="CGPA / Percentage"
+            name="cgpa"
+            value={formData.cgpa}
+            onChange={handleChange}
+            placeholder="8.5 / 85%"
+          />
         </div>
-        <ModalTextarea name="description" value={formData.description} onChange={handleChange} placeholder="Additional details about your education..." />
+        <ModalTextarea
+          name="description"
+          value={formData.description}
+          onChange={handleChange}
+          placeholder="Additional details about your education..."
+        />
         <ModalButtons onClose={onClose} submitText="Add education" />
       </form>
     </ModalShell>
   );
 };
 
-const EMPTY_CAREER = { company: "", role: "", industry: "", startDate: "", endDate: "", current: false, description: "" };
+const EMPTY_CAREER = {
+  company: "",
+  role: "",
+  industry: "",
+  startDate: "",
+  endDate: "",
+  current: false,
+  description: "",
+};
 
 const AddCareerModal = ({ isOpen, onClose, onAdd }) => {
   const [formData, setFormData] = useState(EMPTY_CAREER);
@@ -450,12 +634,45 @@ const AddCareerModal = ({ isOpen, onClose, onAdd }) => {
   return (
     <ModalShell title="Add career experience" onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
-        <ModalInput label="Company" name="company" value={formData.company} onChange={handleChange} placeholder="e.g. Google, Microsoft" required />
-        <ModalInput label="Role / Position" name="role" value={formData.role} onChange={handleChange} placeholder="e.g. Software Engineer" required />
-        <ModalInput label="Industry" name="industry" value={formData.industry} onChange={handleChange} placeholder="e.g. Technology, Finance" />
+        <ModalInput
+          label="Company"
+          name="company"
+          value={formData.company}
+          onChange={handleChange}
+          placeholder="e.g. Google, Microsoft"
+          required
+        />
+        <ModalInput
+          label="Role / Position"
+          name="role"
+          value={formData.role}
+          onChange={handleChange}
+          placeholder="e.g. Software Engineer"
+          required
+        />
+        <ModalInput
+          label="Industry"
+          name="industry"
+          value={formData.industry}
+          onChange={handleChange}
+          placeholder="e.g. Technology, Finance"
+        />
         <div className="grid grid-cols-2 gap-4">
-          <ModalInput label="Start date" name="startDate" type="date" value={formData.startDate} onChange={handleChange} />
-          <ModalInput label="End date" name="endDate" type="date" value={formData.endDate} onChange={handleChange} disabled={formData.current} />
+          <ModalInput
+            label="Start date"
+            name="startDate"
+            type="date"
+            value={formData.startDate}
+            onChange={handleChange}
+          />
+          <ModalInput
+            label="End date"
+            name="endDate"
+            type="date"
+            value={formData.endDate}
+            onChange={handleChange}
+            disabled={formData.current}
+          />
         </div>
         <div className="flex items-center gap-2">
           <input
@@ -470,14 +687,30 @@ const AddCareerModal = ({ isOpen, onClose, onAdd }) => {
             Currently working here
           </label>
         </div>
-        <ModalTextarea name="description" value={formData.description} onChange={handleChange} placeholder="Describe your role and responsibilities..." />
+        <ModalTextarea
+          name="description"
+          value={formData.description}
+          onChange={handleChange}
+          placeholder="Describe your role and responsibilities..."
+        />
         <ModalButtons onClose={onClose} submitText="Add experience" />
       </form>
     </ModalShell>
   );
 };
 
-const AddTagsModal = ({ isOpen, onClose, onAdd, existing, title, label, placeholder, emptyText, emptyAlert, submitText }) => {
+const AddTagsModal = ({
+  isOpen,
+  onClose,
+  onAdd,
+  existing,
+  title,
+  label,
+  placeholder,
+  emptyText,
+  emptyAlert,
+  submitText,
+}) => {
   const [input, setInput] = useState("");
   const [items, setItems] = useState([]);
 
@@ -507,7 +740,9 @@ const AddTagsModal = ({ isOpen, onClose, onAdd, existing, title, label, placehol
     <ModalShell title={title} onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="mb-1 block text-sm font-medium text-neutral-700">{label}</label>
+          <label className="mb-1 block text-sm font-medium text-neutral-700">
+            {label}
+          </label>
           <div className="flex gap-2">
             <input
               type="text"
@@ -534,7 +769,9 @@ const AddTagsModal = ({ isOpen, onClose, onAdd, existing, title, label, placehol
 
         <div className="flex min-h-[60px] flex-wrap gap-2 rounded-lg border border-dashed border-neutral-300 p-3">
           {items.length === 0 ? (
-            <p className="w-full py-3 text-center text-sm text-neutral-400">{emptyText}</p>
+            <p className="w-full py-3 text-center text-sm text-neutral-400">
+              {emptyText}
+            </p>
           ) : (
             items.map((item) => (
               <span
@@ -653,7 +890,9 @@ const FresherProfile = () => {
       setStatus("ready");
     } catch (err) {
       console.error("Error loading user:", err);
-      setStatus(err.message === "UNAUTHENTICATED" ? "unauthenticated" : "error");
+      setStatus(
+        err.message === "UNAUTHENTICATED" ? "unauthenticated" : "error",
+      );
     }
   }, []);
 
@@ -668,6 +907,7 @@ const FresherProfile = () => {
     try {
       const updated = await apiUpdateCurrentUser(patch);
       setUser((prev) => ({ ...prev, ...updated }));
+      notifyProfileChanged();
       showToast(type, successMsg);
     } catch (err) {
       setUser(previous);
@@ -688,14 +928,22 @@ const FresherProfile = () => {
       const updated = await apiUploadAvatar(file);
       if (updated) {
         const url =
-          updated.avatar || updated.profilePic || updated.profileImage || updated.photo || updated.photoUrl;
+          updated.avatar ||
+          updated.profilePic ||
+          updated.profileImage ||
+          updated.photo ||
+          updated.photoUrl;
         setUser((prev) => ({ ...prev, ...updated }));
         if (url) setPreviewImage(null);
+        notifyProfileChanged();
         showToast("success", "Profile photo updated.");
       }
     } catch (err) {
       console.error("Upload failed:", err);
-      showToast("error", err.message || "Could not upload photo. Please try again.");
+      showToast(
+        "error",
+        err.message || "Could not upload photo. Please try again.",
+      );
       setPreviewImage(null);
     } finally {
       setUploading(false);
@@ -709,6 +957,7 @@ const FresherProfile = () => {
       PROFILE_IMAGE_KEYS.forEach((key) => delete mergedUser[key]);
       setUser(mergedUser);
       setPreviewImage(null);
+      notifyProfileChanged();
       showToast("success", "Profile photo removed.");
     } catch (err) {
       showToast("error", err.message || "Could not remove photo.");
@@ -731,32 +980,58 @@ const FresherProfile = () => {
 
   /* CRUD (saved on the server) */
   const handleAddEducation = (education) =>
-    persist({ education: [...(user.education || []), education] }, "Education added.");
+    persist(
+      { education: [...(user.education || []), education] },
+      "Education added.",
+    );
   const handleDeleteEducation = (id) =>
-    persist({ education: (user.education || []).filter((e) => e.id !== id) }, "Education removed.", "info");
+    persist(
+      { education: (user.education || []).filter((e) => e.id !== id) },
+      "Education removed.",
+      "info",
+    );
 
   const handleAddCareer = (career) =>
     persist({ career: [...(user.career || []), career] }, "Experience added.");
   const handleDeleteCareer = (id) =>
-    persist({ career: (user.career || []).filter((c) => c.id !== id) }, "Experience removed.", "info");
+    persist(
+      { career: (user.career || []).filter((c) => c.id !== id) },
+      "Experience removed.",
+      "info",
+    );
 
   const handleAddSkills = (newSkills) =>
-    persist({ skills: [...(user.skills || []), ...newSkills] }, "Skills added.");
+    persist(
+      { skills: [...(user.skills || []), ...newSkills] },
+      "Skills added.",
+    );
   const handleDeleteSkill = (skill) =>
-    persist({ skills: (user.skills || []).filter((s) => s !== skill) }, "Skill removed.", "info");
+    persist(
+      { skills: (user.skills || []).filter((s) => s !== skill) },
+      "Skill removed.",
+      "info",
+    );
 
   const handleAddInterests = (newInterests) =>
-    persist({ interests: [...(user.interests || []), ...newInterests] }, "Interests added.");
+    persist(
+      { interests: [...(user.interests || []), ...newInterests] },
+      "Interests added.",
+    );
   const handleDeleteInterest = (interest) =>
-    persist({ interests: (user.interests || []).filter((i) => i !== interest) }, "Interest removed.", "info");
+    persist(
+      { interests: (user.interests || []).filter((i) => i !== interest) },
+      "Interest removed.",
+      "info",
+    );
 
   /* SAVE PROFILE */
   const handleSave = async (payload) => {
     setSaving(true);
     try {
       const updated = await apiUpdateCurrentUser(payload);
-      setUser({ ...user, ...updated });
+      setUser({ ...user, ...payload, ...updated });
       setEditOpen(false);
+      notifyProfileChanged();
       showToast("success", "Changes saved.");
     } catch (err) {
       showToast("error", err.message || "Could not save changes.");
@@ -769,32 +1044,27 @@ const FresherProfile = () => {
   const presentFields = useMemo(() => {
     if (!user) return [];
     return Object.entries(user)
-      .filter(([key, value]) => !HIDDEN_KEYS.has(key) && hasValue(value) && FIELD_DEFS[key])
+      .filter(
+        ([key, value]) =>
+          !HIDDEN_KEYS.has(key) && hasValue(value) && FIELD_DEFS[key],
+      )
       .map(([key, value]) => ({ key, value, def: FIELD_DEFS[key] }));
   }, [user]);
 
   const fieldByKey = (key) => presentFields.find((field) => field.key === key);
 
-  const checklist = useMemo(() => {
-    if (!user) return [];
-    return [
-      { label: "Profile photo", done: Boolean(getRawAvatarUrl(user)) || Boolean(previewImage) },
-      { label: "About you", done: hasValue(user.bio) },
-      { label: "Education added", done: (user.education || []).length > 0 },
-      { label: "Skills added", done: (user.skills || []).length > 0 },
-      { label: "Contact number", done: hasValue(user.phone) || hasValue(user.mobile) },
-      { label: "Career experience", done: (user.career || []).length > 0 },
-      { label: "Interests added", done: (user.interests || []).length > 0 },
-    ];
-  }, [user, previewImage]);
-
-  const profileCompletion = useMemo(() => {
-    if (checklist.length === 0) return 0;
-    return Math.round((checklist.filter((c) => c.done).length / checklist.length) * 100);
-  }, [checklist]);
+  // SAME rule as Header + SessionBoard (utils/profileCompletion.js)
+  const profile = useMemo(
+    () =>
+      getProfileStatus(user, {
+        hasPhoto: Boolean(getRawAvatarUrl(user)) || Boolean(previewImage),
+      }),
+    [user, previewImage],
+  );
+  const profileCompletion = profile.percent;
 
   const displayName = (user?.name || "").trim() || "Fresher";
-  const avatarUrl = previewImage || (user ? resolveAvatar(user) : null);
+  const avatarUrl = previewImage || getRawAvatarUrl(user); // null => first letter is shown
 
   /* STATES */
   if (status === "unauthenticated") {
@@ -804,7 +1074,10 @@ const FresherProfile = () => {
         title="Please sign in"
         message="Your session has expired. Log in to view your profile."
         action={
-          <Link to="/login" className="mt-6 inline-block rounded-lg bg-black px-6 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800">
+          <Link
+            to="/login"
+            className="mt-6 inline-block rounded-lg bg-black px-6 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800"
+          >
             Go to login
           </Link>
         }
@@ -819,7 +1092,10 @@ const FresherProfile = () => {
         title="We couldn't load your profile"
         message="Check that your backend server is running, then try again."
         action={
-          <button onClick={loadUser} className="mt-6 rounded-lg bg-black px-6 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800">
+          <button
+            onClick={loadUser}
+            className="mt-6 rounded-lg bg-black px-6 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800"
+          >
             Try again
           </button>
         }
@@ -851,7 +1127,10 @@ const FresherProfile = () => {
         />
 
         {/* Only this area scrolls */}
-        <main ref={mainRef} className="min-h-0 flex-1 overflow-y-auto p-4 lg:p-8">
+        <main
+          ref={mainRef}
+          className="min-h-0 flex-1 overflow-y-auto p-4 lg:p-8"
+        >
           <div className="mx-auto max-w-4xl">
             {/* Profile card */}
             <div className="mb-6 overflow-hidden rounded-2xl border border-neutral-200 bg-white">
@@ -861,10 +1140,11 @@ const FresherProfile = () => {
 
               <div className="flex items-end gap-5 px-6 pb-6">
                 <div className="group relative -mt-12 shrink-0">
-                  <img
+                  <AvatarCircle
                     src={avatarUrl}
-                    alt={displayName}
-                    className="h-24 w-24 rounded-full border-4 border-white bg-neutral-200 object-cover"
+                    name={displayName}
+                    className="h-24 w-24 rounded-full border-4 border-white"
+                    textClass="text-4xl"
                   />
                   <label
                     htmlFor="avatar-upload"
@@ -890,8 +1170,12 @@ const FresherProfile = () => {
                 </div>
 
                 <div className="min-w-0 pt-4">
-                  <h2 className="truncate font-serif text-2xl font-semibold text-black">{displayName}</h2>
-                  <p className="truncate text-sm text-neutral-500">{user?.email}</p>
+                  <h2 className="truncate font-serif text-2xl font-semibold text-black">
+                    {displayName}
+                  </h2>
+                  <p className="truncate text-sm text-neutral-500">
+                    {user?.email}
+                  </p>
                   <span className="mt-2 inline-block rounded-full border border-neutral-300 px-3 py-1 text-xs font-medium text-neutral-700">
                     {profileCompletion}% complete
                   </span>
@@ -899,21 +1183,51 @@ const FresherProfile = () => {
               </div>
             </div>
 
+            {/* Not complete yet -> tell the user exactly what is missing */}
+            {!profile.ok && (
+              <div className="mb-6">
+                <CompletionBanner
+                  profile={profile}
+                  onEdit={() => setEditOpen(true)}
+                />
+              </div>
+            )}
+
             <div className="space-y-6">
               {activeTab === "profile" && (
-                <ProfileContent user={user} fieldByKey={fieldByKey} onEdit={() => setEditOpen(true)} />
+                <ProfileContent
+                  user={user}
+                  fieldByKey={fieldByKey}
+                  onEdit={() => setEditOpen(true)}
+                />
               )}
               {activeTab === "education" && (
-                <EducationContent education={user.education || []} onAdd={() => setShowEducationModal(true)} onDelete={handleDeleteEducation} />
+                <EducationContent
+                  education={user.education || []}
+                  onAdd={() => setShowEducationModal(true)}
+                  onDelete={handleDeleteEducation}
+                />
               )}
               {activeTab === "career" && (
-                <CareerContent career={user.career || []} onAdd={() => setShowCareerModal(true)} onDelete={handleDeleteCareer} />
+                <CareerContent
+                  career={user.career || []}
+                  onAdd={() => setShowCareerModal(true)}
+                  onDelete={handleDeleteCareer}
+                />
               )}
               {activeTab === "skills" && (
-                <SkillsContent skills={user.skills || []} onAdd={() => setShowSkillModal(true)} onDelete={handleDeleteSkill} />
+                <SkillsContent
+                  skills={user.skills || []}
+                  onAdd={() => setShowSkillModal(true)}
+                  onDelete={handleDeleteSkill}
+                />
               )}
               {activeTab === "interests" && (
-                <InterestsContent interests={user.interests || []} onAdd={() => setShowInterestModal(true)} onDelete={handleDeleteInterest} />
+                <InterestsContent
+                  interests={user.interests || []}
+                  onAdd={() => setShowInterestModal(true)}
+                  onDelete={handleDeleteInterest}
+                />
               )}
             </div>
 
@@ -930,10 +1244,28 @@ const FresherProfile = () => {
       </div>
 
       {/* Modals */}
-      <AddEducationModal isOpen={showEducationModal} onClose={() => setShowEducationModal(false)} onAdd={handleAddEducation} />
-      <AddCareerModal isOpen={showCareerModal} onClose={() => setShowCareerModal(false)} onAdd={handleAddCareer} />
-      <AddSkillModal isOpen={showSkillModal} onClose={() => setShowSkillModal(false)} onAdd={handleAddSkills} existingSkills={user.skills || []} />
-      <AddInterestModal isOpen={showInterestModal} onClose={() => setShowInterestModal(false)} onAdd={handleAddInterests} existingInterests={user.interests || []} />
+      <AddEducationModal
+        isOpen={showEducationModal}
+        onClose={() => setShowEducationModal(false)}
+        onAdd={handleAddEducation}
+      />
+      <AddCareerModal
+        isOpen={showCareerModal}
+        onClose={() => setShowCareerModal(false)}
+        onAdd={handleAddCareer}
+      />
+      <AddSkillModal
+        isOpen={showSkillModal}
+        onClose={() => setShowSkillModal(false)}
+        onAdd={handleAddSkills}
+        existingSkills={user.skills || []}
+      />
+      <AddInterestModal
+        isOpen={showInterestModal}
+        onClose={() => setShowInterestModal(false)}
+        onAdd={handleAddInterests}
+        existingInterests={user.interests || []}
+      />
 
       {/* Toast */}
       <AnimatePresence>
@@ -950,7 +1282,11 @@ const FresherProfile = () => {
                   toast.type === "error" ? "bg-red-500" : "bg-white text-black"
                 }`}
               >
-                {toast.type === "error" ? <AlertTriangle size={14} /> : <Check size={14} />}
+                {toast.type === "error" ? (
+                  <AlertTriangle size={14} />
+                ) : (
+                  <Check size={14} />
+                )}
               </div>
               <p className="text-sm font-medium">{toast.message}</p>
             </div>
@@ -978,6 +1314,57 @@ const FresherProfile = () => {
 };
 
 /* =========================================================================
+   COMPLETION BANNER
+========================================================================= */
+
+const CompletionBanner = ({ profile, onEdit }) => (
+  <div className="rounded-2xl border border-amber-300 bg-amber-50 p-5">
+    <div className="flex items-start gap-3">
+      <AlertTriangle size={20} className="mt-0.5 shrink-0 text-amber-700" />
+      <div className="min-w-0 flex-1">
+        <h3 className="text-sm font-semibold text-amber-900">
+          Fill your profile details to book meetings
+        </h3>
+        <p className="mt-1 text-sm text-amber-800">
+          You need a profile photo and at least {REQUIRED_PERCENT}% of your
+          details filled. You are at {profile.percent}% now.
+        </p>
+
+        <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-amber-200">
+          <div
+            className="h-full rounded-full bg-amber-600 transition-all"
+            style={{ width: `${profile.percent}%` }}
+          />
+        </div>
+
+        {profile.missing.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {profile.missing.map((m) => (
+              <span
+                key={m.key}
+                className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-medium text-amber-900"
+              >
+                {m.label}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <p className="mt-3 text-xs text-amber-800">
+          Photo: tap your picture and upload. Education, Skills and Interests:
+          use the tabs on the left. Career experience is optional.
+        </p>
+
+        <button onClick={onEdit} className={`${BTN_DARK} mt-4`}>
+          <Pencil size={14} />
+          Fill details now
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
+/* =========================================================================
    TAB CONTENT
 ========================================================================= */
 
@@ -986,26 +1373,47 @@ const ProfileContent = ({ user, fieldByKey, onEdit }) => (
     <div className={CARD}>
       <div className="mb-4 flex items-center justify-between">
         <h2 className={HEADING}>About</h2>
-        <button onClick={onEdit} className="text-sm font-medium text-black underline-offset-4 hover:underline">
+        <button
+          onClick={onEdit}
+          className="text-sm font-medium text-black underline-offset-4 hover:underline"
+        >
           Edit
         </button>
       </div>
       {user?.bio ? (
         <p className="leading-7 text-neutral-700">{user.bio}</p>
       ) : (
-        <p className="text-neutral-400">Add a short introduction so mentors know your goals.</p>
+        <p className="text-neutral-400">
+          Add a short introduction so mentors know your goals.
+        </p>
       )}
     </div>
 
     <div className={CARD}>
       <h2 className={`mb-4 ${HEADING}`}>Contact information</h2>
       <div className="grid gap-4 sm:grid-cols-2">
-        <InfoItem icon={Phone} label="Phone" value={user?.phone || user?.mobile} />
+        <InfoItem
+          icon={Phone}
+          label="Phone"
+          value={user?.phone || user?.mobile}
+        />
         <InfoItem icon={Mail} label="Email" value={user?.email} />
-        {fieldByKey("linkedin") && <InfoItem icon={Globe} label="LinkedIn" value={user?.linkedin} />}
-        {fieldByKey("github") && <InfoItem icon={Globe} label="GitHub" value={user?.github} />}
-        {fieldByKey("location") && <InfoItem icon={MapPin} label="Location" value={user?.location} />}
-        {fieldByKey("nationality") && <InfoItem icon={Globe} label="Nationality" value={user?.nationality} />}
+        {fieldByKey("linkedin") && (
+          <InfoItem icon={Globe} label="LinkedIn" value={user?.linkedin} />
+        )}
+        {fieldByKey("github") && (
+          <InfoItem icon={Globe} label="GitHub" value={user?.github} />
+        )}
+        {fieldByKey("location") && (
+          <InfoItem icon={MapPin} label="Location" value={user?.location} />
+        )}
+        {fieldByKey("nationality") && (
+          <InfoItem
+            icon={Globe}
+            label="Nationality"
+            value={user?.nationality}
+          />
+        )}
       </div>
     </div>
   </>
@@ -1044,33 +1452,55 @@ const EducationContent = ({ education, onAdd, onDelete }) => (
     {education.length > 0 ? (
       <div className="space-y-4">
         {education.map((edu, index) => (
-          <EntryCard key={edu.id || index} onDelete={() => onDelete(edu.id)} label="Delete education">
+          <EntryCard
+            key={edu.id || index}
+            onDelete={() => onDelete(edu.id)}
+            label="Delete education"
+          >
             <h3 className="font-semibold text-black">{edu.institution}</h3>
             <p className="text-sm text-neutral-700">{edu.degree}</p>
-            {edu.field && <p className="text-sm text-neutral-500">{edu.field}</p>}
+            {edu.field && (
+              <p className="text-sm text-neutral-500">{edu.field}</p>
+            )}
             <div className="mt-2 flex flex-wrap gap-3 text-xs text-neutral-500">
               {edu.graduationYear && <span>{edu.graduationYear}</span>}
               {edu.cgpa && <span>{edu.cgpa}</span>}
             </div>
-            {edu.description && <p className="mt-2 text-sm text-neutral-600">{edu.description}</p>}
+            {edu.description && (
+              <p className="mt-2 text-sm text-neutral-600">{edu.description}</p>
+            )}
           </EntryCard>
         ))}
       </div>
     ) : (
-      <EmptyTab icon={<GraduationCap size={44} />} text="No education added yet" subtext='Select "Add education" to start.' />
+      <EmptyTab
+        icon={<GraduationCap size={44} />}
+        text="No education added yet"
+        subtext='Select "Add education" to start.'
+      />
     )}
   </SectionCard>
 );
 
 const CareerContent = ({ career, onAdd, onDelete }) => (
-  <SectionCard title="Career experience" addLabel="Add experience" onAdd={onAdd}>
+  <SectionCard
+    title="Career experience"
+    addLabel="Add experience"
+    onAdd={onAdd}
+  >
     {career.length > 0 ? (
       <div className="space-y-4">
         {career.map((exp, index) => (
-          <EntryCard key={exp.id || index} onDelete={() => onDelete(exp.id)} label="Delete experience">
+          <EntryCard
+            key={exp.id || index}
+            onDelete={() => onDelete(exp.id)}
+            label="Delete experience"
+          >
             <h3 className="font-semibold text-black">{exp.company}</h3>
             <p className="text-sm text-neutral-700">{exp.role}</p>
-            {exp.industry && <p className="text-sm text-neutral-500">{exp.industry}</p>}
+            {exp.industry && (
+              <p className="text-sm text-neutral-500">{exp.industry}</p>
+            )}
             <div className="mt-2 flex flex-wrap gap-3 text-xs text-neutral-500">
               {exp.startDate && <span>From: {exp.startDate}</span>}
               {exp.current ? (
@@ -1079,12 +1509,18 @@ const CareerContent = ({ career, onAdd, onDelete }) => (
                 exp.endDate && <span>To: {exp.endDate}</span>
               )}
             </div>
-            {exp.description && <p className="mt-2 text-sm text-neutral-600">{exp.description}</p>}
+            {exp.description && (
+              <p className="mt-2 text-sm text-neutral-600">{exp.description}</p>
+            )}
           </EntryCard>
         ))}
       </div>
     ) : (
-      <EmptyTab icon={<Briefcase size={44} />} text="No career experience added yet" subtext='Select "Add experience" to start.' />
+      <EmptyTab
+        icon={<Briefcase size={44} />}
+        text="No career experience added yet"
+        subtext='Select "Add experience" to start.'
+      />
     )}
   </SectionCard>
 );
@@ -1114,7 +1550,11 @@ const SkillsContent = ({ skills, onAdd, onDelete }) => (
     {skills.length > 0 ? (
       <TagList items={skills} onDelete={onDelete} />
     ) : (
-      <EmptyTab icon={<Code size={44} />} text="No skills added yet" subtext='Select "Add skills" to start.' />
+      <EmptyTab
+        icon={<Code size={44} />}
+        text="No skills added yet"
+        subtext='Select "Add skills" to start.'
+      />
     )}
   </SectionCard>
 );
@@ -1124,7 +1564,11 @@ const InterestsContent = ({ interests, onAdd, onDelete }) => (
     {interests.length > 0 ? (
       <TagList items={interests} onDelete={onDelete} />
     ) : (
-      <EmptyTab icon={<Heart size={44} />} text="No interests added yet" subtext='Select "Add interests" to start.' />
+      <EmptyTab
+        icon={<Heart size={44} />}
+        text="No interests added yet"
+        subtext='Select "Add interests" to start.'
+      />
     )}
   </SectionCard>
 );
@@ -1133,21 +1577,34 @@ const InterestsContent = ({ interests, onAdd, onDelete }) => (
    EDIT PROFILE MODAL
 ========================================================================= */
 
-const EditProfileModal = ({ user, saving, onClose, onSave, onAvatarUpload, onAvatarRemove, avatarUrl, hasRealAvatar }) => {
+const EditProfileModal = ({
+  user,
+  saving,
+  onClose,
+  onSave,
+  onAvatarUpload,
+  onAvatarRemove,
+  avatarUrl,
+  hasRealAvatar,
+}) => {
   const [form, setForm] = useState({ ...user });
   const [previewImage, setPreviewImage] = useState(null);
   const [uploading, setUploading] = useState(false);
 
+  // ALL editable fields are listed (even if the user has never saved them before),
+  // so gender / location / nationality / about can be filled for the first time
   const editableFields = useMemo(
     () =>
-      Object.keys(user)
-        .filter((key) => FIELD_DEFS[key] && FIELD_DEFS[key].editable !== false)
+      Object.keys(FIELD_DEFS)
+        .filter((key) => FIELD_DEFS[key].editable !== false)
         .map((key) => ({ key, def: FIELD_DEFS[key] })),
-    [user],
+    [],
   );
 
-  const groupedEditable = (group) => editableFields.filter((f) => f.def.group === group);
-  const updateField = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
+  const groupedEditable = (group) =>
+    editableFields.filter((f) => f.def.group === group);
+  const updateField = (key, value) =>
+    setForm((prev) => ({ ...prev, [key]: value }));
 
   const handleImagePick = async (event) => {
     const file = event.target.files?.[0];
@@ -1175,11 +1632,20 @@ const EditProfileModal = ({ user, saving, onClose, onSave, onAvatarUpload, onAva
 
   const handleSubmit = (event) => {
     event.preventDefault();
-    onSave(form);
+    // send only the fields this form edits (not the whole user object)
+    const payload = {};
+    editableFields.forEach(({ key }) => {
+      const v = form[key];
+      payload[key] = typeof v === "string" ? v.trim() : (v ?? "");
+    });
+    onSave(payload);
   };
 
   const missingFields = useMemo(
-    () => Object.keys(FIELD_DEFS).filter((k) => FIELD_DEFS[k].required && !hasValue(form[k])),
+    () =>
+      Object.keys(FIELD_DEFS).filter(
+        (k) => FIELD_DEFS[k].required && !hasValue(form[k]),
+      ),
     [form],
   );
 
@@ -1188,10 +1654,13 @@ const EditProfileModal = ({ user, saving, onClose, onSave, onAvatarUpload, onAva
       <div className="relative max-h-[90dvh] w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-neutral-200 bg-white px-6 py-5">
           <div>
-            <h2 className="font-serif text-lg font-semibold text-black">Edit profile</h2>
+            <h2 className="font-serif text-lg font-semibold text-black">
+              Edit profile
+            </h2>
             {missingFields.length > 0 && (
               <p className="mt-0.5 text-xs text-neutral-500">
-                {missingFields.length} required field{missingFields.length > 1 ? "s" : ""} missing
+                {missingFields.length} required field
+                {missingFields.length > 1 ? "s" : ""} missing
               </p>
             )}
           </div>
@@ -1205,14 +1674,18 @@ const EditProfileModal = ({ user, saving, onClose, onSave, onAvatarUpload, onAva
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="max-h-[calc(90dvh-80px)] overflow-y-auto px-6 py-6">
+        <form
+          onSubmit={handleSubmit}
+          className="max-h-[calc(90dvh-80px)] overflow-y-auto px-6 py-6"
+        >
           {/* Photo */}
           <div className="flex flex-col gap-4 rounded-xl border border-neutral-200 bg-neutral-50 p-5 sm:flex-row sm:items-center">
             <div className="relative shrink-0">
-              <img
+              <AvatarCircle
                 src={previewImage || avatarUrl}
-                alt="Profile"
-                className="h-20 w-20 rounded-full border-2 border-white bg-neutral-200 object-cover shadow-sm"
+                name={user?.name}
+                className="h-20 w-20 rounded-full border-2 border-white shadow-sm"
+                textClass="text-3xl"
               />
               {uploading && (
                 <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/70">
@@ -1236,13 +1709,18 @@ const EditProfileModal = ({ user, saving, onClose, onSave, onAvatarUpload, onAva
             </div>
 
             <div>
-              <h3 className="text-sm font-semibold text-black">Profile photo</h3>
+              <h3 className="text-sm font-semibold text-black">
+                Profile photo
+                <RequiredMark />
+              </h3>
               <p className="mt-1 text-xs text-neutral-500">
                 {hasRealAvatar
                   ? "Upload a new photo to replace this one."
-                  : "A placeholder avatar is shown until you upload one."}
+                  : "Your first letter is shown until you upload a photo. A photo is needed to book meetings."}
               </p>
-              <p className="mt-1 text-xs text-neutral-400">JPG, PNG or GIF, up to 5MB</p>
+              <p className="mt-1 text-xs text-neutral-400">
+                JPG, PNG or GIF, up to 5MB
+              </p>
               {hasRealAvatar && (
                 <button
                   type="button"
@@ -1258,7 +1736,13 @@ const EditProfileModal = ({ user, saving, onClose, onSave, onAvatarUpload, onAva
           {groupedEditable("basic").length > 0 && (
             <FormBlock title="Basic information">
               {groupedEditable("basic").map(({ key, def }) => (
-                <EditField key={key} def={def} value={form[key]} onChange={(v) => updateField(key, v)} isRequired={def.required} />
+                <EditField
+                  key={key}
+                  def={def}
+                  value={form[key]}
+                  onChange={(v) => updateField(key, v)}
+                  isRequired={def.required}
+                />
               ))}
             </FormBlock>
           )}
@@ -1266,7 +1750,13 @@ const EditProfileModal = ({ user, saving, onClose, onSave, onAvatarUpload, onAva
           {groupedEditable("contact").length > 0 && (
             <FormBlock title="Contact information">
               {groupedEditable("contact").map(({ key, def }) => (
-                <EditField key={key} def={def} value={form[key]} onChange={(v) => updateField(key, v)} disabled={def.editable === false} isRequired={def.required} />
+                <EditField
+                  key={key}
+                  def={def}
+                  value={form[key]}
+                  onChange={(v) => updateField(key, v)}
+                  isRequired={def.required}
+                />
               ))}
             </FormBlock>
           )}
@@ -1274,7 +1764,13 @@ const EditProfileModal = ({ user, saving, onClose, onSave, onAvatarUpload, onAva
           {groupedEditable("about").length > 0 && (
             <FormBlock title="About you" full>
               {groupedEditable("about").map(({ key, def }) => (
-                <EditField key={key} def={def} value={form[key]} onChange={(v) => updateField(key, v)} fullWidth />
+                <EditField
+                  key={key}
+                  def={def}
+                  value={form[key]}
+                  onChange={(v) => updateField(key, v)}
+                  fullWidth
+                />
               ))}
             </FormBlock>
           )}
@@ -1292,7 +1788,11 @@ const EditProfileModal = ({ user, saving, onClose, onSave, onAvatarUpload, onAva
               disabled={saving}
               className="flex items-center justify-center gap-2 rounded-lg bg-black px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-neutral-800 disabled:opacity-60"
             >
-              {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+              {saving ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <Check size={16} />
+              )}
               {saving ? "Saving…" : "Save changes"}
             </button>
           </div>
@@ -1305,11 +1805,20 @@ const EditProfileModal = ({ user, saving, onClose, onSave, onAvatarUpload, onAva
 const FormBlock = ({ title, children, full }) => (
   <div className="mt-7">
     <h4 className="mb-3 text-sm font-semibold text-black">{title}</h4>
-    <div className={full ? "mt-3" : "grid gap-4 sm:grid-cols-2"}>{children}</div>
+    <div className={full ? "mt-3" : "grid gap-4 sm:grid-cols-2"}>
+      {children}
+    </div>
   </div>
 );
 
-const EditField = ({ def, value, onChange, disabled = false, fullWidth = false, isRequired = false }) => {
+const EditField = ({
+  def,
+  value,
+  onChange,
+  disabled = false,
+  fullWidth = false,
+  isRequired = false,
+}) => {
   const labelEl = (
     <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-neutral-600">
       {def.label}
@@ -1337,7 +1846,11 @@ const EditField = ({ def, value, onChange, disabled = false, fullWidth = false, 
     return (
       <div>
         {labelEl}
-        <select value={value || ""} onChange={(e) => onChange(e.target.value)} className={INPUT}>
+        <select
+          value={value || ""}
+          onChange={(e) => onChange(e.target.value)}
+          className={INPUT}
+        >
           <option value="" disabled>
             Select {def.label.toLowerCase()}
           </option>
@@ -1355,7 +1868,13 @@ const EditField = ({ def, value, onChange, disabled = false, fullWidth = false, 
     <div>
       {labelEl}
       <input
-        type={def.type === "date" ? "date" : def.type === "number" ? "number" : "text"}
+        type={
+          def.type === "date"
+            ? "date"
+            : def.type === "number"
+              ? "number"
+              : "text"
+        }
         value={value || ""}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
@@ -1394,10 +1913,15 @@ const EmptyStateShell = ({ icon, title, message, action }) => (
       <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-black text-white">
         {icon}
       </div>
-      <h1 className="mt-5 font-serif text-xl font-semibold text-black">{title}</h1>
+      <h1 className="mt-5 font-serif text-xl font-semibold text-black">
+        {title}
+      </h1>
       <p className="mt-2 text-sm text-neutral-500">{message}</p>
       {action || (
-        <Link to="/" className="mt-6 inline-block rounded-lg bg-black px-6 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800">
+        <Link
+          to="/"
+          className="mt-6 inline-block rounded-lg bg-black px-6 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800"
+        >
           Go home
         </Link>
       )}

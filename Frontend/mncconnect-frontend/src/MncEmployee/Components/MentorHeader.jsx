@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -12,12 +18,18 @@ import {
   Loader2,
 } from "lucide-react";
 import { socket } from "../../utils/socket";
-import { api, ENDPOINTS, EVENTS, NOTIFICATIONS_CHANGED } from "../../services/mentorApi";
+import {
+  api,
+  ENDPOINTS,
+  EVENTS,
+  NOTIFICATIONS_CHANGED,
+} from "../../services/mentorApi";
 import useMentorSessions from "../../hooks/useMentorSessions";
 import { useAuth } from "../../context/AuthContext";
 import { performLogout } from "../../utils/logout";
 import { normalizeSessionRequest } from "../../utils/sessionRequests";
 import { REQUESTS_CHANGED } from "../../utils/requestEvents";
+import { SESSIONS_CHANGED } from "../../utils/sessionEvents";
 
 const navItems = [
   { name: "Home", path: "/mentor/home", icon: LayoutDashboard },
@@ -28,6 +40,7 @@ const navItems = [
 ];
 
 const PENDING_SYNC_MS = 20000; // re-sync the Requests badge with the server
+const SESSIONS_SYNC_MS = 8000; // re-sync the Sessions badge with the server
 const CLOCK_TICK_MS = 5000; // hide requests that expired meanwhile
 
 // "Video Call" AND "Group Video Call"
@@ -36,7 +49,13 @@ const isVideoCall = (r) => /video call/i.test(String(r?.type || ""));
 /* ------------------------------------------------------------------
    AVATAR (same logic as MentorProfile)
 ------------------------------------------------------------------ */
-const PROFILE_IMAGE_KEYS = ["profilePic", "profileImage", "avatar", "photo", "photoUrl"];
+const PROFILE_IMAGE_KEYS = [
+  "profilePic",
+  "profileImage",
+  "avatar",
+  "photo",
+  "photoUrl",
+];
 
 const getRawAvatarUrl = (u) => {
   for (const key of PROFILE_IMAGE_KEYS) {
@@ -67,7 +86,11 @@ const Avatar = ({ src, initial }) => {
     );
   }
 
-  return initial ? <span>{initial}</span> : <UserCircle size={21} className="text-slate-500" />;
+  return initial ? (
+    <span>{initial}</span>
+  ) : (
+    <UserCircle size={21} className="text-slate-500" />
+  );
 };
 
 const CountBadge = ({ count, active, label = "upcoming" }) =>
@@ -87,7 +110,8 @@ const MentorHeader = () => {
   const navigate = useNavigate();
   const { user, refresh } = useAuth();
 
-  const userId = user?.id || user?._id || user?.mentor?.id || user?.mentor?._id || null;
+  const userId =
+    user?.id || user?._id || user?.mentor?.id || user?.mentor?._id || null;
 
   const [connected, setConnected] = useState(socket.connected);
   const [unread, setUnread] = useState(0);
@@ -115,7 +139,12 @@ const MentorHeader = () => {
     return () => window.removeEventListener("profile:updated", loadMe);
   }, [loadMe]);
 
-  const displayName = (me?.name || user?.name || user?.mentor?.name || "").trim();
+  const displayName = (
+    me?.name ||
+    user?.name ||
+    user?.mentor?.name ||
+    ""
+  ).trim();
   const initial = displayName ? displayName.charAt(0).toUpperCase() : "";
   const avatarSrc =
     getRawAvatarUrl(me) ||
@@ -123,8 +152,52 @@ const MentorHeader = () => {
     getRawAvatarUrl(user?.mentor) ||
     (displayName ? getFallbackAvatarUrl(displayName) : null);
 
-  /* Sessions count: only Upcoming, each meeting ONCE (group = many rows, one id) */
-  const { sessions } = useMentorSessions();
+  /* ---------- Sessions count ----------
+     Only Upcoming, each meeting ONCE (group = many rows, one id).
+     NOTE: this hook has its OWN state (not shared with the Sessions page),
+     so the header must refresh it by itself: socket events, the
+     SESSIONS_CHANGED event (sent by the pages), focus and a short poll. */
+  const { sessions, reload } = useMentorSessions();
+  const reloadRef = useRef(reload);
+  useEffect(() => {
+    reloadRef.current = reload;
+  }, [reload]);
+
+  useEffect(() => {
+    let timeout = null;
+
+    const refreshSessions = () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => reloadRef.current?.(), 300); // debounce
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshSessions();
+    };
+
+    const bookingEvt = EVENTS?.booking || "booking:updated";
+    socket.on(bookingEvt, refreshSessions);
+    socket.on("meeting:timer", refreshSessions);
+    socket.on("meeting:state", refreshSessions);
+    socket.on("connect", refreshSessions);
+    window.addEventListener(SESSIONS_CHANGED, refreshSessions);
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+
+    const poll = setInterval(refreshSessions, SESSIONS_SYNC_MS);
+
+    return () => {
+      clearTimeout(timeout);
+      clearInterval(poll);
+      socket.off(bookingEvt, refreshSessions);
+      socket.off("meeting:timer", refreshSessions);
+      socket.off("meeting:state", refreshSessions);
+      socket.off("connect", refreshSessions);
+      window.removeEventListener(SESSIONS_CHANGED, refreshSessions);
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
+
   const upcomingCount = useMemo(
     () =>
       new Set(
@@ -184,7 +257,10 @@ const MentorHeader = () => {
 
     const onChanged = (e) => {
       const key = e.detail?.id != null ? String(e.detail.id) : "";
-      if (key) setPending((prev) => prev.filter((p) => p.id !== key && p.group !== key));
+      if (key)
+        setPending((prev) =>
+          prev.filter((p) => p.id !== key && p.group !== key),
+        );
       else loadPending();
     };
 
@@ -301,7 +377,9 @@ const MentorHeader = () => {
 
   const iconBtn = (active) =>
     `relative flex h-10 w-10 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
-      active ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+      active
+        ? "bg-blue-50 text-blue-700"
+        : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
     }`;
 
   const profileActive = isActive("/mentor/profile");
@@ -330,7 +408,9 @@ const MentorHeader = () => {
                 to={path}
                 aria-current={active ? "page" : undefined}
                 className={`relative flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
-                  active ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                  active
+                    ? "bg-blue-50 text-blue-700"
+                    : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
                 }`}
               >
                 <Icon size={17} />
@@ -373,7 +453,9 @@ const MentorHeader = () => {
 
           <Link
             to="/mentor/notifications"
-            aria-label={unread ? `Notifications, ${unread} unread` : "Notifications"}
+            aria-label={
+              unread ? `Notifications, ${unread} unread` : "Notifications"
+            }
             className={iconBtn(isActive("/mentor/notifications"))}
           >
             <Bell size={19} />
@@ -392,7 +474,9 @@ const MentorHeader = () => {
           >
             <span
               className={`flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-blue-50 text-sm font-bold text-blue-700 ring-2 transition ${
-                profileActive ? "ring-blue-500" : "ring-blue-100 hover:ring-blue-300"
+                profileActive
+                  ? "ring-blue-500"
+                  : "ring-blue-100 hover:ring-blue-300"
               }`}
             >
               <Avatar src={avatarSrc} initial={initial} />
@@ -406,7 +490,11 @@ const MentorHeader = () => {
             aria-label="Logout"
             className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-500 transition hover:bg-red-50 hover:text-red-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {loggingOut ? <Loader2 size={19} className="animate-spin" /> : <LogOut size={19} />}
+            {loggingOut ? (
+              <Loader2 size={19} className="animate-spin" />
+            ) : (
+              <LogOut size={19} />
+            )}
           </button>
         </div>
       </div>
@@ -421,7 +509,9 @@ const MentorHeader = () => {
                 to={path}
                 aria-current={active ? "page" : undefined}
                 className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium transition ${
-                  active ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                  active
+                    ? "bg-blue-50 text-blue-700"
+                    : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
                 }`}
               >
                 <Icon size={15} />

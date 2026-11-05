@@ -16,6 +16,7 @@ import { socket } from "../../utils/socket";
 import useMentorSessions from "../../hooks/useMentorSessions";
 import { api, ENDPOINTS } from "../../services/mentorApi";
 import { notifyRequestsChanged } from "../../utils/requestEvents";
+import { notifySessionsChanged } from "../../utils/sessionEvents";
 import {
   assignPaymentToMentor,
   formatDuration,
@@ -336,6 +337,9 @@ const MentorRequests = () => {
 
         removeRequest(selectedRequest.id);
         resetModal();
+
+        // the header's Sessions badge must count the new session right away
+        notifySessionsChanged(result.requestGroupId);
 
         navigate("/mentor/sessions", { state: { acceptedSession: session } });
         return;

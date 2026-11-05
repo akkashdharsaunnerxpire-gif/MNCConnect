@@ -34,6 +34,7 @@ import {
 import useMentorSessions from "../../hooks/useMentorSessions";
 import { inr, api, ENDPOINTS, EVENTS } from "../../services/mentorApi";
 import { socket } from "../../utils/socket";
+import { notifySessionsChanged } from "../../utils/sessionEvents";
 import ChatPanel from "../../Commoncomponents/Chatpanel";
 import PersonDetailsModal from "../../Commoncomponents/Persondetailsmodal";
 
@@ -516,11 +517,22 @@ const MentorSessions = () => {
   const openChatId = useRef(null);
   const seenMessageIds = useRef(new Set());
 
+  // id -> last status we told the header about (avoid spamming it every poll)
+  const notifiedStatusRef = useRef({});
+
   // keep latest reload without re-creating effects
   const reloadRef = useRef(reload);
   useEffect(() => {
     reloadRef.current = reload;
   }, [reload]);
+
+  // the header owns a separate copy of the sessions -> tell it when a status moved
+  const notifyStatus = useCallback((id, status) => {
+    const key = String(id);
+    if (notifiedStatusRef.current[key] === status) return;
+    notifiedStatusRef.current[key] = status;
+    notifySessionsChanged(key);
+  }, []);
 
   // GROUP FIX: one booking = one card (merge duplicate rows with the same id)
   const mergedServer = useMemo(
@@ -541,13 +553,17 @@ const MentorSessions = () => {
     [mergedServer, statusOverrides],
   );
 
-  const setOverride = useCallback((id, status) => {
-    if (!id || !status) return;
-    const key = String(id);
-    setStatusOverrides((prev) =>
-      prev[key] === status ? prev : { ...prev, [key]: status },
-    );
-  }, []);
+  const setOverride = useCallback(
+    (id, status) => {
+      if (!id || !status) return;
+      const key = String(id);
+      setStatusOverrides((prev) =>
+        prev[key] === status ? prev : { ...prev, [key]: status },
+      );
+      notifyStatus(key, status);
+    },
+    [notifyStatus],
+  );
 
   // 1-second clock
   useEffect(() => {
@@ -673,6 +689,12 @@ const MentorSessions = () => {
           });
           return diff ? next : prev;
         });
+
+        // tell the header (only once per status change)
+        Object.entries(statusResults).forEach(([id, st]) => {
+          if (st !== "Upcoming") notifyStatus(id, st);
+        });
+
         // and sync the real list from the server
         const moved = Object.values(statusResults).some(
           (st) => st !== "Upcoming",
@@ -687,7 +709,7 @@ const MentorSessions = () => {
       cancelled = true;
       clearInterval(t);
     };
-  }, [activeIds]);
+  }, [activeIds, notifyStatus]);
 
   // Socket updates (instant when server sends them to this user)
   useEffect(() => {

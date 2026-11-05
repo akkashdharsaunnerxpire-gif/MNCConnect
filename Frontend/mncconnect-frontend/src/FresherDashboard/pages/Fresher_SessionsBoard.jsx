@@ -37,6 +37,10 @@ import {
 import useUserEvents from "../../hooks/useUserEvents";
 import useLive from "../../hooks/useLive";
 import {
+  getProfileStatus,
+  REQUIRED_PERCENT,
+} from "../../utils/profileCompletion";
+import {
   api,
   ENDPOINTS,
   EVENTS,
@@ -114,7 +118,10 @@ const earliestSlot = () => {
   return {
     date: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`,
     time: `${pad2(d.getHours())}:${pad2(d.getMinutes())}`,
-    label: d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }),
+    label: d.toLocaleTimeString("en-IN", {
+      hour: "numeric",
+      minute: "2-digit",
+    }),
   };
 };
 
@@ -175,10 +182,7 @@ const explainError = (message = "", status = 0) => {
   ) {
     return {
       title: "No internet connection",
-      tips: [
-        "Check your Wi-Fi or mobile data",
-        "Then tap Try again",
-      ],
+      tips: ["Check your Wi-Fi or mobile data", "Then tap Try again"],
       moneySafe: true,
       offline: true,
     };
@@ -217,10 +221,7 @@ const explainError = (message = "", status = 0) => {
   if (status >= 500) {
     return {
       title: "Our server had a problem",
-      tips: [
-        "This is not your mistake",
-        "Wait a minute and tap Try again",
-      ],
+      tips: ["This is not your mistake", "Wait a minute and tap Try again"],
       moneySafe: true,
     };
   }
@@ -269,18 +270,16 @@ const Section = ({ step, title, subtitle, done, children }) => (
     <div className="flex items-start gap-3">
       <span
         className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold transition ${
-          done
-            ? "bg-emerald-500 text-white"
-            : "bg-slate-100 text-slate-500"
+          done ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"
         }`}
       >
         {done ? <Check size={16} /> : step}
       </span>
       <div className="min-w-0">
-        <h2 className="text-lg font-bold text-slate-950 sm:text-xl">
-          {title}
-        </h2>
-        {subtitle && <p className="mt-0.5 text-sm text-slate-500">{subtitle}</p>}
+        <h2 className="text-lg font-bold text-slate-950 sm:text-xl">{title}</h2>
+        {subtitle && (
+          <p className="mt-0.5 text-sm text-slate-500">{subtitle}</p>
+        )}
       </div>
     </div>
     <div className="mt-5">{children}</div>
@@ -424,6 +423,9 @@ export default function SessionBoard() {
     userId,
   });
   const me = meData?.user || meData || null;
+  const profileStatus = useMemo(() => getProfileStatus(me), [me]);
+  const profileBlocked = Boolean(me) && !profileStatus.ok;
+  const [showProfileGate, setShowProfileGate] = useState(false);
   const walletBalance = Math.max(0, Number(me?.walletBalance) || 0);
 
   const profileGender = cleanGender(me?.gender) || cleanGender(user?.gender);
@@ -524,8 +526,7 @@ export default function SessionBoard() {
       else if (!f.role) p.push({ key: "role", msg: "Select a role" });
       if (!isGroup && !effectiveGender)
         p.push({ key: "gender", msg: "Select your gender" });
-      if (!f.language)
-        p.push({ key: "language", msg: "Select a language" });
+      if (!f.language) p.push({ key: "language", msg: "Select a language" });
     }
     return p;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -672,6 +673,11 @@ export default function SessionBoard() {
   /* ---------- pay ---------- */
   const startPayment = async () => {
     if (paymentStartingRef.current || stage) return;
+
+    if (profileBlocked) {
+      setShowProfileGate(true);
+      return;
+    }
 
     // Instead of a dead (disabled) button: show exactly what is missing and jump to it
     if (problems.length) {
@@ -906,6 +912,32 @@ export default function SessionBoard() {
           <ChevronRight size={16} />
           <span className="font-semibold text-slate-900">Book a session</span>
         </div>
+        {profileBlocked && (
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle
+                size={20}
+                className="mt-0.5 shrink-0 text-amber-700"
+              />
+              <div>
+                <p className="text-sm font-bold text-amber-900">
+                  Complete your profile to book ({profileStatus.percent}% done)
+                </p>
+                <p className="text-xs text-amber-800">
+                  You need a profile photo and at least {REQUIRED_PERCENT}% of
+                  your details filled.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate("/Home/profile")}
+              className="rounded-lg bg-amber-600 px-4 py-2 text-xs font-bold text-white hover:bg-amber-700"
+            >
+              Go to profile
+            </button>
+          </div>
+        )}
 
         {rebook && (
           <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-4">
@@ -1087,9 +1119,7 @@ export default function SessionBoard() {
               </div>
 
               <div className="mt-5">
-                <Label htmlFor="field-reason">
-                  What do you want to learn?
-                </Label>
+                <Label htmlFor="field-reason">What do you want to learn?</Label>
                 <textarea
                   id="field-reason"
                   value={f.reason}
@@ -1612,13 +1642,51 @@ export default function SessionBoard() {
       </div>
 
       {/* ---------- status modals ---------- */}
+      {showProfileGate && (
+        <Overlay>
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-amber-50">
+            <UserRound size={30} className="text-amber-600" />
+          </div>
+          <h2 className="mt-4 text-xl font-bold text-slate-900">
+            Complete your profile first
+          </h2>
+          <p className="mt-2 text-sm text-slate-500">
+            To book a meeting you need a profile photo and at least{" "}
+            {REQUIRED_PERCENT}% of your details filled. You are at{" "}
+            <b className="text-slate-800">{profileStatus.percent}%</b>.
+          </p>
+
+          <div className="mt-4 rounded-xl bg-slate-50 p-4 text-left">
+            <p className="text-xs font-bold text-slate-800">Still missing</p>
+            <ul className="mt-1.5 space-y-1 text-xs text-slate-600">
+              {profileStatus.missing.map((m) => (
+                <li key={m.key}>• {m.label}</li>
+              ))}
+            </ul>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => navigate("/Home/profile")}
+            className="mt-5 w-full rounded-xl bg-blue-600 py-3.5 text-sm font-bold text-white hover:bg-blue-700"
+          >
+            Complete my profile
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowProfileGate(false)}
+            className="mt-2 w-full rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600"
+          >
+            Not now
+          </button>
+        </Overlay>
+      )}
+
       {(stage === "paying" || stage === "sending") && (
         <Overlay>
           <Loader2 size={34} className="mx-auto animate-spin text-blue-600" />
           <h3 className="mt-5 text-xl font-bold text-slate-900">
-            {stage === "paying"
-              ? "Opening secure payment…"
-              : "Almost done…"}
+            {stage === "paying" ? "Opening secure payment…" : "Almost done…"}
           </h3>
 
           {stage === "sending" && (

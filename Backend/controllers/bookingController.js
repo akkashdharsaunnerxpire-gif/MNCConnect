@@ -728,38 +728,96 @@ const withdrawOverlapping = async (app, mentorId, accepted) => {
 
 /* ============================ CREATE ============================ */
 
+
 exports.createRequest = async (req, res) => {
   try {
+    // 1. Check whether the fresher is logged in
+    if (!req.user?.id) {
+      return fail(res, 401, "Please login to book a session.");
+    }
+
+    // 2. Get fresher details
+    const user = await Fresher.findById(req.user.id).lean();
+
+    if (!user) {
+      return fail(res, 404, "Fresher profile not found.");
+    }
+
+    const has = (v) =>
+      Array.isArray(v)
+        ? v.length > 0
+        : String(v ?? "").trim().length > 0;
+
+    const photo =
+      user.profilePic ||
+      user.profileImage ||
+      user.avatar ||
+      user.photo ||
+      user.photoUrl;
+
+    // 3. Career is optional.
+    // Only these 9 fields are required.
+    const requiredFields = [
+      photo,
+      user.name,
+      user.phone || user.mobile,
+      user.gender,
+      user.location,
+      user.bio,
+      user.education,
+      user.skills,
+      user.interests,
+    ];
+
+    const done = requiredFields.filter(has).length;
+
+    if (!photo || done / requiredFields.length < 0.9) {
+      return res.status(403).json({
+        message:
+          "Complete your profile (photo + required details) to book a session.",
+      });
+    }
+
     optionalAuth(req, null, () => {});
+
     const body = req.body || {};
     const sd = body.sessionDetails || {};
+
     const requestGroupId = String(body.requestGroupId || "").trim();
     const paymentId = String(body.razorpayPaymentId || "").trim();
+
     const preferredMentorId = mongoose.Types.ObjectId.isValid(
       body.preferredMentorId,
     )
       ? String(body.preferredMentorId)
       : null;
 
-    if (!requestGroupId || !paymentId)
+    if (!requestGroupId || !paymentId) {
       return fail(res, 400, "requestGroupId and paymentId required");
+    }
 
     const existing = await Booking.findOne({ requestGroupId }).populate(
       "mentor",
       POPULATE_MENTOR,
     );
-    if (existing)
+
+    if (existing) {
       return res.json({
         success: true,
         booking: toClient(existing),
         notifiedCount: existing.notified.length,
       });
+    }
 
     const payment = await Payment.findOne({
       razorpayPaymentId: paymentId,
       status: "paid",
     });
-    if (!payment) return fail(res, 402, "Payment not verified");
+
+    if (!payment) {
+      return fail(res, 402, "Payment not verified");
+    }
+
     if (
       req.user?.role === "fresher" &&
       payment.fresher &&
@@ -769,23 +827,37 @@ exports.createRequest = async (req, res) => {
     }
 
     if (await paymentUsed(paymentId)) {
-      return fail(res, 409, "This payment is already used for another booking");
+      return fail(
+        res,
+        409,
+        "This payment is already used for another booking",
+      );
     }
-    const claimed = await claimPayment(paymentId, requestGroupId);
-    if (!claimed)
-      return fail(res, 409, "This payment is already used for another booking");
 
-    // payment without an owner cannot be refunded to a wallet -> attach the logged-in fresher
+    const claimed = await claimPayment(paymentId, requestGroupId);
+
+    if (!claimed) {
+      return fail(
+        res,
+        409,
+        "This payment is already used for another booking",
+      );
+    }
+
+    // Payment without an owner cannot be refunded to a wallet.
+    // Attach the logged-in fresher.
     if (req.user?.role === "fresher" && !payment.fresher) {
       await Payment.updateOne(
         { _id: payment._id, fresher: null },
         { $set: { fresher: req.user.id } },
       ).catch(() => {});
+
       payment.fresher = req.user.id;
     }
 
     const reject = async (status, message) => {
       const result = await refundPayment(payment, message);
+
       return fail(
         res,
         status,
@@ -794,36 +866,56 @@ exports.createRequest = async (req, res) => {
     };
 
     const minutes = Number(sd.duration);
-    if (!Number.isInteger(minutes) || minutes < 30 || minutes > 240)
+
+    if (!Number.isInteger(minutes) || minutes < 30 || minutes > 240) {
       return reject(400, "Invalid duration");
+    }
 
     // ---- single or group ----
     const mode = sd.mode === "group" ? "group" : "single";
+
     let maxMembers = 1;
+
     if (mode === "group") {
       maxMembers = Number(sd.maxMembers);
+
       if (
         !Number.isInteger(maxMembers) ||
         maxMembers < 2 ||
         maxMembers > MAX_GROUP
-      )
-        return reject(400, `Group size must be 2 to ${MAX_GROUP} people.`);
+      ) {
+        return reject(
+          400,
+          `Group size must be 2 to ${MAX_GROUP} people.`,
+        );
+      }
     }
 
     if (Number(payment.amount) !== expectedPrice(minutes, mode)) {
-      return reject(400, "Payment amount does not match the session price.");
+      return reject(
+        400,
+        "Payment amount does not match the session price.",
+      );
     }
 
     const startsAt = parseSessionStart(sd.date, sd.time);
+
     if (!startsAt || Number.isNaN(startsAt.getTime())) {
       console.warn("createRequest: cannot read date/time", {
         date: sd.date,
         time: sd.time,
       });
-      return reject(400, "We could not read the date and time you selected.");
+
+      return reject(
+        400,
+        "We could not read the date and time you selected.",
+      );
     }
 
-    const secondsLeft = Math.round((startsAt.getTime() - Date.now()) / 1000);
+    const secondsLeft = Math.round(
+      (startsAt.getTime() - Date.now()) / 1000,
+    );
+
     if (startsAt.getTime() < Date.now() + PAYMENT_GRACE_MS) {
       console.warn("createRequest: slot passed while paying", {
         date: sd.date,
@@ -832,14 +924,19 @@ exports.createRequest = async (req, res) => {
         nowISO: new Date().toISOString(),
         secondsLeft,
       });
+
       return reject(
         400,
         "The time you selected passed while you were paying. Please book a later time.",
       );
     }
-    const endsAt = new Date(startsAt.getTime() + minutes * 60000);
+
+    const endsAt = new Date(
+      startsAt.getTime() + minutes * 60000,
+    );
 
     let preferredMentor = null;
+
     if (preferredMentorId) {
       preferredMentor = await Mentor.findOne({
         _id: preferredMentorId,
@@ -848,11 +945,18 @@ exports.createRequest = async (req, res) => {
       })
         .select(MENTOR_FIELDS)
         .lean();
-      if (!preferredMentor)
+
+      if (!preferredMentor) {
         return reject(400, "Selected mentor is not available.");
+      }
 
       if (
-        await hasConflict(preferredMentor._id, startsAt, endsAt, requestGroupId)
+        await hasConflict(
+          preferredMentor._id,
+          startsAt,
+          endsAt,
+          requestGroupId,
+        )
       ) {
         return reject(
           409,
@@ -867,22 +971,31 @@ exports.createRequest = async (req, res) => {
         : payment.fresher
           ? String(payment.fresher)
           : null;
+
     const fresherDoc = fresherId
-      ? await Fresher.findById(fresherId).select("name email gender").lean()
+      ? await Fresher.findById(fresherId)
+          .select("name email gender")
+          .lean()
       : null;
 
     // ---- WHO may receive this request (gender rule) ----
-    //  single : the fresher's OWN gender from the profile (boy -> male employee,
-    //           girl -> female employee). Old accounts without gender: use the form value.
-    //  group  : whatever the host selected ("" = no preference, any employee)
+    // Single: fresher's own gender from profile.
+    // Group: whatever the host selected.
+
     const profileGender = norm(fresherDoc?.gender);
-    const profileKnown = profileGender === "male" || profileGender === "female";
+
+    const profileKnown =
+      profileGender === "male" || profileGender === "female";
+
     const pickedGender = norm(sd.gender);
-    const pickedKnown = pickedGender === "male" || pickedGender === "female";
+
+    const pickedKnown =
+      pickedGender === "male" || pickedGender === "female";
 
     let fresherGender = "";
+
     if (mode === "group") {
-      fresherGender = pickedKnown ? pickedGender : ""; // "" = any
+      fresherGender = pickedKnown ? pickedGender : "";
     } else {
       fresherGender = profileKnown
         ? profileGender
@@ -896,21 +1009,34 @@ exports.createRequest = async (req, res) => {
       .replace(/\s+/g, " ");
 
     if (!preferredMentor) {
-      if (mode === "single" && !fresherGender)
+      if (mode === "single" && !fresherGender) {
         return reject(400, "Please select your gender.");
-      if (!department) return reject(400, "Please select a department.");
+      }
+
+      if (!department) {
+        return reject(400, "Please select a department.");
+      }
     }
-    const hostName = fresherDoc?.name || body.requester?.fullName || "Fresher";
+
+    const hostName =
+      fresherDoc?.name ||
+      body.requester?.fullName ||
+      "Fresher";
 
     const booking = await Booking.create({
       requestGroupId,
       fresher: fresherId || null,
       fresherName: hostName,
-      fresherEmail: fresherDoc?.email || body.requester?.email || "",
+      fresherEmail:
+        fresherDoc?.email || body.requester?.email || "",
       fresherImage: String(body.requester?.image || ""),
+
       companyName: String(
-        preferredMentor?.currentCompany || body.companyName || "",
+        preferredMentor?.currentCompany ||
+          body.companyName ||
+          "",
       ).trim(),
+
       sessionType: String(sd.sessionType || "").slice(0, 60),
       reason: String(sd.reason || "").slice(0, 1000),
       role: department,
@@ -918,19 +1044,23 @@ exports.createRequest = async (req, res) => {
       gender: fresherGender,
       language: String(sd.language || ""),
       durationMinutes: minutes,
-      amount: Number(payment.amount), // per person
+      amount: Number(payment.amount),
       date: String(sd.date),
       time: String(sd.time),
       startsAt,
       endsAt,
       expiresAt: expiryFor(startsAt),
       razorpayPaymentId: paymentId,
-      preferredMentor: preferredMentor ? preferredMentor._id : null,
+      preferredMentor: preferredMentor
+        ? preferredMentor._id
+        : null,
+
       // ---- group ----
       sessionMode: mode,
       maxMembers,
       perPersonAmount: Number(payment.amount),
       inviteCode: mode === "group" ? makeInviteCode() : "",
+
       participants: [
         {
           fresher: fresherId || null,
@@ -960,6 +1090,7 @@ exports.createRequest = async (req, res) => {
           .lean();
 
     const notified = [];
+
     await broadcastLoop(
       req,
       mentors,
@@ -970,8 +1101,13 @@ exports.createRequest = async (req, res) => {
       requestGroupId,
       notified,
     );
-    if (notified.length)
-      await Booking.updateOne({ _id: booking._id }, { $set: { notified } });
+
+    if (notified.length) {
+      await Booking.updateOne(
+        { _id: booking._id },
+        { $set: { notified } },
+      );
+    }
 
     const out = await Booking.findById(booking._id)
       .populate("mentor", POPULATE_MENTOR)
@@ -983,12 +1119,20 @@ exports.createRequest = async (req, res) => {
       notifiedCount: notified.length,
     });
   } catch (error) {
-    if (error?.code === 11000)
-      return fail(res, 409, "This payment is already used for another booking");
+    if (error?.code === 11000) {
+      return fail(
+        res,
+        409,
+        "This payment is already used for another booking",
+      );
+    }
+
     console.error("createRequest error:", error);
+
     return fail(res, 500, "Failed to create request");
   }
 };
+
 
 /* ============================ GROUP: PREVIEW + JOIN ============================ */
 

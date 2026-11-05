@@ -24,6 +24,12 @@ import {
 import useLive from "../../hooks/useLive";
 import useUserEvents from "../../hooks/useUserEvents";
 import {
+  getProfileStatus,
+  getRawAvatarUrl,
+  getGuideKey,
+  REQUIRED_PERCENT,
+} from "../../utils/profileCompletion";
+import {
   api,
   ENDPOINTS,
   EVENTS,
@@ -82,14 +88,6 @@ const PROFILE_IMAGE_KEYS = [
   "photo",
   "photoUrl",
 ];
-
-const getRawAvatarUrl = (u) => {
-  for (const key of PROFILE_IMAGE_KEYS) {
-    if (u?.[key]) return u[key];
-  }
-  return null;
-};
-
 const getGenderAvatarUrl = (u) => {
   const seed = encodeURIComponent(
     u?.email || u?.name || u?._id || u?.id || "fresher",
@@ -151,6 +149,78 @@ const countdown = (ms) => {
   if (d > 0) return `${d}d ${h}h`;
   if (h > 0) return `${h}h ${pad(m)}m`;
   return `${pad(m)}:${pad(sec)}`;
+};
+/* Ghost hand + tooltip that points at a button (first-time user guide) */
+const GuideHand = ({ getTarget, title, text, onSkip }) => {
+  const [pos, setPos] = useState(null);
+  const getRef = useRef(getTarget);
+  getRef.current = getTarget;
+
+  useEffect(() => {
+    const update = () => {
+      const el = getRef.current();
+      if (!el) {
+        setPos(null);
+        return;
+      }
+      const r = el.getBoundingClientRect();
+      const next = {
+        x: Math.round(r.left + r.width / 2),
+        y: Math.round(r.bottom),
+      };
+      setPos((p) => (p && p.x === next.x && p.y === next.y ? p : next));
+    };
+    update();
+    const id = setInterval(update, 250); // also follows the dropdown while it animates
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, []);
+
+  if (!pos) return null;
+
+  const vw = window.innerWidth;
+  const bubbleW = Math.min(260, vw - 24);
+  const left = Math.min(Math.max(pos.x - bubbleW / 2, 12), vw - bubbleW - 12);
+
+  return (
+    <>
+      <motion.div
+        className="pointer-events-none fixed z-[120]"
+        style={{ left: pos.x - 24, top: pos.y + 2 }}
+        animate={{ y: [0, -10, 0] }}
+        transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
+      >
+        <span
+          className="block select-none text-5xl leading-none opacity-90"
+          style={{ filter: "drop-shadow(0 8px 6px rgba(15,23,42,.45))" }}
+          aria-hidden="true"
+        >
+          👆
+        </span>
+      </motion.div>
+
+      <div
+        role="status"
+        className="fixed z-[120] rounded-2xl border border-blue-200 bg-white p-3.5 shadow-2xl"
+        style={{ left, top: pos.y + 62, width: bubbleW }}
+      >
+        <p className="text-sm font-bold text-slate-900">{title}</p>
+        <p className="mt-1 text-xs leading-5 text-slate-600">{text}</p>
+        <button
+          type="button"
+          onClick={onSkip}
+          className="mt-2 text-[11px] font-semibold text-slate-400 hover:text-slate-600"
+        >
+          Skip
+        </button>
+      </div>
+    </>
+  );
 };
 
 const Badge = ({ count, tone = "blue" }) =>
@@ -219,6 +289,9 @@ const Header = () => {
   const menuRef = useRef(null);
   const seenIds = useRef(null); // ids we have already shown, so only NEW notifications pop up
   const timers = useRef([]);
+  const profileBtnRef = useRef(null); // desktop avatar button
+  const profileItemRef = useRef(null); // "My profile" row inside the dropdown
+  const mobileProfileRef = useRef(null); // mobile avatar button
 
   // where the welcome-bonus coin lands
   const walletBtnRef = useRef(null); // desktop wallet button
@@ -240,7 +313,71 @@ const Header = () => {
   const userName = (me?.name || getUser().name || "").trim();
 
   // profile photo (uploaded one, or the gender / default avatar)
-  const avatarSrc = resolveAvatar(me);
+  // uploaded photo only. No photo => Avatar shows the first letter
+  const avatarSrc = getRawAvatarUrl(me);
+
+  /* ---------- first-time guide: ghost hand -> Profile ---------- */
+  const profileStatus = useMemo(() => getProfileStatus(me), [me]);
+  const onProfilePage = location.pathname
+    .toLowerCase()
+    .startsWith("/home/profile");
+  const guideKey = getGuideKey(userId);
+
+  const [guideSeen, setGuideSeen] = useState(() => {
+    try {
+      return localStorage.getItem(guideKey) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [guideReady, setGuideReady] = useState(false);
+
+  // wait a little so it does not clash with the welcome-bonus animation
+  useEffect(() => {
+    const t = setTimeout(() => setGuideReady(true), 3500);
+    return () => clearTimeout(t);
+  }, []);
+
+  // user opened the Profile page => the hand disappears for good
+  useEffect(() => {
+    if (!onProfilePage || guideSeen) return;
+    setGuideSeen(true);
+    try {
+      localStorage.setItem(guideKey, "1");
+    } catch {
+      /* ignore */
+    }
+  }, [onProfilePage, guideSeen, guideKey]);
+
+  const skipGuide = () => {
+    setGuideSeen(true);
+    try {
+      localStorage.setItem(guideKey, "1");
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const showGuide =
+    Boolean(me) &&
+    guideReady &&
+    !guideSeen &&
+    !profileStatus.ok &&
+    !onProfilePage;
+
+  // desktop: avatar button first, then (once the dropdown is open) the "My profile" row.
+  // mobile: the avatar button opens the profile page directly.
+  const getGuideTarget = () => {
+    const visible = (el) =>
+      el && el.getBoundingClientRect().width > 0 ? el : null;
+    return (
+      (menuOpen ? visible(profileItemRef.current) : null) ||
+      visible(profileBtnRef.current) ||
+      visible(mobileProfileRef.current)
+    );
+  };
+  const guideOnItem =
+    menuOpen && Boolean(profileItemRef.current?.getBoundingClientRect().width);
 
   // Profile page fires "profile:updated" after photo / details change -> refresh header instantly
   useEffect(() => {
@@ -304,10 +441,7 @@ const Header = () => {
 
   const nextBooking = upcoming[0];
   const nextStart = toMs(nextBooking?.startsAt);
- const msToStart =
-  nextStart !== null
-    ? nextStart - 2 * 60 * 1000 - now
-    : null;
+  const msToStart = nextStart !== null ? nextStart - 2 * 60 * 1000 - now : null;
   const joinOpen =
     Boolean(nextBooking) && msToStart !== null && msToStart <= OPEN_BEFORE_MS;
   const nextId = nextBooking?.requestGroupId || nextBooking?.id;
@@ -701,9 +835,10 @@ const Header = () => {
             {/* profile menu */}
             <div className="relative" ref={menuRef}>
               <button
+                ref={profileBtnRef}
                 type="button"
-                onClick={() => setMenuOpen((v) => !v)}
                 aria-haspopup="menu"
+                onClick={() => setMenuOpen((v) => !v)}
                 aria-expanded={menuOpen}
                 aria-label="Profile menu"
                 className="flex items-center gap-1.5 rounded-full border-2 border-blue-100 bg-slate-100 py-0.5 pl-0.5 pr-2 transition hover:border-blue-300"
@@ -748,6 +883,11 @@ const Header = () => {
                       {MENU_ITEMS.map(({ path, label, icon: Icon }) => (
                         <button
                           key={label}
+                          ref={
+                            path === "/Home/profile"
+                              ? profileItemRef
+                              : undefined
+                          }
                           type="button"
                           role="menuitem"
                           onClick={() => go(path)}
@@ -863,7 +1003,9 @@ const Header = () => {
               <div className="space-y-1 px-4 py-4">
                 {/* user card with photo */}
                 <button
+                  ref={mobileProfileRef}
                   type="button"
+                  aria-label="My profile"
                   onClick={() => go("/Home/profile")}
                   className="mb-2 flex w-full items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-left"
                 >
@@ -936,6 +1078,19 @@ const Header = () => {
         </AnimatePresence>
       </header>
 
+      {/* first-time guide: ghost hand points to Profile, disappears once Profile page opens */}
+      {showGuide && (
+        <GuideHand
+          getTarget={getGuideTarget}
+          title={guideOnItem ? "Tap “My profile”" : "Start with your profile"}
+          text={
+            guideOnItem
+              ? "Open your profile and fill your details."
+              : `Tap your profile picture. You need a photo and ${REQUIRED_PERCENT}% details filled to book meetings.`
+          }
+          onSkip={skipGuide}
+        />
+      )}
       {/* live notification pop-ups */}
       <div
         className="pointer-events-none fixed right-4 top-20 z-[110] flex w-[calc(100vw-2rem)] max-w-sm flex-col gap-2"
