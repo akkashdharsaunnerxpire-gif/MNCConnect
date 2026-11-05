@@ -1,7 +1,10 @@
 // src/components/MeetingRoom.jsx
-// SINGLE meeting : peer-to-peer WebRTC (same as before)
-// GROUP meeting  : LiveKit (SFU) - works for 2 to 60 people
-//   npm i livekit-client
+// ONE video engine for everything: LiveKit (SFU)   ->   npm i livekit-client
+//   SINGLE meeting : 2 people (employee + fresher), big remote video + small self preview
+//   GROUP meeting  : 2 to 60 people
+//
+// Backend: POST /bookings/:id/livekit-token must now work for BOTH modes
+//   (single = max 2 participants). Identity: mentor => "mentor:<id>", fresher => "fresher:<id>".
 //
 // GROUP layout (Zoom style)
 //   - Employee (mentor) sees the freshers BIG in a gallery grid (auto columns, pages of 12)
@@ -14,8 +17,11 @@
 //   - single : employee <-> fresher (1 to 1, no names)
 //   - group  : EVERYBODY (employee, host, friends) can chat, every message shows the sender's name
 // POPUPS
-//   - "Did the session go well?" (Meeting Success)  -> only the single fresher / group HOST
-//   - Review (stars + feedback)                     -> EVERY fresher (host and friends)
+//   - "Did the session go well?" (last 3 minutes)   -> only the single fresher / group HOST
+//        Yes -> confirmed
+//        No  -> valid reason -> "Are you sure?" (OK / Cancel) -> declined
+//   - Review (stars + feedback, last 1 minute)      -> EVERY fresher (host and friends)
+//   - Meeting finished and not confirmed            -> the confirm popup again (after the meeting)
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
@@ -44,9 +50,10 @@ import {
 } from "lucide-react";
 import { Room, RoomEvent, Track, VideoPresets } from "livekit-client";
 import { socket } from "../utils/socket";
-import ReviewModal from "../FresherDashboard/pages/Reviewmodal";
 import MeetingInstructionsGate from "../Commoncomponents/MeetingInstructionsGate";
-import SessionCompletionModal from "../Commoncomponents/SessionCompletionModal";
+import SessionConfirmModal, {
+  confirmSessionApi,
+} from "../Commoncomponents/SessionConfirmModal";
 import ChatPanel from "../Commoncomponents/Chatpanel";
 import {
   API_URL,
@@ -54,14 +61,6 @@ import {
   fmtClock,
   getUserId,
 } from "../services/fresherApi";
-
-const ICE = {
-  iceServers: [
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
-    // { urls: "turn:YOUR_TURN_HOST:3478", username: "USER", credential: "PASS" },
-  ],
-};
 
 const ONE_MIN = 60 * 1000;
 const THREE_MIN = 3 * 60 * 1000;
@@ -75,69 +74,6 @@ const ENTRY_BEFORE_MS = 20 * 1000;
 const AUTO_MEDIA_MAX = 6;
 // group gallery: tiles per page
 const GRID_PAGE = 12;
-
-/* ---------- HD camera + mic (single meeting) ---------- */
-const HD_VIDEO = {
-  width: { ideal: 1920, min: 1280 },
-  height: { ideal: 1080, min: 720 },
-  frameRate: { ideal: 30, max: 30 },
-  facingMode: "user",
-};
-const HD_AUDIO = {
-  echoCancellation: true,
-  noiseSuppression: true,
-  autoGainControl: true,
-  sampleRate: 48000,
-  channelCount: 1,
-};
-
-const getMedia = async () => {
-  const attempts = [
-    { video: HD_VIDEO, audio: HD_AUDIO, audioOnly: false },
-    {
-      video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-      audio: HD_AUDIO,
-      audioOnly: false,
-    },
-    { video: true, audio: true, audioOnly: false },
-    { video: false, audio: HD_AUDIO, audioOnly: true },
-  ];
-  for (const { audioOnly, ...constraints } of attempts) {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      stream.getVideoTracks().forEach((t) => {
-        if ("contentHint" in t) t.contentHint = "motion";
-      });
-      return { stream, audioOnly };
-    } catch {
-      /* next */
-    }
-  }
-  return { stream: null, audioOnly: false };
-};
-
-const tuneSenders = async (peer) => {
-  for (const sender of peer.getSenders()) {
-    if (!sender.track) continue;
-    try {
-      const params = sender.getParameters();
-      if (!params.encodings || !params.encodings.length)
-        params.encodings = [{}];
-      if (sender.track.kind === "video") {
-        params.encodings[0].maxBitrate = 2_500_000;
-        params.encodings[0].maxFramerate = 30;
-        params.degradationPreference = "maintain-resolution";
-      } else {
-        params.encodings[0].maxBitrate = 64_000;
-      }
-      await sender.setParameters(params);
-    } catch {
-      /* not supported */
-    }
-  }
-};
-
-const sendSignal = (data) => socket.emit("meeting:signal", { data });
 
 const initialsOf = (name = "") =>
   String(name)
@@ -178,6 +114,7 @@ const ReviewGate = ({ booking, onDone }) => {
       });
       const d = await res.json().catch(() => ({}));
       if (res.ok && d.success) onDone();
+      else if (res.status === 409) onDone(); // already reviewed
       else setErr(d.message || "Could not submit. Try again.");
     } catch {
       setErr("Network error. Try again.");
@@ -245,36 +182,8 @@ const ReviewGate = ({ booking, onDone }) => {
   );
 };
 
-const SuccessConfirmModal = ({ onYes, onNo }) => (
-  <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 px-4">
-    <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center text-slate-900 shadow-2xl">
-      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100">
-        <CheckCircle className="text-emerald-600" size={30} />
-      </div>
-      <h3 className="mt-4 text-lg font-bold">Did the session go well?</h3>
-      <p className="mt-1 text-sm text-slate-500">
-        Please confirm your session. The meeting continues until the timer ends.
-      </p>
-      <div className="mt-5 flex gap-3">
-        <button
-          onClick={onNo}
-          className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600"
-        >
-          No
-        </button>
-        <button
-          onClick={onYes}
-          className="flex-1 rounded-xl bg-emerald-600 py-3 text-sm font-bold text-white hover:bg-emerald-700"
-        >
-          Yes
-        </button>
-      </div>
-    </div>
-  </div>
-);
-
-/* ---------- GROUP: one participant tile (LiveKit) ----------
-   size : "xl" (few big tiles) | "md" (gallery) | "sm" (strip)           */
+/* ---------- one participant tile (LiveKit) ----------
+   size : "xl" (few big tiles) | "md" (gallery) | "sm" (strip / self preview)   */
 const AVATAR = {
   xl: "h-28 w-28 text-4xl",
   md: "h-16 w-16 text-xl",
@@ -369,6 +278,12 @@ const WaitingStage = ({ text }) => (
   </div>
 );
 
+const Center = ({ children }) => (
+  <div className="flex min-h-screen flex-col items-center justify-center bg-slate-950 px-6 text-center text-white">
+    {children}
+  </div>
+);
+
 export default function MeetingRoom() {
   const { bookingId } = useParams();
   const navigate = useNavigate();
@@ -413,10 +328,7 @@ export default function MeetingRoom() {
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
   const [mediaNote, setMediaNote] = useState("");
-  const [localReady, setLocalReady] = useState(false);
   const [booking, setBooking] = useState(null);
-  const [needsReview, setNeedsReview] = useState(false);
-  const [endedConfirmed, setEndedConfirmed] = useState(false);
   const [reviewDone, setReviewDone] = useState(false);
   const [showSuccessBtn, setShowSuccessBtn] = useState(false);
   const [confirmedBanner, setConfirmedBanner] = useState(false);
@@ -424,7 +336,7 @@ export default function MeetingRoom() {
   // MY OWN acceptance of the instructions (a friend's acceptance is separate from the host's)
   const [myAcc, setMyAcc] = useState(false);
 
-  /* ---------- group (LiveKit) state ---------- */
+  /* ---------- LiveKit state (single + group) ---------- */
   const lkRoomRef = useRef(null);
   const audioBox = useRef(null);
   const [lkVersion, setLkVersion] = useState(0);
@@ -460,21 +372,8 @@ export default function MeetingRoom() {
     }
   };
 
-  const localVideo = useRef(null);
-  const remoteVideo = useRef(null);
-  const remoteStream = useRef(null);
-  const localStream = useRef(null);
-  const pc = useRef(null);
-  const pendingIce = useRef([]);
-  const pendingOffer = useRef(null);
-  const retryTimer = useRef(null);
   const joined = useRef(false);
-  const unmounted = useRef(false);
-
-  const mediaStarted = useRef(false);
-  const localReadyRef = useRef(false);
-  const peerReadyRef = useRef(false);
-  const calledRef = useRef(false);
+  const retryTimer = useRef(null);
 
   const isGroup = clock.mode === "group";
   const isHost = !isMentor && myUserId && String(clock.hostId) === myUserId;
@@ -483,110 +382,7 @@ export default function MeetingRoom() {
   // every fresher (host AND friends) writes a review
   const isFresher = !isMentor;
 
-  /* ---------- WebRTC (single) ---------- */
-  const dropPeer = useCallback(() => {
-    pc.current?.close();
-    pc.current = null;
-    remoteStream.current = null;
-    if (remoteVideo.current) remoteVideo.current.srcObject = null;
-  }, []);
-
-  const closePeer = useCallback(() => {
-    dropPeer();
-    pendingIce.current = [];
-  }, [dropPeer]);
-
-  const makePeer = useCallback(() => {
-    dropPeer();
-    const peer = new RTCPeerConnection(ICE);
-
-    const tracks = localStream.current?.getTracks() || [];
-    if (tracks.length)
-      tracks.forEach((t) => peer.addTrack(t, localStream.current));
-    if (!tracks.some((t) => t.kind === "video"))
-      peer.addTransceiver("video", { direction: "recvonly" });
-    if (!tracks.some((t) => t.kind === "audio"))
-      peer.addTransceiver("audio", { direction: "recvonly" });
-
-    tuneSenders(peer);
-
-    peer.ontrack = (e) => {
-      remoteStream.current = e.streams[0];
-      if (remoteVideo.current) {
-        remoteVideo.current.srcObject = e.streams[0];
-        remoteVideo.current.play?.().catch(() => {});
-      }
-    };
-    peer.onicecandidate = (e) =>
-      e.candidate && sendSignal({ candidate: e.candidate });
-    pc.current = peer;
-    return peer;
-  }, [dropPeer]);
-
-  const callPeer = useCallback(async () => {
-    const peer = makePeer();
-    const offer = await peer.createOffer();
-    await peer.setLocalDescription(offer);
-    sendSignal({ description: peer.localDescription });
-  }, [makePeer]);
-
-  const maybeCall = useCallback(() => {
-    if (!isMentor || calledRef.current) return;
-    if (!localReadyRef.current || !peerReadyRef.current) return;
-    calledRef.current = true;
-    callPeer().catch((e) => {
-      calledRef.current = false;
-      console.error("offer error", e);
-    });
-  }, [isMentor, callPeer]);
-
-  const flushIce = useCallback(async () => {
-    for (const c of pendingIce.current.splice(0))
-      await pc.current?.addIceCandidate(c).catch(() => {});
-  }, []);
-
-  const handleOffer = useCallback(
-    async (description) => {
-      const peer = makePeer();
-      await peer.setRemoteDescription(description);
-      await flushIce();
-      const answer = await peer.createAnswer();
-      await peer.setLocalDescription(answer);
-      sendSignal({ description: peer.localDescription });
-    },
-    [makePeer, flushIce],
-  );
-
-  const onSignal = useCallback(
-    async ({ data }) => {
-      try {
-        if (data?.mediaReady) {
-          peerReadyRef.current = true;
-          maybeCall();
-        } else if (data?.description) {
-          if (data.description.type === "offer") {
-            if (!localReadyRef.current) {
-              pendingOffer.current = data.description;
-              return;
-            }
-            await handleOffer(data.description);
-          } else if (pc.current) {
-            await pc.current.setRemoteDescription(data.description);
-            await flushIce();
-          }
-        } else if (data?.candidate) {
-          if (pc.current?.remoteDescription)
-            await pc.current.addIceCandidate(data.candidate).catch(() => {});
-          else pendingIce.current.push(data.candidate);
-        }
-      } catch (e) {
-        console.error("signal error", e);
-      }
-    },
-    [maybeCall, handleOffer, flushIce],
-  );
-
-  /* ---------- join + socket listeners ---------- */
+  /* ---------- join + socket listeners (clock, instructions, chat, ended) ---------- */
   const join = useCallback(() => {
     socket.emit("meeting:join", { bookingId }, (res) => {
       if (!res?.ok) {
@@ -600,7 +396,6 @@ export default function MeetingRoom() {
           );
         } else if (res?.code === "ENDED") {
           setPhase("ended");
-          setNeedsReview(false);
         } else {
           setMessage(res?.message || "Could not join.");
           setPhase("error");
@@ -616,44 +411,21 @@ export default function MeetingRoom() {
   }, [bookingId]);
 
   useEffect(() => {
-    unmounted.current = false;
-
     const onState = (s) => setClock({ ...s, at: Date.now() });
     // per-person instructions state (a friend sees HIS own acceptance here)
     const onInstructionsState = (s) =>
       setMyAcc(Boolean(isMentor ? s.mentor : s.fresher));
 
-    const onPeerJoined = () => {
-      closePeer();
-      peerReadyRef.current = false;
-      calledRef.current = false;
-      pendingOffer.current = null;
-      if (localReadyRef.current) sendSignal({ mediaReady: true });
-    };
-    const onPeerLeft = () => {
-      closePeer();
-      peerReadyRef.current = false;
-      calledRef.current = false;
-      pendingOffer.current = null;
-    };
     const onEnded = (p) => {
-      closePeer();
       lkRoomRef.current?.disconnect();
-      if (p?.confirmed) {
-        setEndedConfirmed(true);
-        setPhase("ended");
-      } else {
-        setPhase("awaiting_confirmation");
-      }
+      // confirmed during the meeting -> done.
+      // not confirmed -> the fresher gets the confirm popup again (awaiting_confirmation)
+      setPhase(p?.confirmed ? "ended" : "awaiting_confirmation");
     };
     const onReconnect = () => joined.current && join();
 
     socket.on("meeting:state", onState);
     socket.on("meeting:instructions-state", onInstructionsState);
-    // single meeting only (group uses LiveKit): these are harmless in a group
-    socket.on("meeting:peer-joined", onPeerJoined);
-    socket.on("meeting:peer-left", onPeerLeft);
-    socket.on("meeting:signal", onSignal);
     socket.on("meeting:ended", onEnded);
     socket.on("connect", onReconnect);
 
@@ -661,22 +433,13 @@ export default function MeetingRoom() {
     join();
 
     return () => {
-      unmounted.current = true;
       clearTimeout(retryTimer.current);
       joined.current = false;
       socket.emit("meeting:leave");
       socket.off("meeting:state", onState);
       socket.off("meeting:instructions-state", onInstructionsState);
-      socket.off("meeting:peer-joined", onPeerJoined);
-      socket.off("meeting:peer-left", onPeerLeft);
-      socket.off("meeting:signal", onSignal);
       socket.off("meeting:ended", onEnded);
       socket.off("connect", onReconnect);
-      closePeer();
-      localStream.current?.getTracks().forEach((t) => t.stop());
-      localStream.current = null;
-      localReadyRef.current = false;
-      mediaStarted.current = false;
       // leave full screen when the meeting page closes
       if (document.fullscreenElement)
         document.exitFullscreen?.().catch(() => {});
@@ -709,44 +472,9 @@ export default function MeetingRoom() {
       ? Boolean(inst.mentor)
       : startReady;
 
-  /* ---------- SINGLE: camera + mic ---------- */
+  /* ---------- connect to LiveKit (single AND group) ---------- */
   useEffect(() => {
-    if (isGroup || phase !== "in" || !mediaAllowed || mediaStarted.current)
-      return;
-    mediaStarted.current = true;
-
-    (async () => {
-      const { stream, audioOnly } = await getMedia();
-
-      if (unmounted.current) {
-        stream?.getTracks().forEach((t) => t.stop());
-        return;
-      }
-
-      localStream.current = stream;
-      if (!stream) setMediaNote("Camera and mic blocked.");
-      else if (audioOnly)
-        setMediaNote("Camera not available. Joined with audio only.");
-      else setMediaNote("");
-
-      if (localVideo.current && stream) localVideo.current.srcObject = stream;
-
-      localReadyRef.current = true;
-      setLocalReady(true);
-      sendSignal({ mediaReady: true });
-
-      if (pendingOffer.current) {
-        const offer = pendingOffer.current;
-        pendingOffer.current = null;
-        handleOffer(offer).catch((e) => console.error(e));
-      }
-      maybeCall();
-    })();
-  }, [isGroup, phase, mediaAllowed, handleOffer, maybeCall]);
-
-  /* ---------- GROUP: connect to LiveKit ---------- */
-  useEffect(() => {
-    if (!isGroup || phase !== "in" || !mediaAllowed) return undefined;
+    if (phase !== "in" || !mediaAllowed) return undefined;
 
     let cancelled = false;
     let room = null;
@@ -763,13 +491,23 @@ export default function MeetingRoom() {
         );
         const d = await res.json().catch(() => ({}));
         if (!res.ok || !d.token)
-          throw new Error(d.message || "Could not start the group video.");
+          throw new Error(d.message || "Could not start the video.");
         if (cancelled) return;
+
+        const group = clockRef.current.mode === "group";
 
         room = new Room({
           adaptiveStream: true, // only download the tiles that are on screen
           dynacast: true,
-          videoCaptureDefaults: { resolution: VideoPresets.h720 },
+          // single = 2 people, so full HD. group = 720p to keep everyone smooth.
+          videoCaptureDefaults: {
+            resolution: group ? VideoPresets.h720 : VideoPresets.h1080,
+          },
+          audioCaptureDefaults: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
         });
         lkRoomRef.current = room;
 
@@ -815,8 +553,8 @@ export default function MeetingRoom() {
         setLkConnected(true);
         setNeedAudio(!room.canPlaybackAudio);
 
-        // big groups: students join muted (their choice to unmute)
-        const big = (clockRef.current.maxMembers || 1) > AUTO_MEDIA_MAX;
+        // big groups: students join muted (their choice to unmute). single: always on.
+        const big = group && (clockRef.current.maxMembers || 1) > AUTO_MEDIA_MAX;
         const startMuted = big && !isMentor;
         if (startMuted) {
           setMicOn(false);
@@ -843,7 +581,7 @@ export default function MeetingRoom() {
       } catch (e) {
         console.error("livekit error", e);
         if (!cancelled)
-          setMediaNote(e.message || "Could not start the group video.");
+          setMediaNote(e.message || "Could not start the video.");
       }
     })();
 
@@ -854,7 +592,7 @@ export default function MeetingRoom() {
       setLkConnected(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isGroup, phase, mediaAllowed, bookingId]);
+  }, [phase, mediaAllowed, bookingId]);
 
   /* ---------- clock / booking ---------- */
   useEffect(() => {
@@ -898,9 +636,32 @@ export default function MeetingRoom() {
 
   const sendSuccessRequest = () =>
     socket.emit("meeting:success-request", { bookingId });
-  const answerSuccess = (accepted) => {
-    socket.emit("meeting:success-confirm", { bookingId, accepted });
-  };
+
+  // in-meeting confirmation. accepted=false needs a validated reason.
+  const answerSuccess = (accepted, reason = "") =>
+    new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (fn, v) => {
+        if (settled) return;
+        settled = true;
+        fn(v);
+      };
+      // if the server sends no ack, the meeting:state event closes the modal anyway
+      const t = setTimeout(() => finish(resolve), 4000);
+      socket.emit(
+        "meeting:success-confirm",
+        { bookingId, accepted, reason },
+        (res) => {
+          clearTimeout(t);
+          if (res && res.ok === false)
+            finish(
+              reject,
+              new Error(res.message || "Could not save. Try again."),
+            );
+          else finish(resolve);
+        },
+      );
+    });
 
   // REVIEW  -> every fresher (single fresher, group host AND group friends)
   //   host / single : booking.reviewed
@@ -916,46 +677,37 @@ export default function MeetingRoom() {
     inLast1 &&
     !alreadyReviewed;
 
-  // "Did the session go well?" (Meeting Success) -> ONLY single fresher / group HOST
+  // "Did the session go well?" -> ONLY single fresher / group HOST
+  //   - automatically in the last 3 minutes (until the fresher answers No)
+  //   - or any time the employee clicks "Meeting Success"
   const showSuccessConfirm =
     isHostFresher &&
     phase === "in" &&
     !clock.fresherConfirmed &&
     !showReviewGate &&
-    clock.successRequested;
+    (clock.successRequested || (inLast3 && !clock.fresherDeclined));
 
+  // mic / camera (same for single and group)
   const toggle = async (kind) => {
-    if (isGroup) {
-      const lp = lkRoomRef.current?.localParticipant;
-      if (!lp) return;
-      try {
-        if (kind === "mic") {
-          const next = !micOn;
-          await lp.setMicrophoneEnabled(next);
-          setMicOn(next);
-        } else {
-          const next = !camOn;
-          await lp.setCameraEnabled(next);
-          setCamOn(next);
-        }
-        setMediaNote("");
-        setLkVersion((v) => v + 1);
-      } catch {
-        setMediaNote(
-          "Could not turn it on. Allow camera / mic in the browser address bar.",
-        );
+    const lp = lkRoomRef.current?.localParticipant;
+    if (!lp) return;
+    try {
+      if (kind === "mic") {
+        const next = !micOn;
+        await lp.setMicrophoneEnabled(next);
+        setMicOn(next);
+      } else {
+        const next = !camOn;
+        await lp.setCameraEnabled(next);
+        setCamOn(next);
       }
-      return;
+      setMediaNote("");
+      setLkVersion((v) => v + 1);
+    } catch {
+      setMediaNote(
+        "Could not turn it on. Allow camera / mic in the browser address bar.",
+      );
     }
-
-    const tracks =
-      kind === "mic"
-        ? localStream.current?.getAudioTracks()
-        : localStream.current?.getVideoTracks();
-    if (!tracks?.length) return;
-    const next = !tracks[0].enabled;
-    tracks.forEach((t) => (t.enabled = next));
-    kind === "mic" ? setMicOn(next) : setCamOn(next);
   };
 
   // GROUP: screen share (employee + host)
@@ -980,7 +732,6 @@ export default function MeetingRoom() {
     if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
     navigate(isMentor ? "/mentor/sessions" : "/Home/my-bookings");
   };
-  const otherHere = isMentor ? clock.fresherPresent : clock.mentorPresent;
 
   /* ---------- screens ---------- */
   if (phase === "joining") {
@@ -1064,18 +815,22 @@ export default function MeetingRoom() {
           </>
         ) : (
           <>
-            <h2 className="text-2xl font-bold">How was the session?</h2>
+            <h2 className="text-2xl font-bold">Session finished</h2>
             <p className="mt-2 text-sm text-slate-400">
-              Please confirm the session.
+              You did not confirm during the meeting. Please confirm now.
             </p>
-            {booking ? (
-              <SessionCompletionModal
-                booking={booking}
-                onDone={() => leaveRoom()}
-              />
-            ) : (
-              <Loader2 className="mt-6 animate-spin" />
-            )}
+            <SessionConfirmModal
+              title="Was your session successful?"
+              subtitle="The session time is over. Please confirm."
+              onYes={async () => {
+                await confirmSessionApi(bookingId, true);
+                leaveRoom();
+              }}
+              onNo={async (reason) => {
+                await confirmSessionApi(bookingId, false, reason);
+                leaveRoom();
+              }}
+            />
           </>
         )}
       </Center>
@@ -1089,7 +844,7 @@ export default function MeetingRoom() {
         <h2 className="mt-4 text-2xl font-bold">Session completed</h2>
         <p className="mt-2 text-sm text-slate-400">
           {isMentor
-            ? "The fresher confirmed the session. Your earnings are now available."
+            ? "The session is completed. Your earnings will be released after confirmation."
             : "Thanks for your feedback. Your session is confirmed."}
         </p>
         <button
@@ -1098,9 +853,6 @@ export default function MeetingRoom() {
         >
           {isMentor ? "Back to sessions" : "Back to my bookings"}
         </button>
-        {needsReview && booking && isHostFresher && !endedConfirmed && (
-          <ReviewModal booking={booking} onDone={leaveRoom} />
-        )}
       </Center>
     );
   }
@@ -1118,24 +870,7 @@ export default function MeetingRoom() {
     );
   }
 
-  const mediaReady = isGroup ? lkConnected : localReady;
-  const status = clock.running
-    ? "Session in progress"
-    : !mediaReady
-      ? "Starting camera…"
-      : isGroup
-        ? "Waiting for everyone to join…"
-        : otherHere
-          ? "Connecting…"
-          : `Waiting for the ${isMentor ? "fresher" : "employee"} to join.`;
-
-  const timerCls = inLast5
-    ? "animate-pulse bg-red-600 text-white ring-2 ring-red-400/60"
-    : clock.running
-      ? "bg-emerald-500/15 text-emerald-300"
-      : "bg-amber-500/15 text-amber-300";
-
-  /* ---------- group stage data ---------- */
+  /* ---------- stage data (from LiveKit) ---------- */
   const lkRoom = lkRoomRef.current;
   const people = lkRoom
     ? [
@@ -1160,6 +895,10 @@ export default function MeetingRoom() {
   const pinnedP = pinnedId ? people.find((p) => p.identity === pinnedId) : null;
   const iAmSharing = Boolean(lkRoom?.localParticipant?.isScreenShareEnabled);
 
+  // SINGLE: the one other person in the room
+  const otherP = people.find((p) => !p.isLocal) || null;
+  const otherHere = Boolean(otherP);
+
   // chat: userId -> name  (so every message shows WHO wrote it, even when the server sends no name)
   people.forEach((p) => {
     const id = String(p.identity || "")
@@ -1169,30 +908,49 @@ export default function MeetingRoom() {
   });
   const chatNames = { ...nameCache.current };
 
-  // which layout?  "spot" = one big tile + strip   |   "grid" = gallery
+  const mediaReady = lkConnected;
+  const status = clock.running
+    ? "Session in progress"
+    : !mediaReady
+      ? "Starting camera…"
+      : isGroup
+        ? "Waiting for everyone to join…"
+        : otherHere
+          ? "Connected. Waiting for the timer to start…"
+          : `Waiting for the ${isMentor ? "fresher" : "employee"} to join.`;
+
+  const timerCls = inLast5
+    ? "animate-pulse bg-red-600 text-white ring-2 ring-red-400/60"
+    : clock.running
+      ? "bg-emerald-500/15 text-emerald-300"
+      : "bg-amber-500/15 text-amber-300";
+
+  // GROUP layout: "spot" = one big tile + strip   |   "grid" = gallery
   let layout = "grid";
   let mainP = null;
   let mainSrc = Track.Source.Camera;
   let stripList = [];
   let gridList = [];
 
-  if (pinnedP) {
-    layout = "spot";
-    mainP = pinnedP;
-    stripList = people.filter((p) => p !== pinnedP);
-  } else if (sharer) {
-    layout = "spot";
-    mainP = sharer;
-    mainSrc = Track.Source.ScreenShare;
-    stripList = people;
-  } else if (viewMode === "speaker") {
-    layout = "spot";
-    mainP = isMentor
-      ? students.find((p) => p.isSpeaking) || students[0] || null
-      : mentorP || null;
-    stripList = students.filter((p) => p !== mainP);
-  } else {
-    gridList = isMentor ? students : people;
+  if (isGroup) {
+    if (pinnedP) {
+      layout = "spot";
+      mainP = pinnedP;
+      stripList = people.filter((p) => p !== pinnedP);
+    } else if (sharer) {
+      layout = "spot";
+      mainP = sharer;
+      mainSrc = Track.Source.ScreenShare;
+      stripList = people;
+    } else if (viewMode === "speaker") {
+      layout = "spot";
+      mainP = isMentor
+        ? students.find((p) => p.isSpeaking) || students[0] || null
+        : mentorP || null;
+      stripList = students.filter((p) => p !== mainP);
+    } else {
+      gridList = isMentor ? students : people;
+    }
   }
 
   const pages = Math.max(1, Math.ceil(gridList.length / GRID_PAGE));
@@ -1234,7 +992,7 @@ export default function MeetingRoom() {
                   Group · {people.length || 1} online
                 </span>
               )}
-              {isFresher && isGroup && mentorP && (
+              {isFresher && mentorP && (
                 <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-medium text-slate-200">
                   Employee: {mentorP.name || "Employee"}
                 </span>
@@ -1263,7 +1021,34 @@ export default function MeetingRoom() {
           className="relative min-h-0 flex-1 px-2 pb-2"
           style={{ minHeight: 0 }}
         >
-          {isGroup ? (
+          {!isGroup ? (
+            /* ================= SINGLE STAGE (LiveKit, 2 people) ================= */
+            <div className="relative h-full w-full overflow-hidden rounded-2xl bg-black">
+              {otherP ? (
+                <Tile
+                  participant={otherP}
+                  version={lkVersion}
+                  big
+                  size="xl"
+                />
+              ) : (
+                <WaitingStage
+                  text={`Waiting for the ${isMentor ? "fresher" : "employee"}…`}
+                />
+              )}
+
+              {/* my own small preview */}
+              {lkRoom && (
+                <div className="absolute bottom-4 right-4 z-20 aspect-video w-32 sm:w-52">
+                  <Tile
+                    participant={lkRoom.localParticipant}
+                    version={lkVersion}
+                    size="sm"
+                  />
+                </div>
+              )}
+            </div>
+          ) : (
             /* ================= GROUP STAGE ================= */
             <div className="relative flex h-full w-full flex-col gap-2">
               {layout === "spot" ? (
@@ -1385,91 +1170,22 @@ export default function MeetingRoom() {
                   )}
                 </div>
               )}
-
-              {/* every remote voice plays from here */}
-              <div ref={audioBox} className="hidden" />
-
-              {needAudio && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    lkRoomRef.current
-                      ?.startAudio()
-                      .then(() => setNeedAudio(false));
-                  }}
-                  className="absolute left-1/2 top-16 z-30 -translate-x-1/2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold shadow-xl hover:bg-blue-700"
-                >
-                  Click to enable meeting audio
-                </button>
-              )}
             </div>
-          ) : (
-            /* ================= SINGLE STAGE ================= */
-            <div
-              className="relative h-full w-full overflow-hidden rounded-2xl bg-black"
-              style={{ width: "100%", height: "100%", minHeight: 0 }}
+          )}
+
+          {/* every remote voice plays from here (single + group) */}
+          <div ref={audioBox} className="hidden" />
+
+          {needAudio && (
+            <button
+              type="button"
+              onClick={() => {
+                lkRoomRef.current?.startAudio().then(() => setNeedAudio(false));
+              }}
+              className="absolute left-1/2 top-16 z-30 -translate-x-1/2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold shadow-xl hover:bg-blue-700"
             >
-              <video
-                ref={(el) => {
-                  remoteVideo.current = el;
-                  if (
-                    el &&
-                    remoteStream.current &&
-                    el.srcObject !== remoteStream.current
-                  ) {
-                    el.srcObject = remoteStream.current;
-                    el.play?.().catch(() => {});
-                  }
-                }}
-                autoPlay
-                playsInline
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  display: "block",
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "contain",
-                  backgroundColor: "#000",
-                }}
-              />
-              {!otherHere && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
-                  <div className="flex h-20 w-20 items-center justify-center rounded-full bg-slate-800">
-                    <UserRound size={36} />
-                  </div>
-                  <p className="mt-4 text-sm">
-                    Waiting for the {isMentor ? "fresher" : "employee"}…
-                  </p>
-                </div>
-              )}
-              <video
-                ref={(el) => {
-                  localVideo.current = el;
-                  if (
-                    el &&
-                    localStream.current &&
-                    el.srcObject !== localStream.current
-                  )
-                    el.srcObject = localStream.current;
-                }}
-                autoPlay
-                playsInline
-                muted
-                style={{
-                  position: "absolute",
-                  zIndex: 10,
-                  right: "16px",
-                  bottom: "16px",
-                  width: "clamp(110px, 18vw, 220px)",
-                  height: "clamp(85px, 22vh, 160px)",
-                  objectFit: "cover",
-                  borderRadius: "12px",
-                  border: "1px solid rgba(255,255,255,0.25)",
-                  backgroundColor: "#0f172a",
-                }}
-              />
-            </div>
+              Click to enable meeting audio
+            </button>
           )}
 
           {inLast5 && (
@@ -1683,23 +1399,21 @@ export default function MeetingRoom() {
         />
       )}
 
-      {/* review: EVERY fresher (host + friends) */}
+      {/* review (last 1 minute): EVERY fresher (host + friends) */}
       {showReviewGate && (
         <ReviewGate booking={booking} onDone={() => setReviewDone(true)} />
       )}
-      {/* "did it go well?": ONLY the single fresher / group host */}
+
+      {/* "did it go well?" (last 3 minutes): ONLY the single fresher / group host
+          No -> reason -> "Are you sure?" (OK / Cancel) */}
       {showSuccessConfirm && (
-        <SuccessConfirmModal
+        <SessionConfirmModal
+          title="Did the session go well?"
+          subtitle="Please confirm your session. The meeting continues until the timer ends."
           onYes={() => answerSuccess(true)}
-          onNo={() => answerSuccess(false)}
+          onNo={(reason) => answerSuccess(false, reason)}
         />
       )}
     </>
   );
 }
-
-const Center = ({ children }) => (
-  <div className="flex min-h-screen flex-col items-center justify-center bg-slate-950 px-6 text-center text-white">
-    {children}
-  </div>
-);
