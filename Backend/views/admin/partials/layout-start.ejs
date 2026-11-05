@@ -66,9 +66,190 @@
   >
 
   <link rel="stylesheet" href="/admin/css/admin.css">
+
+  <!-- ===================== PAGE LOADING PROGRESS (styles) ===================== -->
+    <style>
+    /* ---------- top linear bar (indigo) ---------- */
+    .nav-progress {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 0;
+      height: 3px;
+      z-index: 99999;
+      pointer-events: none;
+      opacity: 0;
+      background: linear-gradient(90deg, #818cf8 0%, #4f46e5 60%, #4338ca 100%);
+      box-shadow: 0 0 10px rgba(79, 70, 229, .55), 0 0 4px rgba(79, 70, 229, .8);
+      border-radius: 0 3px 3px 0;
+      transition: width .35s cubic-bezier(.22, .61, .36, 1), opacity .3s ease;
+    }
+    .nav-progress.is-on { opacity: 1; }
+
+    /* glowing head */
+    .nav-progress::after {
+      content: "";
+      position: absolute;
+      right: 0;
+      top: 50%;
+      width: 90px;
+      height: 100%;
+      transform: translateY(-50%);
+      background: linear-gradient(90deg, transparent, rgba(99, 102, 241, .95));
+      filter: blur(2px);
+    }
+
+    /* moving shine */
+    .nav-progress::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, .55) 50%, transparent 100%);
+      background-size: 200% 100%;
+      animation: navShine 1.1s linear infinite;
+    }
+    @keyframes navShine {
+      from { background-position: 200% 0; }
+      to   { background-position: -200% 0; }
+    }
+
+    /* ---------- circular spinner in the topbar ---------- */
+    .nav-spinner {
+      display: none;
+      width: 18px;
+      height: 18px;
+      flex: none;
+      border-radius: 50%;
+      border: 2px solid #c7d2fe;
+      border-top-color: #4f46e5;
+      animation: navSpin .7s linear infinite;
+      margin-right: 12px;
+    }
+    html.is-loading .nav-spinner { display: inline-block; }
+    @keyframes navSpin { to { transform: rotate(360deg); } }
+
+    /* ---------- dim page while next page loads ---------- */
+    .content { transition: opacity .2s ease; }
+    html.is-navigating .content { opacity: .55; pointer-events: none; }
+    html.is-navigating { cursor: progress; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .nav-progress::before { animation: none; }
+      .nav-spinner { animation-duration: 1.6s; }
+    }
+  </style>
 </head>
 
 <body>
+
+  <!-- Top progress bar -->
+  <div class="nav-progress" id="navProgress" role="progressbar" aria-hidden="true"></div>
+
+  <script>
+    /* ===================== PAGE LOADING PROGRESS (logic) =====================
+       - starts instantly on: link click, form submit, page unload / reload
+       - starts also on first open, and finishes when the page is loaded
+       - creeps to 94% by itself, jumps to 100% when the new page is ready
+       - safety: auto-finishes after 15s so it can never stay stuck
+    ======================================================================== */
+    (function () {
+      var bar = document.getElementById("navProgress");
+      var root = document.documentElement;
+      var w = 0, active = false, timer = null, safety = null, hideT = null;
+
+      function setW(n) {
+        w = n;
+        bar.style.width = n + "%";
+      }
+
+      function start(dim) {
+        if (active) return;
+        active = true;
+        clearTimeout(hideT);
+
+        // reset to 0 without animation
+        bar.style.transition = "none";
+        setW(0);
+        void bar.offsetWidth;
+        bar.style.transition = "";
+
+        bar.classList.add("is-on");
+        root.classList.add("is-loading");
+        if (dim) root.classList.add("is-navigating");
+
+        setW(8);
+        timer = setInterval(function () {
+          var inc =
+            w < 30 ? Math.random() * 8 + 4 :
+            w < 60 ? Math.random() * 4 + 2 :
+            w < 85 ? Math.random() * 1.5 + 0.5 :
+            w < 94 ? 0.2 : 0;
+          setW(Math.min(w + inc, 94));
+        }, 300);
+
+        clearTimeout(safety);
+        safety = setTimeout(done, 15000);
+      }
+
+      function done() {
+        if (!active) return;
+        active = false;
+        clearInterval(timer);
+        clearTimeout(safety);
+
+        setW(100);
+        root.classList.remove("is-loading", "is-navigating");
+
+        hideT = setTimeout(function () {
+          bar.classList.remove("is-on");           // fade out
+          hideT = setTimeout(function () {         // then reset to 0
+            bar.style.transition = "none";
+            setW(0);
+            void bar.offsetWidth;
+            bar.style.transition = "";
+          }, 320);
+        }, 300);
+      }
+
+      // first open of a page
+      start(false);
+      window.addEventListener("load", done);
+      window.addEventListener("pageshow", function (e) { if (e.persisted) done(); }); // back button (bfcache)
+
+      // link click -> next page
+      document.addEventListener("click", function (e) {
+        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        var a = e.target.closest && e.target.closest("a[href]");
+        if (!a) return;
+        if (a.target && a.target !== "_self") return;
+        if (a.hasAttribute("download")) return;
+
+        var href = a.getAttribute("href");
+        if (!href || href.charAt(0) === "#" || /^(javascript:|mailto:|tel:)/i.test(href)) return;
+
+        var u;
+        try { u = new URL(a.href, location.href); } catch (_) { return; }
+        if (u.origin !== location.origin) return;
+        if (u.pathname === location.pathname && u.search === location.search && u.hash) return; // same-page anchor
+        if (/\/export(\/|$)/.test(u.pathname)) return; // CSV download: page does not change
+
+        start(true);
+      });
+
+      // form submit (search, filters, company save...)
+      document.addEventListener("submit", function (e) {
+        var f = e.target;
+        setTimeout(function () {
+          if (e.defaultPrevented) return;                      // cancelled (e.g. confirm() = No)
+          if (f && f.target && f.target !== "_self") return;
+          start(true);
+        }, 0);
+      });
+
+      // location.reload() / location.href = ... (used after Sync fees, Pay, Reject...)
+      window.addEventListener("beforeunload", function () { start(true); });
+    })();
+  </script>
 
   <!-- Mobile overlay -->
   <div class="overlay" id="overlay"></div>
@@ -145,6 +326,9 @@
       </div>
 
       <div class="spacer"></div>
+
+      <!-- circular loader (visible only while a page is loading) -->
+      <span class="nav-spinner" aria-hidden="true"></span>
 
       <!-- Admin profile -->
       <div class="admin-chip">
