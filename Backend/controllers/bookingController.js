@@ -370,6 +370,10 @@ const isWalletPayment = (p) =>
     String(p.razorpayPaymentId || "").startsWith("wallet_pay_"));
 
 // returns "refunded" | "failed"
+// returns "refunded" | "failed"
+// RULE: only the SESSION PRICE is ever refunded.
+// The convenience fee (what the customer paid to cover Razorpay's cost) is NEVER refunded,
+// because Razorpay does not give its fee back to us on refunds.
 const refundPayment = async (payment, reason = "", options = {}) => {
   if (!payment) return "failed";
 
@@ -392,16 +396,12 @@ const refundPayment = async (payment, reason = "", options = {}) => {
   }
   if (!toWallet && !fresh.razorpayPaymentId) return "failed";
 
-  // session price + convenience fee (if CONVENIENCE_FEE_REFUNDABLE). Wallet payments have no fee.
+  // ONLY the session price is refunded. Convenience fee stays with the platform.
   const sessionAmount = round2(Number(fresh.amount) || 0);
-  const refundFee =
-    walletPaid || !getConfig().refundable
-      ? 0
-      : round2(Number(fresh.convenienceFee) || 0);
   // never refund more than the customer really paid
-  const amount = round2(Math.min(sessionAmount + refundFee, checkoutOf(fresh)));
+  const amount = round2(Math.min(sessionAmount, checkoutOf(fresh)));
   if (!(amount > 0)) return "failed";
-  const feePart = round2(Math.max(amount - sessionAmount, 0));
+  const feePart = 0; // convenience fee is never refunded
 
   // ATOMIC lock. Refund amounts are written here, so the books are right even if something fails later.
   const before = await Payment.findOneAndUpdate(
@@ -454,6 +454,7 @@ const refundPayment = async (payment, reason = "", options = {}) => {
       return "refunded";
     }
 
+    // partial refund: only the session price (₹200), not the ₹204.84 the customer paid
     await getRazorpay().payments.refund(before.razorpayPaymentId, {
       amount: toPaise(amount),
       speed: "normal",
@@ -510,7 +511,6 @@ const refundPayment = async (payment, reason = "", options = {}) => {
     return "failed";
   }
 };
-
 // Refund EVERY member's payment. Safe to call again. Returns FRESH payment docs.
 const refundAll = async (booking, reason, options = {}) => {
   const ids = paymentIdsOf(booking);

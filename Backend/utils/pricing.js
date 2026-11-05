@@ -1,4 +1,3 @@
-
 // utils/pricing.js
 // Pure helpers (no database):
 // 1. Convenience fee calculation
@@ -20,14 +19,11 @@ const num = (name, def) => {
   return Number.isFinite(n) ? n : def;
 };
 
-const toPaise = (rupees) =>
-  Math.round((Number(rupees) || 0) * 100);
+const toPaise = (rupees) => Math.round((Number(rupees) || 0) * 100);
 
-const toRupees = (paise) =>
-  Math.round(Number(paise) || 0) / 100;
+const toRupees = (paise) => Math.round(Number(paise) || 0) / 100;
 
-const round2 = (n) =>
-  Math.round((Number(n) || 0) * 100) / 100;
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 const MODES = ["off", "platform", "razorpay_bearer"];
 
@@ -36,9 +32,7 @@ const MODES = ["off", "platform", "razorpay_bearer"];
 // ============================================================
 
 const getConfig = () => {
-  const mode = String(
-    process.env.CONVENIENCE_FEE_MODE || "off"
-  )
+  const mode = String(process.env.CONVENIENCE_FEE_MODE || "off")
     .trim()
     .toLowerCase();
 
@@ -49,24 +43,17 @@ const getConfig = () => {
     percent: num("CONVENIENCE_FEE_PERCENT", 2.36),
 
     grossUp:
-      String(
-        process.env.CONVENIENCE_FEE_GROSS_UP || "true"
-      ).toLowerCase() !== "false",
+      String(process.env.CONVENIENCE_FEE_GROSS_UP || "true").toLowerCase() !==
+      "false",
 
-    minPaise: Math.max(
-      0,
-      toPaise(num("CONVENIENCE_FEE_MIN", 0))
-    ),
+    minPaise: Math.max(0, toPaise(num("CONVENIENCE_FEE_MIN", 0))),
 
-    maxPaise: Math.max(
-      0,
-      toPaise(num("CONVENIENCE_FEE_MAX", 100))
-    ),
+    maxPaise: Math.max(0, toPaise(num("CONVENIENCE_FEE_MAX", 100))),
 
     refundable:
       String(
-        process.env.CONVENIENCE_FEE_REFUNDABLE || "true"
-      ).toLowerCase() !== "false",
+        process.env.CONVENIENCE_FEE_REFUNDABLE || "false",
+      ).toLowerCase() === "true",
   };
 };
 
@@ -76,24 +63,15 @@ const getConfig = () => {
 
 const isWalletPayment = (payment) =>
   Boolean(payment) &&
-  (
-    payment.method === "wallet" ||
-    String(payment.razorpayPaymentId || "").startsWith(
-      "wallet_pay_"
-    ) ||
-    String(payment.razorpayOrderId || "").startsWith(
-      "wallet_order_"
-    )
-  );
+  (payment.method === "wallet" ||
+    String(payment.razorpayPaymentId || "").startsWith("wallet_pay_") ||
+    String(payment.razorpayOrderId || "").startsWith("wallet_order_"));
 
 // ============================================================
 // CONVENIENCE FEE CALCULATION
 // ============================================================
 
-const calcConvenienceFee = ({
-  amount,
-  channel = "razorpay",
-}) => {
+const calcConvenienceFee = ({ amount, channel = "razorpay" }) => {
   const cfg = getConfig();
 
   const sessionPaise = toPaise(amount);
@@ -133,11 +111,7 @@ const calcConvenienceFee = ({
   }
 
   let feePaise = Math.ceil(
-    sessionPaise *
-      (cfg.grossUp
-        ? rate / (1 - rate)
-        : rate) -
-      1e-9
+    sessionPaise * (cfg.grossUp ? rate / (1 - rate) : rate) - 1e-9,
   );
 
   feePaise = Math.max(feePaise, cfg.minPaise);
@@ -189,15 +163,9 @@ const convenienceFeeOf = (payment) => {
 const refundableAmountOf = (payment) => {
   if (!payment) return 0;
 
-  const { refundable } = getConfig();
-
   const sessionAmount = Number(payment.amount) || 0;
 
-  const fee = refundable
-    ? convenienceFeeOf(payment)
-    : 0;
-
-  return round2(sessionAmount + fee);
+  return round2(sessionAmount);
 };
 
 // ============================================================
@@ -213,11 +181,7 @@ const refundableAmountOf = (payment) => {
 // 7. Bearer-managed fee is within allowed limits
 // ============================================================
 
-const validateGatewayAmounts = ({
-  payment,
-  order,
-  rzPayment,
-}) => {
+const validateGatewayAmounts = ({ payment, order, rzPayment }) => {
   const cfg = getConfig();
 
   // ----------------------------------------------------------
@@ -244,10 +208,7 @@ const validateGatewayAmounts = ({
 
   const sessionAmount = Number(payment.amount);
 
-  if (
-    !Number.isFinite(sessionAmount) ||
-    sessionAmount <= 0
-  ) {
+  if (!Number.isFinite(sessionAmount) || sessionAmount <= 0) {
     return {
       ok: false,
       reason: "Invalid stored session amount",
@@ -258,10 +219,7 @@ const validateGatewayAmounts = ({
   // 3. Validate Razorpay order ID
   // ----------------------------------------------------------
 
-  if (
-    !order.id ||
-    order.id !== payment.razorpayOrderId
-  ) {
+  if (!order.id || order.id !== payment.razorpayOrderId) {
     return {
       ok: false,
       reason: "Razorpay order ID does not match stored order",
@@ -272,10 +230,7 @@ const validateGatewayAmounts = ({
   // 4. Validate Razorpay payment order ID
   // ----------------------------------------------------------
 
-  if (
-    !rzPayment.order_id ||
-    rzPayment.order_id !== payment.razorpayOrderId
-  ) {
+  if (!rzPayment.order_id || rzPayment.order_id !== payment.razorpayOrderId) {
     return {
       ok: false,
       reason: "Payment belongs to a different or invalid order",
@@ -286,10 +241,7 @@ const validateGatewayAmounts = ({
   // 5. Validate currency
   // ----------------------------------------------------------
 
-  if (
-    order.currency !== "INR" ||
-    rzPayment.currency !== "INR"
-  ) {
+  if (order.currency !== "INR" || rzPayment.currency !== "INR") {
     return {
       ok: false,
       reason: "Unexpected or missing payment currency",
@@ -343,14 +295,8 @@ const validateGatewayAmounts = ({
 
   const feeMode = payment.convenienceFeeMode || "none";
 
-  if (
-    feeMode === "platform" ||
-    feeMode === "none" ||
-    feeMode === "off"
-  ) {
-    const storedFeePaise = toPaise(
-      Number(payment.convenienceFee) || 0
-    );
+  if (feeMode === "platform" || feeMode === "none" || feeMode === "off") {
+    const storedFeePaise = toPaise(Number(payment.convenienceFee) || 0);
 
     if (storedFeePaise < 0) {
       return {
@@ -359,10 +305,7 @@ const validateGatewayAmounts = ({
       };
     }
 
-    if (
-      storedOrderPaise !==
-      toPaise(sessionAmount) + storedFeePaise
-    ) {
+    if (storedOrderPaise !== toPaise(sessionAmount) + storedFeePaise) {
       return {
         ok: false,
         reason:
@@ -380,21 +323,16 @@ const validateGatewayAmounts = ({
     if (orderPaise !== toPaise(sessionAmount)) {
       return {
         ok: false,
-        reason:
-          "Bearer-managed order amount must match session amount",
+        reason: "Bearer-managed order amount must match session amount",
       };
     }
 
     const difference = paidPaise - orderPaise;
 
-    if (
-      difference < 0 ||
-      difference > cfg.maxPaise
-    ) {
+    if (difference < 0 || difference > cfg.maxPaise) {
       return {
         ok: false,
-        reason:
-          `Bearer fee ${difference} paise is outside the allowed range`,
+        reason: `Bearer fee ${difference} paise is outside the allowed range`,
       };
     }
 
@@ -421,9 +359,7 @@ const validateGatewayAmounts = ({
 
   return {
     ok: true,
-    convenienceFee: round2(
-      Number(payment.convenienceFee) || 0
-    ),
+    convenienceFee: round2(Number(payment.convenienceFee) || 0),
     checkoutAmount: toRupees(paidPaise),
   };
 };
