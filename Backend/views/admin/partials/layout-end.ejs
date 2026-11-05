@@ -3,44 +3,127 @@
   var content = document.querySelector('.content');
   if (!content) return;
 
-  var original = content.innerHTML;   // back button ku restore panna
+  var original = content.innerHTML;
   var shown = false;
 
-  function row() {
-    return '<div class="sk-row">' +
-      '<div class="sk sk-av"></div>' +
-      '<div class="sk-col"><div class="sk sk-line w40"></div><div class="sk sk-line w60"></div></div>' +
-      '<div class="sk sk-line w30" style="flex:none;width:90px"></div>' +
-      '<div class="sk sk-btn"></div>' +
-    '</div>';
+  /* ---------- small builders ---------- */
+  function L(w, h, extra) {
+    return '<div class="sk" style="height:' + (h || 12) + 'px;width:' + (w || '60%') + ';' + (extra || '') + '"></div>';
   }
+  function card(inner, cls) { return '<div class="card ' + (cls || '') + '">' + inner + '</div>'; }
 
   function stat() {
-    return '<div class="card sk-stat"><div class="l">' +
-      '<div class="sk sk-line w40" style="margin-bottom:12px"></div>' +
-      '<div class="sk" style="height:30px;width:55%"></div></div>' +
-      '<div class="sk" style="width:48px;height:48px;border-radius:14px"></div></div>';
+    return '<div class="card sk-stat"><div class="l">' + L('45%', 12, 'margin-bottom:12px') + L('60%', 28) +
+      '</div><div class="sk" style="width:48px;height:48px;border-radius:14px"></div></div>';
+  }
+  function stats(n) {
+    var s = ''; for (var i = 0; i < n; i++) s += stat();
+    var cls = n === 4 ? ' c4' : n === 2 ? ' c2' : '';
+    return '<div class="sk-stats' + cls + '">' + s + '</div>';
+  }
+  function tabs(n) {
+    var s = ''; for (var i = 0; i < n; i++) s += '<div class="sk sk-tab"></div>';
+    return '<div class="sk-tabs">' + s + '</div>';
+  }
+  function toolbar(withChips) {
+    var chips = '';
+    if (withChips) for (var i = 0; i < 4; i++) chips += '<div class="sk sk-tab" style="width:80px"></div>';
+    return '<div class="sk-toolbar" style="padding:0 0 14px;">' +
+      '<div class="sk" style="height:40px;width:300px;border-radius:10px"></div>' +
+      '<div style="flex:1"></div>' + chips + '</div>';
+  }
+  function filterCard() {
+    return card('<div class="sk-toolbar">' +
+      '<div class="sk" style="height:40px;flex:1;border-radius:10px"></div>' +
+      '<div class="sk" style="height:40px;width:150px;border-radius:10px"></div>' +
+      '<div class="sk" style="height:40px;width:100px;border-radius:10px"></div>' +
+      '<div class="sk" style="height:40px;width:90px;border-radius:10px"></div></div>', 'mb');
+  }
+  function table(cols, rows, avatar, title) {
+    var h = '<div class="sk-trow head" style="--c:' + cols + '">';
+    for (var i = 0; i < cols; i++) h += L('50%', 10);
+    h += '</div>';
+    var r = '';
+    for (var j = 0; j < rows; j++) {
+      r += '<div class="sk-trow" style="--c:' + cols + '">';
+      for (var k = 0; k < cols; k++) {
+        if (k === 0 && avatar) {
+          r += '<div class="first"><div class="sk sk-av"></div><div class="sk-col">' + L('80%') + L('55%', 10) + '</div></div>';
+        } else {
+          r += L(k % 2 ? '70%' : '55%');
+        }
+      }
+      r += '</div>';
+    }
+    var head = title ? '<div class="sk-head">' + L('30%') + '</div>' : '';
+    return card(head + h + r);
+  }
+  function pageTitle() {
+    return '<div style="margin-bottom:18px">' + L('180px', 26, 'margin-bottom:10px') + L('420px', 12) + '</div>';
   }
 
-  function skeleton() {
-    var rows = '';
-    for (var i = 0; i < 6; i++) rows += row();
-    return '<div class="sk-stats">' + stat() + stat() + stat() + '</div>' +
-      '<div class="sk-tabs">' +
-        '<div class="sk sk-tab"></div><div class="sk sk-tab"></div>' +
-        '<div class="sk sk-tab"></div><div class="sk sk-tab"></div></div>' +
-      '<div class="card"><div class="sk-head"><div class="sk sk-line w30"></div></div>' + rows + '</div>';
+  /* ---------- per-page skeletons ---------- */
+  var pages = {
+    dashboard: function () {
+      return stats(4) + stats(3) +
+        '<div class="sk-main">' +
+          card('<div class="sk-head">' + L('35%') + '</div><div class="sk-pad"><div class="sk-bars">' +
+            [60, 85, 40, 100, 70, 55].map(function (h) { return '<div class="sk" style="height:' + h + '%"></div>'; }).join('') +
+            '</div></div>') +
+          card('<div class="sk-head">' + L('45%') + '</div><div class="sk-pad"><div class="sk sk-donut"></div>' +
+            '<div class="sk-stack">' + L('100%') + L('100%') + L('100%') + '</div></div>') +
+        '</div>' +
+        '<div class="sk-main">' + table(4, 4, true, true) +
+          card('<div class="sk-head">' + L('50%') + '</div><div class="sk-pad sk-stack">' +
+            L('100%') + L('100%', 8) + L('100%') + L('100%', 8) + L('100%') + L('100%', 8) + '</div>') +
+        '</div>' + table(5, 5, true, true);
+    },
+    mentors: function () { return tabs(4) + filterCard() + table(6, 7, true); },
+    companies: function () { return pageTitle() + stats(4) + toolbar(true) + table(6, 6, true); },
+    payments: function () { return stats(3) + stats(3) + tabs(5) + table(10, 7, false); },
+    withdrawals: function () { return stats(3) + tabs(4) + table(6, 6, true); },
+    finance: function () {
+      return stats(3) + stats(3) + stats(3) +
+        card('<div class="sk-pad sk-stack">' + L('40%', 16) + L('100%') + L('100%') + L('100%') + L('100%') + L('100%') + L('100%') + '</div>', 'mb') +
+        card('<div class="sk-pad sk-stack">' + L('35%', 16) +
+          '<div style="display:flex;gap:8px"><div class="sk" style="height:38px;width:160px"></div><div class="sk" style="height:38px;width:200px"></div><div class="sk" style="height:38px;width:90px"></div></div></div>', 'mb') +
+        '<div class="sk-main even">' + table(4, 4, true, true) + table(4, 4, false, true) + '</div>';
+    },
+    users: function () { return filterCard() + table(5, 8, true); },
+    detail: function () {
+      return card('<div class="sk sk-cover"></div><div class="sk-hero-body"><div class="sk sk-hero-av"></div>' +
+        '<div style="flex:1" class="sk-stack">' + L('35%', 24) + L('50%') + L('65%', 10) + '</div></div>', 'sk-hero') +
+        stats(4) +
+        '<div class="sk-main">' +
+          card('<div class="sk-pad sk-stack">' + L('30%', 16) + L('100%', 60) + L('100%', 60) + L('100%', 60) + L('100%', 60) + '</div>') +
+          card('<div class="sk-pad sk-stack">' + L('50%', 16) + L('100%', 40) + L('100%', 40) + L('100%') + L('100%') + '</div>') +
+        '</div>';
+    },
+    generic: function () { return stats(3) + table(5, 6, true, true); }
+  };
+
+  function pick(path) {
+    path = (path || '').replace(/\/+$/, '');
+    if (path === '/admin') return 'dashboard';
+    if (/^\/admin\/mentors\/[^/]+$/.test(path)) return 'detail';
+    if (path === '/admin/mentors') return 'mentors';
+    if (path === '/admin/companies') return 'companies';
+    if (path === '/admin/payments') return 'payments';
+    if (path === '/admin/withdrawals') return 'withdrawals';
+    if (path === '/admin/finance') return 'finance';
+    if (path === '/admin/users' || path === '/admin/freshers') return 'users';
+    return 'generic';
   }
 
-  function showSkeleton() {
+  function showSkeleton(path) {
     if (shown) return;
     shown = true;
     content.setAttribute('aria-busy', 'true');
-    content.innerHTML = skeleton();
+    content.innerHTML = pages[pick(path)]();
     window.scrollTo({ top: 0 });
   }
 
-  // Internal links click -> skeleton
+  /* ---------- triggers ---------- */
   document.addEventListener('click', function (e) {
     var a = e.target.closest && e.target.closest('a[href]');
     if (!a) return;
@@ -50,20 +133,21 @@
     var href = a.getAttribute('href');
     if (!href || href.charAt(0) === '#' || /^(mailto:|tel:|javascript:)/i.test(href)) return;
     if (a.origin !== location.origin) return;
-    if (/\/export|\/logout/i.test(a.pathname)) return;           // CSV download / logout ku skeleton vendaam
+    if (/\/export|\/logout/i.test(a.pathname)) return;
     if (a.pathname === location.pathname && a.search === location.search) return;
 
-    showSkeleton();
+    showSkeleton(a.pathname);
   });
 
-  // GET forms (search / filter) submit -> skeleton
   document.addEventListener('submit', function (e) {
     var f = e.target;
     if (e.defaultPrevented) return;
-    if ((f.method || 'get').toLowerCase() === 'get') showSkeleton();
+    if ((f.method || 'get').toLowerCase() !== 'get') return;
+    var path = location.pathname;
+    try { path = new URL(f.action, location.href).pathname; } catch (_) {}
+    showSkeleton(path);
   });
 
-  // Browser Back/Forward la page cache-la irundhu vandha, skeleton stuck aagama irukka
   window.addEventListener('pageshow', function (e) {
     if (e.persisted && shown) {
       content.innerHTML = original;
