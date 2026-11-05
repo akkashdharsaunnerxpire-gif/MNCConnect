@@ -13,12 +13,10 @@ import {
   Star,
   ShieldCheck,
   Building2,
-  BriefcaseBusiness,
   Award,
   BarChart3,
   BadgeCheck,
   ArrowRight,
-  ArrowDown,
   X,
   LayoutGrid,
   List,
@@ -28,6 +26,8 @@ import {
   MousePointerClick,
   Sparkles,
   TrendingUp,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 import { socket } from "../../utils/socket";
@@ -66,6 +66,9 @@ const categories = [
 
 const SORT_OPTIONS = ["Popular", "Rating", "Employees", "Online now"];
 
+// companies shown per page (8 = 2 full rows on the 4-column desktop grid)
+const PAGE_SIZE = 8;
+
 const AVATAR_COLORS = [
   "bg-blue-100 text-blue-700",
   "bg-sky-100 text-sky-700",
@@ -94,7 +97,8 @@ const mentorPhoto = (m = {}) =>
 
 const hashIndex = (text = "", mod = AVATAR_COLORS.length) => {
   let h = 0;
-  for (let i = 0; i < text.length; i += 1) h = (h * 31 + text.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < text.length; i += 1)
+    h = (h * 31 + text.charCodeAt(i)) >>> 0;
   return h % mod;
 };
 
@@ -139,6 +143,23 @@ const matchesCategory = (company, category) => {
   );
 };
 
+// page numbers to show: 1 … 4 5 6 … 12
+const buildPageList = (current, total) => {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+
+  const pages = new Set([1, total, current - 1, current, current + 1]);
+  const sorted = [...pages]
+    .filter((p) => p >= 1 && p <= total)
+    .sort((a, b) => a - b);
+
+  const out = [];
+  sorted.forEach((p, i) => {
+    if (i > 0 && p - sorted[i - 1] > 1) out.push("…");
+    out.push(p);
+  });
+  return out;
+};
+
 // ============================================================
 // GROUP EMPLOYEES BY COMPANY
 // ============================================================
@@ -148,7 +169,7 @@ const groupMentorsByCompany = (mentors, profiles = {}) => {
 
   mentors.forEach((mentor) => {
     const registeredName = String(
-      mentor.companyName || mentor.currentCompany || ""
+      mentor.companyName || mentor.currentCompany || "",
     ).trim();
 
     if (!registeredName) return;
@@ -197,7 +218,7 @@ const buildCompanyData = (apiData, profiles = {}) => {
       (item) =>
         item.mentorCount !== undefined ||
         item.onlineCount !== undefined ||
-        item.averageRating !== undefined
+        item.averageRating !== undefined,
     );
 
   if (looksLikeCompanyData) {
@@ -229,12 +250,12 @@ const buildCompanyData = (apiData, profiles = {}) => {
       (mentor) =>
         mentor.isOnline === true ||
         mentor.online === true ||
-        mentor.status === "online"
+        mentor.status === "online",
     );
 
     const ratings = company.mentors
       .map(
-        (mentor) => Number(mentor.averageRating) || Number(mentor.rating) || 0
+        (mentor) => Number(mentor.averageRating) || Number(mentor.rating) || 0,
       )
       .filter((rating) => rating > 0);
 
@@ -280,7 +301,7 @@ const mergeCompanies = (list = []) => {
 
     // employees: add only the ones we haven't seen yet
     const seenIds = new Set(
-      existing.mentors.map((m) => String(m._id || m.id || ""))
+      existing.mentors.map((m) => String(m._id || m.id || "")),
     );
 
     (company.mentors || []).forEach((m) => {
@@ -310,12 +331,13 @@ const mergeCompanies = (list = []) => {
       new Set([
         ...(existing.registeredNames || []),
         ...(company.registeredNames || []),
-      ])
+      ]),
     );
 
     // keep a logo / cover if the first entry didn't have one
     existing.logo = existing.logo || company.logo || null;
-    existing.companyImage = existing.companyImage || company.companyImage || null;
+    existing.companyImage =
+      existing.companyImage || company.companyImage || null;
 
     existing.mentorCount =
       existing.mentors.length ||
@@ -346,6 +368,7 @@ const BrowseMentors = () => {
   const [sort, setSort] = useState("Popular");
   const [onlineOnly, setOnlineOnly] = useState(false);
   const [view, setView] = useState("grid");
+  const [page, setPage] = useState(1);
 
   // search box UX
   const [focused, setFocused] = useState(false);
@@ -432,11 +455,6 @@ const BrowseMentors = () => {
     setTimeout(() => searchRef.current?.focus({ preventScroll: true }), 450);
   }, []);
 
-  // scroll straight to the company cards (used by the "Find your company" button)
-  const goToCards = useCallback(() => {
-    resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, []);
-
   // "/" or Ctrl/Cmd+K anywhere -> jump to the search box
   useEffect(() => {
     const onKeyDown = (e) => {
@@ -467,7 +485,7 @@ const BrowseMentors = () => {
     const io = new IntersectionObserver(
       ([entry]) =>
         setShowFab(!entry.isIntersecting && entry.boundingClientRect.top < 0),
-      { threshold: 0 }
+      { threshold: 0 },
     );
     io.observe(el);
     return () => io.disconnect();
@@ -481,29 +499,20 @@ const BrowseMentors = () => {
         categories.map((c) => [
           c,
           companies.filter((co) => matchesCategory(co, c)).length,
-        ])
+        ]),
       ),
-    [companies]
+    [companies],
   );
 
-  const totals = useMemo(() => {
-    const rated = companies.filter((c) => Number(c.averageRating) > 0);
-
-    return {
-      companies: companies.length,
-      employees: companies.reduce((sum, c) => sum + (c.mentorCount || 0), 0),
-      online: companies.reduce((sum, c) => sum + (c.onlineCount || 0), 0),
-      avgRating: rated.length
-        ? rated.reduce((sum, c) => sum + Number(c.averageRating), 0) /
-          rated.length
-        : 0,
-    };
-  }, [companies]);
+  const totalOnline = useMemo(
+    () => companies.reduce((sum, c) => sum + (c.onlineCount || 0), 0),
+    [companies],
+  );
 
   // only companies that already have an admin-uploaded logo go in the strip
   const logoCompanies = useMemo(
     () => companies.filter((c) => c.logo),
-    [companies]
+    [companies],
   );
 
   // top companies by employee count -> quick-pick chips under the search box
@@ -512,7 +521,7 @@ const BrowseMentors = () => {
       [...companies]
         .sort((a, b) => (b.mentorCount || 0) - (a.mentorCount || 0))
         .slice(0, 6),
-    [companies]
+    [companies],
   );
 
   const keyword = search.trim();
@@ -523,7 +532,7 @@ const BrowseMentors = () => {
     if (!k) return [];
     return companies
       .filter((c) =>
-        [c.companyName, c.industry].join(" ").toLowerCase().includes(k)
+        [c.companyName, c.industry].join(" ").toLowerCase().includes(k),
       )
       .sort((a, b) => {
         const aStart = a.companyName.toLowerCase().startsWith(k) ? 0 : 1;
@@ -541,7 +550,11 @@ const BrowseMentors = () => {
       if (onlineOnly && !(company.onlineCount > 0)) return false;
 
       if (k) {
-        const haystack = [company.companyName, company.industry, company.category]
+        const haystack = [
+          company.companyName,
+          company.industry,
+          company.category,
+        ]
           .join(" ")
           .toLowerCase();
         if (!haystack.includes(k)) return false;
@@ -563,11 +576,39 @@ const BrowseMentors = () => {
         (a, b) =>
           Number(b.onlineCount > 0) - Number(a.onlineCount > 0) || // online first
           byEmployees(a, b) ||
-          byOnline(a, b)
+          byOnline(a, b),
       ); // Popular
 
     return data;
   }, [companies, keyword, activeCategory, sort, onlineOnly]);
+
+  // ---------------- pagination ----------------
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredCompanies.length / PAGE_SIZE),
+  );
+  // clamp: a background refresh can shrink the list while you are on the last page
+  const safePage = Math.min(page, totalPages);
+
+  const pagedCompanies = useMemo(
+    () =>
+      filteredCompanies.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [filteredCompanies, safePage],
+  );
+
+  // any filter change -> back to page 1
+  useEffect(() => {
+    setPage(1);
+  }, [keyword, activeCategory, sort, onlineOnly]);
+
+  const changePage = (next) => {
+    const target = Math.min(Math.max(next, 1), totalPages);
+    setPage(target);
+    resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  // ---------------- actions ----------------
 
   const clearAll = () => {
     setSearch("");
@@ -579,7 +620,10 @@ const BrowseMentors = () => {
   const saveRecent = (text) => {
     const t = String(text || "").trim();
     if (!t) return;
-    const next = [t, ...recent.filter((r) => r.toLowerCase() !== t.toLowerCase())];
+    const next = [
+      t,
+      ...recent.filter((r) => r.toLowerCase() !== t.toLowerCase()),
+    ];
     setRecent(next.slice(0, 5));
     writeRecent(next);
   };
@@ -610,7 +654,6 @@ const BrowseMentors = () => {
         saveRecent(keyword);
         setFocused(false);
         searchRef.current?.blur();
-        resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     } else if (e.key === "Escape") {
       setFocused(false);
@@ -644,169 +687,57 @@ const BrowseMentors = () => {
       clear: () => setSort("Popular"),
     });
 
-  const dash = loading || error ? "–" : null;
   const showDropdown =
     focused && (suggestions.length > 0 || (!keyword && recent.length > 0));
+
+  const firstShown = filteredCompanies.length
+    ? (safePage - 1) * PAGE_SIZE + 1
+    : 0;
+  const lastShown = Math.min(safePage * PAGE_SIZE, filteredCompanies.length);
 
   // ============================================================
   // UI
   // ============================================================
 
   return (
-    <div className="min-h-screen bg-white text-slate-900">
+    <div className="min-h-screen bg-gradient-to-b from-blue-50/60 via-white to-white text-slate-900">
       <style>{`
         @keyframes mc-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
-        @keyframes mc-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
-        @keyframes mc-bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(5px); } }
-        @keyframes mc-shine { from { background-position: 0% 50%; } to { background-position: 200% 50%; } }
         .mc-rise { animation: mc-rise .5s cubic-bezier(.2,.7,.2,1) both; }
-        .mc-float { animation: mc-float 7s ease-in-out infinite; }
-        .mc-bounce { animation: mc-bounce 1.4s ease-in-out infinite; }
-        .mc-shine { background-size: 200% auto; animation: mc-shine 5s linear infinite; }
         .mc-no-scrollbar { scrollbar-width: none; }
         .mc-no-scrollbar::-webkit-scrollbar { display: none; }
         @media (prefers-reduced-motion: reduce) {
-          .mc-rise, .mc-float, .mc-bounce, .mc-shine { animation: none; }
+          .mc-rise { animation: none; }
         }
       `}</style>
 
       {/* ======================================================
-          HERO  (title + live stats only. Search is BELOW)
-      ====================================================== */}
-      <section className="relative overflow-hidden">
-        <div className="pointer-events-none absolute inset-0" aria-hidden="true">
-          <div className="absolute inset-0 bg-gradient-to-b from-blue-50 via-white to-white" />
-          <div className="mc-float absolute -left-24 -top-24 h-96 w-96 rounded-full bg-blue-200/40 blur-3xl" />
-          <div
-            className="mc-float absolute -right-28 top-6 h-96 w-96 rounded-full bg-cyan-200/40 blur-3xl"
-            style={{ animationDelay: "2s" }}
-          />
-          <div className="absolute inset-0 opacity-[0.4] [background-image:linear-gradient(to_right,rgba(37,99,235,0.07)_1px,transparent_1px),linear-gradient(to_bottom,rgba(37,99,235,0.07)_1px,transparent_1px)] [background-size:56px_56px] [mask-image:radial-gradient(ellipse_at_center,black_30%,transparent_75%)]" />
-        </div>
-
-        <div className="relative mx-auto max-w-5xl px-5 pb-24 pt-14 text-center sm:px-8 sm:pb-28 sm:pt-16">
-          <span className="mc-rise inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-3.5 py-1 text-xs font-semibold uppercase tracking-widest text-blue-700 shadow-sm">
-            <BadgeCheck size={14} /> Learn from the best
-          </span>
-
-          <h1
-            className="mc-rise mt-5 text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl"
-            style={{ animationDelay: "60ms" }}
-          >
-            Browse{" "}
-            <span className="mc-shine bg-gradient-to-r from-blue-600 via-sky-500 to-blue-600 bg-clip-text text-transparent">
-              MNC Employees
-            </span>
-          </h1>
-
-          <p
-            className="mc-rise mx-auto mt-4 max-w-xl text-base text-slate-500 sm:text-lg"
-            style={{ animationDelay: "120ms" }}
-          >
-            Book 1:1 sessions with verified professionals from the world's
-            leading companies.
-          </p>
-
-          {/* CTA -> scrolls straight down to the company cards */}
-          <div
-            className="mc-rise mt-7 flex flex-col items-center gap-3"
-            style={{ animationDelay: "180ms" }}
-          >
-            <button
-              type="button"
-              onClick={goToCards}
-              className="group inline-flex items-center gap-2 rounded-full bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-200 transition hover:bg-blue-700 hover:shadow-xl active:scale-95"
-            >
-              <Search size={16} />
-              Find your company
-              <ArrowDown size={16} className="mc-bounce" />
-            </button>
-            <p className="text-xs text-slate-400">
-              Search is just below · press{" "}
-              <kbd className="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-medium text-slate-500">
-                /
-              </kbd>{" "}
-              anytime
-            </p>
-          </div>
-
-          {/* live stats */}
-          <div
-            className="mc-rise mx-auto mt-9 grid max-w-3xl grid-cols-2 gap-3 md:grid-cols-4"
-            style={{ animationDelay: "240ms" }}
-          >
-            <StatPill
-              icon={<BriefcaseBusiness size={18} />}
-              value={dash ?? totals.companies}
-              label="Companies"
-            />
-            <StatPill
-              icon={<Users size={18} />}
-              value={dash ?? totals.employees}
-              label="MNC employees"
-            />
-            <StatPill
-              icon={
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 motion-safe:animate-ping" />
-                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                </span>
-              }
-              value={dash ?? totals.online}
-              label="Online now"
-            />
-            <StatPill
-              icon={<Star size={18} />}
-              value={dash ?? (totals.avgRating ? totals.avgRating.toFixed(1) : "–")}
-              label="Avg. rating"
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* ======================================================
-          SEARCH CARD  (floats over the hero's bottom edge)
+          SEARCH CARD  (now the very first thing on the page)
       ====================================================== */}
       <section
         ref={searchSectionRef}
         id="search"
-        className="relative z-20 mx-auto -mt-12 max-w-4xl scroll-mt-24 px-5 sm:px-8"
+        className="relative z-20 mx-auto max-w-[1400px] scroll-mt-24 px-5 pt-6 sm:px-8 sm:pt-8"
       >
-        <div className="rounded-3xl border border-blue-100 bg-white p-4 shadow-2xl shadow-blue-100/80 sm:p-6">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-600 text-white">
-                <Search size={16} />
-              </span>
-              <div>
-                <h2 className="text-sm font-semibold text-slate-900">
-                  Search companies
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Type a company name or industry
-                </p>
-              </div>
-            </div>
-            {!loading && !error && (
-              <span className="hidden items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 sm:inline-flex">
-                <Sparkles size={12} /> {totals.companies} companies ready
-              </span>
-            )}
-          </div>
-
+        <div className="rounded-3xl border border-blue-100 bg-white p-4 shadow-xl shadow-blue-100/70 sm:p-6">
           {/* input + autocomplete */}
           <div className="relative">
             <label
               htmlFor="company-search"
-              className={`flex items-center gap-3 rounded-2xl border bg-white px-4 py-3.5 transition ${
+              className={`flex items-center gap-3 rounded-full border bg-white px-4 py-3 transition-all duration-300 ${
                 focused
-                  ? "border-blue-500 ring-4 ring-blue-100"
-                  : "border-slate-200 hover:border-blue-300"
+                  ? "border-blue-500 ring-4 ring-blue-100 shadow-lg shadow-blue-100"
+                  : "border-slate-200 shadow-sm hover:border-blue-300"
               }`}
             >
               <Search
-                size={20}
-                className={`shrink-0 transition ${focused ? "text-blue-600" : "text-slate-400"}`}
+                size={19}
+                strokeWidth={2.5}
+                className={`shrink-0 rounded-full p-2 box-content transition-all duration-300 ${
+                  focused
+                    ? "bg-blue-600 text-white"
+                    : "bg-blue-50 text-blue-600"
+                }`}
               />
               <input
                 id="company-search"
@@ -826,7 +757,7 @@ const BrowseMentors = () => {
                 aria-controls="company-suggestions"
                 className="min-w-0 flex-1 bg-transparent text-base text-slate-800 outline-none placeholder:text-slate-400"
               />
-              {search ? (
+              {search && (
                 <button
                   type="button"
                   onMouseDown={(e) => e.preventDefault()}
@@ -835,14 +766,37 @@ const BrowseMentors = () => {
                     searchRef.current?.focus();
                   }}
                   aria-label="Clear search"
-                  className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                  className="rounded-full p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-500"
                 >
                   <X size={16} />
                 </button>
-              ) : (
-                <kbd className="hidden rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-400 sm:block">
-                  /
-                </kbd>
+              )}
+
+              {/* company logos at the end of the search box */}
+              {logoCompanies.length > 0 && (
+                <div className="hidden shrink-0 items-center gap-1.5  pl-3 sm:flex">
+                  {logoCompanies.slice(0, 5).map((company) => (
+                    <button
+                      key={company.companyName}
+                      type="button"
+                      title={company.companyName}
+                      aria-label={`Show ${company.companyName}`}
+                      onClick={() => setSearch(company.companyName)}
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white p-1 transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-md active:scale-95"
+                    >
+                      <img
+                        src={company.logo}
+                        alt=""
+                        className="max-h-full max-w-full object-contain"
+                      />
+                    </button>
+                  ))}
+                  {logoCompanies.length > 5 && (
+                    <span className="text-xs font-medium text-slate-400">
+                      +{logoCompanies.length - 5}
+                    </span>
+                  )}
+                </div>
               )}
             </label>
 
@@ -870,14 +824,21 @@ const BrowseMentors = () => {
                           i === activeIdx ? "bg-blue-50" : "hover:bg-slate-50"
                         }`}
                       >
-                        <Logo company={c} size="h-9 w-9" rounded="rounded-lg" small />
+                        <Logo
+                          company={c}
+                          size="h-9 w-9"
+                          rounded="rounded-lg"
+                          small
+                        />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-sm font-semibold text-slate-900">
                             <Highlight text={c.companyName} query={keyword} />
                           </span>
                           <span className="block truncate text-xs text-slate-500">
                             {c.industry} · {c.mentorCount || 0}{" "}
-                            {(c.mentorCount || 0) === 1 ? "employee" : "employees"}
+                            {(c.mentorCount || 0) === 1
+                              ? "employee"
+                              : "employees"}
                           </span>
                         </span>
                         {c.onlineCount > 0 && (
@@ -927,29 +888,7 @@ const BrowseMentors = () => {
             )}
           </div>
 
-          {/* quick picks */}
-          {popularCompanies.length > 0 && !keyword && (
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-400">
-                <TrendingUp size={13} /> Popular:
-              </span>
-              {popularCompanies.map((c) => (
-                <button
-                  key={c.companyName}
-                  type="button"
-                  onClick={() => {
-                    setSearch(c.companyName);
-                    saveRecent(c.companyName);
-                  }}
-                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 transition hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 active:scale-95"
-                >
-                  {c.companyName}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* category chips (part of the search card, so filters live with search) */}
+          {/* category chips */}
           <div
             className="mc-no-scrollbar -mx-1 mt-4 flex gap-2 overflow-x-auto px-1 pb-1"
             role="tablist"
@@ -990,48 +929,7 @@ const BrowseMentors = () => {
       </section>
 
       {/* ======================================================
-          TRUSTED LOGOS (only companies that have a logo)
-      ====================================================== */}
-      {logoCompanies.length > 0 && (
-        <section className="mt-10 border-y border-slate-100 bg-slate-50/60">
-          <div className="mx-auto flex max-w-[1400px] items-center gap-6 overflow-x-auto px-5 py-4 mc-no-scrollbar sm:px-8">
-            <span className="shrink-0 text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Employees from
-            </span>
-            <div className="flex items-center gap-5">
-              {logoCompanies.slice(0, 10).map((company) => (
-                <button
-                  key={company.companyName}
-                  type="button"
-                  title={`Search ${company.companyName}`}
-                  onClick={() => {
-                    setSearch(company.companyName);
-                    resultsRef.current?.scrollIntoView({
-                      behavior: "smooth",
-                      block: "start",
-                    });
-                  }}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center opacity-60 grayscale transition duration-200 hover:scale-110 hover:opacity-100 hover:grayscale-0"
-                >
-                  <img
-                    src={company.logo}
-                    alt={company.companyName}
-                    className="max-h-full max-w-full object-contain"
-                  />
-                </button>
-              ))}
-              {logoCompanies.length > 10 && (
-                <span className="shrink-0 text-xs font-medium text-slate-400">
-                  +{logoCompanies.length - 10} more
-                </span>
-              )}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* ======================================================
-          RESULTS
+          RESULTS  (company cards + pagination)
       ====================================================== */}
       <main
         ref={resultsRef}
@@ -1042,17 +940,21 @@ const BrowseMentors = () => {
           <p className="text-sm text-slate-500" aria-live="polite">
             {loading ? (
               "Loading companies…"
+            ) : filteredCompanies.length === 0 ? (
+              "No companies"
             ) : (
               <>
                 Showing{" "}
                 <span className="font-semibold text-slate-900">
-                  {filteredCompanies.length}
+                  {firstShown}–{lastShown}
                 </span>{" "}
                 of{" "}
                 <span className="font-semibold text-slate-900">
-                  {companies.length}
+                  {filteredCompanies.length}
                 </span>{" "}
-                companies
+                {filteredCompanies.length === companies.length
+                  ? "companies"
+                  : `matching companies (${companies.length} total)`}
               </>
             )}
           </p>
@@ -1077,9 +979,9 @@ const BrowseMentors = () => {
                 />
               </span>
               Online now
-              {totals.online > 0 && (
+              {totalOnline > 0 && (
                 <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold leading-none text-emerald-700">
-                  {totals.online}
+                  {totalOnline}
                 </span>
               )}
             </button>
@@ -1138,7 +1040,10 @@ const BrowseMentors = () => {
                 className="group inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 transition hover:bg-blue-100"
               >
                 {f.label}
-                <X size={12} className="opacity-60 transition group-hover:opacity-100" />
+                <X
+                  size={12}
+                  className="opacity-60 transition group-hover:opacity-100"
+                />
               </button>
             ))}
             <button
@@ -1163,7 +1068,11 @@ const BrowseMentors = () => {
               aria-busy="true"
             >
               {Array.from({ length: 8 }).map((_, i) =>
-                view === "grid" ? <SkeletonCard key={i} /> : <SkeletonRow key={i} />
+                view === "grid" ? (
+                  <SkeletonCard key={i} />
+                ) : (
+                  <SkeletonRow key={i} />
+                ),
               )}
             </div>
           ) : error ? (
@@ -1171,7 +1080,9 @@ const BrowseMentors = () => {
               <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-red-100 text-red-500">
                 <Building2 size={28} />
               </div>
-              <h2 className="mt-5 text-xl font-semibold">Something went wrong</h2>
+              <h2 className="mt-5 text-xl font-semibold">
+                Something went wrong
+              </h2>
               <p className="mt-2 text-sm leading-6 text-slate-500">{error}</p>
               <button
                 type="button"
@@ -1200,7 +1111,7 @@ const BrowseMentors = () => {
             </div>
           ) : view === "grid" ? (
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {filteredCompanies.map((company, index) => (
+              {pagedCompanies.map((company, index) => (
                 <CompanyCard
                   key={company.companyName}
                   company={company}
@@ -1211,7 +1122,7 @@ const BrowseMentors = () => {
             </div>
           ) : (
             <div className="space-y-3">
-              {filteredCompanies.map((company, index) => (
+              {pagedCompanies.map((company, index) => (
                 <CompanyRow
                   key={company.companyName}
                   company={company}
@@ -1222,6 +1133,15 @@ const BrowseMentors = () => {
             </div>
           )}
         </div>
+
+        {/* pagination (only when there is more than one page) */}
+        {!loading && !error && totalPages > 1 && (
+          <Pagination
+            page={safePage}
+            totalPages={totalPages}
+            onChange={changePage}
+          />
+        )}
       </main>
 
       {/* ======================================================
@@ -1299,6 +1219,68 @@ const BrowseMentors = () => {
 // SMALL PIECES
 // ============================================================
 
+// numbered pagination: Prev · 1 … 4 5 6 … 12 · Next
+const Pagination = ({ page, totalPages, onChange }) => {
+  const pages = buildPageList(page, totalPages);
+
+  const base =
+    "inline-flex h-10 min-w-[2.5rem] items-center justify-center rounded-xl border px-3 text-sm font-medium transition active:scale-95";
+
+  return (
+    <nav
+      aria-label="Pagination"
+      className="mt-10 flex flex-wrap items-center justify-center gap-2"
+    >
+      <button
+        type="button"
+        onClick={() => onChange(page - 1)}
+        disabled={page === 1}
+        className={`${base} gap-1 border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700 disabled:pointer-events-none disabled:opacity-40`}
+      >
+        <ChevronLeft size={16} />
+        <span className="hidden sm:inline">Prev</span>
+      </button>
+
+      {pages.map((p, i) =>
+        p === "…" ? (
+          <span
+            key={`gap-${i}`}
+            className="px-1 text-slate-400"
+            aria-hidden="true"
+          >
+            …
+          </span>
+        ) : (
+          <button
+            key={p}
+            type="button"
+            onClick={() => onChange(p)}
+            aria-label={`Page ${p}`}
+            aria-current={p === page ? "page" : undefined}
+            className={`${base} ${
+              p === page
+                ? "border-blue-600 bg-blue-600 text-white shadow-md shadow-blue-200"
+                : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700"
+            }`}
+          >
+            {p}
+          </button>
+        ),
+      )}
+
+      <button
+        type="button"
+        onClick={() => onChange(page + 1)}
+        disabled={page === totalPages}
+        className={`${base} gap-1 border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700 disabled:pointer-events-none disabled:opacity-40`}
+      >
+        <span className="hidden sm:inline">Next</span>
+        <ChevronRight size={16} />
+      </button>
+    </nav>
+  );
+};
+
 // bold the part of the text that matches what the user typed
 const Highlight = ({ text = "", query = "" }) => {
   const q = query.trim();
@@ -1317,21 +1299,11 @@ const Highlight = ({ text = "", query = "" }) => {
           </mark>
         ) : (
           <React.Fragment key={i}>{part}</React.Fragment>
-        )
+        ),
       )}
     </>
   );
 };
-
-const StatPill = ({ icon, value, label }) => (
-  <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3.5 text-left shadow-sm backdrop-blur transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md">
-    <div className="flex h-5 items-center text-blue-600">{icon}</div>
-    <p className="mt-2 text-2xl font-semibold tracking-tight tabular-nums text-slate-900">
-      {value}
-    </p>
-    <p className="text-xs text-slate-500">{label}</p>
-  </div>
-);
 
 const Feature = ({ icon, title, desc }) => (
   <div className="flex items-center gap-4 rounded-2xl p-3 transition hover:bg-white">
@@ -1460,7 +1432,7 @@ const MiniAvatar = ({ mentor }) => {
 // real employees only; online ones come first so you SEE who is available
 const AvatarStack = ({ mentors = [], total = 0, max = 4 }) => {
   const sorted = [...mentors].sort(
-    (a, b) => Number(isMentorOnline(b)) - Number(isMentorOnline(a))
+    (a, b) => Number(isMentorOnline(b)) - Number(isMentorOnline(a)),
   );
   const shown = sorted.slice(0, max);
   const extra = Math.max(total - shown.length, 0);
@@ -1511,7 +1483,9 @@ const RatingText = ({ company }) => {
       <Star size={14} className="fill-amber-400 text-amber-400" />
       {rating}
       {company.ratingCount ? (
-        <span className="font-normal text-slate-400">({company.ratingCount})</span>
+        <span className="font-normal text-slate-400">
+          ({company.ratingCount})
+        </span>
       ) : null}
     </span>
   ) : (
@@ -1571,7 +1545,10 @@ const CompanyCard = ({ company, index, query }) => {
         </div>
 
         <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4">
-          <AvatarStack mentors={company.mentors} total={company.mentorCount || 0} />
+          <AvatarStack
+            mentors={company.mentors}
+            total={company.mentorCount || 0}
+          />
           <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700 transition group-hover:bg-blue-600 group-hover:text-white">
             Book
             <ArrowRight
