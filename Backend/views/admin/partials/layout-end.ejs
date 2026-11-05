@@ -1,142 +1,75 @@
-    </div><!-- /content -->
-  </div><!-- /main -->
+<script>
+(function () {
+  var content = document.querySelector('.content');
+  if (!content) return;
 
-  <!-- Toast notifications -->
-  <div class="toast-wrap" id="toasts" aria-live="polite" aria-atomic="false"></div>
+  var original = content.innerHTML;   // back button ku restore panna
+  var shown = false;
 
-  <!-- Confirmation modal -->
-  <div
-    class="modal-back"
-    id="modal"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="modalTitle"
-    aria-describedby="modalMsg"
-    aria-hidden="true"
-  >
-    <div class="modal">
-      <h3 id="modalTitle">Are you sure?</h3>
+  function row() {
+    return '<div class="sk-row">' +
+      '<div class="sk sk-av"></div>' +
+      '<div class="sk-col"><div class="sk sk-line w40"></div><div class="sk sk-line w60"></div></div>' +
+      '<div class="sk sk-line w30" style="flex:none;width:90px"></div>' +
+      '<div class="sk sk-btn"></div>' +
+    '</div>';
+  }
 
-      <p id="modalMsg"></p>
+  function stat() {
+    return '<div class="card sk-stat"><div class="l">' +
+      '<div class="sk sk-line w40" style="margin-bottom:12px"></div>' +
+      '<div class="sk" style="height:30px;width:55%"></div></div>' +
+      '<div class="sk" style="width:48px;height:48px;border-radius:14px"></div></div>';
+  }
 
-      <!-- Optional reason field -->
-      <div id="modalReasonWrap" style="display:none">
-        <label class="label" for="modalReason">
-          Reason (shown to admins only)
-        </label>
+  function skeleton() {
+    var rows = '';
+    for (var i = 0; i < 6; i++) rows += row();
+    return '<div class="sk-stats">' + stat() + stat() + stat() + '</div>' +
+      '<div class="sk-tabs">' +
+        '<div class="sk sk-tab"></div><div class="sk sk-tab"></div>' +
+        '<div class="sk sk-tab"></div><div class="sk sk-tab"></div></div>' +
+      '<div class="card"><div class="sk-head"><div class="sk sk-line w30"></div></div>' + rows + '</div>';
+  }
 
-        <textarea
-          id="modalReason"
-          class="textarea"
-          placeholder="e.g. Offer letter is not readable"
-          rows="3"
-        ></textarea>
-      </div>
+  function showSkeleton() {
+    if (shown) return;
+    shown = true;
+    content.setAttribute('aria-busy', 'true');
+    content.innerHTML = skeleton();
+    window.scrollTo({ top: 0 });
+  }
 
-      <div class="modal-foot">
-        <button type="button" class="btn btn-ghost" id="modalCancel">Cancel</button>
-        <button type="button" class="btn btn-ok" id="modalOk">Confirm</button>
-      </div>
-    </div>
-  </div>
+  // Internal links click -> skeleton
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('a[href]');
+    if (!a) return;
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (a.target === '_blank' || a.hasAttribute('download')) return;
 
-  <!-- Admin panel JavaScript -->
-  <script src="/admin/js/admin.js"></script>
+    var href = a.getAttribute('href');
+    if (!href || href.charAt(0) === '#' || /^(mailto:|tel:|javascript:)/i.test(href)) return;
+    if (a.origin !== location.origin) return;
+    if (/\/export|\/logout/i.test(a.pathname)) return;           // CSV download / logout ku skeleton vendaam
+    if (a.pathname === location.pathname && a.search === location.search) return;
 
-  <!-- Companies: live badge + sound + notification -->
-  <style>
-    .co-toast {
-      position: fixed; right: 18px; bottom: 18px; z-index: 9999;
-      display: flex; gap: 10px; align-items: center;
-      background: #1e1b4b; color: #fff; border: 1px solid #7c3aed;
-      padding: 12px 16px; border-radius: 12px; font-size: .9rem;
-      box-shadow: 0 10px 30px rgba(0,0,0,.5); cursor: pointer;
-      animation: co-toast-in .25s ease-out;
+    showSkeleton();
+  });
+
+  // GET forms (search / filter) submit -> skeleton
+  document.addEventListener('submit', function (e) {
+    var f = e.target;
+    if (e.defaultPrevented) return;
+    if ((f.method || 'get').toLowerCase() === 'get') showSkeleton();
+  });
+
+  // Browser Back/Forward la page cache-la irundhu vandha, skeleton stuck aagama irukka
+  window.addEventListener('pageshow', function (e) {
+    if (e.persisted && shown) {
+      content.innerHTML = original;
+      content.removeAttribute('aria-busy');
+      shown = false;
     }
-    @keyframes co-toast-in {
-      from { opacity: 0; transform: translateY(10px); }
-      to { opacity: 1; transform: none; }
-    }
-    [data-co-badge][hidden] { display: none !important; }
-  </style>
-
-  <script>
-  (function () {
-    var KEY = "co_last_count";
-    var POLL_MS = 30000;
-    var badge = document.querySelector("[data-co-badge]");
-    var ctx;
-
-    // browsers block sound until the user clicks once
-    function unlock() {
-      try {
-        ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
-        if (ctx.state === "suspended") ctx.resume();
-      } catch (e) {}
-      if ("Notification" in window && Notification.permission === "default") {
-        Notification.requestPermission();
-      }
-    }
-    document.addEventListener("click", unlock, { once: true });
-
-    function beep() {
-      if (!ctx) return;
-      [880, 1175].forEach(function (freq, i) {
-        var o = ctx.createOscillator(), g = ctx.createGain();
-        o.type = "sine"; o.frequency.value = freq;
-        o.connect(g); g.connect(ctx.destination);
-        var t = ctx.currentTime + i * 0.18;
-        g.gain.setValueAtTime(0.0001, t);
-        g.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
-        o.start(t); o.stop(t + 0.17);
-      });
-    }
-
-    function toast(text) {
-      var d = document.createElement("div");
-      d.className = "co-toast";
-      d.innerHTML = '<i class="fas fa-building"></i><span></span>';
-      d.lastChild.textContent = text;
-      d.onclick = function () { location.href = "/admin/companies"; };
-      document.body.appendChild(d);
-      setTimeout(function () { d.remove(); }, 6000);
-    }
-
-    function notify(text) {
-      if ("Notification" in window && Notification.permission === "granted") {
-        var n = new Notification("MNCConnect Admin", { body: text });
-        n.onclick = function () { window.focus(); location.href = "/admin/companies"; };
-      }
-    }
-
-    function render(count) {
-      if (!badge) return;
-      badge.textContent = count;
-      badge.hidden = count <= 0;
-    }
-
-    async function check() {
-      try {
-        var r = await fetch("/admin/companies/new-count", { credentials: "same-origin" });
-        if (!r.ok) return;
-        var count = (await r.json()).count || 0;
-        var stored = localStorage.getItem(KEY);
-        render(count);
-
-        // alert only when the count goes UP
-        if (stored !== null && count > Number(stored)) {
-          var diff = count - Number(stored);
-          var msg = diff + " new compan" + (diff === 1 ? "y" : "ies") + " registered. Upload logo & cover.";
-          beep(); toast(msg); notify(msg);
-        }
-        localStorage.setItem(KEY, String(count));
-      } catch (e) {}
-    }
-
-    check();
-    setInterval(check, POLL_MS);
-  })();
-  </script>
-</body>
-</html>
+  });
+})();
+</script>
