@@ -9,7 +9,7 @@ export const PROFILE_IMAGE_KEYS = [
   "photoUrl",
 ];
 
-export const REQUIRED_PERCENT = 90;
+export const REQUIRED_PERCENT = 80;
 
 export const getRawAvatarUrl = (user) => {
   for (const key of PROFILE_IMAGE_KEYS) {

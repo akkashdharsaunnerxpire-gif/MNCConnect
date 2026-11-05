@@ -168,13 +168,6 @@ const FIELD_DEFS = {
     required: true,
     placeholder: "+91 1234567890",
   },
-  mobile: {
-    label: "Mobile",
-    group: "contact",
-    editable: true,
-    icon: Phone,
-    placeholder: "+91 1234567890",
-  },
   bio: {
     label: "About me",
     group: "about",
@@ -222,7 +215,7 @@ const HEADING = "font-serif text-lg font-semibold text-black";
 const NAV_ITEMS = [
   { id: "profile", label: "Profile", icon: UserCircle },
   { id: "education", label: "Education", icon: GraduationCap },
-  { id: "career", label: "Career", icon: BriefcaseBusiness },
+  { id: "career", label: "Career (Optional)", icon: BriefcaseBusiness },
   { id: "skills", label: "Skills", icon: Code },
   { id: "interests", label: "Interests", icon: Heart },
 ];
@@ -882,6 +875,8 @@ const FresherProfile = () => {
       const data = await apiGetCurrentUser();
       setUser({
         ...data,
+        // Backward compatibility: older accounts may store the number in `mobile`.
+        phone: data.phone || data.mobile || "",
         education: data.education || [],
         career: data.career || [],
         skills: data.skills || [],
@@ -1484,7 +1479,7 @@ const EducationContent = ({ education, onAdd, onDelete }) => (
 
 const CareerContent = ({ career, onAdd, onDelete }) => (
   <SectionCard
-    title="Career experience"
+    title="Career experience (Optional)"
     addLabel="Add experience"
     onAdd={onAdd}
   >
@@ -1519,7 +1514,7 @@ const CareerContent = ({ career, onAdd, onDelete }) => (
       <EmptyTab
         icon={<Briefcase size={44} />}
         text="No career experience added yet"
-        subtext='Select "Add experience" to start.'
+        subtext='Optional: add work experience if you have any.'
       />
     )}
   </SectionCard>
@@ -1587,7 +1582,10 @@ const EditProfileModal = ({
   avatarUrl,
   hasRealAvatar,
 }) => {
-  const [form, setForm] = useState({ ...user });
+  const [form, setForm] = useState({
+    ...user,
+    phone: user.phone || user.mobile || "",
+  });
   const [previewImage, setPreviewImage] = useState(null);
   const [uploading, setUploading] = useState(false);
 
@@ -1644,19 +1642,24 @@ const EditProfileModal = ({
   const missingFields = useMemo(
     () =>
       Object.keys(FIELD_DEFS).filter(
-        (k) => FIELD_DEFS[k].required && !hasValue(form[k]),
+        (k) =>
+          FIELD_DEFS[k].required &&
+          !hasValue(k === "phone" ? (form.phone || form.mobile) : form[k]),
       ),
     [form],
   );
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4">
-      <div className="relative max-h-[90dvh] w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+      <div className="relative max-h-[92dvh] w-full max-w-3xl overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-neutral-200 bg-white px-6 py-5">
           <div>
-            <h2 className="font-serif text-lg font-semibold text-black">
+            <h2 className="font-serif text-xl font-semibold tracking-tight text-black">
               Edit profile
             </h2>
+            <p className="mt-1 text-xs text-neutral-500">
+              Keep your details updated so mentors can understand your goals.
+            </p>
             {missingFields.length > 0 && (
               <p className="mt-0.5 text-xs text-neutral-500">
                 {missingFields.length} required field
@@ -1676,7 +1679,7 @@ const EditProfileModal = ({
 
         <form
           onSubmit={handleSubmit}
-          className="max-h-[calc(90dvh-80px)] overflow-y-auto px-6 py-6"
+          className="max-h-[calc(92dvh-104px)] overflow-y-auto px-5 py-5 sm:px-7 sm:py-6"
         >
           {/* Photo */}
           <div className="flex flex-col gap-4 rounded-xl border border-neutral-200 bg-neutral-50 p-5 sm:flex-row sm:items-center">
@@ -1878,6 +1881,8 @@ const EditField = ({
         value={value || ""}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
+        autoComplete={def.label === "Phone" ? "tel" : undefined}
+        inputMode={def.label === "Phone" ? "tel" : undefined}
         placeholder={def.placeholder || `Enter ${def.label.toLowerCase()}`}
         className={INPUT}
       />

@@ -80,16 +80,36 @@ const generateOtp = () => crypto.randomInt(100000, 999999).toString();
 const tempMobile = () =>
   `+910${String(crypto.randomInt(0, 999999999)).padStart(9, "0")}`;
 
+
 const sanitizeFresher = (user) => {
   return {
     id: user._id,
-    name: user.name,
-    email: user.email,
+    name: user.name || "",
+    email: user.email || "",
+
+    // Contact details
     mobile: user.mobile || "",
+    phone: user.mobile || "",
     countryCode: user.countryCode || "+91",
+
+    // Account details
     role: "fresher",
-    gender: user.gender || "", // male | female (set at registration)
+    gender: user.gender || "",
     profilePic: user.profilePic || "",
+
+    // Profile completion fields
+    dateOfBirth: user.dateOfBirth || "",
+    location: user.location || "",
+    nationality: user.nationality || "",
+    bio: user.bio || "",
+
+    // Profile sections
+    education: user.education || [],
+    career: user.career || [],
+    skills: user.skills || [],
+    interests: user.interests || [],
+
+    // Existing account fields
     isEmailVerified: user.isEmailVerified || false,
     walletBalance: user.walletBalance || 0,
     referralCode: user.referralCode || "",
