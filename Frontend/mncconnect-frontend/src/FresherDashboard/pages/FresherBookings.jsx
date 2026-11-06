@@ -37,6 +37,13 @@ import ChatPanel from "../../Commoncomponents/Chatpanel";
 import PersonDetailsModal from "../../Commoncomponents/Persondetailsmodal";
 import { socket } from "../../utils/socket";
 import {
+  JOIN_OPEN_MS,
+  FINAL_WARNING_MS,
+  TIMER_POLL_MS,
+  liveRemaining,
+  hasTimerFinished,
+} from "../../utils/sessionTiming";
+import {
   api,
   ENDPOINTS,
   EVENTS,
@@ -46,8 +53,8 @@ import {
   inr,
 } from "../../services/fresherApi";
 
-const FINAL_WARNING_MS = 5 * 60 * 1000;
-const TIMER_POLL_MS = 3000;
+// same room-open time as the mentor side (shared constant)
+const OPEN_BEFORE_MS = JOIN_OPEN_MS;
 const IST = "Asia/Kolkata";
 
 const fmtTimeIST = (ms) =>
@@ -497,8 +504,7 @@ const MyBookings = () => {
               if (DONE_STATUSES.includes(d.booking.status)) {
                 justFinished.push(id);
               } else if (
-                wasRunningRef.current[id] &&
-                (!running || (typeof remaining === "number" && remaining <= 0))
+                hasTimerFinished(wasRunningRef.current[id], running, remaining)
               ) {
                 justFinished.push(id);
               }
@@ -541,7 +547,7 @@ const MyBookings = () => {
         },
       }));
 
-      if (wasRunningRef.current[id] && (!running || p.remainingMs <= 0)) {
+      if (hasTimerFinished(wasRunningRef.current[id], running, p.remainingMs)) {
         markFinished(id);
       }
     };
@@ -554,11 +560,8 @@ const MyBookings = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const rawLeft = (b) => {
-    const t = timers[b.requestGroupId];
-    if (!t?.running || typeof t.remainingMs !== "number") return null;
-    return Math.max(0, t.remainingMs - (now - t.at));
-  };
+  // live remaining ms (same helper the mentor side uses)
+  const rawLeft = (b) => liveRemaining(timers[b.requestGroupId], now);
 
   const timerOf = (b) => {
     if (finishedIds[b.requestGroupId]) return null;
@@ -581,7 +584,7 @@ const MyBookings = () => {
   const view = (b) => {
     const starts = new Date(b.startsAt).getTime();
     const ends = new Date(b.endsAt).getTime();
-    const opens = starts - 2 * 60000;
+    const opens = starts - OPEN_BEFORE_MS;
     const left = timerOf(b);
     const finished = Boolean(finishedIds[b.requestGroupId]);
 
@@ -765,7 +768,6 @@ const MyBookings = () => {
                   ? `${fmtTimeIST(startMs)} → ${fmtTimeIST(endMs)}`
                   : b.time;
 
-              // group friends have no chat (chat is host <-> employee only)
               // group friends have no chat (chat is host <-> employee only)
               const canChat =
                 Boolean(b.mentor) &&

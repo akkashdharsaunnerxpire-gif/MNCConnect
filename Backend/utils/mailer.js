@@ -358,6 +358,82 @@ const otpVerificationEmail = (name, otp) => {
 
   return { subject, text, html };
 };
+// ============================================================
+// SESSION BOOKED / REMINDER EMAIL (fresher, friends, employee)
+// ============================================================
+const sessionEmail = ({
+  kind = "booked",
+  role = "fresher",
+  name = "there",
+  otherName = "",
+  companyName = "",
+  sessionType = "",
+  date = "",
+  time = "",
+  durationMinutes = 30,
+  isGroup = false,
+  meetingUrl,
+}) => {
+  const first = String(name).trim().split(" ")[0] || "there";
+  const reminder = kind === "reminder";
+  const withText =
+    role === "mentor"
+      ? isGroup ? `Freshers: ${otherName}` : `Fresher: ${otherName}`
+      : otherName ? `Employee: ${otherName}` : "";
+
+  const subject = reminder
+    ? "⏰ Your MNCConnect meeting room is open now"
+    : "✅ Your MNCConnect session is booked - join 5 minutes early";
+
+  const intro = reminder
+    ? "Your meeting room is <b>open now</b>. Please join and read the meeting guidelines."
+    : "Your session is <b>confirmed</b>. Here are the details:";
+
+  const details = [
+    `<b>Date:</b> ${escapeHtml(date)}`,
+    `<b>Time:</b> ${escapeHtml(time)} (IST)`,
+    `<b>Duration:</b> ${escapeHtml(durationMinutes)} minutes`,
+    companyName ? `<b>Company:</b> ${escapeHtml(companyName)}` : "",
+    sessionType ? `<b>Topic:</b> ${escapeHtml(sessionType)}` : "",
+    withText ? escapeHtml(withText) : "",
+  ].filter(Boolean);
+
+  const steps = [
+    "<b>Please join 5 minutes before the meeting time.</b> The meeting room opens 5 minutes early.",
+    "Read and accept the meeting guidelines. The video starts when both sides have accepted.",
+    "Use Chrome with a good internet connection. Allow camera and microphone.",
+  ];
+
+  const text = [
+    `Hi ${first},`,
+    "",
+    reminder ? "Your meeting room is open now." : "Your session is confirmed.",
+    `Date: ${date}`,
+    `Time: ${time} (IST)`,
+    `Duration: ${durationMinutes} minutes`,
+    withText,
+    "",
+    "Please join 5 minutes before the meeting time.",
+    `Join link: ${meetingUrl}`,
+    "",
+    "Team MNCConnect",
+  ].filter((l) => l !== undefined).join("\n");
+
+  const html = layout({
+    preheader: "Please join 5 minutes before the meeting time.",
+    heading: reminder ? `${escapeHtml(first)}, the room is open` : `Session booked, ${escapeHtml(first)}!`,
+    paragraphsHtml:
+      `<p style="margin:0 0 14px;font-size:15px;line-height:1.7;color:#334155;">${intro}</p>` +
+      `<p style="margin:0 0 14px;padding:14px 16px;border-radius:10px;background:#eff6ff;border:1px solid #bfdbfe;font-size:14px;line-height:1.9;color:#1e3a8a;">${details.join("<br>")}</p>`,
+    listTitle: "Before you join",
+    listItems: steps,
+    buttonText: "Open meeting",
+    buttonUrl: meetingUrl,
+    footerNote: "Meeting time-ku 5 minutes munnaadi join pannunga. The timer starts once both sides are inside.",
+  });
+
+  return { subject, text, html };
+};
 
 module.exports = {
   sendMail,
@@ -365,5 +441,6 @@ module.exports = {
   rejectionEmail,
   resetPasswordEmail,
   passwordChangedEmail,
-  otpVerificationEmail, // ✅ Export this
+  otpVerificationEmail,
+  sessionEmail, // ✅ Export this
 };

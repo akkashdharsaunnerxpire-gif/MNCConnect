@@ -12,6 +12,10 @@ const Booking = require("../models/Booking");
 const Payment = require("../models/Payment");
 const Mentor = require("../models/Mentor");
 const Fresher = require("../models/Fresher");
+const { sendMail, sessionEmail } = require("../utils/mailer");
+const SITE_URL = (
+  process.env.SITE_URL || "https://mncconnect.onrender.com"
+).replace(/\/$/, "");
 const Notification = require("../models/Notification");
 const TOKEN_OPEN_BEFORE_MS = 60 * 1000;
 
@@ -236,6 +240,73 @@ const emitBooking = (b) => {
   );
   if (b.mentor)
     emitToUser(b.mentor._id || b.mentor, "booking:updated", payload);
+};
+
+// Mail to the freshers (host + friends) and the employee: "join 5 minutes early"
+// kind: "booked" | "reminder".  opts.only = one fresher id, opts.skipMentor = true
+const emailBookingParties = async (b, kind = "booked", opts = {}) => {
+  try {
+    const ids = opts.only ? [String(opts.only)] : participantUserIds(b);
+    const freshers = await Fresher.find({ _id: { $in: ids } })
+      .select("name email")
+      .lean();
+
+    const mentorDoc = b.mentor
+      ? b.mentor.email
+        ? b.mentor
+        : await Mentor.findById(b.mentor._id || b.mentor)
+            .select("name email")
+            .lean()
+      : null;
+
+    const base = {
+      kind,
+      companyName: b.companyName,
+      sessionType: b.sessionType,
+      date: b.date,
+      time: b.time,
+      durationMinutes: b.durationMinutes,
+      isGroup: isGroup(b),
+    };
+
+    const jobs = [];
+    for (const f of freshers) {
+      if (!f.email) continue;
+      jobs.push(
+        sendMail({
+          to: f.email,
+          toName: f.name,
+          ...sessionEmail({
+            ...base,
+            name: f.name,
+            role: "fresher",
+            otherName: mentorDoc?.name || "",
+            meetingUrl: `${SITE_URL}/Home/meeting/${b.requestGroupId}`,
+          }),
+        }),
+      );
+    }
+    if (!opts.skipMentor && mentorDoc?.email) {
+      jobs.push(
+        sendMail({
+          to: mentorDoc.email,
+          toName: mentorDoc.name,
+          ...sessionEmail({
+            ...base,
+            name: mentorDoc.name,
+            role: "mentor",
+            otherName: isGroup(b)
+              ? `${membersOf(b).length} freshers`
+              : b.fresherName,
+            meetingUrl: `${SITE_URL}/mentor/meeting/${b.requestGroupId}`,
+          }),
+        }),
+      );
+    }
+    await Promise.allSettled(jobs);
+  } catch (e) {
+    console.error("emailBookingParties:", e.message);
+  }
 };
 
 // payments of EVERY member -> assigned to the accepting mentor
@@ -728,7 +799,6 @@ const withdrawOverlapping = async (app, mentorId, accepted) => {
 
 /* ============================ CREATE ============================ */
 
-
 exports.createRequest = async (req, res) => {
   try {
     // 1. Check whether the fresher is logged in
@@ -744,9 +814,7 @@ exports.createRequest = async (req, res) => {
     }
 
     const has = (v) =>
-      Array.isArray(v)
-        ? v.length > 0
-        : String(v ?? "").trim().length > 0;
+      Array.isArray(v) ? v.length > 0 : String(v ?? "").trim().length > 0;
 
     const photo =
       user.profilePic ||
@@ -827,21 +895,13 @@ exports.createRequest = async (req, res) => {
     }
 
     if (await paymentUsed(paymentId)) {
-      return fail(
-        res,
-        409,
-        "This payment is already used for another booking",
-      );
+      return fail(res, 409, "This payment is already used for another booking");
     }
 
     const claimed = await claimPayment(paymentId, requestGroupId);
 
     if (!claimed) {
-      return fail(
-        res,
-        409,
-        "This payment is already used for another booking",
-      );
+      return fail(res, 409, "This payment is already used for another booking");
     }
 
     // Payment without an owner cannot be refunded to a wallet.
@@ -884,18 +944,12 @@ exports.createRequest = async (req, res) => {
         maxMembers < 2 ||
         maxMembers > MAX_GROUP
       ) {
-        return reject(
-          400,
-          `Group size must be 2 to ${MAX_GROUP} people.`,
-        );
+        return reject(400, `Group size must be 2 to ${MAX_GROUP} people.`);
       }
     }
 
     if (Number(payment.amount) !== expectedPrice(minutes, mode)) {
-      return reject(
-        400,
-        "Payment amount does not match the session price.",
-      );
+      return reject(400, "Payment amount does not match the session price.");
     }
 
     const startsAt = parseSessionStart(sd.date, sd.time);
@@ -906,15 +960,10 @@ exports.createRequest = async (req, res) => {
         time: sd.time,
       });
 
-      return reject(
-        400,
-        "We could not read the date and time you selected.",
-      );
+      return reject(400, "We could not read the date and time you selected.");
     }
 
-    const secondsLeft = Math.round(
-      (startsAt.getTime() - Date.now()) / 1000,
-    );
+    const secondsLeft = Math.round((startsAt.getTime() - Date.now()) / 1000);
 
     if (startsAt.getTime() < Date.now() + PAYMENT_GRACE_MS) {
       console.warn("createRequest: slot passed while paying", {
@@ -931,9 +980,7 @@ exports.createRequest = async (req, res) => {
       );
     }
 
-    const endsAt = new Date(
-      startsAt.getTime() + minutes * 60000,
-    );
+    const endsAt = new Date(startsAt.getTime() + minutes * 60000);
 
     let preferredMentor = null;
 
@@ -951,12 +998,7 @@ exports.createRequest = async (req, res) => {
       }
 
       if (
-        await hasConflict(
-          preferredMentor._id,
-          startsAt,
-          endsAt,
-          requestGroupId,
-        )
+        await hasConflict(preferredMentor._id, startsAt, endsAt, requestGroupId)
       ) {
         return reject(
           409,
@@ -973,9 +1015,7 @@ exports.createRequest = async (req, res) => {
           : null;
 
     const fresherDoc = fresherId
-      ? await Fresher.findById(fresherId)
-          .select("name email gender")
-          .lean()
+      ? await Fresher.findById(fresherId).select("name email gender").lean()
       : null;
 
     // ---- WHO may receive this request (gender rule) ----
@@ -984,13 +1024,11 @@ exports.createRequest = async (req, res) => {
 
     const profileGender = norm(fresherDoc?.gender);
 
-    const profileKnown =
-      profileGender === "male" || profileGender === "female";
+    const profileKnown = profileGender === "male" || profileGender === "female";
 
     const pickedGender = norm(sd.gender);
 
-    const pickedKnown =
-      pickedGender === "male" || pickedGender === "female";
+    const pickedKnown = pickedGender === "male" || pickedGender === "female";
 
     let fresherGender = "";
 
@@ -1018,23 +1056,17 @@ exports.createRequest = async (req, res) => {
       }
     }
 
-    const hostName =
-      fresherDoc?.name ||
-      body.requester?.fullName ||
-      "Fresher";
+    const hostName = fresherDoc?.name || body.requester?.fullName || "Fresher";
 
     const booking = await Booking.create({
       requestGroupId,
       fresher: fresherId || null,
       fresherName: hostName,
-      fresherEmail:
-        fresherDoc?.email || body.requester?.email || "",
+      fresherEmail: fresherDoc?.email || body.requester?.email || "",
       fresherImage: String(body.requester?.image || ""),
 
       companyName: String(
-        preferredMentor?.currentCompany ||
-          body.companyName ||
-          "",
+        preferredMentor?.currentCompany || body.companyName || "",
       ).trim(),
 
       sessionType: String(sd.sessionType || "").slice(0, 60),
@@ -1051,9 +1083,7 @@ exports.createRequest = async (req, res) => {
       endsAt,
       expiresAt: expiryFor(startsAt),
       razorpayPaymentId: paymentId,
-      preferredMentor: preferredMentor
-        ? preferredMentor._id
-        : null,
+      preferredMentor: preferredMentor ? preferredMentor._id : null,
 
       // ---- group ----
       sessionMode: mode,
@@ -1103,10 +1133,7 @@ exports.createRequest = async (req, res) => {
     );
 
     if (notified.length) {
-      await Booking.updateOne(
-        { _id: booking._id },
-        { $set: { notified } },
-      );
+      await Booking.updateOne({ _id: booking._id }, { $set: { notified } });
     }
 
     const out = await Booking.findById(booking._id)
@@ -1120,11 +1147,7 @@ exports.createRequest = async (req, res) => {
     });
   } catch (error) {
     if (error?.code === 11000) {
-      return fail(
-        res,
-        409,
-        "This payment is already used for another booking",
-      );
+      return fail(res, 409, "This payment is already used for another booking");
     }
 
     console.error("createRequest error:", error);
@@ -1132,7 +1155,6 @@ exports.createRequest = async (req, res) => {
     return fail(res, 500, "Failed to create request");
   }
 };
-
 
 /* ============================ GROUP: PREVIEW + JOIN ============================ */
 
@@ -1398,6 +1420,7 @@ exports.updateRequest = async (req, res) => {
     await assignMentorToAll(accepted, mentorId);
 
     emitBooking(accepted);
+    emailBookingParties(accepted, "booked"); // <-- ADD (not awaited, never blocks)
 
     (accepted.notified || [])
       .filter((id) => String(id) !== String(mentorId))
@@ -1802,6 +1825,12 @@ const settleCompleted = async (booking, { auto = false } = {}) => {
   }
 
   emitBooking(updated);
+  // mentor already accepted -> the new friend also gets the "join 5 minutes early" mail
+  if (updated.mentor)
+    emailBookingParties(updated, "booked", {
+      only: String(req.user.id),
+      skipMentor: true,
+    });
   pushTimerOff(updated);
   return updated;
 };
@@ -2131,17 +2160,25 @@ exports.startSchedulers = (app) => {
       for (const b of overdue) await completeBooking(b.requestGroupId);
 
       // 6) reminders
+      // 6) reminders: the room is open now -> mail everyone once
       const soon = await Booking.find({
         status: "accepted",
         reminderSent: false,
         startsAt: { $lte: new Date(now.getTime() + OPEN_BEFORE_MS) },
       });
-      for (const b of soon)
-        await Booking.updateOne(
-          { _id: b._id },
+      for (const b of soon) {
+        const r = await Booking.updateOne(
+          { _id: b._id, reminderSent: false },
           { $set: { reminderSent: true } },
         );
-
+        if (r.modifiedCount) {
+          const full = await Booking.findById(b._id).populate(
+            "mentor",
+            POPULATE_MENTOR,
+          );
+          if (full) emailBookingParties(full, "reminder");
+        }
+      }
       // 7) money was taken (wallet OR Razorpay) but the booking / group join never happened -> give it back
       const orphanPaid = await Payment.find({
         status: "paid",
@@ -2270,8 +2307,6 @@ exports.livekitToken = async (req, res) => {
       requestGroupId: String(req.params.id || "").trim(),
     }).lean();
     if (!b) return fail(res, 404, "Booking not found");
-    if (b.sessionMode !== "group")
-      return fail(res, 400, "This is not a group session");
 
     const me = String(req.user.id);
     const isMentor =

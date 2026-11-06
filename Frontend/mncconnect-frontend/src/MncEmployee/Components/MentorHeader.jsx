@@ -39,9 +39,22 @@ const navItems = [
   { name: "Reviews", path: "/mentor/reviews", icon: Star },
 ];
 
-const PENDING_SYNC_MS = 20000; // re-sync the Requests badge with the server
+const PENDING_SYNC_MS = 10000; // re-sync the Requests badge with the server
 const SESSIONS_SYNC_MS = 8000; // re-sync the Sessions badge with the server
 const CLOCK_TICK_MS = 5000; // hide requests that expired meanwhile
+
+// statuses that are NOT a pending request any more
+const NOT_PENDING = [
+  "accepted",
+  "cancelled",
+  "canceled",
+  "expired",
+  "declined",
+  "rejected",
+  "missed",
+  "completed",
+  "taken",
+];
 
 // "Video Call" AND "Group Video Call"
 const isVideoCall = (r) => /video call/i.test(String(r?.type || ""));
@@ -209,19 +222,37 @@ const MentorHeader = () => {
   );
 
   /* ---------- Pending requests count ----------
-     The server list is the truth: it REPLACES the local list (so a stale
-     entry that was added from a socket event disappears). */
+     The SERVER list is the only truth. The badge is never increased from a
+     socket event any more (that left a stale "1" when the request was already
+     taken / expired). A socket event only asks the server again.
+     - rows that are not pending / already expired are dropped
+     - a group (many rows) is counted ONCE */
   const loadPending = useCallback(async () => {
     try {
       const d = await api(ENDPOINTS.mentorPending);
+      const nowTs = Date.now();
+
       const list = (d.requests || [])
         .map((raw) => ({ raw, n: normalizeSessionRequest(raw) }))
-        .filter(({ n }) => n.id && isVideoCall(n))
+        .filter(({ raw, n }) => {
+          if (!n.id || !isVideoCall(n)) return false;
+
+          const st = String(raw.status || n.status || "").toLowerCase();
+          if (st && NOT_PENDING.includes(st)) return false;
+
+          const exp = raw.expiresAt || n.expiresAt;
+          if (exp) {
+            const t = new Date(exp).getTime();
+            if (Number.isFinite(t) && t <= nowTs) return false;
+          }
+          return true;
+        })
         .map(({ raw, n }) => ({
           id: String(n.id),
           group: String(n.requestGroupId ?? ""),
           expiresAt: raw.expiresAt || n.expiresAt || null,
         }));
+
       setPending(list);
     } catch {
       /* ignore: keep the last known count */
@@ -231,28 +262,22 @@ const MentorHeader = () => {
   useEffect(() => {
     loadPending();
 
-    const onRequest = (incoming) => {
-      const r = normalizeSessionRequest(incoming);
-      if (!r.id || !isVideoCall(r)) return;
-      const id = String(r.id);
-      setPending((prev) =>
-        prev.some((p) => p.id === id)
-          ? prev
-          : [
-              ...prev,
-              {
-                id,
-                group: String(r.requestGroupId ?? ""),
-                expiresAt: incoming?.expiresAt || r.expiresAt || null,
-              },
-            ],
-      );
+    let t = null;
+    const loadSoon = () => {
+      clearTimeout(t);
+      t = setTimeout(loadPending, 400); // debounce
     };
+
+    // new / changed request -> ask the server (do NOT add it locally)
+    const onRequest = () => loadSoon();
 
     const onTaken = ({ id, requestGroupId } = {}) => {
       const key = String(id ?? requestGroupId ?? "");
-      if (!key) return;
-      setPending((prev) => prev.filter((p) => p.id !== key && p.group !== key));
+      if (key)
+        setPending((prev) =>
+          prev.filter((p) => p.id !== key && p.group !== key),
+        );
+      loadSoon();
     };
 
     const onChanged = (e) => {
@@ -261,15 +286,18 @@ const MentorHeader = () => {
         setPending((prev) =>
           prev.filter((p) => p.id !== key && p.group !== key),
         );
-      else loadPending();
+      loadSoon();
     };
 
     const onFocus = () => {
       if (document.visibilityState === "visible") loadPending();
     };
 
+    const bookingEvt = EVENTS?.booking || "booking:updated";
+
     socket.on("session-request", onRequest);
     socket.on("session-request-taken", onTaken);
+    socket.on(bookingEvt, loadSoon);
     socket.on("connect", loadPending);
     window.addEventListener(REQUESTS_CHANGED, onChanged);
     window.addEventListener("focus", onFocus);
@@ -278,9 +306,11 @@ const MentorHeader = () => {
     const poll = setInterval(loadPending, PENDING_SYNC_MS);
 
     return () => {
+      clearTimeout(t);
       clearInterval(poll);
       socket.off("session-request", onRequest);
       socket.off("session-request-taken", onTaken);
+      socket.off(bookingEvt, loadSoon);
       socket.off("connect", loadPending);
       window.removeEventListener(REQUESTS_CHANGED, onChanged);
       window.removeEventListener("focus", onFocus);
@@ -296,11 +326,15 @@ const MentorHeader = () => {
 
   const pendingCount = useMemo(
     () =>
-      pending.filter((p) => {
-        if (!p.expiresAt) return true;
-        const t = new Date(p.expiresAt).getTime();
-        return !Number.isFinite(t) || t > clock;
-      }).length,
+      new Set(
+        pending
+          .filter((p) => {
+            if (!p.expiresAt) return true;
+            const t = new Date(p.expiresAt).getTime();
+            return !Number.isFinite(t) || t > clock;
+          })
+          .map((p) => p.group || p.id), // group = ONE request
+      ).size,
     [pending, clock],
   );
 

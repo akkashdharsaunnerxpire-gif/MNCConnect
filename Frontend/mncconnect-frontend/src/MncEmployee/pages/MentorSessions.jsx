@@ -35,13 +35,16 @@ import useMentorSessions from "../../hooks/useMentorSessions";
 import { inr, api, ENDPOINTS, EVENTS } from "../../services/mentorApi";
 import { socket } from "../../utils/socket";
 import { notifySessionsChanged } from "../../utils/sessionEvents";
+import {
+  JOIN_OPEN_MS,
+  FINAL_WARNING_MS,
+  TIMER_POLL_MS,
+  hasTimerFinished,
+} from "../../utils/sessionTiming";
 import ChatPanel from "../../Commoncomponents/Chatpanel";
 import PersonDetailsModal from "../../Commoncomponents/Persondetailsmodal";
 
 const INDIA_TIMEZONE = "Asia/Kolkata";
-const JOIN_WINDOW_MINUTES = 2;
-const FINAL_WARNING_MS = 5 * 60 * 1000;
-const TIMER_POLL_MS = 3000;
 const TABS = ["Upcoming", "Awaiting Confirmation", "Completed", "Cancelled"];
 
 // Status only moves forward: Upcoming -> awaiting_confirmation -> Completed/Cancelled
@@ -246,7 +249,8 @@ const getJoinStatus = (session, nowMs) => {
       msUntilStart: 0,
     };
   }
-  const joinOpen = session.startsAt - JOIN_WINDOW_MINUTES * 60000;
+  // same window as the fresher side (shared constant)
+  const joinOpen = session.startsAt - JOIN_OPEN_MS;
   return {
     isLive: nowMs >= session.startsAt && nowMs < session.endsAt,
     isJoinWindow: nowMs >= joinOpen && nowMs < session.startsAt,
@@ -517,6 +521,10 @@ const MentorSessions = () => {
   const openChatId = useRef(null);
   const seenMessageIds = useRef(new Set());
 
+  // id -> true when the meeting timer was running at least once
+  // (same idea as the fresher My Bookings page -> both sides finish together)
+  const wasRunningRef = useRef({});
+
   // id -> last status we told the header about (avoid spamming it every poll)
   const notifiedStatusRef = useRef({});
 
@@ -557,9 +565,12 @@ const MentorSessions = () => {
     (id, status) => {
       if (!id || !status) return;
       const key = String(id);
-      setStatusOverrides((prev) =>
-        prev[key] === status ? prev : { ...prev, [key]: status },
-      );
+      setStatusOverrides((prev) => {
+        // status only moves forward
+        if ((STATUS_RANK[prev[key]] ?? -1) >= (STATUS_RANK[status] ?? 0))
+          return prev;
+        return { ...prev, [key]: status };
+      });
       notifyStatus(key, status);
     },
     [notifyStatus],
@@ -655,14 +666,24 @@ const MentorSessions = () => {
           try {
             const d = await api(ENDPOINTS.booking(id));
             if (d?.booking) {
+              const running = Boolean(d.booking.timerRunning);
+              const remaining = d.booking.remainingMs;
+
+              if (running) wasRunningRef.current[id] = true;
+
               timerResults[id] = {
-                remainingMs: d.booking.remainingMs,
-                running: Boolean(d.booking.timerRunning),
+                remainingMs: remaining,
+                running,
                 at: Date.now(),
               };
+
               const mapped = mapBookingStatus(d.booking.status);
               if (mapped) {
                 statusResults[id] = mapped;
+                changed = true;
+              } else if (hasTimerFinished(wasRunningRef.current[id], running, remaining)) {
+                // timer ran and stopped -> same moment the fresher sees it finish
+                statusResults[id] = "awaiting_confirmation";
                 changed = true;
               }
             }
@@ -724,14 +745,24 @@ const MentorSessions = () => {
       }
 
       if (typeof p.remainingMs !== "number") return;
+
+      const running = Boolean(p.running);
+      if (running) wasRunningRef.current[id] = true;
+
       setTimers((prev) => ({
         ...prev,
         [id]: {
           remainingMs: p.remainingMs,
-          running: Boolean(p.running),
+          running,
           at: Date.now(),
         },
       }));
+
+      // timer ended -> move the card right away (same as the fresher page)
+      if (!mapped && hasTimerFinished(wasRunningRef.current[id], running, p.remainingMs)) {
+        setOverride(id, "awaiting_confirmation");
+        reloadRef.current?.();
+      }
     };
     socket.on("meeting:timer", onTimer);
     socket.on("meeting:state", onTimer);
@@ -947,16 +978,19 @@ const SessionCard = ({
       ? `${fmtTime(new Date(session.startsAt))} → ${fmtTime(new Date(session.endsAt))}`
       : session.time;
 
-  // ---- LIVE MEETING TIMER (same value as inside the video call) ----
-  const timerRunning = isUpcoming && Boolean(timer?.running);
+  // ---- LIVE MEETING TIMER (same value + same rules as the fresher side) ----
+  const timerActive = isUpcoming && Boolean(timer?.running);
   const baseRemaining =
     typeof timer?.remainingMs === "number"
       ? timer.remainingMs
       : session.remainingMs;
   const remaining =
-    timerRunning && typeof baseRemaining === "number"
+    timerActive && typeof baseRemaining === "number"
       ? Math.max(0, baseRemaining - (nowMs - (timer?.at || nowMs)))
       : 0;
+  // when the clock reaches 0 the meeting is over (do not wait for the server)
+  const timerRunning =
+    timerActive && (typeof baseRemaining !== "number" || remaining > 0);
   const isFinalWarning = timerRunning && remaining <= FINAL_WARNING_MS;
 
   const isLive = base.isLive || timerRunning;
