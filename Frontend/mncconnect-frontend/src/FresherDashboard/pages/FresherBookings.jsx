@@ -452,11 +452,17 @@ const MyBookings = () => {
   useEffect(() => {
     const id = location.state?.openChatId;
     if (!id || !bookings.length) return;
+
     const b = bookings.find((x) => String(x.requestGroupId) === String(id));
+
     if (!b) return;
+
     openChat(b);
-    navigate(location.pathname, { replace: true, state: null });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    navigate(location.pathname, {
+      replace: true,
+      state: null,
+    });
   }, [bookings, location.state]);
 
   // Timer values that come with the list (if backend sends them)

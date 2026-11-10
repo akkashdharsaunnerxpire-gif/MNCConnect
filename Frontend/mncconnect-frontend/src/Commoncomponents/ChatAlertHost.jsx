@@ -1,5 +1,14 @@
-import React, { memo, useCallback, useEffect, useRef, useState } from "react";
+
+import React, {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+
 import { useLocation, useNavigate } from "react-router-dom";
+
 import {
   Avatar,
   Box,
@@ -9,12 +18,27 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
-import { X, MessageCircle } from "lucide-react";
+
+import {
+  X,
+  MessageCircle,
+  Reply,
+  Eye,
+  CheckCheck,
+} from "lucide-react";
 
 import { socket } from "../utils/socket";
 import { isChatOpen } from "../utils/chatOpenRegistry";
-import { api as fresherApi, ENDPOINTS as FRESHER_ENDPOINTS } from "../services/fresherApi";
-import { api as mentorApi, ENDPOINTS as MENTOR_ENDPOINTS } from "../services/mentorApi";
+
+import {
+  api as fresherApi,
+  ENDPOINTS as FRESHER_ENDPOINTS,
+} from "../services/fresherApi";
+
+import {
+  api as mentorApi,
+  ENDPOINTS as MENTOR_ENDPOINTS,
+} from "../services/mentorApi";
 
 // ================= CONFIG =================
 
@@ -25,13 +49,15 @@ const bare = (s) => String(s || "").split(":").pop();
 
 const initialsOf = (name = "") => {
   const parts = name.trim().split(/\s+/).filter(Boolean);
+
   if (!parts.length) return "?";
+
   return (
-    (parts[0][0] || "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")
+    (parts[0][0] || "") +
+    (parts.length > 1 ? parts[parts.length - 1][0] : "")
   ).toUpperCase();
 };
 
-// every possible place the backend may put the photo (profilePic included)
 const imageFromMessage = (m) =>
   m?.senderImage ||
   m?.senderProfilePic ||
@@ -54,20 +80,27 @@ const ChatAlertItem = memo(function ChatAlertItem({
   onClose,
   onView,
   onReply,
+  onMarkRead,
 }) {
   const [paused, setPaused] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
 
-  // new image arrived (fallback fetch) -> try again
   useEffect(() => {
     setImgFailed(false);
   }, [item.image]);
 
   useEffect(() => {
     if (paused) return undefined;
-    const timer = setTimeout(() => onClose(item.key), AUTO_HIDE_MS);
+
+    const timer = setTimeout(
+      () => onClose(item.key),
+      AUTO_HIDE_MS,
+    );
+
     return () => clearTimeout(timer);
   }, [paused, item.key, onClose]);
+
+  const openMessage = () => onView(item);
 
   return (
     <Paper
@@ -79,17 +112,22 @@ const ChatAlertItem = memo(function ChatAlertItem({
         position: "relative",
         width: "100%",
         boxSizing: "border-box",
-        p: "12px 13px 10px",
-        borderRadius: "13px",
+        p: "13px",
+        borderRadius: "15px",
         border: "1px solid #e5e7eb",
-        backgroundColor: "#ffffff",
-        boxShadow: "0 5px 22px rgba(15,23,42,0.12)",
+        backgroundColor: "#fff",
+        boxShadow: "0 8px 28px rgba(15,23,42,0.13)",
         overflow: "hidden",
         pointerEvents: "auto",
         animation: "chatAlertIn .25s ease-out both",
       }}
     >
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 0 }}>
+      <Stack
+        direction="row"
+        alignItems="center"
+        spacing={1}
+        sx={{ minWidth: 0 }}
+      >
         <Avatar
           src={!imgFailed ? item.image || undefined : undefined}
           alt={item.name}
@@ -98,8 +136,8 @@ const ChatAlertItem = memo(function ChatAlertItem({
             onError: () => setImgFailed(true),
           }}
           sx={{
-            width: 32,
-            height: 32,
+            width: 36,
+            height: 36,
             flexShrink: 0,
             bgcolor: "#e8edff",
             color: "#3659c9",
@@ -111,101 +149,161 @@ const ChatAlertItem = memo(function ChatAlertItem({
         </Avatar>
 
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Stack direction="row" alignItems="center" spacing={0.7} sx={{ minWidth: 0 }}>
-            <Typography
-              noWrap
-              sx={{ fontSize: 12.5, fontWeight: 700, color: "#171717", maxWidth: "55%" }}
-            >
-              {item.name || "New user"}
-            </Typography>
-            <Typography noWrap sx={{ fontSize: 11.5, color: "#888" }}>
-              sent you a message
-            </Typography>
-          </Stack>
+          <Typography
+            noWrap
+            sx={{
+              fontSize: 13,
+              fontWeight: 700,
+              color: "#171717",
+            }}
+          >
+            {item.name || "New user"}
+          </Typography>
+
+          <Typography
+            noWrap
+            sx={{ fontSize: 11, color: "#888" }}
+          >
+            sent you a message
+          </Typography>
         </Box>
-
-        <Button
-          size="small"
-          onClick={() => onView(item)}
-          sx={{
-            minWidth: 43,
-            height: 27,
-            px: 1,
-            borderRadius: "7px",
-            border: "1px solid #e5e7eb",
-            color: "#333",
-            fontSize: 10.5,
-            fontWeight: 600,
-            textTransform: "none",
-            "&:hover": { bgcolor: "#f3f4f6" },
-          }}
-        >
-          View
-        </Button>
-
-        <Button
-          size="small"
-          variant="contained"
-          onClick={() => onReply(item)}
-          sx={{
-            minWidth: 47,
-            height: 27,
-            px: 1,
-            borderRadius: "7px",
-            bgcolor: "#171717",
-            color: "#fff",
-            fontSize: 10.5,
-            fontWeight: 600,
-            textTransform: "none",
-            boxShadow: "none",
-            "&:hover": { bgcolor: "#333", boxShadow: "none" },
-          }}
-        >
-          Reply
-        </Button>
 
         <IconButton
           size="small"
           aria-label="Close notification"
           onClick={() => onClose(item.key)}
           sx={{
-            width: 23,
-            height: 23,
-            ml: "2px !important",
+            width: 25,
+            height: 25,
             color: "#9ca3af",
-            "&:hover": { bgcolor: "#fee2e2", color: "#dc2626" },
+            "&:hover": {
+              bgcolor: "#fee2e2",
+              color: "#dc2626",
+            },
           }}
         >
-          <X size={14} />
+          <X size={15} />
         </IconButton>
       </Stack>
 
-      <Box
+      {/* CLICK MESSAGE -> OPEN CHAT PANEL */}
+      <Button
+        fullWidth
+        onClick={openMessage}
+        aria-label={`Open message from ${item.name}`}
         sx={{
           display: "flex",
-          alignItems: "center",
-          gap: 0.8,
-          mt: 1,
-          pl: "40px",
-          pr: 0.5,
-          minWidth: 0,
+          justifyContent: "flex-start",
+          alignItems: "flex-start",
+          gap: 1,
+          mt: 1.5,
+          px: 1,
+          py: 1,
+          borderRadius: "9px",
+          backgroundColor: "#f8fafc",
+          color: "#64748b",
+          textAlign: "left",
+          textTransform: "none",
+          "&:hover": {
+            backgroundColor: "#eff6ff",
+          },
         }}
       >
-        <MessageCircle size={12} color="#94a3b8" style={{ flexShrink: 0 }} />
+        <MessageCircle
+          size={14}
+          style={{ flexShrink: 0, marginTop: 3 }}
+        />
+
         <Typography
-          noWrap
-          sx={{ fontSize: 11.5, color: "#777", lineHeight: 1.5, minWidth: 0 }}
+          sx={{
+            fontSize: 12,
+            lineHeight: 1.6,
+            color: "#475569",
+            textAlign: "left",
+            overflowWrap: "anywhere",
+            whiteSpace: "normal",
+          }}
         >
           {item.text || "You have received a new message."}
         </Typography>
-      </Box>
+      </Button>
 
+      {/* ACTION BUTTONS */}
+      <Stack
+        direction="row"
+        spacing={1}
+        sx={{ mt: 1.3 }}
+      >
+        <Button
+          fullWidth
+          size="small"
+          onClick={() => onReply(item)}
+          startIcon={<Reply size={14} />}
+          sx={{
+            height: 32,
+            borderRadius: "8px",
+            bgcolor: "#171717",
+            color: "#fff",
+            fontSize: 11,
+            fontWeight: 700,
+            textTransform: "none",
+            "&:hover": {
+              bgcolor: "#333",
+            },
+          }}
+        >
+          Reply
+        </Button>
+
+        <Button
+          fullWidth
+          size="small"
+          onClick={() => onMarkRead(item)}
+          startIcon={<CheckCheck size={14} />}
+          sx={{
+            height: 32,
+            borderRadius: "8px",
+            border: "1px solid #dbe3ef",
+            color: "#475569",
+            fontSize: 11,
+            fontWeight: 700,
+            textTransform: "none",
+            "&:hover": {
+              bgcolor: "#eff6ff",
+            },
+          }}
+        >
+          Mark as read
+        </Button>
+
+        <Button
+          size="small"
+          onClick={() => onView(item)}
+          startIcon={<Eye size={14} />}
+          sx={{
+            height: 32,
+            minWidth: 65,
+            borderRadius: "8px",
+            color: "#475569",
+            fontSize: 11,
+            fontWeight: 600,
+            textTransform: "none",
+            "&:hover": {
+              bgcolor: "#f1f5f9",
+            },
+          }}
+        >
+          View
+        </Button>
+      </Stack>
+
+      {/* AUTO HIDE PROGRESS */}
       <Box
         sx={{
           position: "absolute",
           bottom: 0,
           left: 0,
-          height: "2px",
+          height: "3px",
           width: "100%",
           bgcolor: "#eef2ff",
         }}
@@ -234,77 +332,138 @@ export default function ChatAlertHost({ role, getMyId }) {
   const [items, setItems] = useState([]);
 
   const seen = useRef(new Set());
+
   const pathRef = useRef(location.pathname);
   pathRef.current = location.pathname;
 
-  // bookingId -> { name, image }  (so we call the API only once per chat)
   const personCache = useRef(new Map());
 
+  // CLOSE ALERT
   const close = useCallback((key) => {
-    setItems((prev) => prev.filter((item) => item.key !== key));
+    setItems((prev) =>
+      prev.filter((item) => item.key !== key),
+    );
   }, []);
 
+  // OPEN CORRECT CHAT PANEL
   const openChat = useCallback(
     (item) => {
+      if (!item?.bookingId) return;
+
       close(item.key);
-      navigate(role === "mentor" ? "/mentor/sessions" : "/Home/my-bookings", {
-        state: { openChatId: item.bookingId },
+
+      const target =
+        role === "mentor"
+          ? "/mentor/sessions"
+          : "/Home/my-bookings";
+
+      navigate(target, {
+        state: {
+          openChatId: String(item.bookingId),
+          openChatAction: true,
+        },
       });
     },
     [close, navigate, role],
   );
 
-  const view = useCallback((item) => openChat(item), [openChat]);
-  const reply = useCallback((item) => openChat(item), [openChat]);
+  // REPLY -> OPEN CHAT PANEL
+  const reply = useCallback(
+    (item) => openChat(item),
+    [openChat],
+  );
 
-  // message has no photo -> get it from the booking's counterpart (profilePic)
+  // VIEW -> OPEN CHAT PANEL
+  const view = useCallback(
+    (item) => openChat(item),
+    [openChat],
+  );
+
+  // MARK READ -> OPEN CHAT PANEL
+  // ChatPanel sends the actual chat:read socket event.
+  const markRead = useCallback(
+    (item) => openChat(item),
+    [openChat],
+  );
+
+  // GET COUNTERPART PROFILE
   const fetchPerson = useCallback(
     async (bookingId) => {
       if (personCache.current.has(bookingId)) {
         return personCache.current.get(bookingId);
       }
-      const call = role === "mentor" ? mentorApi : fresherApi;
-      const eps = role === "mentor" ? MENTOR_ENDPOINTS : FRESHER_ENDPOINTS;
+
+      const call =
+        role === "mentor" ? mentorApi : fresherApi;
+
+      const eps =
+        role === "mentor"
+          ? MENTOR_ENDPOINTS
+          : FRESHER_ENDPOINTS;
 
       const promise = Promise.resolve()
-        .then(() => call(`${eps.booking(bookingId)}/counterpart`))
+        .then(() =>
+          call(`${eps.booking(bookingId)}/counterpart`),
+        )
         .then((d) => ({
           name: d?.person?.name || "",
           image: imageFromPerson(d?.person),
         }))
-        .catch(() => ({ name: "", image: "" }));
+        .catch(() => ({
+          name: "",
+          image: "",
+        }));
 
       personCache.current.set(bookingId, promise);
+
       return promise;
     },
     [role],
   );
 
+  // LISTEN FOR INCOMING MESSAGES
   useEffect(() => {
     const onMsg = (m) => {
       if (!m) return;
 
-      // Ignore my own messages
+      // IGNORE MY OWN MESSAGES
       if (role === "mentor") {
         if (m.senderRole === "mentor") return;
       } else {
         const senderId = bare(m.senderId);
         const myId = bare(getMyId?.());
-        if (senderId ? senderId === myId : m.senderRole === "fresher") return;
+
+        if (
+          senderId
+            ? senderId === myId
+            : m.senderRole === "fresher"
+        ) {
+          return;
+        }
       }
 
-      // Ignore messages inside the meeting room
-      if (/\/meeting(?:\/|$)/i.test(pathRef.current)) return;
+      // IGNORE MEETING ROOM MESSAGES
+      if (/\/meeting(?:\/|$)/i.test(pathRef.current)) {
+        return;
+      }
 
-      const ids = [m.requestGroupId, m.bookingId].filter(Boolean).map(String);
+      const ids = [
+        m.requestGroupId,
+        m.bookingId,
+      ]
+        .filter(Boolean)
+        .map(String);
+
       const bookingId = ids[0];
+
       if (!bookingId) return;
 
-      // Ignore already open chat
+      // IGNORE ALREADY OPEN CHAT
       if (ids.some(isChatOpen)) return;
 
-      // Duplicate prevention
+      // DUPLICATE PREVENTION
       const mid = String(m._id || m.id || "");
+
       if (mid) {
         if (seen.current.has(mid)) return;
         seen.current.add(mid);
@@ -313,27 +472,46 @@ export default function ChatAlertHost({ role, getMyId }) {
       const name =
         m.senderName ||
         m.sender?.name ||
-        (m.senderRole === "mentor" ? "Employee" : "Student");
+        (m.senderRole === "mentor"
+          ? "Employee"
+          : "Student");
 
       const image = imageFromMessage(m);
-      const key = mid || `${Date.now()}-${Math.random()}`;
+
+      const key =
+        mid || `${Date.now()}-${Math.random()}`;
+
+      const item = {
+        key,
+        bookingId,
+        messageId: mid,
+        name,
+        text: String(m.text || ""),
+        image,
+      };
 
       setItems((prev) =>
-        [{ key, bookingId, name, text: String(m.text || ""), image }, ...prev].slice(
-          0,
-          MAX_ALERTS,
-        ),
+        [item, ...prev].slice(0, MAX_ALERTS),
       );
 
-      // photo missing in the socket payload -> fallback fetch
+      // PROFILE PHOTO FALLBACK
       if (!image) {
         fetchPerson(bookingId).then((person) => {
           if (!person?.image) return;
-          // only use it when it is the same person (group chats have many senders)
-          if (m.senderName && person.name && person.name !== m.senderName) return;
+
+          if (
+            m.senderName &&
+            person.name &&
+            person.name !== m.senderName
+          ) {
+            return;
+          }
+
           setItems((prev) =>
             prev.map((it) =>
-              it.key === key ? { ...it, image: person.image } : it,
+              it.key === key
+                ? { ...it, image: person.image }
+                : it,
             ),
           );
         });
@@ -341,7 +519,10 @@ export default function ChatAlertHost({ role, getMyId }) {
     };
 
     socket.on("chat:message", onMsg);
-    return () => socket.off("chat:message", onMsg);
+
+    return () => {
+      socket.off("chat:message", onMsg);
+    };
   }, [role, getMyId, fetchPerson]);
 
   if (!items.length) return null;
@@ -351,15 +532,29 @@ export default function ChatAlertHost({ role, getMyId }) {
       <style>
         {`
           @keyframes chatAlertIn {
-            from { opacity: 0; transform: translateY(-8px); }
-            to { opacity: 1; transform: translateY(0); }
+            from {
+              opacity: 0;
+              transform: translateY(-8px);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
           }
+
           @keyframes chatAlertProgress {
-            from { transform: scaleX(1); }
-            to { transform: scaleX(0); }
+            from {
+              transform: scaleX(1);
+            }
+            to {
+              transform: scaleX(0);
+            }
           }
+
           @media (prefers-reduced-motion: reduce) {
-            [role="alert"] { animation: none !important; }
+            [role="alert"] {
+              animation: none !important;
+            }
           }
         `}
       </style>
@@ -370,7 +565,10 @@ export default function ChatAlertHost({ role, getMyId }) {
           top: { xs: 12, sm: 15 },
           right: { xs: 10, sm: 18 },
           zIndex: 20000,
-          width: { xs: "calc(100% - 20px)", sm: "425px" },
+          width: {
+            xs: "calc(100% - 20px)",
+            sm: "425px",
+          },
           maxWidth: "425px",
           display: "flex",
           flexDirection: "column",
@@ -385,6 +583,7 @@ export default function ChatAlertHost({ role, getMyId }) {
             onClose={close}
             onView={view}
             onReply={reply}
+            onMarkRead={markRead}
           />
         ))}
       </Box>
