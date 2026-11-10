@@ -1025,6 +1025,17 @@ const MyBookings = () => {
           role="fresher"
           group={chatFor.mode === "group"}
           myUserId={userId}
+          peerImage={chatFor.mentor?.profilePic || chatFor.mentor?.image || ""}
+          images={Object.fromEntries(
+            (chatFor.members || [])
+              .map((m) => [
+                String(m.id || m._id || m.userId || "")
+                  .split(":")
+                  .pop(),
+                m.profilePic || m.image || "",
+              ])
+              .filter(([k, img]) => k && img),
+          )}
           names={Object.fromEntries(
             (chatFor.members || [])
               .map((m) => [

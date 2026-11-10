@@ -1333,6 +1333,7 @@ const SessionCard = ({
           variant="modal"
           bookingId={chatFor.id}
           role="mentor"
+          peerImage={chatFor.avatar || ""}
           group={isGroup}
           title={isGroup ? "Group chat" : `Chat with ${chatFor.name}`}
           onClose={closeChat}

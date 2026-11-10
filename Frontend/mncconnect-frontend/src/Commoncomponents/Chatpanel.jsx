@@ -136,6 +136,21 @@ const nameFor = (m, names = {}) =>
   names[senderIdOf(m)] ||
   (m?.senderRole === "mentor" ? "Employee" : "Member");
 
+// profile photo of the sender: message payload first, then the
+// { userId: photoUrl } map (group), then the single-chat fallback
+const senderImageOf = (m, images = {}, fallback = "") =>
+  m?.senderImage ||
+  m?.senderProfilePic ||
+  m?.senderPic ||
+  m?.sender?.profilePic ||
+  m?.sender?.image ||
+  m?.sender?.avatar ||
+  m?.sender?.photo ||
+  m?.profilePic ||
+  images[senderIdOf(m)] ||
+  fallback ||
+  "";
+
 /**
  * WhatsApp style ticks
  * ✓   grey = sent
@@ -165,19 +180,72 @@ const initialsOf = (title = "") => {
   ).toUpperCase();
 };
 
+/* ---------- small round profile photo (falls back to the first letter) ---------- */
+const SenderAvatar = memo(function SenderAvatar({ image, name }) {
+  const [failed, setFailed] = useState(false);
+  const letter = (name || "?").trim().charAt(0).toUpperCase() || "?";
+
+  // a new url arrived (e.g. loaded later) -> try again
+  useEffect(() => {
+    setFailed(false);
+  }, [image]);
+
+  return (
+    <div
+      title={name || "Member"}
+      className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white bg-indigo-100 text-xs font-bold text-indigo-700 shadow-sm"
+    >
+      {image && !failed ? (
+        <img
+          src={image}
+          alt={name || "Profile"}
+          onError={() => setFailed(true)}
+          referrerPolicy="no-referrer"
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        letter
+      )}
+    </div>
+  );
+});
+
+/* ---------- header avatar (photo or initials) ---------- */
+const HeaderAvatar = memo(function HeaderAvatar({ image, title }) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [image]);
+
+  if (image && !failed) {
+    return (
+      <img
+        src={image}
+        alt={title}
+        onError={() => setFailed(true)}
+        referrerPolicy="no-referrer"
+        className="h-full w-full object-cover"
+      />
+    );
+  }
+  return initialsOf(title);
+});
+
 /* ---------- GROUP: tiny profile photo of one reader ---------- */
 const SeenAvatar = memo(function SeenAvatar({ r }) {
   const [failed, setFailed] = useState(false);
   const letter = (r.name || "?").charAt(0).toUpperCase();
+  const image = r.image || r.profilePic || "";
 
   return (
     <span
       title={`Seen by ${r.name || "Member"}`}
       className="-ml-1 flex h-[18px] w-[18px] items-center justify-center overflow-hidden rounded-full border border-white bg-indigo-100 text-[9px] font-bold text-indigo-700 first:ml-0"
     >
-      {r.image && !failed ? (
+      {image && !failed ? (
         <img
-          src={r.image}
+          src={image}
           alt={r.name}
           onError={() => setFailed(true)}
           referrerPolicy="no-referrer"
@@ -219,6 +287,7 @@ const SeenBy = memo(function SeenBy({ readers, senderId }) {
  * One chat bubble.
  *  - tap / click the bubble  -> reply to it (WhatsApp style)
  *  - tap the quoted part     -> jump to the original message
+ *  - other people's messages: profile photo on the left
  *  - GROUP: sender's name on top of other people's messages
  *  - GROUP: "seen by" photos ONLY under MY OWN messages
  */
@@ -229,6 +298,7 @@ const MessageRow = memo(function MessageRow({
   lastInGroup,
   group,
   senderLabel,
+  senderImage,
   quoteMine,
   quoteLabel,
   colorKey,
@@ -261,13 +331,21 @@ const MessageRow = memo(function MessageRow({
   return (
     <div
       data-mid={String(m._id)}
-      className={`group/row flex w-full items-center gap-1 rounded-lg transition-colors duration-500 ${
+      className={`group/row flex w-full items-start gap-1 rounded-lg transition-colors duration-500 ${
         mine ? "justify-end" : "justify-start"
       } ${firstInGroup ? "mt-3" : "mt-0.5"} ${
         highlight ? "bg-sky-300/40" : ""
       }`}
     >
       {mine && replyBtn}
+
+      {/* profile photo: shown on the first bubble of a run, spacer for the rest */}
+      {!mine &&
+        (firstInGroup ? (
+          <SenderAvatar image={senderImage} name={senderLabel || nameFor(m)} />
+        ) : (
+          <span className="h-8 w-8 shrink-0" aria-hidden="true" />
+        ))}
 
       <div
         className={`flex max-w-[80%] flex-col ${
@@ -371,6 +449,9 @@ const DayDivider = memo(function DayDivider({ label }) {
  * group={true}     -> GROUP chat: everybody can write, sender name on every
  *                     message from others, and "seen by" photos under MY messages.
  *                     myUserId is optional: the server tells the client who it is.
+ *
+ * peerImage        -> single chat: photo url of the other person
+ * images           -> group chat: { userId: photoUrl }
  */
 export default function ChatPanel({
   bookingId,
@@ -383,6 +464,8 @@ export default function ChatPanel({
   group = false,
   myUserId = "",
   names = {},
+  peerImage: peerImageProp = "",
+  images = {},
 }) {
   const peerRole = role === "mentor" ? "fresher" : "mentor";
   const peerName = title.replace(/^chat with\s+/i, "").trim() || "Contact";
@@ -498,6 +581,7 @@ export default function ChatPanel({
       setChatOpen(bookingId, false);
     };
   }, [bookingId, open]);
+
   /* ---------------- data + socket ---------------- */
   useEffect(() => {
     if (!bookingId) return undefined;
@@ -944,6 +1028,7 @@ export default function ChatPanel({
         firstInGroup,
         lastInGroup,
         senderLabel,
+        senderImage: senderImageOf(m, images, group ? "" : peerImageProp),
         colorKey: senderIdOf(m) || senderLabel,
         quoteMine,
         quoteLabel: quoteMine
@@ -956,7 +1041,7 @@ export default function ChatPanel({
     });
 
     return out;
-  }, [messages, isMine, group, names, role, selfId, peerName]);
+  }, [messages, isMine, group, names, images, peerImageProp, role, selfId, peerName]);
 
   /* ---------------- UI ---------------- */
   const statusText = !joined
@@ -967,13 +1052,21 @@ export default function ChatPanel({
         ? "Online"
         : formatLastSeen(peerLastSeen) || "Offline";
 
+  // header photo: single chat only (group has no single "other person")
+  const headerImage = group
+    ? ""
+    : peerImageProp ||
+      senderImageOf(messages.find((m) => !isMine(m) && senderImageOf(m)) || {});
+
   const body = (
     <>
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-sm font-semibold text-white">
-            {initialsOf(title)}
+          <div className="relative h-10 w-10 shrink-0">
+            <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-sm font-semibold text-white">
+              <HeaderAvatar image={headerImage} title={title} />
+            </div>
             <span
               className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white ${
                 group
@@ -1062,6 +1155,7 @@ export default function ChatPanel({
                     lastInGroup={row.lastInGroup}
                     group={group}
                     senderLabel={row.senderLabel}
+                    senderImage={row.senderImage}
                     colorKey={row.colorKey}
                     quoteMine={row.quoteMine}
                     quoteLabel={row.quoteLabel}

@@ -1,14 +1,5 @@
-
-import React, {
-  memo,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
-
+import React, { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-
 import {
   Avatar,
   Box,
@@ -18,11 +9,12 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
-
 import { X, MessageCircle } from "lucide-react";
 
 import { socket } from "../utils/socket";
 import { isChatOpen } from "../utils/chatOpenRegistry";
+import { api as fresherApi, ENDPOINTS as FRESHER_ENDPOINTS } from "../services/fresherApi";
+import { api as mentorApi, ENDPOINTS as MENTOR_ENDPOINTS } from "../services/mentorApi";
 
 // ================= CONFIG =================
 
@@ -33,14 +25,27 @@ const bare = (s) => String(s || "").split(":").pop();
 
 const initialsOf = (name = "") => {
   const parts = name.trim().split(/\s+/).filter(Boolean);
-
   if (!parts.length) return "?";
-
   return (
-    (parts[0][0] || "") +
-    (parts.length > 1 ? parts[parts.length - 1][0] : "")
+    (parts[0][0] || "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")
   ).toUpperCase();
 };
+
+// every possible place the backend may put the photo (profilePic included)
+const imageFromMessage = (m) =>
+  m?.senderImage ||
+  m?.senderProfilePic ||
+  m?.senderPic ||
+  m?.sender?.profilePic ||
+  m?.sender?.image ||
+  m?.sender?.avatar ||
+  m?.sender?.photo ||
+  m?.profilePic ||
+  m?.image ||
+  "";
+
+const imageFromPerson = (p) =>
+  p?.profilePic || p?.image || p?.avatar || p?.photo || "";
 
 // ================= NOTIFICATION ITEM =================
 
@@ -53,13 +58,14 @@ const ChatAlertItem = memo(function ChatAlertItem({
   const [paused, setPaused] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
 
+  // new image arrived (fallback fetch) -> try again
+  useEffect(() => {
+    setImgFailed(false);
+  }, [item.image]);
+
   useEffect(() => {
     if (paused) return undefined;
-
-    const timer = setTimeout(() => {
-      onClose(item.key);
-    }, AUTO_HIDE_MS);
-
+    const timer = setTimeout(() => onClose(item.key), AUTO_HIDE_MS);
     return () => clearTimeout(timer);
   }, [paused, item.key, onClose]);
 
@@ -83,14 +89,7 @@ const ChatAlertItem = memo(function ChatAlertItem({
         animation: "chatAlertIn .25s ease-out both",
       }}
     >
-      {/* Top row */}
-      <Stack
-        direction="row"
-        alignItems="center"
-        spacing={1}
-        sx={{ minWidth: 0 }}
-      >
-        {/* Profile picture or first letter */}
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 0 }}>
         <Avatar
           src={!imgFailed ? item.image || undefined : undefined}
           alt={item.name}
@@ -111,39 +110,20 @@ const ChatAlertItem = memo(function ChatAlertItem({
           {initialsOf(item.name)}
         </Avatar>
 
-        {/* Name and message label */}
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Stack
-            direction="row"
-            alignItems="center"
-            spacing={0.7}
-            sx={{ minWidth: 0 }}
-          >
+          <Stack direction="row" alignItems="center" spacing={0.7} sx={{ minWidth: 0 }}>
             <Typography
               noWrap
-              sx={{
-                fontSize: 12.5,
-                fontWeight: 700,
-                color: "#171717",
-                maxWidth: "55%",
-              }}
+              sx={{ fontSize: 12.5, fontWeight: 700, color: "#171717", maxWidth: "55%" }}
             >
               {item.name || "New user"}
             </Typography>
-
-            <Typography
-              noWrap
-              sx={{
-                fontSize: 11.5,
-                color: "#888",
-              }}
-            >
+            <Typography noWrap sx={{ fontSize: 11.5, color: "#888" }}>
               sent you a message
             </Typography>
           </Stack>
         </Box>
 
-        {/* View */}
         <Button
           size="small"
           onClick={() => onView(item)}
@@ -157,15 +137,12 @@ const ChatAlertItem = memo(function ChatAlertItem({
             fontSize: 10.5,
             fontWeight: 600,
             textTransform: "none",
-            "&:hover": {
-              bgcolor: "#f3f4f6",
-            },
+            "&:hover": { bgcolor: "#f3f4f6" },
           }}
         >
           View
         </Button>
 
-        {/* Reply */}
         <Button
           size="small"
           variant="contained"
@@ -181,16 +158,12 @@ const ChatAlertItem = memo(function ChatAlertItem({
             fontWeight: 600,
             textTransform: "none",
             boxShadow: "none",
-            "&:hover": {
-              bgcolor: "#333",
-              boxShadow: "none",
-            },
+            "&:hover": { bgcolor: "#333", boxShadow: "none" },
           }}
         >
           Reply
         </Button>
 
-        {/* Close */}
         <IconButton
           size="small"
           aria-label="Close notification"
@@ -200,17 +173,13 @@ const ChatAlertItem = memo(function ChatAlertItem({
             height: 23,
             ml: "2px !important",
             color: "#9ca3af",
-            "&:hover": {
-              bgcolor: "#fee2e2",
-              color: "#dc2626",
-            },
+            "&:hover": { bgcolor: "#fee2e2", color: "#dc2626" },
           }}
         >
           <X size={14} />
         </IconButton>
       </Stack>
 
-      {/* Message preview */}
       <Box
         sx={{
           display: "flex",
@@ -222,26 +191,15 @@ const ChatAlertItem = memo(function ChatAlertItem({
           minWidth: 0,
         }}
       >
-        <MessageCircle
-          size={12}
-          color="#94a3b8"
-          style={{ flexShrink: 0 }}
-        />
-
+        <MessageCircle size={12} color="#94a3b8" style={{ flexShrink: 0 }} />
         <Typography
           noWrap
-          sx={{
-            fontSize: 11.5,
-            color: "#777",
-            lineHeight: 1.5,
-            minWidth: 0,
-          }}
+          sx={{ fontSize: 11.5, color: "#777", lineHeight: 1.5, minWidth: 0 }}
         >
           {item.text || "You have received a new message."}
         </Typography>
       </Box>
 
-      {/* Thin auto-close progress */}
       <Box
         sx={{
           position: "absolute",
@@ -277,44 +235,51 @@ export default function ChatAlertHost({ role, getMyId }) {
 
   const seen = useRef(new Set());
   const pathRef = useRef(location.pathname);
-
   pathRef.current = location.pathname;
 
-  // Close notification
+  // bookingId -> { name, image }  (so we call the API only once per chat)
+  const personCache = useRef(new Map());
+
   const close = useCallback((key) => {
     setItems((prev) => prev.filter((item) => item.key !== key));
   }, []);
 
-  // Open chat
   const openChat = useCallback(
     (item) => {
       close(item.key);
-
-      navigate(
-        role === "mentor"
-          ? "/mentor/sessions"
-          : "/Home/my-bookings",
-        {
-          state: {
-            openChatId: item.bookingId,
-          },
-        }
-      );
+      navigate(role === "mentor" ? "/mentor/sessions" : "/Home/my-bookings", {
+        state: { openChatId: item.bookingId },
+      });
     },
-    [close, navigate, role]
+    [close, navigate, role],
   );
 
-  const view = useCallback(
-    (item) => openChat(item),
-    [openChat]
+  const view = useCallback((item) => openChat(item), [openChat]);
+  const reply = useCallback((item) => openChat(item), [openChat]);
+
+  // message has no photo -> get it from the booking's counterpart (profilePic)
+  const fetchPerson = useCallback(
+    async (bookingId) => {
+      if (personCache.current.has(bookingId)) {
+        return personCache.current.get(bookingId);
+      }
+      const call = role === "mentor" ? mentorApi : fresherApi;
+      const eps = role === "mentor" ? MENTOR_ENDPOINTS : FRESHER_ENDPOINTS;
+
+      const promise = Promise.resolve()
+        .then(() => call(`${eps.booking(bookingId)}/counterpart`))
+        .then((d) => ({
+          name: d?.person?.name || "",
+          image: imageFromPerson(d?.person),
+        }))
+        .catch(() => ({ name: "", image: "" }));
+
+      personCache.current.set(bookingId, promise);
+      return promise;
+    },
+    [role],
   );
 
-  const reply = useCallback(
-    (item) => openChat(item),
-    [openChat]
-  );
-
-  // Socket listener
   useEffect(() => {
     const onMsg = (m) => {
       if (!m) return;
@@ -325,31 +290,14 @@ export default function ChatAlertHost({ role, getMyId }) {
       } else {
         const senderId = bare(m.senderId);
         const myId = bare(getMyId?.());
-
-        if (
-          senderId
-            ? senderId === myId
-            : m.senderRole === "fresher"
-        ) {
-          return;
-        }
+        if (senderId ? senderId === myId : m.senderRole === "fresher") return;
       }
 
-      // Ignore messages inside meeting room
-      if (/\/meeting(?:\/|$)/i.test(pathRef.current)) {
-        return;
-      }
+      // Ignore messages inside the meeting room
+      if (/\/meeting(?:\/|$)/i.test(pathRef.current)) return;
 
-      // Booking identifiers
-      const ids = [
-        m.requestGroupId,
-        m.bookingId,
-      ]
-        .filter(Boolean)
-        .map(String);
-
+      const ids = [m.requestGroupId, m.bookingId].filter(Boolean).map(String);
       const bookingId = ids[0];
-
       if (!bookingId) return;
 
       // Ignore already open chat
@@ -357,46 +305,44 @@ export default function ChatAlertHost({ role, getMyId }) {
 
       // Duplicate prevention
       const mid = String(m._id || m.id || "");
-
       if (mid) {
         if (seen.current.has(mid)) return;
         seen.current.add(mid);
       }
 
-      // Sender details
       const name =
         m.senderName ||
         m.sender?.name ||
         (m.senderRole === "mentor" ? "Employee" : "Student");
 
-      const image =
-        m.sender?.image ||
-        m.senderImage ||
-        "";
+      const image = imageFromMessage(m);
+      const key = mid || `${Date.now()}-${Math.random()}`;
 
-      // Add notification
-      setItems((prev) => {
-        const newItem = {
-          key: mid || `${Date.now()}-${Math.random()}`,
-          bookingId,
-          name,
-          text: String(m.text || ""),
-          image,
-        };
+      setItems((prev) =>
+        [{ key, bookingId, name, text: String(m.text || ""), image }, ...prev].slice(
+          0,
+          MAX_ALERTS,
+        ),
+      );
 
-        return [
-          newItem,
-          ...prev,
-        ].slice(0, MAX_ALERTS);
-      });
+      // photo missing in the socket payload -> fallback fetch
+      if (!image) {
+        fetchPerson(bookingId).then((person) => {
+          if (!person?.image) return;
+          // only use it when it is the same person (group chats have many senders)
+          if (m.senderName && person.name && person.name !== m.senderName) return;
+          setItems((prev) =>
+            prev.map((it) =>
+              it.key === key ? { ...it, image: person.image } : it,
+            ),
+          );
+        });
+      }
     };
 
     socket.on("chat:message", onMsg);
-
-    return () => {
-      socket.off("chat:message", onMsg);
-    };
-  }, [role, getMyId]);
+    return () => socket.off("chat:message", onMsg);
+  }, [role, getMyId, fetchPerson]);
 
   if (!items.length) return null;
 
@@ -405,29 +351,15 @@ export default function ChatAlertHost({ role, getMyId }) {
       <style>
         {`
           @keyframes chatAlertIn {
-            from {
-              opacity: 0;
-              transform: translateY(-8px);
-            }
-            to {
-              opacity: 1;
-              transform: translateY(0);
-            }
+            from { opacity: 0; transform: translateY(-8px); }
+            to { opacity: 1; transform: translateY(0); }
           }
-
           @keyframes chatAlertProgress {
-            from {
-              transform: scaleX(1);
-            }
-            to {
-              transform: scaleX(0);
-            }
+            from { transform: scaleX(1); }
+            to { transform: scaleX(0); }
           }
-
           @media (prefers-reduced-motion: reduce) {
-            [role="alert"] {
-              animation: none !important;
-            }
+            [role="alert"] { animation: none !important; }
           }
         `}
       </style>
@@ -435,19 +367,10 @@ export default function ChatAlertHost({ role, getMyId }) {
       <Box
         sx={{
           position: "fixed",
-          top: {
-            xs: 12,
-            sm: 15,
-          },
-          right: {
-            xs: 10,
-            sm: 18,
-          },
+          top: { xs: 12, sm: 15 },
+          right: { xs: 10, sm: 18 },
           zIndex: 20000,
-          width: {
-            xs: "calc(100% - 20px)",
-            sm: "425px",
-          },
+          width: { xs: "calc(100% - 20px)", sm: "425px" },
           maxWidth: "425px",
           display: "flex",
           flexDirection: "column",
