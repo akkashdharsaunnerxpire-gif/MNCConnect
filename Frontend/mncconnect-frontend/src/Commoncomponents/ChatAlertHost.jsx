@@ -1,195 +1,474 @@
-import React, { memo, useCallback, useEffect, useRef, useState } from "react";
+
+import React, {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+
 import { useLocation, useNavigate } from "react-router-dom";
+
+import {
+  Avatar,
+  Box,
+  Button,
+  IconButton,
+  Paper,
+  Stack,
+  Typography,
+} from "@mui/material";
+
 import { X } from "lucide-react";
+
 import { socket } from "../utils/socket";
 import { isChatOpen } from "../utils/chatOpenRegistry";
 
+// ================= CONFIG =================
+
 const MAX_ALERTS = 3;
 const AUTO_HIDE_MS = 7000;
+
 const bare = (s) => String(s || "").split(":").pop();
 
 const initialsOf = (name = "") => {
   const parts = name.trim().split(/\s+/).filter(Boolean);
+
   if (!parts.length) return "?";
+
   return (
-    (parts[0][0] || "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")
+    (parts[0][0] || "") +
+    (parts.length > 1 ? parts[parts.length - 1][0] : "")
   ).toUpperCase();
 };
 
-const ChatAlertItem = memo(function ChatAlertItem({ item, onClose, onReply }) {
+// ================= SINGLE NOTIFICATION =================
+
+const ChatAlertItem = memo(function ChatAlertItem({
+  item,
+  onClose,
+  onView,
+  onReply,
+}) {
   const [paused, setPaused] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
 
   useEffect(() => {
     if (paused) return undefined;
-    const t = setTimeout(() => onClose(item.key), AUTO_HIDE_MS);
-    return () => clearTimeout(t);
+
+    const timer = setTimeout(() => {
+      onClose(item.key);
+    }, AUTO_HIDE_MS);
+
+    return () => clearTimeout(timer);
   }, [paused, item.key, onClose]);
 
   return (
-    <div
+    <Paper
+      elevation={0}
       role="alert"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
-      style={{ animation: "chatAlertIn .3s cubic-bezier(.22,1,.36,1) both" }}
-      className="pointer-events-auto relative grid grid-cols-[32px_1fr] gap-x-3 rounded-xl border border-slate-200 bg-white p-3.5 pr-9 text-slate-900 shadow-xl ring-1 ring-black/5"
+      sx={{
+        position: "relative",
+        width: "100%",
+        p: 1.8,
+        pr: 5,
+        borderRadius: "15px",
+        border: "1px solid #e5e7eb",
+        backgroundColor: "#ffffff",
+        color: "#171717",
+        boxShadow:
+          "0 4px 18px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.04)",
+        animation: "chatAlertIn .3s cubic-bezier(.22,1,.36,1) both",
+        pointerEvents: "auto",
+        overflow: "hidden",
+      }}
     >
-      <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-slate-200 bg-indigo-100 text-xs font-bold text-indigo-700">
-        {item.image && !imgFailed ? (
-          <img
-            src={item.image}
-            alt={item.name}
-            onError={() => setImgFailed(true)}
-            referrerPolicy="no-referrer"
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          initialsOf(item.name)
-        )}
-      </span>
+      {/* Close button */}
 
-      <div className="min-w-0">
-        <p className="flex items-center gap-2 text-sm font-semibold">
-          <span className="truncate">{item.name}</span>
-          <span className="truncate font-normal text-slate-500">
-            sent you a message
-          </span>
-        </p>
-        <p className="mt-0.5 line-clamp-1 text-sm text-slate-500">
-          &quot;{item.text}&quot;
-        </p>
-
-        <div className="mt-2.5 flex gap-2">
-          <button
-            type="button"
-            onClick={() => onClose(item.key)}
-            className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            Dismiss
-          </button>
-          <button
-            type="button"
-            onClick={() => onReply(item)}
-            className="rounded-md bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-700"
-          >
-            Reply
-          </button>
-        </div>
-      </div>
-
-      <button
-        type="button"
+      <IconButton
+        size="small"
+        aria-label="Close notification"
         onClick={() => onClose(item.key)}
-        aria-label="Close"
-        className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+        sx={{
+          position: "absolute",
+          right: 8,
+          top: 8,
+          width: 27,
+          height: 27,
+          color: "#9ca3af",
+          "&:hover": {
+            backgroundColor: "#f3f4f6",
+            color: "#374151",
+          },
+        }}
       >
-        <X size={14} />
-      </button>
-    </div>
+        <X size={15} />
+      </IconButton>
+
+      {/* Sender details */}
+
+      <Stack direction="row" alignItems="center" spacing={1.5}>
+        <Avatar
+          src={!imgFailed ? item.image || undefined : undefined}
+          alt={item.name}
+          imgProps={{
+            referrerPolicy: "no-referrer",
+            onError: () => setImgFailed(true),
+          }}
+          sx={{
+            width: 38,
+            height: 38,
+            flexShrink: 0,
+            bgcolor: "#e0e7ff",
+            color: "#4338ca",
+            fontSize: 13,
+            fontWeight: 700,
+            border: "1px solid #e5e7eb",
+          }}
+        >
+          {initialsOf(item.name)}
+        </Avatar>
+
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          {/* Name and message label */}
+
+          <Stack
+            direction="row"
+            alignItems="center"
+            spacing={0.7}
+            sx={{ minWidth: 0 }}
+          >
+            <Typography
+              noWrap
+              sx={{
+                fontSize: 13.5,
+                fontWeight: 700,
+                color: "#171717",
+                maxWidth: "48%",
+              }}
+            >
+              {item.name}
+            </Typography>
+
+            <Typography
+              noWrap
+              sx={{
+                fontSize: 12.5,
+                color: "#888888",
+                fontWeight: 400,
+              }}
+            >
+              sent you a message
+            </Typography>
+          </Stack>
+
+          {/* Message preview */}
+
+          <Typography
+            sx={{
+              mt: 0.55,
+              fontSize: 13,
+              color: "#777777",
+              lineHeight: 1.5,
+              display: "-webkit-box",
+              WebkitLineClamp: 1,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+              wordBreak: "break-word",
+              pr: 0.5,
+            }}
+          >
+            "{item.text}"
+          </Typography>
+        </Box>
+      </Stack>
+
+      {/* Actions */}
+
+      <Stack
+        direction="row"
+        justifyContent="flex-end"
+        spacing={1}
+        sx={{ mt: 1.5 }}
+      >
+        <Button
+          size="small"
+          variant="outlined"
+          onClick={() => onView(item)}
+          sx={{
+            minWidth: 55,
+            height: 29,
+            px: 1.5,
+            borderRadius: "8px",
+            borderColor: "#e5e7eb",
+            color: "#333333",
+            fontSize: 11.5,
+            fontWeight: 600,
+            textTransform: "none",
+            "&:hover": {
+              borderColor: "#9ca3af",
+              backgroundColor: "#f9fafb",
+            },
+          }}
+        >
+          View
+        </Button>
+
+        <Button
+          size="small"
+          variant="contained"
+          onClick={() => onReply(item)}
+          sx={{
+            minWidth: 58,
+            height: 29,
+            px: 1.5,
+            borderRadius: "8px",
+            backgroundColor: "#171717",
+            color: "#ffffff",
+            fontSize: 11.5,
+            fontWeight: 600,
+            textTransform: "none",
+            boxShadow: "none",
+            "&:hover": {
+              backgroundColor: "#333333",
+              boxShadow: "none",
+            },
+          }}
+        >
+          Reply
+        </Button>
+      </Stack>
+    </Paper>
   );
 });
 
+// ================= CHAT ALERT HOST =================
+
 /**
- * Shows an alert when a chat message arrives and that chat is NOT open.
+ * Shows a notification when a chat message arrives
+ * and the corresponding chat is not open.
+ *
  * role: "fresher" | "mentor"
- * getMyId: function returning my user id (fresher only, to ignore my own messages)
+ * getMyId: function returning current fresher user ID
  */
+
 export default function ChatAlertHost({ role, getMyId }) {
   const navigate = useNavigate();
   const location = useLocation();
+
   const [items, setItems] = useState([]);
+
   const seen = useRef(new Set());
+
   const pathRef = useRef(location.pathname);
+
   pathRef.current = location.pathname;
 
-  const close = useCallback(
-    (key) => setItems((prev) => prev.filter((i) => i.key !== key)),
-    [],
+  // ================= CLOSE =================
+
+  const close = useCallback((key) => {
+    setItems((prev) => prev.filter((item) => item.key !== key));
+  }, []);
+
+  // ================= OPEN CHAT =================
+
+  const openChat = useCallback(
+    (item) => {
+      close(item.key);
+
+      navigate(
+        role === "mentor"
+          ? "/mentor/sessions"
+          : "/Home/my-bookings",
+        {
+          state: {
+            openChatId: item.bookingId,
+          },
+        }
+      );
+    },
+    [close, navigate, role]
   );
+
+  // ================= VIEW =================
+
+  const view = useCallback(
+    (item) => {
+      openChat(item);
+    },
+    [openChat]
+  );
+
+  // ================= REPLY =================
 
   const reply = useCallback(
     (item) => {
-      close(item.key);
-      navigate(role === "mentor" ? "/mentor/sessions" : "/Home/my-bookings", {
-        state: { openChatId: item.bookingId },
-      });
+      openChat(item);
     },
-    [close, navigate, role],
+    [openChat]
   );
+
+  // ================= SOCKET MESSAGE LISTENER =================
 
   useEffect(() => {
     const onMsg = (m) => {
       if (!m) return;
 
-      // my own message -> no alert
+      // Ignore my own messages
+
       if (role === "mentor") {
         if (m.senderRole === "mentor") return;
       } else {
-        const sid = bare(m.senderId);
-        const me = String(getMyId?.() || "");
-        if (sid ? sid === me : m.senderRole === "fresher") return;
+        const senderId = bare(m.senderId);
+        const myId = bare(getMyId?.());
+
+        if (
+          senderId
+            ? senderId === myId
+            : m.senderRole === "fresher"
+        ) {
+          return;
+        }
       }
 
-      // inside the meeting room we do not want to push the user out of the call
-      if (/\/meeting\//.test(pathRef.current)) return;
+      // Do not show alerts inside meeting room
 
-      const ids = [m.requestGroupId, m.bookingId].filter(Boolean).map(String);
+      if (/\/meeting(?:\/|$)/i.test(pathRef.current)) {
+        return;
+      }
+
+      // Get booking identifiers
+
+      const ids = [
+        m.requestGroupId,
+        m.bookingId,
+      ]
+        .filter(Boolean)
+        .map(String);
+
       const bookingId = ids[0];
+
       if (!bookingId) return;
 
-      // that chat is open right now -> no alert
+      // Chat already open -> no notification
+
       if (ids.some(isChatOpen)) return;
 
+      // Prevent duplicate notifications
+
       const mid = String(m._id || m.id || "");
+
       if (mid) {
         if (seen.current.has(mid)) return;
+
         seen.current.add(mid);
       }
+
+      // Sender details
 
       const name =
         m.senderName ||
         m.sender?.name ||
-        (m.senderRole === "mentor" ? "Employee" : "Student");
+        (m.senderRole === "mentor"
+          ? "Employee"
+          : "Student");
 
-      setItems((prev) =>
-        [
-          {
-            key: mid || `${Date.now()}-${Math.random()}`,
-            bookingId,
-            name,
-            text: String(m.text || ""),
-            image: m.sender?.image || m.senderImage || "",
-          },
+      const image =
+        m.sender?.image ||
+        m.senderImage ||
+        "";
+
+      // Add notification
+
+      setItems((prev) => {
+        const newItem = {
+          key:
+            mid ||
+            `${Date.now()}-${Math.random()}`,
+
+          bookingId,
+          name,
+          text: String(m.text || ""),
+          image,
+        };
+
+        return [
+          newItem,
           ...prev,
-        ].slice(0, MAX_ALERTS),
-      );
+        ].slice(0, MAX_ALERTS);
+      });
     };
 
     socket.on("chat:message", onMsg);
-    return () => socket.off("chat:message", onMsg);
+
+    return () => {
+      socket.off("chat:message", onMsg);
+    };
   }, [role, getMyId]);
+
+  // ================= UI =================
 
   if (!items.length) return null;
 
   return (
     <>
-      <style>{`
-        @keyframes chatAlertIn {
-          from { opacity: 0; transform: translateY(-10px) scale(.97); }
-          to { opacity: 1; transform: translateY(0) scale(1); }
-        }
-        @media (prefers-reduced-motion: reduce) { [role="alert"] { animation: none !important; } }
-      `}</style>
-      <div className="pointer-events-none fixed right-4 top-4 z-[200] flex w-[calc(100%-2rem)] max-w-sm flex-col gap-2">
+      <style>
+        {`
+          @keyframes chatAlertIn {
+            from {
+              opacity: 0;
+              transform: translateY(-10px) scale(.97);
+            }
+
+            to {
+              opacity: 1;
+              transform: translateY(0) scale(1);
+            }
+          }
+
+          @media (prefers-reduced-motion: reduce) {
+            [role="alert"] {
+              animation: none !important;
+            }
+          }
+        `}
+      </style>
+
+      <Box
+        sx={{
+          position: "fixed",
+          top: {
+            xs: 12,
+            sm: 18,
+          },
+          right: {
+            xs: 12,
+            sm: 20,
+          },
+          zIndex: 20000,
+          width: {
+            xs: "calc(100% - 24px)",
+            sm: "390px",
+          },
+          maxWidth: "390px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 1.2,
+          pointerEvents: "none",
+        }}
+      >
         {items.map((item) => (
           <ChatAlertItem
             key={item.key}
             item={item}
             onClose={close}
+            onView={view}
             onReply={reply}
           />
         ))}
-      </div>
+      </Box>
     </>
   );
 }
