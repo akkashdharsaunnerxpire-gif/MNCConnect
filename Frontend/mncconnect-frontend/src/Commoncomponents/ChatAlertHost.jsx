@@ -19,7 +19,12 @@ import {
   Typography,
 } from "@mui/material";
 
-import { X } from "lucide-react";
+import {
+  X,
+  MessageCircle,
+  ArrowUpRight,
+  Sparkles,
+} from "lucide-react";
 
 import { socket } from "../utils/socket";
 import { isChatOpen } from "../utils/chatOpenRegistry";
@@ -72,174 +77,275 @@ const ChatAlertItem = memo(function ChatAlertItem({
       sx={{
         position: "relative",
         width: "100%",
-        p: 1.8,
-        pr: 5,
-        borderRadius: "15px",
-        border: "1px solid #e5e7eb",
-        backgroundColor: "#ffffff",
-        color: "#171717",
-        boxShadow:
-          "0 4px 18px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.04)",
-        animation: "chatAlertIn .3s cubic-bezier(.22,1,.36,1) both",
-        pointerEvents: "auto",
         overflow: "hidden",
+        borderRadius: "20px",
+        border: "1px solid rgba(148,163,184,0.22)",
+        background:
+          "linear-gradient(145deg, #ffffff 0%, #f8faff 65%, #f0f5ff 100%)",
+        color: "#0f172a",
+        boxShadow:
+          "0 20px 55px rgba(15,23,42,0.13), 0 4px 14px rgba(15,23,42,0.05)",
+        animation: "chatAlertIn .42s cubic-bezier(.16,1,.3,1) both",
+        pointerEvents: "auto",
+        "&::before": {
+          content: '""',
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100%",
+          height: "3px",
+          background:
+            "linear-gradient(90deg, #2563eb, #6366f1, #a855f7)",
+        },
       }}
     >
-      {/* Close button */}
-
-      <IconButton
-        size="small"
-        aria-label="Close notification"
-        onClick={() => onClose(item.key)}
-        sx={{
-          position: "absolute",
-          right: 8,
-          top: 8,
-          width: 27,
-          height: 27,
-          color: "#9ca3af",
-          "&:hover": {
-            backgroundColor: "#f3f4f6",
-            color: "#374151",
-          },
-        }}
-      >
-        <X size={15} />
-      </IconButton>
-
-      {/* Sender details */}
-
-      <Stack direction="row" alignItems="center" spacing={1.5}>
-        <Avatar
-          src={!imgFailed ? item.image || undefined : undefined}
-          alt={item.name}
-          imgProps={{
-            referrerPolicy: "no-referrer",
-            onError: () => setImgFailed(true),
-          }}
-          sx={{
-            width: 38,
-            height: 38,
-            flexShrink: 0,
-            bgcolor: "#e0e7ff",
-            color: "#4338ca",
-            fontSize: 13,
-            fontWeight: 700,
-            border: "1px solid #e5e7eb",
-          }}
+      {/* Header */}
+      <Box sx={{ px: 2.2, pt: 2, pb: 1.5 }}>
+        <Stack
+          direction="row"
+          alignItems="center"
+          justifyContent="space-between"
+          sx={{ mb: 1.8 }}
         >
-          {initialsOf(item.name)}
-        </Avatar>
-
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          {/* Name and message label */}
-
-          <Stack
-            direction="row"
-            alignItems="center"
-            spacing={0.7}
-            sx={{ minWidth: 0 }}
-          >
-            <Typography
-              noWrap
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <Box
               sx={{
-                fontSize: 13.5,
-                fontWeight: 700,
-                color: "#171717",
-                maxWidth: "48%",
+                width: 30,
+                height: 30,
+                borderRadius: "10px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#2563eb",
+                background: "#eaf1ff",
               }}
             >
-              {item.name}
-            </Typography>
+              <MessageCircle size={16} />
+            </Box>
 
             <Typography
-              noWrap
               sx={{
-                fontSize: 12.5,
-                color: "#888888",
-                fontWeight: 400,
+                fontSize: 11,
+                fontWeight: 800,
+                letterSpacing: "1.1px",
+                color: "#64748b",
+                textTransform: "uppercase",
               }}
             >
-              sent you a message
+              New message
             </Typography>
+
+            <Box
+              sx={{
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                bgcolor: "#22c55e",
+                boxShadow: "0 0 0 3px rgba(34,197,94,0.12)",
+              }}
+            />
           </Stack>
 
-          {/* Message preview */}
-
-          <Typography
+          <IconButton
+            size="small"
+            aria-label="Close notification"
+            onClick={() => onClose(item.key)}
             sx={{
-              mt: 0.55,
-              fontSize: 13,
-              color: "#777777",
-              lineHeight: 1.5,
-              display: "-webkit-box",
-              WebkitLineClamp: 1,
-              WebkitBoxOrient: "vertical",
-              overflow: "hidden",
-              wordBreak: "break-word",
-              pr: 0.5,
+              width: 29,
+              height: 29,
+              color: "#94a3b8",
+              borderRadius: "9px",
+              "&:hover": {
+                bgcolor: "#fee2e2",
+                color: "#dc2626",
+              },
             }}
           >
-            "{item.text}"
-          </Typography>
+            <X size={16} />
+          </IconButton>
+        </Stack>
+
+        {/* Sender */}
+        <Stack direction="row" alignItems="center" spacing={1.5}>
+          <Box sx={{ position: "relative", flexShrink: 0 }}>
+            <Avatar
+              src={!imgFailed ? item.image || undefined : undefined}
+              alt={item.name}
+              imgProps={{
+                referrerPolicy: "no-referrer",
+                onError: () => setImgFailed(true),
+              }}
+              sx={{
+                width: 48,
+                height: 48,
+                bgcolor: "#e0e7ff",
+                color: "#4338ca",
+                fontSize: 15,
+                fontWeight: 800,
+                border: "2px solid white",
+                boxShadow: "0 0 0 2px #dbeafe",
+              }}
+            >
+              {initialsOf(item.name)}
+            </Avatar>
+
+            <Box
+              sx={{
+                position: "absolute",
+                right: 0,
+                bottom: 0,
+                width: 12,
+                height: 12,
+                borderRadius: "50%",
+                bgcolor: "#22c55e",
+                border: "2px solid white",
+              }}
+            />
+          </Box>
+
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography
+              noWrap
+              sx={{
+                fontSize: 14,
+                fontWeight: 800,
+                color: "#172033",
+                letterSpacing: "-0.2px",
+              }}
+            >
+              {item.name || "New user"}
+            </Typography>
+
+            <Typography
+              sx={{
+                mt: 0.35,
+                fontSize: 11.5,
+                color: "#64748b",
+                fontWeight: 500,
+              }}
+            >
+              Sent you a message
+            </Typography>
+          </Box>
+
+          <Box
+            sx={{
+              px: 1,
+              py: 0.5,
+              borderRadius: "8px",
+              bgcolor: "#eff6ff",
+              color: "#2563eb",
+              fontSize: 9,
+              fontWeight: 800,
+              letterSpacing: "0.5px",
+              whiteSpace: "nowrap",
+            }}
+          >
+            CHAT
+          </Box>
+        </Stack>
+
+        {/* Message preview */}
+        <Box
+          sx={{
+            mt: 2,
+            p: 1.5,
+            borderRadius: "13px",
+            background: "rgba(241,245,249,0.85)",
+            border: "1px solid rgba(226,232,240,0.8)",
+          }}
+        >
+          <Stack direction="row" spacing={1} alignItems="flex-start">
+            <Box sx={{ color: "#64748b", mt: 0.1 }}>
+              <MessageCircle size={14} />
+            </Box>
+
+            <Typography
+              sx={{
+                fontSize: 12.5,
+                lineHeight: 1.65,
+                color: "#475569",
+                fontWeight: 500,
+                display: "-webkit-box",
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+                wordBreak: "break-word",
+              }}
+            >
+              {item.text || "You have received a new message."}
+            </Typography>
+          </Stack>
         </Box>
-      </Stack>
 
-      {/* Actions */}
+        {/* Actions */}
+        <Stack direction="row" spacing={1} sx={{ mt: 1.8 }}>
+          <Button
+            fullWidth
+            variant="outlined"
+            onClick={() => onView(item)}
+            endIcon={<ArrowUpRight size={14} />}
+            sx={{
+              height: 38,
+              borderRadius: "11px",
+              borderColor: "#dbe3ef",
+              color: "#334155",
+              fontSize: 11.5,
+              fontWeight: 700,
+              textTransform: "none",
+              "&:hover": {
+                borderColor: "#93c5fd",
+                bgcolor: "#eff6ff",
+              },
+            }}
+          >
+            View chat
+          </Button>
 
-      <Stack
-        direction="row"
-        justifyContent="flex-end"
-        spacing={1}
-        sx={{ mt: 1.5 }}
+          <Button
+            fullWidth
+            variant="contained"
+            onClick={() => onReply(item)}
+            startIcon={<MessageCircle size={14} />}
+            sx={{
+              height: 38,
+              borderRadius: "11px",
+              bgcolor: "#2563eb",
+              color: "#fff",
+              fontSize: 11.5,
+              fontWeight: 800,
+              textTransform: "none",
+              boxShadow: "0 5px 12px rgba(37,99,235,0.2)",
+              "&:hover": {
+                bgcolor: "#1d4ed8",
+                boxShadow: "0 7px 16px rgba(37,99,235,0.25)",
+              },
+            }}
+          >
+            Reply
+          </Button>
+        </Stack>
+      </Box>
+
+      {/* Auto-dismiss progress */}
+      <Box
+        sx={{
+          width: "100%",
+          height: 3,
+          bgcolor: "#e2e8f0",
+        }}
       >
-        <Button
-          size="small"
-          variant="outlined"
-          onClick={() => onView(item)}
+        <Box
           sx={{
-            minWidth: 55,
-            height: 29,
-            px: 1.5,
-            borderRadius: "8px",
-            borderColor: "#e5e7eb",
-            color: "#333333",
-            fontSize: 11.5,
-            fontWeight: 600,
-            textTransform: "none",
-            "&:hover": {
-              borderColor: "#9ca3af",
-              backgroundColor: "#f9fafb",
-            },
+            height: "100%",
+            width: "100%",
+            transformOrigin: "left",
+            background: "linear-gradient(90deg, #2563eb, #818cf8)",
+            animation: `chatAlertProgress ${AUTO_HIDE_MS}ms linear forwards`,
+            animationPlayState: paused ? "paused" : "running",
           }}
-        >
-          View
-        </Button>
-
-        <Button
-          size="small"
-          variant="contained"
-          onClick={() => onReply(item)}
-          sx={{
-            minWidth: 58,
-            height: 29,
-            px: 1.5,
-            borderRadius: "8px",
-            backgroundColor: "#171717",
-            color: "#ffffff",
-            fontSize: 11.5,
-            fontWeight: 600,
-            textTransform: "none",
-            boxShadow: "none",
-            "&:hover": {
-              backgroundColor: "#333333",
-              boxShadow: "none",
-            },
-          }}
-        >
-          Reply
-        </Button>
-      </Stack>
+        />
+      </Box>
     </Paper>
   );
 });
@@ -247,8 +353,8 @@ const ChatAlertItem = memo(function ChatAlertItem({
 // ================= CHAT ALERT HOST =================
 
 /**
- * Shows a notification when a chat message arrives
- * and the corresponding chat is not open.
+ * Displays chat notifications when a message arrives
+ * and the corresponding chat is not already open.
  *
  * role: "fresher" | "mentor"
  * getMyId: function returning current fresher user ID
@@ -261,7 +367,6 @@ export default function ChatAlertHost({ role, getMyId }) {
   const [items, setItems] = useState([]);
 
   const seen = useRef(new Set());
-
   const pathRef = useRef(location.pathname);
 
   pathRef.current = location.pathname;
@@ -317,7 +422,6 @@ export default function ChatAlertHost({ role, getMyId }) {
       if (!m) return;
 
       // Ignore my own messages
-
       if (role === "mentor") {
         if (m.senderRole === "mentor") return;
       } else {
@@ -334,13 +438,11 @@ export default function ChatAlertHost({ role, getMyId }) {
       }
 
       // Do not show alerts inside meeting room
-
       if (/\/meeting(?:\/|$)/i.test(pathRef.current)) {
         return;
       }
 
       // Get booking identifiers
-
       const ids = [
         m.requestGroupId,
         m.bookingId,
@@ -353,27 +455,21 @@ export default function ChatAlertHost({ role, getMyId }) {
       if (!bookingId) return;
 
       // Chat already open -> no notification
-
       if (ids.some(isChatOpen)) return;
 
       // Prevent duplicate notifications
-
       const mid = String(m._id || m.id || "");
 
       if (mid) {
         if (seen.current.has(mid)) return;
-
         seen.current.add(mid);
       }
 
       // Sender details
-
       const name =
         m.senderName ||
         m.sender?.name ||
-        (m.senderRole === "mentor"
-          ? "Employee"
-          : "Student");
+        (m.senderRole === "mentor" ? "Employee" : "Student");
 
       const image =
         m.sender?.image ||
@@ -381,13 +477,11 @@ export default function ChatAlertHost({ role, getMyId }) {
         "";
 
       // Add notification
-
       setItems((prev) => {
         const newItem = {
           key:
             mid ||
             `${Date.now()}-${Math.random()}`,
-
           bookingId,
           name,
           text: String(m.text || ""),
@@ -419,12 +513,20 @@ export default function ChatAlertHost({ role, getMyId }) {
           @keyframes chatAlertIn {
             from {
               opacity: 0;
-              transform: translateY(-10px) scale(.97);
+              transform: translateY(-18px) scale(.97);
             }
-
             to {
               opacity: 1;
               transform: translateY(0) scale(1);
+            }
+          }
+
+          @keyframes chatAlertProgress {
+            from {
+              transform: scaleX(1);
+            }
+            to {
+              transform: scaleX(0);
             }
           }
 
@@ -441,11 +543,11 @@ export default function ChatAlertHost({ role, getMyId }) {
           position: "fixed",
           top: {
             xs: 12,
-            sm: 18,
+            sm: 20,
           },
           right: {
             xs: 12,
-            sm: 20,
+            sm: 22,
           },
           zIndex: 20000,
           width: {
@@ -455,7 +557,7 @@ export default function ChatAlertHost({ role, getMyId }) {
           maxWidth: "390px",
           display: "flex",
           flexDirection: "column",
-          gap: 1.2,
+          gap: 1.5,
           pointerEvents: "none",
         }}
       >

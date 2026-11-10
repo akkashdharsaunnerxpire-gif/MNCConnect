@@ -965,6 +965,8 @@ const SessionCard = ({
   onJoin,
   onChatOpen,
   onChatClose,
+  autoOpen = false,
+  onAutoOpened,
 }) => {
   const [chatFor, setChatFor] = useState(null);
   // fresher details modal
@@ -983,7 +985,6 @@ const SessionCard = ({
     if (!autoOpen) return;
     openChat(session);
     onAutoOpened?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpen]);
 
   const isUpcoming = session.status === "Upcoming";
