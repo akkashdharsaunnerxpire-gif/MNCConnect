@@ -334,6 +334,13 @@ const settleGatewayPayment = async ({
       order,
       rzPayment,
     });
+    if (!check.ok) {
+      await rejectMismatch(payment, rzPayment, check.reason);
+      return { ok: false, rejected: true, reason: check.reason };
+    }
+    convenienceFee = check.convenienceFee;
+    checkoutAmount = check.checkoutAmount;
+    amountVerified = true;
   }
 
   let gatewayFee = 0;

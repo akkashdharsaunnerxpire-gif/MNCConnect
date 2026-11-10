@@ -34,12 +34,15 @@ import { COUNTRY_CODES } from "../../data/countryCodes";
 // must include /api  (backend mounts auth at /api/auth)
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
-const INTRO_MS = 1300;
+// Intro (same MNC zoom as the mentor page). Total length in ms.
+const INTRO_MS = 2400;
+// The form card starts its entrance a little before the intro ends.
+const CARD_DELAY_MS = 1700;
 
-// Intro plays once per page load. Kept in memory only
-// (no localStorage / sessionStorage), so it resets on a full refresh.
-let introSeen = false;
-const shouldShowIntro = () => !introSeen;
+// Intro plays EVERY time the user enters this page (each mount).
+// It is also rendered on the very first paint, so there is no flash of the
+// form before the intro. It only animates transform + opacity = no lag.
+const shouldShowIntro = () => true;
 
 const initialForm = {
   name: "",
@@ -57,6 +60,70 @@ const GENDERS = [
   { value: "female", label: "Female" },
 ];
 
+// ============================================================================
+// MNC INTRO LOADER
+// Lag-free: ONLY transform + opacity are animated (GPU compositor).
+// No blur / drop-shadow filters, no huge scale (the old scale(18) was the lag).
+// ============================================================================
+function McIntro() {
+  return (
+    <div
+      className="mnc-intro pointer-events-none fixed inset-0 z-[10000] overflow-hidden"
+      aria-hidden="true"
+    >
+      {/* white curtain */}
+      <div
+        className="absolute inset-0 bg-white"
+        style={{
+          animation: `mncCurtain ${INTRO_MS}ms cubic-bezier(.77,0,.18,1) forwards`,
+          willChange: "opacity",
+        }}
+      />
+
+      {/* MNC zoom */}
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div
+          className="relative overflow-hidden"
+          style={{
+            animation: `mncZoom ${INTRO_MS}ms cubic-bezier(.77,0,.18,1) forwards`,
+            willChange: "transform, opacity",
+            transformOrigin: "center center",
+            backfaceVisibility: "hidden",
+            WebkitBackfaceVisibility: "hidden",
+          }}
+        >
+          <div className="bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 bg-clip-text text-[clamp(30px,10vw,120px)] font-black leading-none tracking-[-0.12em] text-transparent">
+            MNC
+          </div>
+
+          {/* sheen sweep (transform only) */}
+          <div
+            className="absolute inset-0 bg-gradient-to-r from-transparent via-white/80 to-transparent"
+            style={{
+              transform: "translateX(-120%)",
+              animation: "mncSheen 1.1s ease-out .3s forwards",
+              willChange: "transform, opacity",
+            }}
+          />
+        </div>
+      </div>
+
+      {/* 3 dots */}
+      <div
+        className="absolute left-1/2 top-[62%] flex items-center gap-2"
+        style={{
+          animation: "mncDots 1.8s ease-out forwards",
+          willChange: "transform, opacity",
+        }}
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-blue-600" />
+        <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+        <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+      </div>
+    </div>
+  );
+}
+
 export default function LoginRegister() {
   const navigate = useNavigate();
   const { start, stop } = useContext(LoadingContext);
@@ -70,6 +137,8 @@ export default function LoginRegister() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showIntro, setShowIntro] = useState(shouldShowIntro);
+  // remembered once, so the card only waits for the intro on the first render
+  const cardDelayRef = useRef(showIntro ? CARD_DELAY_MS : 0);
 
   const [showOtpBox, setShowOtpBox] = useState(false);
   const [otp, setOtp] = useState("");
@@ -123,9 +192,9 @@ export default function LoginRegister() {
     };
   }, [updateFade]);
 
+  // intro: remove it from the DOM when finished (so nothing keeps running)
   useEffect(() => {
     if (!showIntro) return undefined;
-    introSeen = true;
     const timer = window.setTimeout(() => setShowIntro(false), INTRO_MS);
     return () => window.clearTimeout(timer);
   }, [showIntro]);
@@ -415,370 +484,373 @@ export default function LoginRegister() {
         <div
           className="relative mx-auto w-full max-w-[490px] lg:h-full lg:min-h-0 lg:max-w-[522px]"
           style={{
-            animation: "mncCardEnter .45s cubic-bezier(.2,.8,.2,1) both",
+            animation: `mncCardEnter .45s cubic-bezier(.2,.8,.2,1) ${cardDelayRef.current}ms both`,
           }}
         >
-        <section
-          ref={scrollRef}
-          onScroll={updateFade}
-          className="mnc-scroll lg:h-full lg:overflow-y-auto lg:overscroll-contain lg:p-4"
-        >
-          <div className="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-[0_4px_24px_-8px_rgba(15,23,42,0.10)] sm:p-8">
-            <div className="hidden lg:block">
-              <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-cyan-700">
-                Fresher portal
-              </p>
-              <h2 className="mt-2 text-3xl font-black tracking-tight">
-                {mode === "login" ? "Welcome back" : "Create your account"}
-              </h2>
-              <p className="mt-2 text-sm leading-6 text-slate-600">
-                {mode === "login"
-                  ? "Pick up where your career journey left off."
-                  : "Join the MNCConnect fresher community."}
-              </p>
-            </div>
-
-            <div className="mt-6 grid grid-cols-2 rounded-2xl border border-slate-200 bg-slate-100 p-1.5">
-              <button
-                type="button"
-                onClick={() => switchMode("login")}
-                className={`rounded-xl px-3 py-3 text-sm font-bold transition ${mode === "login" ? "bg-gradient-to-r from-blue-500 to-cyan-400 text-white shadow-lg" : "text-slate-600 hover:text-slate-900"}`}
-              >
-                Login
-              </button>
-              <button
-                type="button"
-                onClick={() => switchMode("register")}
-                className={`rounded-xl px-3 py-3 text-sm font-bold transition ${mode === "register" ? "bg-gradient-to-r from-blue-500 to-cyan-400 text-white shadow-lg" : "text-slate-600 hover:text-slate-900"}`}
-              >
-                Create account
-              </button>
-            </div>
-
-            {error && (
-              <div
-                role="alert"
-                className="mt-5 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
-              >
-                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                {error}
+          <section
+            ref={scrollRef}
+            onScroll={updateFade}
+            className="mnc-scroll lg:h-full lg:overflow-y-auto lg:overscroll-contain lg:p-4"
+          >
+            <div className="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-[0_4px_24px_-8px_rgba(15,23,42,0.10)] sm:p-8">
+              <div className="hidden lg:block">
+                <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-cyan-700">
+                  Fresher portal
+                </p>
+                <h2 className="mt-2 text-3xl font-black tracking-tight">
+                  {mode === "login" ? "Welcome back" : "Create your account"}
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  {mode === "login"
+                    ? "Pick up where your career journey left off."
+                    : "Join the MNCConnect fresher community."}
+                </p>
               </div>
-            )}
-            {success && (
-              <div className="mt-5 flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                {success}
-              </div>
-            )}
 
-            <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-              {isRegister && (
-                <label className="block">
-                  <span className="mb-2 block text-xs font-semibold text-slate-700">
-                    Full name
-                  </span>
-                  <div className="relative">
-                    <UserRound className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                    <input
-                      required
-                      value={form.name}
-                      onChange={(e) => updateForm("name", e.target.value)}
-                      placeholder="Enter your full name"
-                      className={inputClass}
-                    />
-                  </div>
-                </label>
+              <div className="mt-6 grid grid-cols-2 rounded-2xl border border-slate-200 bg-slate-100 p-1.5">
+                <button
+                  type="button"
+                  onClick={() => switchMode("login")}
+                  className={`rounded-xl px-3 py-3 text-sm font-bold transition ${mode === "login" ? "bg-gradient-to-r from-blue-500 to-cyan-400 text-white shadow-lg" : "text-slate-600 hover:text-slate-900"}`}
+                >
+                  Login
+                </button>
+                <button
+                  type="button"
+                  onClick={() => switchMode("register")}
+                  className={`rounded-xl px-3 py-3 text-sm font-bold transition ${mode === "register" ? "bg-gradient-to-r from-blue-500 to-cyan-400 text-white shadow-lg" : "text-slate-600 hover:text-slate-900"}`}
+                >
+                  Create account
+                </button>
+              </div>
+
+              {error && (
+                <div
+                  role="alert"
+                  className="mt-5 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+                >
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  {error}
+                </div>
               )}
-
-              {/* GENDER (register only) - decides which employee gets your single meeting */}
-              {isRegister && (
-                <div>
-                  <span className="mb-2 block text-xs font-semibold text-slate-700">
-                    Gender
-                  </span>
-                  <div className="grid grid-cols-2 gap-3">
-                    {GENDERS.map((g) => {
-                      const active = form.gender === g.value;
-                      return (
-                        <button
-                          key={g.value}
-                          type="button"
-                          onClick={() => updateForm("gender", g.value)}
-                          aria-pressed={active}
-                          className={`flex items-center justify-center gap-2 rounded-2xl border py-3.5 text-sm font-semibold transition ${
-                            active
-                              ? "border-cyan-500 bg-cyan-50 text-cyan-700 ring-4 ring-cyan-500/10"
-                              : "border-slate-200 bg-white text-slate-600 hover:border-cyan-300"
-                          }`}
-                        >
-                          {active && <Check className="h-4 w-4" />}
-                          {g.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="mt-1.5 text-xs text-slate-400">
-                    Single meetings are matched with an employee of the same
-                    gender. You cannot change this later.
-                  </p>
+              {success && (
+                <div className="mt-5 flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                  {success}
                 </div>
               )}
 
-              <label className="block">
-                <span className="mb-2 block text-xs font-semibold text-slate-700">
-                  Email address
-                </span>
-                <div className="relative flex items-center">
-                  <Mail className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                  <input
-                    required
-                    type="email"
-                    value={form.email}
-                    onChange={(e) => {
-                      updateForm("email", e.target.value);
-                      setIsEmailVerified(false);
-                    }}
-                    placeholder="you@example.com"
-                    className={`${inputClass} ${isRegister ? "pr-24" : ""}`}
-                    disabled={isRegister && isEmailVerified}
-                  />
+              <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+                {isRegister && (
+                  <label className="block">
+                    <span className="mb-2 block text-xs font-semibold text-slate-700">
+                      Full name
+                    </span>
+                    <div className="relative">
+                      <UserRound className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                      <input
+                        required
+                        value={form.name}
+                        onChange={(e) => updateForm("name", e.target.value)}
+                        placeholder="Enter your full name"
+                        className={inputClass}
+                      />
+                    </div>
+                  </label>
+                )}
 
-                  {/* Verify button: REGISTER only */}
-                  {isRegister && (
-                    <div className="absolute right-2 top-1/2 -translate-y-1/2">
-                      {isEmailVerified ? (
-                        <span className="flex h-8 items-center justify-center gap-1 rounded-lg bg-emerald-50 px-2 text-xs font-bold text-emerald-600">
-                          <Check size={14} /> Verified
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={handleSendOtp}
-                          disabled={sendingOtp}
-                          className="rounded-lg bg-cyan-50 px-3 py-1.5 text-xs font-bold text-cyan-700 transition hover:bg-cyan-100 disabled:opacity-50"
-                        >
-                          {sendingOtp ? "Sending..." : "Verify"}
-                        </button>
-                      )}
+                {/* GENDER (register only) - decides which employee gets your single meeting */}
+                {isRegister && (
+                  <div>
+                    <span className="mb-2 block text-xs font-semibold text-slate-700">
+                      Gender
+                    </span>
+                    <div className="grid grid-cols-2 gap-3">
+                      {GENDERS.map((g) => {
+                        const active = form.gender === g.value;
+                        return (
+                          <button
+                            key={g.value}
+                            type="button"
+                            onClick={() => updateForm("gender", g.value)}
+                            aria-pressed={active}
+                            className={`flex items-center justify-center gap-2 rounded-2xl border py-3.5 text-sm font-semibold transition ${
+                              active
+                                ? "border-cyan-500 bg-cyan-50 text-cyan-700 ring-4 ring-cyan-500/10"
+                                : "border-slate-200 bg-white text-slate-600 hover:border-cyan-300"
+                            }`}
+                          >
+                            {active && <Check className="h-4 w-4" />}
+                            {g.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-1.5 text-xs text-slate-400">
+                      Single meetings are matched with an employee of the same
+                      gender. You cannot change this later.
+                    </p>
+                  </div>
+                )}
+
+                <label className="block">
+                  <span className="mb-2 block text-xs font-semibold text-slate-700">
+                    Email address
+                  </span>
+                  <div className="relative flex items-center">
+                    <Mail className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                    <input
+                      required
+                      type="email"
+                      value={form.email}
+                      onChange={(e) => {
+                        updateForm("email", e.target.value);
+                        setIsEmailVerified(false);
+                      }}
+                      placeholder="you@example.com"
+                      className={`${inputClass} ${isRegister ? "pr-24" : ""}`}
+                      disabled={isRegister && isEmailVerified}
+                    />
+
+                    {/* Verify button: REGISTER only */}
+                    {isRegister && (
+                      <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                        {isEmailVerified ? (
+                          <span className="flex h-8 items-center justify-center gap-1 rounded-lg bg-emerald-50 px-2 text-xs font-bold text-emerald-600">
+                            <Check size={14} /> Verified
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handleSendOtp}
+                            disabled={sendingOtp}
+                            className="rounded-lg bg-cyan-50 px-3 py-1.5 text-xs font-bold text-cyan-700 transition hover:bg-cyan-100 disabled:opacity-50"
+                          >
+                            {sendingOtp ? "Sending..." : "Verify"}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {isRegister && showOtpBox && !isEmailVerified && (
+                    <div className="mt-2 flex items-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 p-2">
+                      <KeyRound size={16} className="ml-1 text-cyan-600" />
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={6}
+                        value={otp}
+                        onChange={(e) => {
+                          setOtp(e.target.value.replace(/\D/g, "").slice(0, 6));
+                          setOtpError("");
+                        }}
+                        placeholder="Enter 6-digit OTP"
+                        className="flex-1 bg-transparent text-sm font-medium outline-none placeholder:text-cyan-600/50"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleVerifyOtp}
+                        disabled={verifyingOtp || otp.length !== 6}
+                        className="rounded-lg bg-cyan-600 px-4 py-1.5 text-xs font-bold text-white transition hover:bg-cyan-700 disabled:opacity-50"
+                      >
+                        {verifyingOtp ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          "Verify"
+                        )}
+                      </button>
                     </div>
                   )}
-                </div>
-
-                {isRegister && showOtpBox && !isEmailVerified && (
-                  <div className="mt-2 flex items-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 p-2">
-                    <KeyRound size={16} className="ml-1 text-cyan-600" />
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={6}
-                      value={otp}
-                      onChange={(e) => {
-                        setOtp(e.target.value.replace(/\D/g, "").slice(0, 6));
-                        setOtpError("");
-                      }}
-                      placeholder="Enter 6-digit OTP"
-                      className="flex-1 bg-transparent text-sm font-medium outline-none placeholder:text-cyan-600/50"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleVerifyOtp}
-                      disabled={verifyingOtp || otp.length !== 6}
-                      className="rounded-lg bg-cyan-600 px-4 py-1.5 text-xs font-bold text-white transition hover:bg-cyan-700 disabled:opacity-50"
-                    >
-                      {verifyingOtp ? (
-                        <Loader2 size={14} className="animate-spin" />
-                      ) : (
-                        "Verify"
-                      )}
-                    </button>
-                  </div>
-                )}
-                {isRegister && otpError && (
-                  <p className="mt-1 text-xs text-red-600">{otpError}</p>
-                )}
-              </label>
-
-              {isRegister && (
-                <label className="block">
-                  <span className="mb-2 block text-xs font-semibold text-slate-700">
-                    Mobile number
-                  </span>
-                  <div className="flex gap-2">
-                    <div className="relative">
-                      <select
-                        value={form.countryCode}
-                        onChange={(e) =>
-                          updateForm("countryCode", e.target.value)
-                        }
-                        className="w-32 appearance-none rounded-2xl border border-slate-200 bg-white py-3.5 pl-9 pr-6 text-sm font-medium text-slate-900 outline-none transition duration-300 focus:border-cyan-500 focus:ring-4 focus:ring-cyan-500/10"
-                      >
-                        {countryOptions}
-                      </select>
-                      <Globe className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    </div>
-                    <input
-                      required
-                      type="tel"
-                      inputMode="numeric"
-                      maxLength={10}
-                      value={form.mobileNumber}
-                      onChange={(e) =>
-                        updateForm(
-                          "mobileNumber",
-                          e.target.value.replace(/\D/g, "").slice(0, 10),
-                        )
-                      }
-                      placeholder="Enter 10-digit number"
-                      className={`${inputClass} flex-1`}
-                    />
-                  </div>
+                  {isRegister && otpError && (
+                    <p className="mt-1 text-xs text-red-600">{otpError}</p>
+                  )}
                 </label>
-              )}
 
-              <label className="block">
-                <span className="mb-2 block text-xs font-semibold text-slate-700">
-                  Password
-                </span>
-                <div className="relative">
-                  <LockKeyhole className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                  <input
-                    required
-                    type={showPassword ? "text" : "password"}
-                    value={form.password}
-                    onChange={(e) => updateForm("password", e.target.value)}
-                    placeholder={
-                      isRegister ? "At least 8 characters" : "Enter password"
-                    }
-                    className={`${inputClass} pr-12`}
-                  />
-
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100"
-                  >
-                    {showPassword ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </button>
-                </div>
-
-                {/* Forgot password: LOGIN mode only (moved outside the input's relative box
-                    so the eye icon stays centred on the input) */}
-                {!isRegister && (
-                  <div className="mt-2 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => navigate("/forgot-password")}
-                      className="text-xs font-bold text-cyan-700 transition hover:text-cyan-800 hover:underline"
-                    >
-                      Forgot password?
-                    </button>
-                  </div>
+                {isRegister && (
+                  <label className="block">
+                    <span className="mb-2 block text-xs font-semibold text-slate-700">
+                      Mobile number
+                    </span>
+                    <div className="flex gap-2">
+                      <div className="relative">
+                        <select
+                          value={form.countryCode}
+                          onChange={(e) =>
+                            updateForm("countryCode", e.target.value)
+                          }
+                          className="w-32 appearance-none rounded-2xl border border-slate-200 bg-white py-3.5 pl-9 pr-6 text-sm font-medium text-slate-900 outline-none transition duration-300 focus:border-cyan-500 focus:ring-4 focus:ring-cyan-500/10"
+                        >
+                          {countryOptions}
+                        </select>
+                        <Globe className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      </div>
+                      <input
+                        required
+                        type="tel"
+                        inputMode="numeric"
+                        maxLength={10}
+                        value={form.mobileNumber}
+                        onChange={(e) =>
+                          updateForm(
+                            "mobileNumber",
+                            e.target.value.replace(/\D/g, "").slice(0, 10),
+                          )
+                        }
+                        placeholder="Enter 10-digit number"
+                        className={`${inputClass} flex-1`}
+                      />
+                    </div>
+                  </label>
                 )}
-              </label>
 
-              {isRegister && (
                 <label className="block">
                   <span className="mb-2 block text-xs font-semibold text-slate-700">
-                    Confirm password
+                    Password
                   </span>
                   <div className="relative">
                     <LockKeyhole className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                     <input
                       required
-                      type={showConfirmPassword ? "text" : "password"}
-                      value={form.confirmPassword}
-                      onChange={(e) =>
-                        updateForm("confirmPassword", e.target.value)
+                      type={showPassword ? "text" : "password"}
+                      value={form.password}
+                      onChange={(e) => updateForm("password", e.target.value)}
+                      placeholder={
+                        isRegister ? "At least 8 characters" : "Enter password"
                       }
-                      placeholder="Re-enter password"
                       className={`${inputClass} pr-12`}
                     />
+
                     <button
                       type="button"
-                      onClick={() =>
-                        setShowConfirmPassword(!showConfirmPassword)
-                      }
+                      onClick={() => setShowPassword(!showPassword)}
                       className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100"
                     >
-                      {showConfirmPassword ? (
+                      {showPassword ? (
                         <EyeOff className="h-4 w-4" />
                       ) : (
                         <Eye className="h-4 w-4" />
                       )}
                     </button>
                   </div>
+
+                  {/* Forgot password: LOGIN mode only (moved outside the input's relative box
+                    so the eye icon stays centred on the input) */}
+                  {!isRegister && (
+                    <div className="mt-2 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => navigate("/forgot-password")}
+                        className="text-xs font-bold text-cyan-700 transition hover:text-cyan-800 hover:underline"
+                      >
+                        Forgot password?
+                      </button>
+                    </div>
+                  )}
                 </label>
-              )}
 
-              <button
-                type="submit"
-                className="group mt-2 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-blue-500 to-cyan-400 px-4 py-4 text-sm font-extrabold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-xl"
-              >
-                {mode === "login"
-                  ? "Login to your account"
-                  : "Create fresher account"}
-                <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
-              </button>
-            </form>
-          </div>
-        </section>
+                {isRegister && (
+                  <label className="block">
+                    <span className="mb-2 block text-xs font-semibold text-slate-700">
+                      Confirm password
+                    </span>
+                    <div className="relative">
+                      <LockKeyhole className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                      <input
+                        required
+                        type={showConfirmPassword ? "text" : "password"}
+                        value={form.confirmPassword}
+                        onChange={(e) =>
+                          updateForm("confirmPassword", e.target.value)
+                        }
+                        placeholder="Re-enter password"
+                        className={`${inputClass} pr-12`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setShowConfirmPassword(!showConfirmPassword)
+                        }
+                        className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100"
+                      >
+                        {showConfirmPassword ? (
+                          <EyeOff className="h-4 w-4" />
+                        ) : (
+                          <Eye className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
+                  </label>
+                )}
 
-        {/* scroll-down hint: only on desktop, only while content is hidden below */}
-        <button
-          type="button"
-          aria-label="Scroll down"
-          tabIndex={canScrollDown ? 0 : -1}
-          onClick={() =>
-            scrollRef.current?.scrollBy({ top: 260, behavior: "smooth" })
-          }
-          className={`absolute bottom-6 left-1/2 hidden h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full border border-slate-200 bg-white/95 text-cyan-700 shadow-md backdrop-blur transition duration-300 hover:-translate-y-0.5 hover:border-cyan-300 hover:text-cyan-800 lg:flex ${
-            canScrollDown
-              ? "opacity-100"
-              : "pointer-events-none translate-y-2 opacity-0"
-          }`}
-        >
-          <ChevronDown className="h-5 w-5 animate-bounce" />
-        </button>
+                <button
+                  type="submit"
+                  className="group mt-2 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-blue-500 to-cyan-400 px-4 py-4 text-sm font-extrabold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-xl"
+                >
+                  {mode === "login"
+                    ? "Login to your account"
+                    : "Create fresher account"}
+                  <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+                </button>
+              </form>
+            </div>
+          </section>
+
+          {/* scroll-down hint: only on desktop, only while content is hidden below */}
+          <button
+            type="button"
+            aria-label="Scroll down"
+            tabIndex={canScrollDown ? 0 : -1}
+            onClick={() =>
+              scrollRef.current?.scrollBy({ top: 260, behavior: "smooth" })
+            }
+            className={`absolute bottom-6 left-1/2 hidden h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full border border-slate-200 bg-white/95 text-cyan-700 shadow-md backdrop-blur transition duration-300 hover:-translate-y-0.5 hover:border-cyan-300 hover:text-cyan-800 lg:flex ${
+              canScrollDown
+                ? "opacity-100"
+                : "pointer-events-none translate-y-2 opacity-0"
+            }`}
+          >
+            <ChevronDown className="h-5 w-5 animate-bounce" />
+          </button>
         </div>
       </main>
 
-      {showIntro && (
-        <div className="pointer-events-none fixed inset-0 z-[10000] overflow-hidden">
-          <div
-            className="absolute inset-0 bg-white"
-            style={{
-              animation: `mncCurtain ${INTRO_MS}ms ease-out forwards`,
-              willChange: "opacity",
-            }}
-          />
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div
-              style={{
-                animation: `mncZoom ${INTRO_MS}ms cubic-bezier(.4,0,.2,1) forwards`,
-                willChange: "transform, opacity",
-              }}
-            >
-              <div className="bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 bg-clip-text text-[clamp(30px,10vw,120px)] font-black leading-none tracking-[-0.12em] text-transparent">
-                MNC
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* MNC intro (unmounts itself when finished, so nothing keeps running) */}
+      {showIntro && <McIntro />}
 
       {/* all keyframes + hidden scrollbar in one place */}
       <style>{`
-        @keyframes mncZoom { 0% { transform: scale(.85); opacity: 0; } 25% { transform: scale(1); opacity: 1; } 60% { transform: scale(1.05); opacity: 1; } 100% { transform: scale(4); opacity: 0; } }
-        @keyframes mncCurtain { 0%, 55% { opacity: 1; } 100% { opacity: 0; } }
+        /* Intro: transform + opacity only = smooth on every device */
+        @keyframes mncZoom {
+          0%   { transform: scale(.8) translateZ(0); opacity: 0; }
+          16%  { transform: scale(1) translateZ(0); opacity: 1; }
+          48%  { transform: scale(1.04) translateZ(0); opacity: 1; }
+          100% { transform: scale(5) translateZ(0); opacity: 0; }
+        }
+        @keyframes mncCurtain {
+          0%, 54% { opacity: 1; }
+          100% { opacity: 0; }
+        }
+        @keyframes mncSheen {
+          0%   { opacity: 0; transform: translateX(-120%); }
+          25%  { opacity: .85; }
+          100% { opacity: 0; transform: translateX(120%); }
+        }
+        @keyframes mncDots {
+          0%   { opacity: 0; transform: translate(-50%, 8px); }
+          18%  { opacity: 1; transform: translate(-50%, 0); }
+          70%  { opacity: 1; }
+          100% { opacity: 0; transform: translate(-50%, -5px); }
+        }
         @keyframes mncCardEnter { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
 
         /* ---- Hidden scrollbar for the form card (still scrolls with wheel / touch / keys) ---- */
         .mnc-scroll { scrollbar-width: none; -ms-overflow-style: none; }
         .mnc-scroll::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+        @media (prefers-reduced-motion: reduce) {
+          .mnc-intro, .mnc-intro * { animation-duration: 1ms !important; }
+        }
       `}</style>
     </div>
   );

@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { socket } from "../utils/socket";
 import EmojiPicker from "./EmojiPicker";
+import { setChatOpen } from "../utils/chatOpenRegistry";
 import {
   playSendSound,
   playReceiveSound,
@@ -114,7 +115,10 @@ const colorFor = (key = "") => {
 };
 
 // "fresher:123" / "mentor:456" / "123"  ->  "123" / "456" / "123"
-const bare = (s) => String(s || "").split(":").pop();
+const bare = (s) =>
+  String(s || "")
+    .split(":")
+    .pop();
 
 const senderIdOf = (m) => {
   if (!m) return "";
@@ -488,9 +492,12 @@ export default function ChatPanel({
   useEffect(() => {
     if (!bookingId || !open) return undefined;
     setChatActive(bookingId, true);
-    return () => setChatActive(bookingId, false);
+    setChatOpen(bookingId, true);
+    return () => {
+      setChatActive(bookingId, false);
+      setChatOpen(bookingId, false);
+    };
   }, [bookingId, open]);
-
   /* ---------------- data + socket ---------------- */
   useEffect(() => {
     if (!bookingId) return undefined;

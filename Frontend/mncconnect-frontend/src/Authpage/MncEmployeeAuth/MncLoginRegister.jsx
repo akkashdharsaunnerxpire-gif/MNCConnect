@@ -19,6 +19,7 @@ import {
 import { useNavigate, useLocation } from "react-router-dom";
 import { COUNTRY_CODES } from "../../data/countryCodes"; // <-- adjust path to your folder
 import { useAuth } from "../../context/AuthContext";
+import FormAlert from "../../Commoncomponents/FormAlert";
 const API_URL = import.meta.env.VITE_API_URL;
 
 // Auth endpoints / storage keys. Keep these in one place if your backend paths differ.
@@ -78,6 +79,13 @@ const getDigits = (value) => String(value || "").replace(/\D/g, "");
 const INPUT_CLASS =
   "w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm text-slate-800 outline-none placeholder:text-slate-400 transition-all duration-200 focus:border-amber-500 focus:ring-4 focus:ring-amber-50 hover:border-slate-300";
 
+// Red state for an input that has a visible error
+const INPUT_ERROR_CLASS =
+  "!border-red-400 !bg-red-50/50 hover:!border-red-400 focus:!border-red-500 focus:!ring-red-100";
+
+const inputCls = (error, extra = "") =>
+  `${INPUT_CLASS} ${extra} ${error ? INPUT_ERROR_CLASS : ""}`;
+
 const PRIMARY_ACTION =
   "border-transparent bg-[linear-gradient(135deg,#111827_0%,#1d4ed8_42%,#06b6d4_100%)] text-white shadow-[0_10px_28px_rgba(37,99,235,.18)] hover:shadow-[0_14px_34px_rgba(37,99,235,.24)] active:scale-[0.99] transition-[box-shadow,transform] duration-200";
 
@@ -98,6 +106,100 @@ const REQUIRED_STEP_1_FIELDS = [
   ["skills", "Skills / Expertise is required."],
   ["bio", "Professional bio is required."],
 ];
+
+// Which fields belong to which step (used for step-wise validation + jumping to the right step)
+const STEP_FIELDS = {
+  1: [...REQUIRED_STEP_1_FIELDS.map(([field]) => field), "linkedin"],
+  2: ["offerLetter", "employeeIdProof", "companyId"],
+  3: ["confirmation"],
+};
+
+const FIELD_STEP = Object.entries(STEP_FIELDS).reduce((acc, [stepNo, list]) => {
+  list.forEach((field) => {
+    acc[field] = Number(stepNo);
+  });
+  return acc;
+}, {});
+
+const ALLOWED_FILE_TYPES = ["application/pdf", "image/png", "image/jpeg"];
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+
+// ----------------------------------------------------------------------------
+// Pure validation: returns an object { fieldName: "message" } for EVERY problem
+// across all 3 steps. The UI decides which of these to show (touched / attempted).
+// ----------------------------------------------------------------------------
+const collectErrors = (profile, files) => {
+  const e = {};
+
+  // ---- Step 1 ----
+  REQUIRED_STEP_1_FIELDS.forEach(([field, message]) => {
+    if (!String(profile[field] || "").trim()) e[field] = message;
+  });
+
+  const name = String(profile.name || "").trim();
+  if (!e.name) {
+    if (name.length < 2) {
+      e.name = "Enter your full name (at least 2 characters).";
+    } else if (!/^[\p{L}][\p{L}\s.'-]*$/u.test(name)) {
+      e.name = "Name can contain only letters, spaces and . ' -";
+    }
+  }
+
+  const email = String(profile.email || "").trim();
+  if (!e.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    e.email = "Enter a valid professional email (e.g. arun@company.com).";
+  }
+
+  if (!e.mobile) {
+    const digits = getDigits(profile.mobile);
+    const dial = getDialCode(profile.countryLabel);
+    if (dial === "+91" && digits.length !== 10) {
+      e.mobile = "Indian mobile number must be exactly 10 digits.";
+    } else if (digits.length < 6 || digits.length > 15) {
+      e.mobile = "Enter a valid mobile number (6–15 digits).";
+    }
+  }
+
+  if (!e.password && String(profile.password).length < 8) {
+    e.password = "Password must be at least 8 characters.";
+  }
+
+  if (!e.experience) {
+    const years = Number(profile.experience);
+    if (Number.isNaN(years) || years < 0 || years > 60) {
+      e.experience = "Enter a valid experience between 0 and 60 years.";
+    }
+  }
+
+  const linkedin = String(profile.linkedin || "").trim();
+  if (linkedin && !/^https?:\/\/([\w-]+\.)?linkedin\.com\/.+/i.test(linkedin)) {
+    e.linkedin =
+      "Enter a valid LinkedIn URL (https://linkedin.com/in/yourname).";
+  }
+
+  if (!e.bio && String(profile.bio).trim().length < 20) {
+    e.bio = "Bio should be at least 20 characters.";
+  }
+
+  // ---- Step 2 ----
+  if (!files.offerLetter) {
+    e.offerLetter = "Company offer letter / employment proof is required.";
+  }
+  if (!files.employeeIdProof) {
+    e.employeeIdProof = "Employee ID / company ID proof is required.";
+  }
+  if (!String(profile.companyId || "").trim()) {
+    e.companyId = "Employee ID / Associate No is required.";
+  }
+
+  // ---- Step 3 ----
+  if (!profile.confirmationAccepted) {
+    e.confirmation =
+      "Please confirm that the information and documents are genuine.";
+  }
+
+  return e;
+};
 
 // ============================================================================
 // TOAST / POPUP NOTIFICATION SYSTEM
@@ -184,9 +286,16 @@ export default function MncLoginRegister() {
   const [files, setFiles] = useState(emptyFiles);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [preview, setPreview] = useState(null);
-  const [validationAttempted, setValidationAttempted] = useState(false);
-  const [errors, setErrors] = useState({});
-  // Error that comes from the server while REGISTERING (shown on the register page)
+
+  // --- Validation state -----------------------------------------------------
+  // touched:      fields the user has already visited (blur) -> show their error right there
+  // attempted:    steps where Continue / Submit was pressed -> show ALL errors of that step
+  // manualErrors: errors that come from server / file picker (always visible until fixed)
+  const [touched, setTouched] = useState({});
+  const [attempted, setAttempted] = useState({});
+  const [manualErrors, setManualErrors] = useState({});
+
+  // Banner error from the server while REGISTERING (shown on the register page)
   const [submitError, setSubmitError] = useState("");
   const [cropState, setCropState] = useState({
     cropX: 0.18,
@@ -203,6 +312,46 @@ export default function MncLoginRegister() {
     currentPath === "/mentor/register" || currentPath === "/mentor";
   const isLoginRoute = currentPath === "/mentor/login";
   const isForgotPasswordRoute = currentPath === "/mentor/forgot-password";
+
+  // ==========================================================================
+  // LIVE ERRORS (computed on every change, so they are always up to date)
+  // ==========================================================================
+
+  const errors = useMemo(
+    () => ({ ...collectErrors(profile, files), ...manualErrors }),
+    [profile, files, manualErrors],
+  );
+
+  // Only the errors that should be visible right now, at their own spot
+  const visibleErrors = useMemo(() => {
+    const out = {};
+    Object.entries(errors).forEach(([field, message]) => {
+      if (
+        manualErrors[field] ||
+        touched[field] ||
+        attempted[FIELD_STEP[field]]
+      ) {
+        out[field] = message;
+      }
+    });
+    return out;
+  }, [errors, manualErrors, touched, attempted]);
+
+  const stepErrorCount = attempted[step]
+    ? (STEP_FIELDS[step] || []).filter((field) => errors[field]).length
+    : 0;
+
+  const touch = (field) =>
+    setTouched((prev) => (prev[field] ? prev : { ...prev, [field]: true }));
+
+  const scrollToFirstError = () => {
+    setTimeout(() => {
+      document.querySelector("[data-validation-error]")?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 150);
+  };
 
   // ==========================================================================
   // TOAST FUNCTIONS
@@ -282,12 +431,17 @@ export default function MncLoginRegister() {
 
   const update = (field, value) => {
     setProfile((prev) => ({ ...prev, [field]: value }));
-    setErrors((prev) => {
+
+    // user is fixing this field -> drop old server / picker error for it
+    setManualErrors((prev) => {
+      if (!prev[field]) return prev;
       const { [field]: _removed, ...rest } = prev;
-      // confirmation error is stored under "confirmation", not the field name
-      if (field === "confirmationAccepted") delete rest.confirmation;
       return rest;
     });
+
+    // checkbox has no "blur" feel, so show its error right away
+    if (field === "confirmationAccepted") touch("confirmation");
+
     // typing a new email clears the server "already registered" banner
     if (field === "email") setSubmitError("");
   };
@@ -301,10 +455,26 @@ export default function MncLoginRegister() {
 
   const handleFile = (field, file) => {
     if (!file) return;
+    touch(field);
 
-    // 10MB limit (matches the text shown in the upload card)
-    if (file.size > 10 * 1024 * 1024) {
-      showToast("File is too large. Maximum size is 10MB.", "error", 4000);
+    // type check (matches the text shown in the upload card)
+    const isAllowedType =
+      ALLOWED_FILE_TYPES.includes(file.type) ||
+      /\.(pdf|png|jpe?g)$/i.test(file.name);
+    if (!isAllowedType) {
+      setManualErrors((prev) => ({
+        ...prev,
+        [field]: "Only PDF, PNG or JPG files are allowed.",
+      }));
+      return;
+    }
+
+    // 10MB limit
+    if (file.size > MAX_FILE_SIZE) {
+      setManualErrors((prev) => ({
+        ...prev,
+        [field]: "File is too large. Maximum size is 10MB.",
+      }));
       return;
     }
 
@@ -316,7 +486,7 @@ export default function MncLoginRegister() {
 
     const prepared = Object.assign(file, { __url: setObjectUrl(file) });
     setFiles((prev) => ({ ...prev, [field]: prepared }));
-    update(field, file.name);
+    update(field, file.name); // also clears any manual error for this field
   };
 
   const openPreview = (field) => {
@@ -439,78 +609,23 @@ export default function MncLoginRegister() {
     }
   };
 
-  const validateStep = (currentStep) => {
-    const nextErrors = {};
+  // Marks the step as "attempted" (so every error of that step becomes visible)
+  // and returns true only when the step has no errors.
+  const validateStep = (stepNo) => {
+    setAttempted((prev) => ({ ...prev, [stepNo]: true }));
 
-    if (currentStep === 1) {
-      REQUIRED_STEP_1_FIELDS.forEach(([field, message]) => {
-        if (!String(profile[field] || "").trim()) {
-          nextErrors[field] = message;
-        }
-      });
-
-      if (profile.password && profile.password.length < 8) {
-        nextErrors.password = "Password must be at least 8 characters.";
-      }
-
-      if (
-        profile.email &&
-        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profile.email.trim())
-      ) {
-        nextErrors.email = "Enter a valid professional email.";
-      }
-
-      // Mobile: digits only, 6-15 (E.164 max), India must be exactly 10
-      if (profile.mobile && !nextErrors.mobile) {
-        const digits = getDigits(profile.mobile);
-        const dial = getDialCode(profile.countryLabel);
-
-        if (dial === "+91" && digits.length !== 10) {
-          nextErrors.mobile = "Indian mobile number must be 10 digits.";
-        } else if (digits.length < 6 || digits.length > 15) {
-          nextErrors.mobile = "Enter a valid mobile number (6–15 digits).";
-        }
-      }
+    const hasErrors = (STEP_FIELDS[stepNo] || []).some(
+      (field) => errors[field],
+    );
+    if (hasErrors) {
+      scrollToFirstError();
+      return false;
     }
-
-    if (currentStep === 2) {
-      if (!files.offerLetter) {
-        nextErrors.offerLetter =
-          "Company offer letter / employment proof is required.";
-      }
-      if (!files.employeeIdProof) {
-        nextErrors.employeeIdProof =
-          "Employee ID / company ID proof is required.";
-      }
-      if (!String(profile.companyId || "").trim()) {
-        nextErrors.companyId = "Employee ID / Associate No  is required.";
-      }
-    }
-
-    if (currentStep === 3 && !profile.confirmationAccepted) {
-      nextErrors.confirmation =
-        "Please confirm that the information and documents are genuine.";
-    }
-
-    setErrors(nextErrors);
-    setValidationAttempted(true);
-
-    if (Object.keys(nextErrors).length === 0) return true;
-
-    setTimeout(() => {
-      document.querySelector("[data-validation-error]")?.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-      });
-    }, 0);
-
-    return false;
+    return true;
   };
 
   const goNext = () => {
     if (!validateStep(step)) return;
-    setValidationAttempted(false);
-    setErrors({});
     setSubmitError("");
     setStep((prev) => Math.min(prev + 1, 3));
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -518,15 +633,63 @@ export default function MncLoginRegister() {
 
   const goBack = () => {
     setStep((prev) => Math.max(prev - 1, 1));
-    setValidationAttempted(false);
-    setErrors({});
     setSubmitError("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  // Turns a server response into { fieldName: message } so each error lands
+  // exactly on the field it belongs to.
+  const mapServerFieldErrors = (status, data) => {
+    const result = {};
+    const raw = data?.errors;
+
+    const add = (field, message) => {
+      if (field && FIELD_STEP[field] && message)
+        result[field] = String(message);
+    };
+
+    if (Array.isArray(raw)) {
+      raw.forEach((item) =>
+        add(
+          item?.field || item?.path || item?.param,
+          item?.message || item?.msg,
+        ),
+      );
+    } else if (raw && typeof raw === "object") {
+      Object.entries(raw).forEach(([field, message]) =>
+        add(field, typeof message === "string" ? message : message?.message),
+      );
+    }
+
+    // Duplicate account (409) -> show under email (or mobile if the message says so)
+    if (status === 409 && Object.keys(result).length === 0) {
+      const message =
+        data?.message ||
+        "This email is already registered. Please use a different email or login.";
+      result[/mobile|phone/i.test(message) ? "mobile" : "email"] = message;
+    }
+
+    return result;
+  };
+
   const submitForVerification = async (event) => {
     event.preventDefault();
-    if (!validateStep(3) || isSubmitting) return;
+    if (isSubmitting) return;
+
+    // Safety: Enter key on step 1 / 2 should behave like "Continue"
+    if (step !== 3) {
+      goNext();
+      return;
+    }
+
+    // Validate every step; if an earlier step has a problem, jump there
+    for (const stepNo of [1, 2, 3]) {
+      if (!validateStep(stepNo)) {
+        setStep(stepNo);
+        if (stepNo !== step) window.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
+    }
 
     setIsSubmitting(true);
     setSubmitError("");
@@ -583,29 +746,27 @@ export default function MncLoginRegister() {
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        // Email already registered: STAY on the register page and show the
-        // error in red on the email field (step 1). No redirect to login.
-        if (response.status === 409) {
-          const msg =
-            data.message ||
-            "This email is already registered. Please use a different email or login.";
+        // 1) Errors that belong to a specific field -> show them AT that field
+        const fieldErrors = mapServerFieldErrors(response.status, data);
+        const fieldNames = Object.keys(fieldErrors);
 
-          setStep(1);
-          setValidationAttempted(true);
-          setErrors({ email: msg });
-          setSubmitError(msg);
-          showToast(msg, "error", 5000);
+        if (fieldNames.length > 0) {
+          const firstStep = Math.min(...fieldNames.map((f) => FIELD_STEP[f]));
+
+          setManualErrors((prev) => ({ ...prev, ...fieldErrors }));
+          setAttempted((prev) => ({ ...prev, [firstStep]: true }));
+          setStep(firstStep);
+          setSubmitError(
+            "Please correct the highlighted field(s) and submit again.",
+          );
+          showToast(Object.values(fieldErrors)[0], "error", 5000);
 
           window.scrollTo({ top: 0, behavior: "smooth" });
-          setTimeout(() => {
-            document.querySelector("[data-validation-error]")?.scrollIntoView({
-              behavior: "smooth",
-              block: "center",
-            });
-          }, 150);
+          scrollToFirstError();
           return;
         }
 
+        // 2) General errors -> banner at the top of the form
         let errorMessage =
           data.message || "Registration failed. Please try again.";
         if (response.status === 400) {
@@ -616,6 +777,7 @@ export default function MncLoginRegister() {
         }
         setSubmitError(errorMessage);
         showToast(errorMessage, "error", 5000);
+        window.scrollTo({ top: 0, behavior: "smooth" });
         return;
       }
 
@@ -637,6 +799,7 @@ export default function MncLoginRegister() {
           : error.message || "Unable to submit registration. Please try again.";
       setSubmitError(message);
       showToast(message, "error", 5000);
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } finally {
       setIsSubmitting(false);
     }
@@ -728,7 +891,11 @@ export default function MncLoginRegister() {
                 isRegisterRoute={isRegisterRoute}
               />
 
-              <form onSubmit={submitForVerification} className="min-w-0 w-full">
+              <form
+                onSubmit={submitForVerification}
+                noValidate
+                className="min-w-0 w-full"
+              >
                 <div className="w-full rounded-[24px] border border-slate-200/80 bg-white shadow-[0_18px_55px_rgba(15,23,42,.07)] sm:rounded-[30px]">
                   <div>
                     <FormHeader step={step} stepTitle={stepTitle} />
@@ -737,30 +904,30 @@ export default function MncLoginRegister() {
                   <div className="px-4 py-5 sm:px-7 sm:py-7 lg:px-8 lg:py-8">
                     {/* Registration error banner (RED, register page only) */}
                     {submitError && (
-                      <div
-                        role="alert"
-                        className="mb-6 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 animate-fadeIn"
+                      <FormAlert
+                        open={Boolean(submitError)}
+                        severity="error"
+                        title="Registration error"
+                        onClose={() => setSubmitError("")}
                       >
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-red-500 text-white">
-                          <AlertCircle className="h-4 w-4" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-red-600">
-                            Registration error
-                          </p>
-                          <p className="mt-1 text-sm font-semibold text-red-700">
-                            {submitError}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setSubmitError("")}
-                          className="shrink-0 rounded-lg p-1 text-red-400 transition-colors hover:bg-red-100 hover:text-red-600"
-                          aria-label="Dismiss"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </div>
+                        {submitError}
+                      </FormAlert>
+                    )}
+
+                    {/* Step error summary: appears after Continue, disappears when everything is fixed */}
+                    {stepErrorCount > 0 && (
+                      <FormAlert
+                        open={stepErrorCount > 0}
+                        severity="error"
+                        title={
+                          stepErrorCount === 1
+                            ? "1 field needs your attention"
+                            : `${stepErrorCount} fields need your attention`
+                        }
+                      >
+                        Please fix the fields highlighted in red below to
+                        continue.
+                      </FormAlert>
                     )}
 
                     {step === 1 && (
@@ -790,8 +957,8 @@ export default function MncLoginRegister() {
                         <StepOne
                           profile={profile}
                           update={update}
-                          errors={errors}
-                          validationAttempted={validationAttempted}
+                          touch={touch}
+                          errors={visibleErrors}
                         />
                       )}
 
@@ -799,11 +966,10 @@ export default function MncLoginRegister() {
                         <StepTwo
                           profile={profile}
                           update={update}
-                          files={files}
+                          touch={touch}
                           handleFile={handleFile}
                           openPreview={openPreview}
-                          errors={errors}
-                          validationAttempted={validationAttempted}
+                          errors={visibleErrors}
                         />
                       )}
 
@@ -812,8 +978,7 @@ export default function MncLoginRegister() {
                           profile={profile}
                           files={files}
                           update={update}
-                          errors={errors}
-                          validationAttempted={validationAttempted}
+                          errors={visibleErrors}
                         />
                       )}
                     </div>
@@ -1275,33 +1440,24 @@ function MentorLogin({ showToast }) {
 
       <form onSubmit={submit} className="px-6 py-7 sm:px-8">
         {notice && (
-          <div className="relative mb-6 overflow-hidden rounded-2xl border border-emerald-200/80 bg-white px-4 py-4 shadow-[0_16px_40px_rgba(16,185,129,.10)] animate-completeToast">
-            <div className="flex items-start gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white shadow-[0_8px_20px_rgba(16,185,129,.22)]">
-                <CheckCircle2 className="h-5 w-5" strokeWidth={2.8} />
-              </div>
-              <div className="min-w-0">
-                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-600">
-                  Notice
-                </p>
-                <p className="mt-1 text-sm font-bold text-slate-950">
-                  {notice}
-                </p>
-              </div>
-            </div>
-            <div className="absolute bottom-0 left-0 h-0.5 w-full bg-emerald-100">
-              <span className="block h-full w-full origin-left bg-emerald-500 animate-completeLine" />
-            </div>
-          </div>
+          <FormAlert
+            open={Boolean(notice)}
+            severity="success"
+            title="Notice"
+            onClose={() => setNotice("")}
+          >
+            {notice}
+          </FormAlert>
         )}
         {error && (
-          <div
-            role="alert"
-            className="mb-5 flex items-start gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-600"
+          <FormAlert
+            open={Boolean(error)}
+            severity="error"
+            title="Login failed"
+            onClose={() => setError("")}
           >
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>{error}</span>
-          </div>
+            {error}
+          </FormAlert>
         )}
 
         <div className="space-y-5">
@@ -1334,7 +1490,6 @@ function MentorLogin({ showToast }) {
               >
                 {showPassword ? <EyeOff size={19} /> : <Eye size={19} />}
               </button>
-              
             </div>
           </Field>
         </div>
@@ -1434,14 +1589,24 @@ function MentorForgotPassword({ showToast }) {
       </div>
       <form onSubmit={submit} className="px-6 py-7 sm:px-8">
         {message && (
-          <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-700">
+          <FormAlert
+            open={Boolean(message)}
+            severity="success"
+            title="Check your email"
+            onClose={() => setMessage("")}
+          >
             {message}
-          </div>
+          </FormAlert>
         )}
         {error && (
-          <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-600">
+          <FormAlert
+            open={Boolean(error)}
+            severity="error"
+            title="Error"
+            onClose={() => setError("")}
+          >
             {error}
-          </div>
+          </FormAlert>
         )}
         <Field label="Professional Email" required>
           <input
@@ -1651,12 +1816,8 @@ function McLoader() {
 }
 
 // ----- STEP ONE -----
-function StepOne({
-  profile,
-  update,
-  errors = {},
-  validationAttempted = false,
-}) {
+// `errors` here = only the errors that are VISIBLE right now (touched / attempted / server)
+function StepOne({ profile, update, touch, errors = {} }) {
   const [showPassword, setShowPassword] = useState(false);
 
   const dialCode = getDialCode(profile.countryLabel);
@@ -1670,36 +1831,34 @@ function StepOne({
       </InfoBanner>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-x-5 md:gap-y-5">
-        <Field label="Legal / Full Name" required={validationAttempted}>
+        <Field label="Legal / Full Name" required>
           <input
             value={profile.name}
             onChange={(e) => update("name", e.target.value)}
+            onBlur={() => touch("name")}
+            aria-invalid={Boolean(errors.name)}
             placeholder="Arun Kumar"
-            className={`${INPUT_CLASS} ${errors.name && validationAttempted ? "border-red-300 bg-red-50/50" : ""}`}
+            className={inputCls(errors.name)}
           />
           <Hint>Your name used for professional verification.</Hint>
-          <ErrorText
-            error={errors.name}
-            validationAttempted={validationAttempted}
-          />
+          <ErrorText error={errors.name} />
         </Field>
 
-        <Field label="Professional Email" required={validationAttempted}>
+        <Field label="Professional Email" required>
           <input
             type="email"
             value={profile.email}
             onChange={(e) => update("email", e.target.value)}
+            onBlur={() => touch("email")}
+            aria-invalid={Boolean(errors.email)}
             placeholder="arun@company.com"
-            className={`${INPUT_CLASS} ${errors.email && validationAttempted ? "border-red-300 bg-red-50/50" : ""}`}
+            className={inputCls(errors.email)}
           />
-          <ErrorText
-            error={errors.email}
-            validationAttempted={validationAttempted}
-          />
+          <ErrorText error={errors.email} />
         </Field>
 
         {/* ---------- MOBILE WITH COUNTRY CODE ---------- */}
-        <Field label="Mobile Number" required={validationAttempted}>
+        <Field label="Mobile Number" required>
           <div className="flex gap-2">
             <select
               value={profile.countryLabel}
@@ -1723,29 +1882,26 @@ function StepOne({
               onChange={(e) =>
                 update("mobile", e.target.value.replace(/\D/g, ""))
               }
+              onBlur={() => touch("mobile")}
+              aria-invalid={Boolean(errors.mobile)}
               placeholder={isIndia ? "9876543210" : "Mobile number"}
-              className={`${INPUT_CLASS} ${errors.mobile && validationAttempted ? "border-red-300 bg-red-50/50" : ""}`}
+              className={inputCls(errors.mobile)}
             />
           </div>
           <Hint>Approval notification will be sent to {dialCode}…</Hint>
-          <ErrorText
-            error={errors.mobile}
-            validationAttempted={validationAttempted}
-          />
+          <ErrorText error={errors.mobile} />
         </Field>
 
-        <Field label="Password" required={validationAttempted}>
+        <Field label="Password" required>
           <div className="relative">
             <input
               type={showPassword ? "text" : "password"}
               value={profile.password}
               onChange={(e) => update("password", e.target.value)}
+              onBlur={() => touch("password")}
+              aria-invalid={Boolean(errors.password)}
               placeholder="Min 8 characters"
-              className={`${INPUT_CLASS} pr-12 ${
-                errors.password && validationAttempted
-                  ? "border-red-300 bg-red-50/50"
-                  : ""
-              }`}
+              className={inputCls(errors.password, "pr-12")}
             />
 
             <button
@@ -1763,61 +1919,52 @@ function StepOne({
           </div>
 
           <Hint>Must be at least 8 characters long.</Hint>
-
-          <ErrorText
-            error={errors.password}
-            validationAttempted={validationAttempted}
-          />
+          <ErrorText error={errors.password} />
         </Field>
 
-        <Field label="Current MNC / Company" required={validationAttempted}>
+        <Field label="Current MNC / Company" required>
           <input
             value={profile.company}
             onChange={(e) => update("company", e.target.value)}
+            onBlur={() => touch("company")}
+            aria-invalid={Boolean(errors.company)}
             placeholder="Google / Amazon / TCS"
-            className={`${INPUT_CLASS} ${errors.company && validationAttempted ? "border-red-300 bg-red-50/50" : ""}`}
+            className={inputCls(errors.company)}
           />
-          <ErrorText
-            error={errors.company}
-            validationAttempted={validationAttempted}
-          />
+          <ErrorText error={errors.company} />
         </Field>
 
-        <Field label="Designation" required={validationAttempted}>
+        <Field label="Designation" required>
           <input
             value={profile.designation}
             onChange={(e) => update("designation", e.target.value)}
+            onBlur={() => touch("designation")}
+            aria-invalid={Boolean(errors.designation)}
             placeholder="Senior Software Engineer"
-            className={`${INPUT_CLASS} ${errors.designation && validationAttempted ? "border-red-300 bg-red-50/50" : ""}`}
+            className={inputCls(errors.designation)}
           />
-          <ErrorText
-            error={errors.designation}
-            validationAttempted={validationAttempted}
-          />
+          <ErrorText error={errors.designation} />
         </Field>
 
-        <Field label="Department / Team" required={validationAttempted}>
+        <Field label="Department / Team" required>
           <input
             value={profile.department}
             onChange={(e) => update("department", e.target.value)}
+            onBlur={() => touch("department")}
+            aria-invalid={Boolean(errors.department)}
             placeholder="Engineering / Product / HR"
-            className={`${INPUT_CLASS} ${errors.department && validationAttempted ? "border-red-300 bg-red-50/50" : ""}`}
+            className={inputCls(errors.department)}
           />
-          <ErrorText
-            error={errors.department}
-            validationAttempted={validationAttempted}
-          />
+          <ErrorText error={errors.department} />
         </Field>
 
-        <Field label="Gender" required={validationAttempted}>
+        <Field label="Gender" required>
           <select
             value={profile.gender}
             onChange={(e) => update("gender", e.target.value)}
-            className={`${INPUT_CLASS} ${
-              errors.gender && validationAttempted
-                ? "border-red-300 bg-red-50/50"
-                : ""
-            }`}
+            onBlur={() => touch("gender")}
+            aria-invalid={Boolean(errors.gender)}
+            className={inputCls(errors.gender)}
           >
             <option value="">Select Gender</option>
             <option value="male">Male</option>
@@ -1825,39 +1972,34 @@ function StepOne({
             <option value="other">Other</option>
           </select>
 
-          <ErrorText
-            error={errors.gender}
-            validationAttempted={validationAttempted}
-          />
+          <ErrorText error={errors.gender} />
         </Field>
 
-        <Field label="Years of Experience" required={validationAttempted}>
+        <Field label="Years of Experience" required>
           <input
             type="number"
             min="0"
             max="60"
             value={profile.experience}
             onChange={(e) => update("experience", e.target.value)}
+            onBlur={() => touch("experience")}
+            aria-invalid={Boolean(errors.experience)}
             placeholder="5"
-            className={`${INPUT_CLASS} ${errors.experience && validationAttempted ? "border-red-300 bg-red-50/50" : ""}`}
+            className={inputCls(errors.experience)}
           />
-          <ErrorText
-            error={errors.experience}
-            validationAttempted={validationAttempted}
-          />
+          <ErrorText error={errors.experience} />
         </Field>
 
-        <Field label="Current Location" required={validationAttempted}>
+        <Field label="Current Location" required>
           <input
             value={profile.location}
             onChange={(e) => update("location", e.target.value)}
+            onBlur={() => touch("location")}
+            aria-invalid={Boolean(errors.location)}
             placeholder="Bengaluru, India"
-            className={`${INPUT_CLASS} ${errors.location && validationAttempted ? "border-red-300 bg-red-50/50" : ""}`}
+            className={inputCls(errors.location)}
           />
-          <ErrorText
-            error={errors.location}
-            validationAttempted={validationAttempted}
-          />
+          <ErrorText error={errors.location} />
         </Field>
 
         <Field label="LinkedIn Profile">
@@ -1865,39 +2007,40 @@ function StepOne({
             type="url"
             value={profile.linkedin}
             onChange={(e) => update("linkedin", e.target.value)}
+            onBlur={() => touch("linkedin")}
+            aria-invalid={Boolean(errors.linkedin)}
             placeholder="https://linkedin.com/in/yourname"
-            className={INPUT_CLASS}
+            className={inputCls(errors.linkedin)}
           />
+          <ErrorText error={errors.linkedin} />
         </Field>
 
-        <Field label="Skills / Expertise" required={validationAttempted}>
+        <Field label="Skills / Expertise" required>
           <input
             value={profile.skills}
             onChange={(e) => update("skills", e.target.value)}
+            onBlur={() => touch("skills")}
+            aria-invalid={Boolean(errors.skills)}
             placeholder="React, Java, DSA, Cloud..."
-            className={`${INPUT_CLASS} ${errors.skills && validationAttempted ? "border-red-300 bg-red-50/50" : ""}`}
+            className={inputCls(errors.skills)}
           />
           <Hint>Separate skills with commas.</Hint>
-          <ErrorText
-            error={errors.skills}
-            validationAttempted={validationAttempted}
-          />
+          <ErrorText error={errors.skills} />
         </Field>
       </div>
 
       <div className="mt-5">
-        <Field label="Professional Bio" required={validationAttempted}>
+        <Field label="Professional Bio" required>
           <textarea
             value={profile.bio}
             maxLength={2000}
             onChange={(e) => update("bio", e.target.value)}
+            onBlur={() => touch("bio")}
+            aria-invalid={Boolean(errors.bio)}
             placeholder="Tell freshers about your career, expertise and what you can help them with..."
-            className={`${INPUT_CLASS} min-h-32 resize-y ${errors?.bio && validationAttempted ? "border-red-300 bg-red-50/50" : ""}`}
+            className={inputCls(errors.bio, "min-h-32 resize-y")}
           />
-          <ErrorText
-            error={errors?.bio}
-            validationAttempted={validationAttempted}
-          />
+          <ErrorText error={errors.bio} />
         </Field>
       </div>
     </div>
@@ -1908,10 +2051,10 @@ function StepOne({
 function StepTwo({
   profile,
   update,
+  touch,
   handleFile,
   openPreview,
   errors = {},
-  validationAttempted = false,
 }) {
   return (
     <div className="animate-fadeIn">
@@ -1927,43 +2070,37 @@ function StepTwo({
 
       <div className="mt-7 space-y-5">
         <DocumentUpload
-          required={validationAttempted}
+          required
           label="Company Offer Letter / Employment Proof"
           description="Upload your company offer letter or current employment document."
           value={profile.offerLetter}
           onChange={(file) => handleFile("offerLetter", file)}
           onView={() => openPreview("offerLetter")}
           error={errors.offerLetter}
-          validationAttempted={validationAttempted}
         />
 
         <DocumentUpload
-          required={validationAttempted}
+          required
           label="Employee ID / Company ID Proof"
           description="Upload a valid company employee ID or another official employee proof."
           value={profile.employeeIdProof}
           onChange={(file) => handleFile("employeeIdProof", file)}
           onView={() => openPreview("employeeIdProof")}
           error={errors.employeeIdProof}
-          validationAttempted={validationAttempted}
         />
 
         <div className="grid gap-5 sm:grid-cols-2">
-          <Field
-            label="Employee ID / Associate No"
-            required={validationAttempted}
-          >
+          <Field label="Employee ID / Associate No" required>
             <input
               value={profile.companyId}
               onChange={(e) => update("companyId", e.target.value)}
+              onBlur={() => touch("companyId")}
+              aria-invalid={Boolean(errors.companyId)}
               placeholder="e.g. 2345678"
-              className={`${INPUT_CLASS} ${errors.companyId && validationAttempted ? "border-red-300 bg-red-50/50" : ""}`}
+              className={inputCls(errors.companyId)}
             />
             <Hint>Permanent employee number, not the ID card number.</Hint>
-            <ErrorText
-              error={errors.companyId}
-              validationAttempted={validationAttempted}
-            />
+            <ErrorText error={errors.companyId} />
           </Field>
 
           <DocumentUpload
@@ -1972,6 +2109,7 @@ function StepTwo({
             value={profile.additionalProof}
             onChange={(file) => handleFile("additionalProof", file)}
             onView={() => openPreview("additionalProof")}
+            error={errors.additionalProof}
           />
         </div>
 
@@ -1988,13 +2126,7 @@ function StepTwo({
 }
 
 // ----- STEP THREE -----
-function StepThree({
-  profile,
-  files,
-  update,
-  errors = {},
-  validationAttempted = false,
-}) {
+function StepThree({ profile, files, update, errors = {} }) {
   const genderLabel = profile.gender
     ? profile.gender.charAt(0).toUpperCase() + profile.gender.slice(1)
     : "";
@@ -2058,13 +2190,20 @@ function StepThree({
         </p>
       </div>
 
-      <label className="mt-6 flex cursor-pointer items-start gap-3 rounded-2xl border border-slate-200/80 bg-gradient-to-br from-slate-50/80 to-white/40 p-4 backdrop-blur-sm transition-all duration-300 hover:border-amber-200 hover:shadow-md">
+      <label
+        className={`mt-6 flex cursor-pointer items-start gap-3 rounded-2xl border p-4 backdrop-blur-sm transition-all duration-300 hover:shadow-md ${
+          errors.confirmation
+            ? "border-red-300 bg-red-50/60"
+            : "border-slate-200/80 bg-gradient-to-br from-slate-50/80 to-white/40 hover:border-amber-200"
+        }`}
+      >
         <input
           type="checkbox"
           checked={Boolean(profile.confirmationAccepted)}
           onChange={(event) =>
             update("confirmationAccepted", event.target.checked)
           }
+          aria-invalid={Boolean(errors.confirmation)}
           className="mt-1 h-4 w-4 accent-amber-500 shrink-0 transition-all duration-200"
         />
         <span className="text-xs leading-5 text-slate-600">
@@ -2074,10 +2213,7 @@ function StepThree({
           Connect admin verification is completed.
         </span>
       </label>
-      <ErrorText
-        error={errors.confirmation}
-        validationAttempted={validationAttempted}
-      />
+      <ErrorText error={errors.confirmation} />
     </div>
   );
 }
@@ -2135,7 +2271,7 @@ function ActionBar({ step, goBack, goNext, isSubmitting = false }) {
         <p className="mt-2 text-center text-[10px] font-medium text-slate-400">
           {isLast
             ? "Your documents are shared only for admin verification."
-            : "Required fields appear only after you press Continue."}
+            : "Fields marked with * are required. Errors appear right at the field."}
         </p>
 
         {step === 1 && (
@@ -2202,14 +2338,17 @@ function Hint({ children }) {
 }
 
 // ----- ERROR TEXT -----
-function ErrorText({ error, validationAttempted }) {
-  if (!validationAttempted || !error) return null;
+// Renders right under the field. Parent only passes errors that are visible now.
+function ErrorText({ error }) {
+  if (!error) return null;
   return (
     <p
+      role="alert"
       data-validation-error
-      className="mt-1.5 text-xs font-medium text-red-600 animate-fadeIn"
+      className="mt-1.5 flex items-start gap-1.5 text-xs font-medium text-red-600 animate-fadeIn"
     >
-      {error}
+      <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
+      <span>{error}</span>
     </p>
   );
 }
@@ -2248,7 +2387,6 @@ function DocumentUpload({
   onChange,
   onView,
   required = false,
-  validationAttempted = false,
   error = "",
 }) {
   const inputRef = useRef(null);
@@ -2261,7 +2399,7 @@ function DocumentUpload({
   };
 
   const hasValue = Boolean(value);
-  const hasError = error && validationAttempted;
+  const hasError = Boolean(error);
 
   return (
     <div className="transition-all duration-300">
@@ -2281,22 +2419,26 @@ function DocumentUpload({
           }
         }}
         className={`cursor-pointer rounded-2xl border-2 border-dashed p-5 outline-none transition-all duration-300 ${
-          hasValue
-            ? "border-emerald-300 bg-emerald-50/50 shadow-[0_4px_15px_rgba(16,185,129,.1)]"
-            : hasError
-              ? "border-red-300 bg-red-50/30"
+          hasError
+            ? "border-red-300 bg-red-50/30"
+            : hasValue
+              ? "border-emerald-300 bg-emerald-50/50 shadow-[0_4px_15px_rgba(16,185,129,.1)]"
               : "border-slate-200 bg-white hover:border-amber-300 hover:shadow-md hover:bg-amber-50/30"
         }`}
       >
         <div className="flex flex-wrap items-center gap-3">
           <div
             className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl transition-all duration-300 ${
-              hasValue
-                ? "bg-emerald-100 text-emerald-600"
-                : "bg-amber-50 text-amber-600"
+              hasError
+                ? "bg-red-100 text-red-600"
+                : hasValue
+                  ? "bg-emerald-100 text-emerald-600"
+                  : "bg-amber-50 text-amber-600"
             }`}
           >
-            {hasValue ? (
+            {hasError ? (
+              <AlertCircle className="h-6 w-6" />
+            ) : hasValue ? (
               <CheckCircle2 className="h-6 w-6" />
             ) : (
               <UploadCloud className="h-6 w-6" />
@@ -2354,7 +2496,7 @@ function DocumentUpload({
         </div>
       </div>
 
-      <ErrorText error={error} validationAttempted={validationAttempted} />
+      <ErrorText error={error} />
     </div>
   );
 }

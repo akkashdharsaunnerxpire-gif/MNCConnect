@@ -6,7 +6,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import Box from "@mui/material/Box";
 import CircularProgress from "@mui/material/CircularProgress";
 import Typography from "@mui/material/Typography";
@@ -681,7 +681,9 @@ const MentorSessions = () => {
               if (mapped) {
                 statusResults[id] = mapped;
                 changed = true;
-              } else if (hasTimerFinished(wasRunningRef.current[id], running, remaining)) {
+              } else if (
+                hasTimerFinished(wasRunningRef.current[id], running, remaining)
+              ) {
                 // timer ran and stopped -> same moment the fresher sees it finish
                 statusResults[id] = "awaiting_confirmation";
                 changed = true;
@@ -759,7 +761,10 @@ const MentorSessions = () => {
       }));
 
       // timer ended -> move the card right away (same as the fresher page)
-      if (!mapped && hasTimerFinished(wasRunningRef.current[id], running, p.remainingMs)) {
+      if (
+        !mapped &&
+        hasTimerFinished(wasRunningRef.current[id], running, p.remainingMs)
+      ) {
         setOverride(id, "awaiting_confirmation");
         reloadRef.current?.();
       }
@@ -784,6 +789,27 @@ const MentorSessions = () => {
     socket.on(evt, onUpdated);
     return () => socket.off(evt, onUpdated);
   }, [setOverride]);
+  const location = useLocation();
+  const [autoOpenId, setAutoOpenId] = useState(null);
+
+  // opened from the global message alert
+  useEffect(() => {
+    const id = location.state?.openChatId;
+    if (!id) return;
+    setAutoOpenId(String(id));
+    navigate(location.pathname, { replace: true, state: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
+
+  // switch to the tab where that session lives
+  useEffect(() => {
+    if (!autoOpenId) return;
+    const s = sessions.find((x) => String(x.id) === autoOpenId);
+    if (!s) return;
+    setActiveTab(
+      s.status === "awaiting_confirmation" ? "Awaiting Confirmation" : s.status,
+    );
+  }, [autoOpenId, sessions]);
 
   const counts = useMemo(
     () =>
@@ -899,6 +925,8 @@ const MentorSessions = () => {
           ) : (
             filtered.map((s) => (
               <SessionCard
+                autoOpen={autoOpenId === String(s.id)}
+                onAutoOpened={() => setAutoOpenId(null)}
                 key={s.id}
                 session={s}
                 nowMs={nowMs}
@@ -951,6 +979,12 @@ const SessionCard = ({
     onChatClose();
     setChatFor(null);
   };
+  useEffect(() => {
+    if (!autoOpen) return;
+    openChat(session);
+    onAutoOpened?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpen]);
 
   const isUpcoming = session.status === "Upcoming";
   const isAwaitingConfirmation = session.status === "awaiting_confirmation";

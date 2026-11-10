@@ -15,6 +15,7 @@ import MentorHeader from "../MncEmployee/Components/MentorHeader";
 import ResetPassword from "../Authpage/MncEmployeeAuth/ResetPassword";
 import MeetingRoom from "../Commoncomponents/Meetingroom";
 import SuspenseLoader from "../Commoncomponents/SuspenseLoader";
+import ChatAlertHost from "../Commoncomponents/ChatAlertHost";
 import { useAuth } from "../context/AuthContext";
 
 // The server (via cookie) decides. While it answers, show the loader.
@@ -40,6 +41,8 @@ const MentorFallback = () => {
 const MentorLayout = () => (
   <div className="min-h-screen bg-[#080612] text-white">
     <MentorHeader />
+    {/* new-message alert on every mentor page (not inside the meeting room) */}
+    <ChatAlertHost role="mentor" />
     <main className="min-h-[calc(100vh-64px)]">
       <Outlet />
     </main>
@@ -57,7 +60,7 @@ const MentorRoutes = () => {
 
       {/* private */}
       <Route element={<MentorProtectedRoute />}>
-        {/* Full-screen meeting room (no header) */}
+        {/* Full-screen meeting room (no header, no chat alert) */}
         <Route path="meeting/:bookingId" element={<MeetingRoom />} />
 
         <Route element={<MentorLayout />}>

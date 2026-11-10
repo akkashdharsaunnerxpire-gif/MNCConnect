@@ -6,8 +6,8 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Link, useNavigate } from "react-router-dom";
 import useChatNotificationSound from "../../hooks/useChatNotificationSound";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import {
   CalendarDays,
@@ -317,6 +317,7 @@ const GroupInfo = ({ b, me }) => {
 const MyBookings = () => {
   useChatNotificationSound("fresher");
   const navigate = useNavigate();
+  const location = useLocation();
   const userId = useMemo(() => getUserId(), []);
   const [now, setNow] = useState(Date.now());
   const [tab, setTab] = useState("upcoming");
@@ -446,6 +447,17 @@ const MyBookings = () => {
   };
 
   const closeDetails = useCallback(() => setDetailsFor(null), []);
+
+  // opened from the global message alert -> open that chat
+  useEffect(() => {
+    const id = location.state?.openChatId;
+    if (!id || !bookings.length) return;
+    const b = bookings.find((x) => String(x.requestGroupId) === String(id));
+    if (!b) return;
+    openChat(b);
+    navigate(location.pathname, { replace: true, state: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookings, location.state]);
 
   // Timer values that come with the list (if backend sends them)
   useEffect(() => {

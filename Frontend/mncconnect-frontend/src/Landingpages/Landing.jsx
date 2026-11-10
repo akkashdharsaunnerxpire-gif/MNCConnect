@@ -25,8 +25,6 @@ import {
 } from "lucide-react";
 import Auth from "../Authpage/Auth";
 import { useNavigate } from "react-router-dom";
-/* NavAvatar.jsx must sit in the same folder as this file */
-import NavAvatar, { NAV_AVATAR_CSS, useAutoLite } from "../assets/Navavatar";
 
 /* ==========================================================
    DATA
@@ -102,7 +100,6 @@ const DEMO_VIDEO_URL =
 const CANDIDATE_IMAGE =
   "https://images.unsplash.com/photo-1531482615713-2afd69097998?auto=format&fit=crop&w=700&q=80";
 
-/* Hero role picker: choosing a role changes the matched mentor */
 const heroRoles = [
   { key: "backend", label: "Backend", mentor: 0, match: 96 },
   { key: "frontend", label: "Frontend", mentor: 4, match: 94 },
@@ -178,7 +175,7 @@ const steps = [
 ];
 
 /* ==========================================================
-   HELPERS / HOOKS  (all cheap: transform + opacity only)
+   HELPERS / HOOKS
    ========================================================== */
 
 /* One shared observer for every Reveal on the page */
@@ -276,6 +273,32 @@ function useCountUp(target, active, duration = 1600) {
   return value;
 }
 
+/* Auto-cycling index. Runs only while `enabled` (section on screen).
+   A manual pick pauses auto-cycling for 10s so the user is never fought. */
+function useCycle(count, ms, enabled) {
+  const [index, setIndex] = useState(0);
+  const pausedUntil = useRef(0);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const timer = window.setInterval(() => {
+      if (Date.now() < pausedUntil.current) return;
+      setIndex((v) => (v + 1) % count);
+    }, ms);
+    return () => window.clearInterval(timer);
+  }, [count, ms, enabled]);
+
+  const set = (value) => {
+    pausedUntil.current = Date.now() + 10000;
+    setIndex(value);
+  };
+  const pause = (duration = 6000) => {
+    pausedUntil.current = Date.now() + duration;
+  };
+
+  return [index, set, pause];
+}
+
 /* ==========================================================
    MAIN PAGE
    ========================================================== */
@@ -284,55 +307,45 @@ export default function Landing() {
   const isMobile = useMediaQuery("(max-width: 768px)");
   const reduceMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
 
-  /* auto performance mode: phones, weak CPUs, or measured low FPS */
-  const lite = useAutoLite();
-
-  const [persona, setPersona] = useState("fresher");
   const [menuOpen, setMenuOpen] = useState(false);
   const [videoOpen, setVideoOpen] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [scrolled, setScrolled] = useState(false);
-  const [loginHover, setLoginHover] = useState(false);
-
-  /* avatar click -> points at Log in (2.4s), auth modal does NOT open */
-  const [pointing, setPointing] = useState(false);
-  const pointTimer = useRef(0);
-
-  const [heroRole, setHeroRole] = useState(0);
   const [notifIndex, setNotifIndex] = useState(0);
-
-  const [mentorIndex, setMentorIndex] = useState(0);
-  const [mentorPaused, setMentorPaused] = useState(false);
 
   const progressRef = useRef(null);
   const heroZoneRef = useRef(null);
-  const stageRef = useRef(null);
-  const parallaxRaf = useRef(0);
-
+  const personaRef = useRef(null);
+  const featuresRef = useRef(null);
   const mentorSectionRef = useRef(null);
   const mentorStageRef = useRef(null);
+
   const dragStartX = useRef(0);
   const dragging = useRef(false);
   const dragMoved = useRef(false);
   const dragRaf = useRef(0);
 
   const heroInView = useInView(heroZoneRef, { threshold: 0.1 });
+  const personaVisible = useInView(personaRef, { threshold: 0.2 });
+  const featuresVisible = useInView(featuresRef, { threshold: 0.1 });
   const mentorVisible = useInView(mentorSectionRef, { threshold: 0.15 });
 
-  const fresherMode = persona === "fresher";
+  const motionOn = !reduceMotion;
+
+  /* everything below auto-cycles while its section is on screen */
+  const [heroRole, setHeroRole] = useCycle(heroRoles.length, 4500, heroInView && motionOn);
+  const [personaIdx, setPersonaIdx] = useCycle(2, 6500, personaVisible && motionOn);
+  const [mentorIndex, setMentorIndex, pauseMentor] = useCycle(
+    mentors.length,
+    isMobile ? 3600 : 3000,
+    mentorVisible && !showAuthModal && !videoOpen && motionOn
+  );
+
+  const fresherMode = personaIdx === 0;
   const activeRole = heroRoles[heroRole];
   const heroMentor = mentors[activeRole.mentor];
 
-  /* ---------- avatar click handler ---------- */
-  const onAvatarClick = () => {
-    window.clearTimeout(pointTimer.current);
-    setPointing(true);
-    pointTimer.current = window.setTimeout(() => setPointing(false), 2400);
-  };
-
-  useEffect(() => () => window.clearTimeout(pointTimer.current), []);
-
-  /* ---------- scroll progress + navbar state (one passive listener) ---------- */
+  /* ---------- scroll progress + navbar state ---------- */
   useEffect(() => {
     let raf = 0;
 
@@ -365,7 +378,7 @@ export default function Landing() {
     };
   }, []);
 
-  /* ---------- auth modal scroll lock (unchanged behaviour) ---------- */
+  /* ---------- auth modal scroll lock ---------- */
   useEffect(() => {
     if (!showAuthModal) return;
 
@@ -410,7 +423,7 @@ export default function Landing() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  /* ---------- rotating live notification (only while hero is visible) ---------- */
+  /* ---------- rotating notification (only while hero is visible) ---------- */
   useEffect(() => {
     if (!heroInView || reduceMotion) return;
     const timer = window.setInterval(
@@ -420,54 +433,10 @@ export default function Landing() {
     return () => window.clearInterval(timer);
   }, [heroInView, reduceMotion]);
 
-  /* ---------- hero 3D pointer parallax (mouse only, writes CSS vars) ---------- */
-  const onHeroMove = (event) => {
-    if (lite || isMobile || reduceMotion || event.pointerType !== "mouse") return;
-    const zone = heroZoneRef.current;
-    if (!zone) return;
-
-    const rect = zone.getBoundingClientRect();
-    const x = (event.clientX - rect.left) / rect.width - 0.5;
-    const y = (event.clientY - rect.top) / rect.height - 0.5;
-
-    cancelAnimationFrame(parallaxRaf.current);
-    parallaxRaf.current = requestAnimationFrame(() => {
-      const stage = stageRef.current;
-      if (!stage) return;
-      stage.style.setProperty("--px", x.toFixed(3));
-      stage.style.setProperty("--py", y.toFixed(3));
-    });
-  };
-
-  const onHeroLeave = () => {
-    cancelAnimationFrame(parallaxRaf.current);
-    const stage = stageRef.current;
-    if (!stage) return;
-    stage.style.setProperty("--px", "0");
-    stage.style.setProperty("--py", "0");
-  };
-
-  /* ---------- mentor carousel ---------- */
-  const nextMentor = () => setMentorIndex((v) => (v + 1) % mentors.length);
+  /* ---------- mentor carousel controls ---------- */
+  const nextMentor = () => setMentorIndex((mentorIndex + 1) % mentors.length);
   const prevMentor = () =>
-    setMentorIndex((v) => (v - 1 + mentors.length) % mentors.length);
-
-  useEffect(() => {
-    if (
-      mentorPaused ||
-      !mentorVisible ||
-      showAuthModal ||
-      videoOpen ||
-      reduceMotion
-    )
-      return;
-
-    const timer = window.setInterval(
-      () => setMentorIndex((v) => (v + 1) % mentors.length),
-      isMobile ? 4200 : 3200
-    );
-    return () => window.clearInterval(timer);
-  }, [mentorPaused, mentorVisible, showAuthModal, videoOpen, isMobile, reduceMotion]);
+    setMentorIndex((mentorIndex - 1 + mentors.length) % mentors.length);
 
   const setDrag = (px) => {
     cancelAnimationFrame(dragRaf.current);
@@ -480,6 +449,7 @@ export default function Landing() {
     dragging.current = true;
     dragMoved.current = false;
     dragStartX.current = event.clientX;
+    pauseMentor(8000);
     mentorStageRef.current?.setAttribute("data-drag", "1");
     event.currentTarget.setPointerCapture?.(event.pointerId);
   };
@@ -510,16 +480,10 @@ export default function Landing() {
     setShowAuthModal(true);
   };
 
-  /* Log in looks "called out" while hovered or while the boy points at it */
-  const loginHighlighted = pointing || loginHover;
-
   /* ========================================================== */
   return (
-    <div
-      data-lite={lite ? "1" : "0"}
-      className="landing-root min-h-screen overflow-x-clip bg-white text-slate-900"
-    >
-      <style>{LANDING_CSS + NAV_AVATAR_CSS}</style>
+    <div className="landing-root min-h-screen overflow-x-clip bg-white text-slate-900">
+      <style>{LANDING_CSS}</style>
 
       {/* Scroll progress */}
       <div
@@ -529,38 +493,20 @@ export default function Landing() {
         aria-hidden="true"
       />
 
-      {/* Background (single fixed layer; blobs are desktop only) */}
+      {/* Static background (no blur, no animation) */}
       <div className="pointer-events-none fixed inset-0 z-0 bg-white" />
       <div className="pointer-events-none fixed inset-0 z-0 cyber-grid opacity-50" />
-      <div className="mobile-hide pointer-events-none fixed left-[-10%] top-[10%] z-0 h-[500px] w-[500px] rounded-full bg-indigo-500/10 blur-[140px]" />
-      <div className="mobile-hide pointer-events-none fixed right-[-10%] top-[25%] z-0 h-[600px] w-[600px] rounded-full bg-emerald-400/10 blur-[150px]" />
-
-      {!lite && !reduceMotion && (
-        <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
-          <div className="grid-scan absolute left-0 right-0 h-48 bg-gradient-to-b from-transparent via-indigo-400/10 to-transparent" />
-          {[...Array(6)].map((_, i) => (
-            <span
-              key={i}
-              className="particle absolute h-1 w-1 rounded-full bg-indigo-400/30"
-              style={{
-                left: `${(i * 19 + 7) % 100}%`,
-                animationDelay: `${(i * 1.9) % 10}s`,
-              }}
-            />
-          ))}
-        </div>
-      )}
 
       {/* ===================== NAVBAR ===================== */}
       <nav
-        className={`fixed left-0 right-0 top-0 z-50 border-b transition-all duration-300 ${
+        className={`fixed left-0 right-0 top-0 z-50 border-b transition-colors duration-300 ${
           scrolled
-            ? "border-slate-200 bg-white/95 shadow-[0_8px_30px_rgba(15,23,42,.06)] md:bg-white/80 md:backdrop-blur-2xl"
-            : "border-transparent bg-white/70 md:backdrop-blur-xl"
+            ? "border-slate-200 bg-white shadow-[0_6px_20px_rgba(15,23,42,.05)]"
+            : "border-transparent bg-white/90"
         }`}
       >
         <div
-          className={`mx-auto flex max-w-[1500px] items-center justify-between px-5 transition-all duration-300 sm:px-8 lg:px-12 ${
+          className={`mx-auto flex max-w-[1500px] items-center justify-between px-5 transition-[height] duration-300 sm:px-8 lg:px-12 ${
             scrolled ? "h-16" : "h-20"
           }`}
         >
@@ -593,45 +539,22 @@ export default function Landing() {
             ))}
           </div>
 
-          {/* Desktop (>=1024px only): avatar sits on the nav edge.
-              Click -> he points at Log in. Auth modal stays closed. */}
-          <div className="hidden items-center gap-3 self-stretch md:flex">
-            {!isMobile && (
-              <div className="avatar-slot relative hidden w-[68px] self-stretch lg:block">
-                <NavAvatar
-                  excited={loginHover}
-                  pointing={pointing}
-                  lite={lite}
-                  reduceMotion={reduceMotion}
-                  onClick={onAvatarClick}
-                />
-              </div>
-            )}
-
+          <div className="hidden items-center gap-3 md:flex">
             <button
-              className={`login-btn rounded-xl px-4 py-2 text-sm font-semibold transition ${
-                loginHighlighted
-                  ? "login-called bg-indigo-50 text-indigo-600 ring-2 ring-indigo-400"
-                  : "text-slate-600 hover:text-indigo-600"
-              }`}
+              className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-indigo-50 hover:text-indigo-600"
               onClick={openAuth}
-              onMouseEnter={() => setLoginHover(true)}
-              onMouseLeave={() => setLoginHover(false)}
-              onFocus={() => setLoginHover(true)}
-              onBlur={() => setLoginHover(false)}
             >
               Log in
             </button>
 
             <button
-              className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-bold text-white shadow-lg transition hover:-translate-y-0.5 hover:bg-indigo-600"
+              className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-bold text-white shadow-lg transition-colors hover:bg-indigo-600"
               onClick={openAuth}
             >
               Get Started
             </button>
           </div>
 
-          {/* Mobile / small screens: no avatar, just the menu button */}
           <button
             onClick={() => setMenuOpen(!menuOpen)}
             className="ml-auto rounded-xl border border-slate-200 bg-white p-2.5 md:hidden"
@@ -680,7 +603,7 @@ export default function Landing() {
             <Reveal>
               <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 font-mono text-[8px] font-bold tracking-[.25em] text-emerald-600">
                 <span className="relative flex h-2 w-2">
-                  <span className="live-pulse absolute inset-0 rounded-full bg-emerald-500" />
+                  <span className="live-pulse anim absolute inset-0 rounded-full bg-emerald-500" />
                   <span className="relative h-2 w-2 rounded-full bg-emerald-500" />
                 </span>
                 1:1 VIDEO MENTORSHIP // LIVE
@@ -690,7 +613,7 @@ export default function Landing() {
             <Reveal delay={80}>
               <h1 className="max-w-4xl text-5xl font-black leading-[.9] tracking-[-.06em] text-slate-900 sm:text-6xl md:text-7xl xl:text-[5.6rem]">
                 CONNECT WITH
-                <span className="hero-gradient block bg-gradient-to-r from-slate-900 via-indigo-600 to-emerald-600 bg-clip-text text-transparent">
+                <span className="block bg-gradient-to-r from-slate-900 via-indigo-600 to-emerald-600 bg-clip-text text-transparent">
                   MNC EMPLOYEES
                 </span>
               </h1>
@@ -709,7 +632,7 @@ export default function Landing() {
               </p>
             </Reveal>
 
-            {/* Interactive role picker */}
+            {/* Role picker (auto-cycles; click to choose) */}
             <Reveal delay={220}>
               <div className="mt-8">
                 <div className="mb-3 font-mono text-[8px] font-bold tracking-[.25em] text-slate-500">
@@ -725,7 +648,7 @@ export default function Landing() {
                       onClick={() => setHeroRole(index)}
                       className={`role-chip rounded-full border px-4 py-2 text-sm font-semibold ${
                         heroRole === index
-                          ? "border-indigo-600 bg-indigo-600 text-white shadow-[0_10px_25px_rgba(79,70,229,.28)]"
+                          ? "border-indigo-600 bg-indigo-600 text-white shadow-[0_8px_20px_rgba(79,70,229,.25)]"
                           : "border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:text-indigo-600"
                       }`}
                     >
@@ -738,25 +661,26 @@ export default function Landing() {
 
             <Reveal delay={280}>
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-                <MagneticButton
+                <button
+                  type="button"
                   onClick={openAuth}
-                  className="group relative flex items-center justify-center gap-3 overflow-hidden rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-7 py-4 text-sm font-bold text-white shadow-[0_18px_45px_rgba(79,70,229,.25)]"
+                  className="btn group flex items-center justify-center gap-3 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-7 py-4 text-sm font-bold text-white shadow-[0_14px_35px_rgba(79,70,229,.25)]"
                 >
-                  <span className="btn-shine" aria-hidden="true" />
                   <GraduationCap size={18} />
                   Find an Employee
                   <span className="rounded-md bg-white/15 px-2 py-1 text-[8px]">FRESHERS</span>
-                  <ArrowRight size={16} className="transition group-hover:translate-x-1" />
-                </MagneticButton>
+                  <ArrowRight size={16} />
+                </button>
 
-                <MagneticButton
+                <button
+                  type="button"
                   onClick={() => navigate("/mentor/register")}
-                  className="group flex items-center justify-center gap-3 rounded-xl border border-emerald-200 bg-white px-7 py-4 text-sm font-bold text-slate-700 hover:border-emerald-400"
+                  className="btn group flex items-center justify-center gap-3 rounded-xl border border-emerald-200 bg-white px-7 py-4 text-sm font-bold text-slate-700 hover:border-emerald-400"
                 >
                   <CircleDollarSign size={18} className="text-emerald-600" />
                   Become a Paid Employee
-                  <ArrowRight size={16} className="transition group-hover:translate-x-1" />
-                </MagneticButton>
+                  <ArrowRight size={16} />
+                </button>
               </div>
             </Reveal>
 
@@ -765,189 +689,188 @@ export default function Landing() {
             </Reveal>
           </div>
 
-          {/* ---------- Right: 3D scene ---------- */}
+          {/* ---------- Right: auto-moving 3D scene (CSS only) ---------- */}
           <div
             ref={heroZoneRef}
-            onPointerMove={onHeroMove}
-            onPointerLeave={onHeroLeave}
             className="relative flex min-h-[520px] items-center justify-center sm:min-h-[600px] lg:min-h-[660px]"
           >
             <div
-              ref={stageRef}
-              className="hero-stage relative h-[500px] w-full max-w-[640px] sm:h-[560px]"
+              data-play={heroInView ? "1" : "0"}
+              className="hero-persp relative h-[500px] w-full max-w-[640px] sm:h-[560px]"
             >
-              {/* Floor grid plate */}
-              <Layer d={6} className="inset-0 flex items-end justify-center mobile-hide">
-                <div className="hero-floor" />
-              </Layer>
+              <div className="hero-tilt anim absolute inset-0">
+                {/* Floor grid plate */}
+                <ZLayer z={-60} className="inset-0 flex items-end justify-center mobile-hide">
+                  <div className="hero-floor" />
+                </ZLayer>
 
-              {/* Rings */}
-              <Layer d={10} className="inset-0 flex items-center justify-center mobile-hide">
-                <div className="ring-a h-[470px] w-[470px] rounded-full border border-indigo-300/40" />
-              </Layer>
-              <Layer d={14} className="inset-0 flex items-center justify-center mobile-hide">
-                <div className="ring-b h-[520px] w-[280px] rounded-[50%] border border-violet-300/40" />
-              </Layer>
-              <Layer d={0} className="inset-0 flex items-center justify-center">
-                <div className="h-[330px] w-[330px] rounded-full border border-slate-200/70 sm:h-[420px] sm:w-[420px]" />
-              </Layer>
+                {/* Rings */}
+                <ZLayer z={-30} className="inset-0 flex items-center justify-center mobile-hide">
+                  <div className="ring-a anim h-[470px] w-[470px] rounded-full border border-indigo-300/40" />
+                </ZLayer>
+                <ZLayer z={-10} className="inset-0 flex items-center justify-center mobile-hide">
+                  <div className="ring-b anim h-[520px] w-[280px] rounded-[50%] border border-violet-300/40" />
+                </ZLayer>
+                <ZLayer z={0} className="inset-0 flex items-center justify-center">
+                  <div className="h-[330px] w-[330px] rounded-full border border-slate-200/70 sm:h-[420px] sm:w-[420px]" />
+                </ZLayer>
 
-              {/* Main video window */}
-              <Layer d={22} z={30} className="inset-0 flex items-center justify-center">
-                <div className="pointer-events-auto w-[min(94%,540px)]">
-                  <div className="float-a glass-card pulse-glow overflow-hidden rounded-[26px] border border-white/90">
-                    <div className="flex items-center justify-between border-b border-slate-200/80 bg-white/85 px-4 py-3.5 sm:px-5 sm:py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
-                          <Video size={15} />
+                {/* Main video window */}
+                <ZLayer z={40} className="inset-0 flex items-center justify-center">
+                  <div className="pointer-events-auto w-[min(94%,540px)]">
+                    <div className="float-a anim overflow-hidden rounded-[26px] border border-white/90 bg-white shadow-[0_24px_60px_rgba(15,23,42,.14)]">
+                      <div className="flex items-center justify-between border-b border-slate-200/80 bg-white px-4 py-3.5 sm:px-5 sm:py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+                            <Video size={15} />
+                          </div>
+                          <div>
+                            <div className="text-xs font-bold text-slate-800">LIVE MOCK INTERVIEW</div>
+                            <div className="font-mono text-[7px] tracking-[.16em] text-slate-600">
+                              SECURE VIDEO ROOM // #MX-28491
+                            </div>
+                          </div>
                         </div>
-                        <div>
-                          <div className="text-xs font-bold text-slate-800">LIVE MOCK INTERVIEW</div>
-                          <div className="font-mono text-[7px] tracking-[.16em] text-slate-600">
-                            SECURE VIDEO ROOM // #MX-28491
+
+                        <div className="flex items-center gap-2 rounded-full bg-emerald-50 px-2.5 py-1 font-mono text-[7px] font-bold text-emerald-600">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                          LIVE
+                        </div>
+                      </div>
+
+                      <div className="relative grid aspect-[16/9] grid-cols-2 gap-2 bg-slate-900 p-2">
+                        <div key={heroMentor.name} className="swap-in contents">
+                          <VideoPerson
+                            image={heroMentor.image}
+                            name={heroMentor.name}
+                            role={`Mentor • ${heroMentor.company} ${heroMentor.role}`}
+                            mentor
+                          />
+                        </div>
+
+                        <VideoPerson image={CANDIDATE_IMAGE} name="You" role="Candidate • Final Year" />
+
+                        <div className="absolute left-1/2 top-1/2 flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-white/20 text-white">
+                          <Zap size={15} />
+                        </div>
+
+                        <div className="absolute bottom-3 left-3 flex items-end gap-0.5" aria-hidden="true">
+                          {[3, 6, 10, 5, 8].map((h, i) => (
+                            <span
+                              key={i}
+                              className="eq-bar anim w-1 rounded-full bg-emerald-400"
+                              style={{ height: h, animationDelay: `${i * 0.12}s` }}
+                            />
+                          ))}
+                        </div>
+
+                        <div className="absolute bottom-3 right-3 rounded-md bg-black/40 px-2 py-1 font-mono text-[7px] text-white">
+                          00:42:18
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between bg-white px-4 py-3.5 sm:px-5 sm:py-4">
+                        <div className="flex gap-2">
+                          {["MUTE", "CAM", "CHAT"].map((label) => (
+                            <span key={label} className="rounded-md bg-slate-50 px-2 py-1 font-mono text-[7px] text-slate-600">
+                              {label}
+                            </span>
+                          ))}
+                        </div>
+
+                        <button
+                          onClick={() => setVideoOpen(true)}
+                          className="flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-[9px] font-bold text-white transition hover:bg-indigo-700 active:scale-95"
+                        >
+                          <Play size={11} fill="currentColor" />
+                          ENTER SESSION
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </ZLayer>
+
+                {/* Best match card (changes with role) */}
+                <ZLayer z={90} className="-left-1 top-6 sm:-left-4 sm:top-10">
+                  <div key={activeRole.key} className="swap-in">
+                    <div className="float-b anim w-[188px] rounded-2xl border border-white/90 bg-white p-3 shadow-[0_14px_36px_rgba(15,23,42,.14)]">
+                      <div className="font-mono text-[7px] font-bold tracking-[.2em] text-indigo-500">
+                        BEST MATCH
+                      </div>
+                      <div className="mt-2 flex gap-3">
+                        <img
+                          src={heroMentor.image}
+                          alt={heroMentor.name}
+                          width="48"
+                          height="48"
+                          loading="lazy"
+                          decoding="async"
+                          className="h-12 w-12 rounded-xl object-cover"
+                        />
+                        <div className="min-w-0">
+                          <div className="truncate text-xs font-black text-slate-800">{heroMentor.name}</div>
+                          <div className="mt-0.5 text-[8px] text-slate-600">{heroMentor.role}</div>
+                          <div className="mt-1 inline-flex rounded bg-indigo-50 px-1.5 py-0.5 font-mono text-[7px] font-bold text-indigo-600">
+                            {heroMentor.company}
                           </div>
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-2 rounded-full bg-emerald-50 px-2.5 py-1 font-mono text-[7px] font-bold text-emerald-600">
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                        LIVE
-                      </div>
-                    </div>
-
-                    <div className="relative grid aspect-[16/9] grid-cols-2 gap-2 bg-slate-900 p-2">
-                      <div key={heroMentor.name} className="swap-in contents">
-                        <VideoPerson
-                          image={heroMentor.image}
-                          videoSrc={lite ? undefined : DEMO_VIDEO_URL}
-                          name={heroMentor.name}
-                          role={`Mentor • ${heroMentor.company} ${heroMentor.role}`}
-                          mentor
-                        />
-                      </div>
-
-                      <VideoPerson image={CANDIDATE_IMAGE} name="You" role="Candidate • Final Year" />
-
-                      <div className="absolute left-1/2 top-1/2 flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-white/20 text-white">
-                        <Zap size={15} />
-                      </div>
-
-                      <div className="absolute bottom-3 left-3 flex items-end gap-0.5" aria-hidden="true">
-                        {[3, 6, 10, 5, 8].map((h, i) => (
-                          <span
-                            key={i}
-                            className="eq-bar w-1 rounded-full bg-emerald-400"
-                            style={{ height: h, animationDelay: `${i * 0.12}s` }}
+                      <div className="mt-3">
+                        <div className="mb-1 flex justify-between font-mono text-[7px] text-slate-600">
+                          <span>{activeRole.label.toUpperCase()}</span>
+                          <span className="font-bold text-emerald-600">{activeRole.match}% MATCH</span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            key={`m-${activeRole.key}`}
+                            className="bar-grow h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-600"
+                            style={{ width: `${activeRole.match}%` }}
                           />
-                        ))}
-                      </div>
-
-                      <div className="absolute bottom-3 right-3 rounded-md bg-black/40 px-2 py-1 font-mono text-[7px] text-white">
-                        00:42:18
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between bg-white px-4 py-3.5 sm:px-5 sm:py-4">
-                      <div className="flex gap-2">
-                        {["MUTE", "CAM", "CHAT"].map((label) => (
-                          <span key={label} className="rounded-md bg-slate-50 px-2 py-1 font-mono text-[7px] text-slate-600">
-                            {label}
-                          </span>
-                        ))}
-                      </div>
-
-                      <button
-                        onClick={() => setVideoOpen(true)}
-                        className="flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-[9px] font-bold text-white transition hover:bg-indigo-700 active:scale-95"
-                      >
-                        <Play size={11} fill="currentColor" />
-                        ENTER SESSION
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </Layer>
-
-              {/* Best match card (changes with role) */}
-              <Layer d={34} z={60} className="-left-1 top-6 sm:-left-4 sm:top-10">
-                <div key={activeRole.key} className="swap-in">
-                  <div className="float-b w-[188px] rounded-2xl border border-white/90 bg-white/95 p-3 shadow-[0_20px_50px_rgba(15,23,42,.14)]">
-                    <div className="font-mono text-[7px] font-bold tracking-[.2em] text-indigo-500">
-                      BEST MATCH
-                    </div>
-                    <div className="mt-2 flex gap-3">
-                      <img
-                        src={heroMentor.image}
-                        alt={heroMentor.name}
-                        width="48"
-                        height="48"
-                        loading="lazy"
-                        decoding="async"
-                        className="h-12 w-12 rounded-xl object-cover"
-                      />
-                      <div className="min-w-0">
-                        <div className="truncate text-xs font-black text-slate-800">{heroMentor.name}</div>
-                        <div className="mt-0.5 text-[8px] text-slate-600">{heroMentor.role}</div>
-                        <div className="mt-1 inline-flex rounded bg-indigo-50 px-1.5 py-0.5 font-mono text-[7px] font-bold text-indigo-600">
-                          {heroMentor.company}
                         </div>
                       </div>
                     </div>
-                    <div className="mt-3">
-                      <div className="mb-1 flex justify-between font-mono text-[7px] text-slate-600">
-                        <span>{activeRole.label.toUpperCase()}</span>
-                        <span className="font-bold text-emerald-600">{activeRole.match}% MATCH</span>
+                  </div>
+                </ZLayer>
+
+                {/* Second profile */}
+                <ZLayer z={70} className="-right-2 bottom-24 hidden sm:-right-3 sm:block">
+                  <div className="float-c anim">
+                    <MentorFloatCard mentor={mentors[2]} />
+                  </div>
+                </ZLayer>
+
+                {/* Earnings */}
+                <ZLayer z={110} className="bottom-0 left-[10%] sm:left-[16%]">
+                  <div className="float-b anim rounded-2xl border border-emerald-200 bg-white px-4 py-3 shadow-[0_12px_32px_rgba(16,185,129,.14)]">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+                        <DollarSign size={17} />
                       </div>
-                      <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
-                        <div
-                          key={`m-${activeRole.key}`}
-                          className="bar-grow h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-600"
-                          style={{ width: `${activeRole.match}%` }}
-                        />
+                      <div>
+                        <div className="font-mono text-[7px] tracking-[.15em] text-slate-600">MENTOR EARNINGS</div>
+                        <div className="mt-0.5 text-sm font-black text-emerald-600">₹2,500 / HR</div>
                       </div>
                     </div>
                   </div>
-                </div>
-              </Layer>
+                </ZLayer>
 
-              {/* Second profile */}
-              <Layer d={28} z={50} className="-right-2 bottom-24 sm:-right-3 hidden sm:block">
-                <div className="float-c">
-                  <MentorFloatCard mentor={mentors[2]} />
-                </div>
-              </Layer>
-
-              {/* Earnings */}
-              <Layer d={40} z={70} className="bottom-0 left-[10%] sm:left-[16%]">
-                <div className="float-b rounded-2xl border border-emerald-200 bg-white/95 px-4 py-3 shadow-[0_15px_45px_rgba(16,185,129,.14)]">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
-                      <DollarSign size={17} />
-                    </div>
-                    <div>
-                      <div className="font-mono text-[7px] tracking-[.15em] text-slate-600">MENTOR EARNINGS</div>
-                      <div className="mt-0.5 text-sm font-black text-emerald-600">₹2,500 / HR</div>
-                    </div>
+                {/* Live notification */}
+                <ZLayer z={80} className="right-0 top-2 sm:right-2 sm:top-4">
+                  <div className="float-c anim flex max-w-[210px] items-start gap-2 rounded-2xl border border-indigo-100 bg-white px-3 py-2.5 shadow-[0_12px_30px_rgba(79,70,229,.12)]">
+                    <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+                      <BellRing size={12} />
+                    </span>
+                    <span key={notifIndex} className="swap-in text-[10px] font-semibold leading-snug text-slate-700">
+                      {notifications[notifIndex]}
+                    </span>
                   </div>
-                </div>
-              </Layer>
+                </ZLayer>
 
-              {/* Live notification */}
-              <Layer d={30} z={65} className="right-0 top-2 sm:right-2 sm:top-4">
-                <div className="float-c flex max-w-[210px] items-start gap-2 rounded-2xl border border-indigo-100 bg-white/95 px-3 py-2.5 shadow-[0_16px_40px_rgba(79,70,229,.12)]">
-                  <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
-                    <BellRing size={12} />
-                  </span>
-                  <span key={notifIndex} className="swap-in text-[10px] font-semibold leading-snug text-slate-700">
-                    {notifications[notifIndex]}
-                  </span>
-                </div>
-              </Layer>
-
-              {/* Orbit dot */}
-              <Layer d={12} className="inset-0 flex items-center justify-center mobile-hide">
-                <div className="orbit-dot h-3 w-3 rounded-full bg-indigo-500 shadow-[0_0_20px_rgba(99,102,241,.8)]" />
-              </Layer>
+                {/* Orbit dot */}
+                <ZLayer z={-20} className="inset-0 flex items-center justify-center mobile-hide">
+                  <div className="orbit-dot anim h-3 w-3 rounded-full bg-indigo-500 shadow-[0_0_14px_rgba(99,102,241,.7)]" />
+                </ZLayer>
+              </div>
             </div>
           </div>
         </div>
@@ -956,9 +879,10 @@ export default function Landing() {
       {/* ===================== COMPANY MARQUEE ===================== */}
       <MarqueeStrip />
 
-      {/* ===================== PERSONA ===================== */}
+      {/* ===================== PERSONA (auto-switches) ===================== */}
       <section
         id="section-2"
+        ref={personaRef}
         className="relative z-10 scroll-mt-20 px-5 py-24 sm:px-8 md:py-28 lg:px-12"
       >
         <div className="mx-auto max-w-[1400px]">
@@ -992,7 +916,7 @@ export default function Landing() {
                 aria-hidden="true"
               />
               <button
-                onClick={() => setPersona("fresher")}
+                onClick={() => setPersonaIdx(0)}
                 className={`relative z-10 flex items-center justify-center gap-2 rounded-xl px-3 py-3 text-xs font-bold transition-colors sm:px-5 sm:text-sm ${
                   fresherMode ? "text-indigo-600" : "text-slate-600"
                 }`}
@@ -1000,7 +924,7 @@ export default function Landing() {
                 <GraduationCap size={16} />I am a Fresher
               </button>
               <button
-                onClick={() => setPersona("mentor")}
+                onClick={() => setPersonaIdx(1)}
                 className={`relative z-10 flex items-center justify-center gap-2 rounded-xl px-3 py-3 text-xs font-bold transition-colors sm:px-5 sm:text-sm ${
                   !fresherMode ? "text-emerald-600" : "text-slate-600"
                 }`}
@@ -1012,13 +936,13 @@ export default function Landing() {
 
           <Reveal delay={120} className="mt-12">
             <div
-              className={`overflow-hidden rounded-[28px] border p-6 shadow-[0_30px_100px_rgba(15,23,42,.08)] transition-colors duration-500 sm:p-8 md:rounded-[32px] md:p-12 ${
+              className={`overflow-hidden rounded-[28px] border p-6 shadow-[0_24px_70px_rgba(15,23,42,.07)] transition-colors duration-500 sm:p-8 md:rounded-[32px] md:p-12 ${
                 fresherMode
                   ? "border-indigo-100 bg-gradient-to-br from-indigo-50/80 via-white to-violet-50/60"
                   : "border-emerald-100 bg-gradient-to-br from-emerald-50/80 via-white to-teal-50/60"
               }`}
             >
-              <div key={persona} className="swap-in grid items-center gap-10 lg:grid-cols-[1fr_.8fr] lg:gap-12">
+              <div key={personaIdx} className="swap-in grid items-center gap-10 lg:grid-cols-[1fr_.8fr] lg:gap-12">
                 <div>
                   <div
                     className={`font-mono text-[8px] font-bold tracking-[.3em] ${
@@ -1059,8 +983,7 @@ export default function Landing() {
                     ).map((item) => (
                       <div
                         key={item}
-                        className="spot flex items-center gap-2 rounded-xl border border-white bg-white/80 px-4 py-3 text-sm font-medium text-slate-600 shadow-sm"
-                        onPointerMove={spotMove}
+                        className="flex items-center gap-2 rounded-xl border border-white bg-white/80 px-4 py-3 text-sm font-medium text-slate-600 shadow-sm"
                       >
                         <CheckCircle2
                           size={15}
@@ -1071,27 +994,23 @@ export default function Landing() {
                     ))}
                   </div>
 
-                  <MagneticButton
+                  <button
+                    type="button"
                     onClick={() => (fresherMode ? openAuth() : navigate("/mentor/register"))}
-                    className={`mt-9 inline-flex items-center gap-3 rounded-xl px-6 py-3.5 text-sm font-bold text-white shadow-lg ${
+                    className={`btn mt-9 inline-flex items-center gap-3 rounded-xl px-6 py-3.5 text-sm font-bold text-white shadow-lg ${
                       fresherMode ? "bg-indigo-600 shadow-indigo-200" : "bg-emerald-600 shadow-emerald-200"
                     }`}
                   >
                     {fresherMode ? "Explore MNC Working Employees" : "Start Earning"}
                     <ArrowRight size={16} />
-                  </MagneticButton>
+                  </button>
                 </div>
 
-                <div className="relative flex min-h-[300px] items-center justify-center">
+                {/* 3D card that sways on its own */}
+                <div className="card-persp relative flex min-h-[300px] items-center justify-center">
                   <div
-                    className={`mobile-hide absolute h-64 w-64 rounded-full blur-[70px] ${
-                      fresherMode ? "bg-indigo-300/30" : "bg-emerald-300/30"
-                    }`}
-                  />
-
-                  <TiltCard
-                    className="relative w-full max-w-sm rounded-3xl border border-white bg-white/90 p-6 shadow-[0_25px_70px_rgba(15,23,42,.1)]"
-                    max={7}
+                    data-play={personaVisible ? "1" : "0"}
+                    className="card-sway anim relative w-full max-w-sm rounded-3xl border border-white bg-white p-6 shadow-[0_20px_55px_rgba(15,23,42,.1)]"
                   >
                     <div className="flex items-center justify-between">
                       <span className="font-mono text-[8px] tracking-[.2em] text-slate-600">
@@ -1133,7 +1052,7 @@ export default function Landing() {
                         {fresherMode ? "READY FOR INTERVIEW" : "ACCEPTING SESSIONS"}
                       </span>
                     </div>
-                  </TiltCard>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1144,10 +1063,10 @@ export default function Landing() {
       {/* ===================== FEATURES ===================== */}
       <section
         id="section-1"
+        ref={featuresRef}
+        data-play={featuresVisible ? "1" : "0"}
         className="premium-feature-section relative z-10 scroll-mt-20 overflow-hidden border-y border-slate-800 px-5 py-24 sm:px-8 md:py-28 lg:px-12"
       >
-        <div className="absolute inset-0 fine-grid opacity-50" />
-
         <div className="relative mx-auto max-w-[1450px]">
           <Reveal>
             <SectionHeading
@@ -1159,27 +1078,25 @@ export default function Landing() {
             />
           </Reveal>
 
-          <div className="mt-14 grid gap-5 lg:grid-cols-3">
+          <div className="card-persp mt-14 grid gap-5 lg:grid-cols-3">
             {features.map((feature, i) => {
               const Icon = feature.icon;
               const tone =
                 feature.accent === "emerald"
-                  ? { border: "border-emerald-400/25", chip: "bg-emerald-400/10 text-emerald-300", glow: "bg-emerald-400/10" }
+                  ? { border: "border-emerald-400/25", chip: "bg-emerald-400/10 text-emerald-300" }
                   : feature.accent === "violet"
-                    ? { border: "border-violet-400/20", chip: "bg-violet-400/10 text-violet-300", glow: "bg-violet-400/10" }
-                    : { border: "border-indigo-400/20", chip: "bg-indigo-400/10 text-indigo-300", glow: "bg-indigo-400/10" };
+                    ? { border: "border-violet-400/20", chip: "bg-violet-400/10 text-violet-300" }
+                    : { border: "border-indigo-400/20", chip: "bg-indigo-400/10 text-indigo-300" };
 
               return (
                 <Reveal key={feature.title} delay={i * 110}>
-                  <TiltCard
-                    max={9}
-                    className={`feature-card-premium spot group relative min-h-[380px] overflow-hidden rounded-[26px] border p-7 sm:p-8 ${tone.border}`}
+                  <div
+                    className={`feature-card-premium card-sway anim group relative min-h-[380px] overflow-hidden rounded-[26px] border p-7 sm:p-8 ${tone.border}`}
+                    style={{ animationDelay: `${-i * 2.4}s` }}
                   >
-                    <div className={`mobile-hide absolute -right-20 -top-20 h-48 w-48 rounded-full blur-[70px] ${tone.glow}`} />
-
-                    <div className="relative" style={{ transform: "translateZ(30px)" }}>
+                    <div className="relative">
                       <div className="flex items-start justify-between">
-                        <div className={`feature-icon-premium flex h-14 w-14 items-center justify-center rounded-2xl ${tone.chip}`}>
+                        <div className={`flex h-14 w-14 items-center justify-center rounded-2xl ${tone.chip}`}>
                           <Icon size={24} />
                         </div>
                         <span className="text-5xl font-black tracking-[-.08em] text-white/10">{feature.number}</span>
@@ -1194,10 +1111,10 @@ export default function Landing() {
 
                       <div className="mt-7 flex items-center gap-2 text-xs font-bold text-cyan-300">
                         Learn more
-                        <ArrowRight size={14} className="transition group-hover:translate-x-1" />
+                        <ArrowRight size={14} />
                       </div>
                     </div>
-                  </TiltCard>
+                  </div>
                 </Reveal>
               );
             })}
@@ -1205,15 +1122,11 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* ===================== MENTOR CAROUSEL ===================== */}
+      {/* ===================== MENTOR CAROUSEL (3D, auto) ===================== */}
       <section
         id="section-0"
         ref={mentorSectionRef}
         className="relative z-10 scroll-mt-20 overflow-hidden px-5 py-24 sm:px-8 md:py-28 lg:px-12"
-        onMouseEnter={() => setMentorPaused(true)}
-        onMouseLeave={() => setMentorPaused(false)}
-        onTouchStart={() => setMentorPaused(true)}
-        onTouchEnd={() => setMentorPaused(false)}
       >
         <div className="mx-auto max-w-[1500px]">
           <Reveal>
@@ -1228,7 +1141,7 @@ export default function Landing() {
 
           <div
             ref={mentorStageRef}
-            className="mentor-stage relative mx-auto mt-12 h-[540px] max-w-[1400px] select-none outline-none sm:h-[600px]"
+            className="mentor-stage relative mx-auto mt-12 h-[520px] max-w-[1400px] select-none outline-none sm:h-[560px]"
             tabIndex={0}
             role="region"
             aria-roledescription="carousel"
@@ -1251,12 +1164,14 @@ export default function Landing() {
               const spacing = isMobile ? 200 : 305;
               const x = offset * spacing;
               const z = abs === 0 ? 100 : abs === 1 ? -45 : -190;
-              const rotateY = offset === 0 ? 0 : offset > 0 ? -34 : 34;
+              const tilt = isMobile ? 24 : 34;
+              const rotateY = offset === 0 ? 0 : offset > 0 ? -tilt : tilt;
               const scale = abs === 0 ? 1 : abs === 1 ? 0.82 : 0.64;
               const opacity = isMobile
                 ? abs === 0 ? 1 : abs === 1 ? 0.55 : 0
-                : abs === 0 ? 1 : abs === 1 ? 0.78 : 0.2;
+                : abs === 0 ? 1 : abs === 1 ? 0.8 : 0.3;
               const active = abs === 0;
+              const hidden = abs > (isMobile ? 1 : 2);
 
               return (
                 <div
@@ -1266,16 +1181,13 @@ export default function Landing() {
                     setMentorIndex(index);
                   }}
                   className={`mentor-card absolute left-1/2 top-1/2 h-[400px] w-[290px] overflow-hidden rounded-[28px] border border-white/90 bg-white sm:w-[300px] ${
-                    abs > (isMobile ? 1 : 2) ? "pointer-events-none" : "cursor-pointer"
+                    hidden ? "pointer-events-none" : "cursor-pointer"
                   }`}
                   style={{
                     transform: `translate(-50%, -50%) translateX(calc(${x}px + var(--drag, 0px))) translateZ(${z}px) rotateY(${rotateY}deg) scale(${scale})`,
                     opacity,
                     zIndex: 30 - abs,
-                    visibility: isMobile && abs > 1 ? "hidden" : "visible",
-                    boxShadow: active
-                      ? "0 30px 80px rgba(15,23,42,.22)"
-                      : "0 14px 36px rgba(15,23,42,.14)",
+                    visibility: hidden ? "hidden" : "visible",
                   }}
                   aria-hidden={!active}
                 >
@@ -1366,7 +1278,7 @@ export default function Landing() {
                   type="button"
                   onClick={() => setMentorIndex(index)}
                   aria-label={`Show ${mentor.name}`}
-                  className={`h-2 rounded-full transition-all duration-500 ${
+                  className={`h-2 rounded-full transition-all duration-300 ${
                     mentorIndex === index ? "w-9 bg-indigo-600" : "w-2 bg-slate-300 hover:bg-slate-400"
                   }`}
                 />
@@ -1386,15 +1298,13 @@ export default function Landing() {
       </section>
 
       {/* ===================== HOW IT WORKS ===================== */}
-      <HowItWorks />
+      <HowItWorks reduceMotion={reduceMotion} />
 
       {/* Professionals anchor */}
       <div id="section-4" className="relative z-10 h-0 scroll-mt-24" aria-hidden="true" />
 
       {/* ===================== FINAL CTA ===================== */}
       <section className="relative z-10 overflow-hidden px-5 py-28 sm:px-8 md:py-32 lg:px-12">
-        <div className="mobile-hide absolute left-1/2 top-1/2 h-[500px] w-[900px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-indigo-500/10 blur-[130px]" />
-
         <div className="relative mx-auto max-w-5xl text-center">
           <Reveal>
             <div className="mx-auto mb-6 flex w-fit max-w-full items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-4 py-2 font-mono text-[8px] font-bold tracking-[.2em] text-indigo-600 sm:tracking-[.3em]">
@@ -1406,7 +1316,7 @@ export default function Landing() {
           <Reveal delay={80}>
             <h2 className="text-5xl font-black leading-[.9] tracking-[-.065em] text-slate-900 sm:text-7xl lg:text-8xl">
               DON'T JUST
-              <span className="hero-gradient block bg-gradient-to-r from-indigo-600 via-violet-600 to-emerald-600 bg-clip-text text-transparent">
+              <span className="block bg-gradient-to-r from-indigo-600 via-violet-600 to-emerald-600 bg-clip-text text-transparent">
                 PREPARE.
               </span>
               <span className="block">CONNECT WITH INDUSTRY.</span>
@@ -1421,21 +1331,23 @@ export default function Landing() {
 
           <Reveal delay={200}>
             <div className="mt-10 flex flex-col justify-center gap-3 sm:flex-row">
-              <MagneticButton
+              <button
+                type="button"
                 onClick={openAuth}
-                className="group flex items-center justify-center gap-3 rounded-xl bg-indigo-600 px-8 py-4 text-sm font-bold text-white shadow-[0_20px_50px_rgba(79,70,229,.25)] hover:bg-indigo-700"
+                className="btn group flex items-center justify-center gap-3 rounded-xl bg-indigo-600 px-8 py-4 text-sm font-bold text-white shadow-[0_16px_40px_rgba(79,70,229,.25)] hover:bg-indigo-700"
               >
                 <GraduationCap size={18} />
                 Find an MNC Employee
-              </MagneticButton>
+              </button>
 
-              <MagneticButton
+              <button
+                type="button"
                 onClick={() => navigate("/mentor/register")}
-                className="group flex items-center justify-center gap-3 rounded-xl border border-emerald-200 bg-white px-8 py-4 text-sm font-bold text-emerald-600 shadow-sm hover:shadow-lg"
+                className="btn group flex items-center justify-center gap-3 rounded-xl border border-emerald-200 bg-white px-8 py-4 text-sm font-bold text-emerald-600 shadow-sm hover:shadow-lg"
               >
                 <DollarSign size={18} />
                 Start Earning as an MNC Employee
-              </MagneticButton>
+              </button>
             </div>
           </Reveal>
         </div>
@@ -1463,7 +1375,7 @@ export default function Landing() {
         </div>
       </footer>
 
-      {/* ===================== VIDEO MODAL ===================== */}
+      {/* ===================== VIDEO MODAL (video loads only when opened) ===================== */}
       {videoOpen && (
         <div
           className="modal-fade fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/75 p-4 sm:p-5"
@@ -1511,13 +1423,13 @@ export default function Landing() {
           aria-modal="true"
         >
           <div
-            className="modal-pop relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-[28px] border border-white/80 bg-white shadow-[0_35px_100px_rgba(15,23,42,.22)]"
+            className="modal-pop relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-[28px] border border-white/80 bg-white shadow-[0_30px_80px_rgba(15,23,42,.22)]"
             style={{ overscrollBehavior: "contain" }}
           >
             <button
               onClick={() => setShowAuthModal(false)}
               aria-label="Close authentication"
-              className="absolute right-4 top-4 z-20 flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white/95 text-slate-400 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:text-slate-900"
+              className="absolute right-4 top-4 z-20 flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white/95 text-slate-400 shadow-sm transition duration-200 hover:text-slate-900"
             >
               <X size={18} />
             </button>
@@ -1533,17 +1445,8 @@ export default function Landing() {
 }
 
 /* ==========================================================
-   SMALL INTERACTION HELPERS
+   SMALL HELPERS
    ========================================================== */
-
-/* Cursor spotlight (writes two CSS vars, desktop mouse only) */
-function spotMove(event) {
-  if (event.pointerType !== "mouse") return;
-  const el = event.currentTarget;
-  const rect = el.getBoundingClientRect();
-  el.style.setProperty("--mx", `${event.clientX - rect.left}px`);
-  el.style.setProperty("--my", `${event.clientY - rect.top}px`);
-}
 
 /* Fade/slide in once when scrolled into view */
 function Reveal({ children, delay = 0, className = "", as: Tag = "div" }) {
@@ -1567,92 +1470,14 @@ function Reveal({ children, delay = 0, className = "", as: Tag = "div" }) {
   );
 }
 
-/* 3D tilt + glare, mouse only. On touch devices it stays flat (no cost). */
-function TiltCard({ children, className = "", max = 8 }) {
-  const ref = useRef(null);
-  const raf = useRef(0);
-
-  useEffect(() => () => cancelAnimationFrame(raf.current), []);
-
-  const onMove = (event) => {
-    if (event.pointerType !== "mouse") return;
-    const el = ref.current;
-    if (!el) return;
-
-    const rect = el.getBoundingClientRect();
-    const px = (event.clientX - rect.left) / rect.width;
-    const py = (event.clientY - rect.top) / rect.height;
-    const mx = event.clientX - rect.left;
-    const my = event.clientY - rect.top;
-
-    cancelAnimationFrame(raf.current);
-    raf.current = requestAnimationFrame(() => {
-      el.style.transform = `perspective(1000px) rotateX(${((0.5 - py) * max).toFixed(2)}deg) rotateY(${((px - 0.5) * max).toFixed(2)}deg)`;
-      el.style.setProperty("--gx", `${(px * 100).toFixed(1)}%`);
-      el.style.setProperty("--gy", `${(py * 100).toFixed(1)}%`);
-      el.style.setProperty("--mx", `${mx}px`);
-      el.style.setProperty("--my", `${my}px`);
-    });
-  };
-
-  const onLeave = () => {
-    cancelAnimationFrame(raf.current);
-    if (ref.current) ref.current.style.transform = "";
-  };
-
+/* Static depth layer for the hero scene: only a fixed translateZ.
+   All movement is done by CSS keyframes on the parent, so there is
+   no JS running on mouse-move. */
+function ZLayer({ z = 0, className = "", children }) {
   return (
     <div
-      ref={ref}
-      onPointerMove={onMove}
-      onPointerLeave={onLeave}
-      className={`tilt ${className}`}
-    >
-      {children}
-      <span className="tilt-glare" aria-hidden="true" />
-    </div>
-  );
-}
-
-/* Button that leans toward the cursor (mouse only) */
-function MagneticButton({ children, className = "", onClick }) {
-  const ref = useRef(null);
-
-  const onMove = (event) => {
-    if (event.pointerType !== "mouse") return;
-    const el = ref.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const dx = (event.clientX - (rect.left + rect.width / 2)) * 0.14;
-    const dy = (event.clientY - (rect.top + rect.height / 2)) * 0.22;
-    el.style.transform = `translate3d(${dx.toFixed(1)}px, ${dy.toFixed(1)}px, 0)`;
-  };
-
-  const onLeave = () => {
-    if (ref.current) ref.current.style.transform = "";
-  };
-
-  return (
-    <button
-      ref={ref}
-      type="button"
-      onClick={onClick}
-      onPointerMove={onMove}
-      onPointerLeave={onLeave}
-      className={`magnetic ${className}`}
-    >
-      {children}
-    </button>
-  );
-}
-
-/* Parallax layer: depth `d` moves with --px/--py set on the stage */
-function Layer({ d = 0, z = 0, className = "", children }) {
-  return (
-    <div
-      className={`pointer-events-none absolute ${className}`}
-      style={{
-        transform: `translate3d(calc(var(--px, 0) * ${d}px), calc(var(--py, 0) * ${d}px), ${z}px)`,
-      }}
+      className={`zl pointer-events-none absolute ${className}`}
+      style={{ transform: `translateZ(${z}px)` }}
     >
       {children}
     </div>
@@ -1678,7 +1503,7 @@ function HudPanel() {
   return (
     <div
       ref={ref}
-      className="mt-10 overflow-hidden rounded-2xl border border-slate-200 bg-white/90 shadow-[0_20px_60px_rgba(15,23,42,.06)]"
+      className="mt-10 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_16px_45px_rgba(15,23,42,.06)]"
     >
       <div className="grid grid-cols-3">
         <HudStat value={sessions.toLocaleString()} suffix="+" label="ACTIVE SESSIONS" icon={<Video size={13} />} />
@@ -1714,7 +1539,7 @@ function HudStat({ value, suffix, label, icon }) {
   );
 }
 
-/* Marquee only animates while visible; pauses on hover */
+/* Marquee only animates while visible */
 function MarqueeStrip() {
   const ref = useRef(null);
   const visible = useInView(ref, { threshold: 0.01 });
@@ -1722,7 +1547,7 @@ function MarqueeStrip() {
   return (
     <section
       ref={ref}
-      className="relative z-10 overflow-hidden border-y border-slate-200 bg-slate-50/70 py-8"
+      className="relative z-10 overflow-hidden border-y border-slate-200 bg-slate-50 py-8"
     >
       <div className="mb-5 text-center font-mono text-[8px] font-bold tracking-[.3em] text-slate-600">
         LEARN FROM PEOPLE WHO WORK HERE
@@ -1745,10 +1570,13 @@ function MarqueeStrip() {
   );
 }
 
-/* Steps with a progress line that fills when scrolled into view */
-function HowItWorks() {
+/* Steps: progress line fills on view, then the active step auto-highlights in turn */
+function HowItWorks({ reduceMotion }) {
+  const sectionRef = useRef(null);
   const lineRef = useRef(null);
   const [filled, setFilled] = useState(false);
+  const visible = useInView(sectionRef, { threshold: 0.2 });
+  const [activeStep] = useCycle(steps.length, 2200, visible && !reduceMotion);
 
   useEffect(() => {
     const el = lineRef.current;
@@ -1759,7 +1587,8 @@ function HowItWorks() {
   return (
     <section
       id="section-3"
-      className="relative z-10 scroll-mt-20 border-y border-slate-200 bg-slate-50/70 px-5 py-24 sm:px-8 md:py-28 lg:px-12"
+      ref={sectionRef}
+      className="relative z-10 scroll-mt-20 border-y border-slate-200 bg-slate-50 px-5 py-24 sm:px-8 md:py-28 lg:px-12"
     >
       <div className="mx-auto max-w-[1400px]">
         <Reveal>
@@ -1786,9 +1615,13 @@ function HowItWorks() {
               const Icon = item.icon;
               return (
                 <Reveal key={item.n} delay={index * 100}>
-                  <div className="step group relative h-full rounded-2xl border border-slate-200 bg-white p-6 md:rounded-none md:border-0 md:border-l md:bg-transparent md:p-8 md:first:border-l-0">
+                  <div
+                    className={`step group relative h-full rounded-2xl border border-slate-200 bg-white p-6 md:rounded-none md:border-0 md:border-l md:bg-transparent md:p-8 md:first:border-l-0 ${
+                      activeStep === index ? "step-on" : ""
+                    }`}
+                  >
                     <div className="flex items-center justify-between">
-                      <span className="text-5xl font-black text-slate-200 transition-colors duration-300 group-hover:text-indigo-200">
+                      <span className="stepnum text-5xl font-black text-slate-200 transition-colors duration-300 group-hover:text-indigo-200">
                         {item.n}
                       </span>
                       <div className="step-icon relative z-10 flex h-11 w-11 items-center justify-center rounded-xl bg-white text-indigo-600 shadow-sm ring-1 ring-slate-100">
@@ -1811,12 +1644,13 @@ function HowItWorks() {
   );
 }
 
+/* Image tile; a real <video> is rendered only when videoSrc is given (modal) */
 function VideoPerson({ image, videoSrc, name, role, mentor = false }) {
   return (
-    <div className="group relative overflow-hidden rounded-2xl bg-slate-800">
+    <div className="relative overflow-hidden rounded-2xl bg-slate-800">
       {videoSrc ? (
         <video
-          className="h-full w-full object-cover opacity-90 transition duration-700 group-hover:scale-105"
+          className="h-full w-full object-cover opacity-90"
           src={videoSrc}
           poster={image}
           autoPlay
@@ -1832,14 +1666,14 @@ function VideoPerson({ image, videoSrc, name, role, mentor = false }) {
           alt={name}
           loading="lazy"
           decoding="async"
-          className="h-full w-full object-cover opacity-90 transition duration-700 group-hover:scale-105"
+          className="h-full w-full object-cover opacity-90"
         />
       )}
 
       <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-transparent to-slate-950/10" />
 
       <div className="absolute left-3 top-3 flex items-center gap-1.5 rounded-full border border-white/15 bg-black/40 px-2 py-1 font-mono text-[6px] font-bold tracking-wider text-white/90">
-        <span className="live-pulse h-1.5 w-1.5 rounded-full bg-emerald-400" />
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
         LIVE
       </div>
 
@@ -1859,7 +1693,7 @@ function VideoPerson({ image, videoSrc, name, role, mentor = false }) {
 
 function MentorFloatCard({ mentor }) {
   return (
-    <div className="w-[190px] rounded-2xl border border-white/90 bg-white/95 p-3 shadow-[0_20px_50px_rgba(15,23,42,.12)]">
+    <div className="w-[190px] rounded-2xl border border-white/90 bg-white p-3 shadow-[0_14px_36px_rgba(15,23,42,.12)]">
       <div className="flex gap-3">
         <img
           src={mentor.image}
@@ -1938,48 +1772,38 @@ function SectionHeading({ eyebrow, number, title, gradient, description }) {
 }
 
 /* ==========================================================
-   CSS
-   Rules of thumb used here:
-   - animate only transform / opacity (no box-shadow, no blur animation)
-   - no backdrop-filter on phones
-   - infinite animations are switched off on phones, off-screen and
-     when the user prefers reduced motion
-   - avatar + lite-mode CSS lives in NavAvatar.jsx (NAV_AVATAR_CSS)
+   CSS - 3D that stays smooth
+   Rules:
+   - every moving thing is transform/opacity only (GPU compositor)
+   - ALL motion is CSS keyframes (no mouse-move JS, no per-frame React)
+   - NO blur filters, NO backdrop-filter, NO big animated shadows
+   - animations pause when their section leaves the screen
+     ([data-play="0"] .anim) and are off for reduced motion
+   - phones: 3D scene is simplified (flat layers, no rings/floor)
    ========================================================== */
 const LANDING_CSS = `
-/* ---------- page-level: no sideways drag + slim scrollbar ---------- */
 html, body {
   max-width: 100%;
-  overflow-x: clip;            /* clips without creating a scroll container */
+  overflow-x: clip;
   overscroll-behavior-x: none;
 }
 html {
   scroll-behavior: smooth;
-  scrollbar-width: thin;                              /* Firefox */
+  scrollbar-width: thin;
   scrollbar-color: #a5b4fc transparent;
 }
-html::-webkit-scrollbar { width: 6px; height: 6px; } /* Chrome / Edge / Safari */
+html::-webkit-scrollbar { width: 6px; height: 6px; }
 html::-webkit-scrollbar-track { background: transparent; }
 html::-webkit-scrollbar-thumb { background: #a5b4fc; border-radius: 999px; }
 html::-webkit-scrollbar-thumb:hover { background: #6366f1; }
 
 .landing-root { -webkit-tap-highlight-color: transparent; max-width: 100vw; }
 
-/* content-visibility removed: it made the scroll thumb jump because
-   off-screen sections were sized by a guess. Sections now render normally. */
-.cv-auto { content-visibility: visible; }
-
 .cyber-grid {
   background-image:
     linear-gradient(rgba(226,232,240,.75) 1px, transparent 1px),
     linear-gradient(90deg, rgba(226,232,240,.75) 1px, transparent 1px);
   background-size: 52px 52px;
-}
-.fine-grid {
-  background-image:
-    linear-gradient(rgba(226,232,240,.45) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(226,232,240,.45) 1px, transparent 1px);
-  background-size: 26px 26px;
 }
 
 .nav-link { position: relative; transition: color .2s; }
@@ -1990,122 +1814,89 @@ html::-webkit-scrollbar-thumb:hover { background: #6366f1; }
 .nav-link:hover { color: #4f46e5; }
 .nav-link:hover::after { transform: scaleX(1); }
 
-/* ---------- Log in highlight (hover or avatar pointing) ---------- */
-.login-btn { position: relative; }
-@keyframes loginNudge { 0%,100% { transform: scale(1); } 50% { transform: scale(1.07); } }
-.login-called { animation: loginNudge .55s ease-in-out infinite; }
-
-/* ---------- reveal on scroll ---------- */
-.reveal { opacity: 0; transform: translate3d(0, 22px, 0); transition: opacity .7s cubic-bezier(.22,1,.36,1), transform .7s cubic-bezier(.22,1,.36,1); }
+/* reveal on scroll */
+.reveal { opacity: 0; transform: translate3d(0, 16px, 0); transition: opacity .55s ease-out, transform .55s ease-out; }
 .reveal.in { opacity: 1; transform: none; }
 
-/* ---------- swap animation (role / persona / notification change) ---------- */
-@keyframes swapIn { from { opacity: 0; transform: translate3d(0, 8px, 0) scale(.985); } to { opacity: 1; transform: none; } }
-.swap-in { animation: swapIn .45s cubic-bezier(.22,1,.36,1) both; }
+@keyframes swapIn { from { opacity: 0; transform: translate3d(0, 6px, 0); } to { opacity: 1; transform: none; } }
+.swap-in { animation: swapIn .35s ease-out both; }
 .contents { display: contents; }
 
 @keyframes barGrow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
-.bar-grow { transform-origin: left; animation: barGrow .9s cubic-bezier(.22,1,.36,1) both; }
+.bar-grow { transform-origin: left; animation: barGrow .8s ease-out both; }
 
-.role-chip { transition: transform .15s, background-color .2s, border-color .2s, color .2s, box-shadow .2s; }
+.role-chip { transition: transform .15s, background-color .2s, border-color .2s, color .2s; }
 .role-chip:active { transform: scale(.95); }
+.toggle-pill { transition: transform .3s ease-out; }
 
-.toggle-pill { transition: transform .35s cubic-bezier(.22,1,.36,1); }
+.btn { transition: background-color .2s, box-shadow .2s, border-color .2s, transform .15s; }
+.btn:hover { transform: translateY(-2px); }
+.btn:active { transform: scale(.97); }
 
-/* ---------- buttons ---------- */
-.magnetic { transition: transform .2s ease-out, background-color .2s, box-shadow .2s, border-color .2s; will-change: transform; }
-.magnetic:active { transform: scale(.97) !important; }
-.btn-shine { position: absolute; inset: 0; background: linear-gradient(110deg, transparent 30%, rgba(255,255,255,.28) 50%, transparent 70%); transform: translateX(-120%); }
-.magnetic:hover .btn-shine { transform: translateX(120%); transition: transform .8s ease; }
+/* ---------- animations pause when off-screen ---------- */
+[data-play="0"] .anim { animation-play-state: paused; }
 
-/* ---------- gradient text shimmer (desktop) ---------- */
-.hero-gradient { background-size: 200% 100%; }
-@keyframes gradientShift { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
-
-/* ---------- hero 3D stage ---------- */
-.hero-stage {
-  transform-style: preserve-3d;
-  transform: perspective(1400px) rotateX(calc(var(--py, 0) * -6deg)) rotateY(calc(var(--px, 0) * 8deg));
-  transition: transform .25s ease-out;
+/* ---------- HERO 3D (auto sway, CSS only) ---------- */
+.hero-persp { perspective: 1400px; }
+.hero-tilt { transform-style: preserve-3d; animation: heroSway 10s ease-in-out infinite alternate; }
+@keyframes heroSway {
+  from { transform: rotateY(-9deg) rotateX(3deg); }
+  to   { transform: rotateY(9deg)  rotateX(-3deg); }
 }
-.hero-stage > div { transition: transform .25s ease-out; }
+.zl { transform-style: preserve-3d; }
+
 .hero-floor {
   width: 540px; height: 330px; margin-bottom: 8px;
   transform: rotateX(68deg);
+  border-radius: 50%;
   background-image:
-    linear-gradient(rgba(99,102,241,.22) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(99,102,241,.22) 1px, transparent 1px);
+    linear-gradient(rgba(99,102,241,.2) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99,102,241,.2) 1px, transparent 1px);
   background-size: 34px 34px;
-  -webkit-mask-image: radial-gradient(closest-side, #000 40%, transparent 100%);
-  mask-image: radial-gradient(closest-side, #000 40%, transparent 100%);
+  opacity: .8;
 }
 
-.glass-card { background: rgba(255,255,255,.82); box-shadow: 0 35px 90px rgba(15,23,42,.16); position: relative; }
-.glass-card::after {
-  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-  box-shadow: 0 25px 90px rgba(99,102,241,.28), 0 0 45px rgba(99,102,241,.18); opacity: 0;
-}
-
-@keyframes floatA { 0%,100% { transform: translate3d(0,0,0); } 50% { transform: translate3d(0,-14px,0); } }
-@keyframes floatB { 0%,100% { transform: translate3d(0,0,0); } 50% { transform: translate3d(0,-10px,0) rotate(.6deg); } }
-@keyframes floatC { 0%,100% { transform: translate3d(0,0,0); } 50% { transform: translate3d(0,-12px,0) rotate(-.6deg); } }
+@keyframes floatA { 0%,100% { transform: translate3d(0,0,0); } 50% { transform: translate3d(0,-12px,0); } }
+@keyframes floatB { 0%,100% { transform: translate3d(0,0,0); } 50% { transform: translate3d(0,-9px,0) rotate(.5deg); } }
+@keyframes floatC { 0%,100% { transform: translate3d(0,0,0); } 50% { transform: translate3d(0,-11px,0) rotate(-.5deg); } }
 .float-a { animation: floatA 7s ease-in-out infinite; }
 .float-b { animation: floatB 6s ease-in-out infinite; }
 .float-c { animation: floatC 8s ease-in-out infinite; animation-delay: -2s; }
 
-@keyframes glowPulse { 0%,100% { opacity: 0; } 50% { opacity: 1; } }
-.pulse-glow::after { animation: glowPulse 4s ease-in-out infinite; }
-
 @keyframes ringRotate { from { transform: rotateX(68deg) rotateZ(0deg); } to { transform: rotateX(68deg) rotateZ(360deg); } }
 @keyframes ringRotateReverse { from { transform: rotateY(66deg) rotateZ(360deg); } to { transform: rotateY(66deg) rotateZ(0deg); } }
-.ring-a { animation: ringRotate 22s linear infinite; }
-.ring-b { animation: ringRotateReverse 18s linear infinite; }
+.ring-a { animation: ringRotate 24s linear infinite; }
+.ring-b { animation: ringRotateReverse 20s linear infinite; }
 
 @keyframes orbitDot { from { transform: rotate(0deg) translateX(190px) rotate(0deg); } to { transform: rotate(360deg) translateX(190px) rotate(-360deg); } }
 .orbit-dot { animation: orbitDot 9s linear infinite; }
 
-@keyframes livePulse { 0%,100% { transform: scale(.92); opacity: .45; } 50% { transform: scale(1.15); opacity: .95; } }
+@keyframes livePulse { 0%,100% { transform: scale(.92); opacity: .5; } 50% { transform: scale(1.15); opacity: .95; } }
 .live-pulse { animation: livePulse 2.6s ease-in-out infinite; }
 
 @keyframes eq { 0%,100% { transform: scaleY(.45); } 50% { transform: scaleY(1.25); } }
 .eq-bar { transform-origin: bottom; animation: eq 1s ease-in-out infinite; }
 
-@keyframes gridScan { 0% { transform: translateY(-100%); opacity: 0; } 15% { opacity: .35; } 80% { opacity: .2; } 100% { transform: translateY(100vh); opacity: 0; } }
-.grid-scan { animation: gridScan 9s linear infinite; }
-@keyframes particleUp { 0% { transform: translateY(110vh) scale(.4); opacity: 0; } 15% { opacity: .45; } 80% { opacity: .2; } 100% { transform: translateY(-20vh) scale(1); opacity: 0; } }
-.particle { animation: particleUp 13s linear infinite; }
+/* ---------- auto-swaying 3D cards (persona + features) ---------- */
+.card-persp { perspective: 1100px; }
+.card-sway { animation: cardSway 9s ease-in-out infinite alternate; }
+@keyframes cardSway {
+  from { transform: rotateY(-6deg) rotateX(2deg); }
+  to   { transform: rotateY(6deg)  rotateX(-2deg); }
+}
 
 /* ---------- marquee ---------- */
 @keyframes marqueeSlide { from { transform: translate3d(0,0,0); } to { transform: translate3d(-50%,0,0); } }
-.marquee-track { animation: marqueeSlide 30s linear infinite; will-change: transform; }
+.marquee-track { animation: marqueeSlide 32s linear infinite; will-change: transform; }
 .marquee-track.is-paused { animation-play-state: paused; }
 .marquee-mask:hover .marquee-track { animation-play-state: paused; }
 .marquee-mask { -webkit-mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent); mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent); }
 
-/* ---------- tilt cards ---------- */
-.tilt { position: relative; transform-style: preserve-3d; transition: transform .18s ease-out; }
-.tilt-glare {
-  position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0; transition: opacity .25s;
-  background: radial-gradient(420px circle at var(--gx, 50%) var(--gy, 50%), rgba(255,255,255,.22), transparent 55%);
-}
-.tilt:hover .tilt-glare { opacity: 1; }
-
-/* ---------- cursor spotlight ---------- */
-.spot { position: relative; overflow: hidden; }
-.spot::before {
-  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .25s;
-  background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 50%), rgba(99,102,241,.14), transparent 60%);
-}
-.spot:hover::before { opacity: 1; }
-.feature-card-premium.spot::before {
-  background: radial-gradient(340px circle at var(--mx, 50%) var(--my, 50%), rgba(129,140,248,.2), transparent 60%);
-}
-
-/* ---------- premium feature section ---------- */
+/* ---------- dark features section ---------- */
 .premium-feature-section {
   background:
-    radial-gradient(circle at 15% 20%, rgba(99,102,241,.18), transparent 30%),
-    radial-gradient(circle at 85% 75%, rgba(16,185,129,.12), transparent 32%),
+    radial-gradient(circle at 15% 20%, rgba(99,102,241,.16), transparent 30%),
+    radial-gradient(circle at 85% 75%, rgba(16,185,129,.1), transparent 32%),
     linear-gradient(135deg, #050816 0%, #0a1022 48%, #050b17 100%);
   color: #f8fafc;
 }
@@ -2113,88 +1904,63 @@ html::-webkit-scrollbar-thumb:hover { background: #6366f1; }
 .premium-feature-section .text-slate-700 { color: rgba(226,232,240,.72) !important; }
 .premium-feature-section .text-slate-600 { color: rgba(226,232,240,.58) !important; }
 .premium-feature-section .bg-indigo-200 { background: rgba(165,180,252,.4) !important; }
-.premium-feature-section .fine-grid { opacity: .18 !important; }
 
 .feature-card-premium {
-  isolation: isolate;
   background: linear-gradient(145deg, rgba(20,30,58,.96), rgba(8,15,31,.96));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 30px 80px rgba(0,0,0,.28);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 18px 45px rgba(0,0,0,.25);
+  backface-visibility: hidden;
 }
-.feature-card-premium::after {
-  content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; pointer-events: none; opacity: .6;
-  background: linear-gradient(120deg, rgba(129,140,248,.55), transparent 32%, transparent 65%, rgba(45,212,191,.4));
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor; mask-composite: exclude;
-}
-.feature-card-premium .feature-icon-premium { box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 0 28px rgba(99,102,241,.12); }
 
-/* ---------- mentor carousel ---------- */
+/* ---------- 3D mentor carousel ---------- */
 .mentor-stage { perspective: 1500px; transform-style: preserve-3d; touch-action: pan-y; cursor: grab; }
 .mentor-stage:active { cursor: grabbing; }
 .mentor-stage:focus-visible { box-shadow: 0 0 0 3px rgba(99,102,241,.3); border-radius: 24px; }
 .mentor-card {
   transform-style: preserve-3d; backface-visibility: hidden; will-change: transform, opacity;
+  box-shadow: 0 18px 44px rgba(15,23,42,.16);
   transition: transform .7s cubic-bezier(.22,1,.36,1), opacity .7s cubic-bezier(.22,1,.36,1);
 }
 .mentor-stage[data-drag="1"] .mentor-card { transition: none; }
 
 /* ---------- how it works ---------- */
-.step-line { transform: scaleX(0); transition: transform 1.6s cubic-bezier(.22,1,.36,1) .2s; }
-.step { transition: transform .3s, box-shadow .3s, border-color .3s; }
-.step:hover { transform: translateY(-4px); }
-.step-icon { transition: transform .3s, background-color .3s, color .3s; }
-.step:hover .step-icon { transform: scale(1.1) rotate(-6deg); background: #4f46e5; color: #fff; }
+.step-line { transform: scaleX(0); transition: transform 1.4s ease-out .2s; }
+.step { transition: transform .35s ease-out; }
+.step:hover, .step-on { transform: translateY(-4px); }
+.step-icon { transition: transform .35s ease-out, background-color .35s, color .35s; }
+.step:hover .step-icon, .step-on .step-icon { background: #4f46e5; color: #fff; transform: scale(1.1) rotate(-6deg); }
+.step-on .stepnum { color: #c7d2fe !important; }
 
 /* ---------- modals ---------- */
 @keyframes modalFade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes modalPop { from { opacity: 0; transform: translate3d(0,16px,0) scale(.985); } to { opacity: 1; transform: none; } }
-.modal-fade { animation: modalFade .18s ease-out both; }
-.modal-pop { animation: modalPop .22s cubic-bezier(.22,1,.36,1) both; }
-.menu-drop { animation: swapIn .25s ease-out both; }
+@keyframes modalPop { from { opacity: 0; transform: translate3d(0,12px,0); } to { opacity: 1; transform: none; } }
+.modal-fade { animation: modalFade .15s ease-out both; }
+.modal-pop { animation: modalPop .2s ease-out both; }
+.menu-drop { animation: swapIn .2s ease-out both; }
 
 /* ==========================================================
-   PHONES: no heavy stuff
+   PHONES: simplified 3D
    ========================================================== */
 @media (max-width: 768px) {
   .mobile-hide { display: none !important; }
+  .reveal { transform: translate3d(0, 10px, 0); transition-duration: .4s; }
 
-  .reveal { transform: translate3d(0, 14px, 0); transition-duration: .5s; }
+  .hero-tilt { animation: none; transform: none; }
+  .zl { transform: none !important; }
+  .card-sway { animation: none; }
+  .eq-bar { animation: none; }
 
-  .hero-stage { transform: none !important; transition: none; }
-  .hero-stage > div { transform: none !important; }
-
-  .float-a, .float-b, .float-c { animation-duration: 9s; }
-  .float-a { animation-name: floatA; }
-  .pulse-glow::after, .eq-bar, .grid-scan, .particle, .ring-a, .ring-b, .orbit-dot { animation: none !important; }
-  .marquee-track { animation-duration: 38s; }
-
-  .glass-card { background: rgba(255,255,255,.96); box-shadow: 0 18px 40px rgba(15,23,42,.14); }
-  .feature-card-premium { box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 12px 30px rgba(0,0,0,.25); }
-
-  .backdrop-blur, .backdrop-blur-xl, .backdrop-blur-2xl {
-    -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
-  }
-
-  .mentor-stage { perspective: 1000px; }
-  .mentor-card { transition-duration: .5s; will-change: auto; }
-  .tilt-glare, .spot::before { display: none; }
-
-  .step-line { transition-duration: 1s; }
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .hero-gradient { animation: gradientShift 8s ease-in-out infinite; }
+  .marquee-track { animation-duration: 40s; }
+  .mentor-card { transition-duration: .5s; }
 }
 
 /* ==========================================================
-   Reduced motion: everything calm
+   Reduced motion
    ========================================================== */
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   .reveal { opacity: 1; transform: none; transition: none; }
-  .float-a, .float-b, .float-c, .pulse-glow::after, .marquee-track, .grid-scan, .particle,
-  .ring-a, .ring-b, .orbit-dot, .live-pulse, .eq-bar, .hero-gradient, .swap-in, .bar-grow,
-  .login-called { animation: none !important; }
-  .hero-stage, .hero-stage > div, .tilt, .mentor-card, .step-line { transition: none !important; }
+  .hero-tilt, .card-sway, .float-a, .float-b, .float-c, .ring-a, .ring-b, .orbit-dot,
+  .live-pulse, .eq-bar, .marquee-track, .swap-in, .bar-grow { animation: none !important; }
+  .mentor-card, .step-line, .toggle-pill { transition: none !important; }
 }
 `;

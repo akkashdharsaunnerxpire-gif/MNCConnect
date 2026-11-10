@@ -14,6 +14,8 @@ import {
   useLocation,
   useParams,
 } from "react-router-dom";
+import ChatAlertHost from "../Commoncomponents/ChatAlertHost";
+import { getUserId } from "../services/fresherApi";
 
 import Home from "../FresherDashboard/pages/Home";
 import FresherProfile from "../FresherDashboard/pages/FresherProfile";
@@ -29,7 +31,9 @@ import { useAuth } from "../context/AuthContext";
 import JoinGroup from "../FresherDashboard/pages/JoinGroup";
 
 // Fresher auth pages (lazy, only loaded when opened)
-const Login = lazy(() => import("../Authpage/FresherAuth/FresherLoginRegister"));
+const Login = lazy(
+  () => import("../Authpage/FresherAuth/FresherLoginRegister"),
+);
 const Forgetpassword = lazy(
   () => import("../Authpage/FresherAuth/Forgetpassword"),
 );
@@ -63,7 +67,10 @@ const readAfterLogin = () => {
     const raw = sessionStorage.getItem(AFTER_LOGIN_KEY);
     if (!raw) return "";
     const { path, at } = JSON.parse(raw);
-    if (!RETURN_PATH.test(String(path || "")) || Date.now() - at > AFTER_LOGIN_TTL_MS) {
+    if (
+      !RETURN_PATH.test(String(path || "")) ||
+      Date.now() - at > AFTER_LOGIN_TTL_MS
+    ) {
       sessionStorage.removeItem(AFTER_LOGIN_KEY);
       return "";
     }
@@ -122,6 +129,7 @@ const FresherProtectedRoute = () => {
 const FresherLayout = () => (
   <div className="min-h-screen">
     <Header />
+    <ChatAlertHost role="fresher" getMyId={getUserId} />
     <Outlet />
   </div>
 );
