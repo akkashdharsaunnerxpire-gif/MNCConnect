@@ -14,6 +14,7 @@ import {
   Box,
   Button,
   IconButton,
+  InputBase,
   Paper,
   Stack,
   Typography,
@@ -25,6 +26,8 @@ import {
   Reply,
   Eye,
   CheckCheck,
+  Send,
+  Check,
 } from "lucide-react";
 
 import { socket } from "../utils/socket";
@@ -44,6 +47,7 @@ import {
 
 const MAX_ALERTS = 3;
 const AUTO_HIDE_MS = 7000;
+const MAX_LEN = 1000;
 
 const bare = (s) => String(s || "").split(":").pop();
 
@@ -85,12 +89,29 @@ const ChatAlertItem = memo(function ChatAlertItem({
   const [paused, setPaused] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
 
+  const [replyOpen, setReplyOpen] = useState(false);
+  const [replyText, setReplyText] = useState("");
+  const [replySending, setReplySending] = useState(false);
+  const [replySent, setReplySent] = useState(false);
+
+  const [readDone, setReadDone] = useState(false);
+  const [readLoading, setReadLoading] = useState(false);
+
+  const [actionError, setActionError] = useState("");
+
+  const inputRef = useRef(null);
+
   useEffect(() => {
     setImgFailed(false);
   }, [item.image]);
 
+  // Keep notification alive while replying
   useEffect(() => {
-    if (paused) return undefined;
+    if (replyOpen) setPaused(true);
+  }, [replyOpen]);
+
+  useEffect(() => {
+    if (paused || replyOpen || replySending) return undefined;
 
     const timer = setTimeout(
       () => onClose(item.key),
@@ -98,21 +119,87 @@ const ChatAlertItem = memo(function ChatAlertItem({
     );
 
     return () => clearTimeout(timer);
-  }, [paused, item.key, onClose]);
+  }, [
+    paused,
+    replyOpen,
+    replySending,
+    item.key,
+    onClose,
+  ]);
 
-  const openMessage = () => onView(item);
+  useEffect(() => {
+    if (replyOpen) {
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  }, [replyOpen]);
+
+  // ================= OPEN CHAT =================
+
+  const openMessage = () => {
+    onView(item);
+  };
+
+  // ================= INLINE REPLY =================
+
+  const showReply = () => {
+    setReplyOpen((prev) => !prev);
+    setActionError("");
+  };
+
+  const sendReply = async (e) => {
+    e.preventDefault();
+
+    const message = replyText.trim();
+
+    if (!message || replySending || replySent) return;
+
+    setReplySending(true);
+    setActionError("");
+
+    try {
+      await onReply(item, message);
+
+      setReplyText("");
+      setReplySent(true);
+      setReplyOpen(false);
+    } catch (error) {
+      setActionError(error?.message || "Message could not be sent.");
+    } finally {
+      setReplySending(false);
+    }
+  };
+
+  // ================= MARK AS READ =================
+
+  const handleMarkRead = async () => {
+    if (readDone || readLoading) return;
+
+    setReadLoading(true);
+    setActionError("");
+
+    try {
+      await onMarkRead(item);
+      setReadDone(true);
+    } catch (error) {
+      setActionError(error?.message || "Could not mark as read.");
+    } finally {
+      setReadLoading(false);
+    }
+  };
 
   return (
     <Paper
       elevation={0}
       role="alert"
       onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
+      onMouseLeave={() => {
+        if (!replyOpen) setPaused(false);
+      }}
       sx={{
         position: "relative",
         width: "100%",
         boxSizing: "border-box",
-        p: "13px",
+        p: 1.6,
         borderRadius: "15px",
         border: "1px solid #e5e7eb",
         backgroundColor: "#fff",
@@ -122,12 +209,9 @@ const ChatAlertItem = memo(function ChatAlertItem({
         animation: "chatAlertIn .25s ease-out both",
       }}
     >
-      <Stack
-        direction="row"
-        alignItems="center"
-        spacing={1}
-        sx={{ minWidth: 0 }}
-      >
+      {/* HEADER */}
+
+      <Stack direction="row" alignItems="center" spacing={1}>
         <Avatar
           src={!imgFailed ? item.image || undefined : undefined}
           alt={item.name}
@@ -136,8 +220,8 @@ const ChatAlertItem = memo(function ChatAlertItem({
             onError: () => setImgFailed(true),
           }}
           sx={{
-            width: 36,
-            height: 36,
+            width: 38,
+            height: 38,
             flexShrink: 0,
             bgcolor: "#e8edff",
             color: "#3659c9",
@@ -160,10 +244,7 @@ const ChatAlertItem = memo(function ChatAlertItem({
             {item.name || "New user"}
           </Typography>
 
-          <Typography
-            noWrap
-            sx={{ fontSize: 11, color: "#888" }}
-          >
+          <Typography sx={{ fontSize: 11, color: "#888" }}>
             sent you a message
           </Typography>
         </Box>
@@ -172,25 +253,16 @@ const ChatAlertItem = memo(function ChatAlertItem({
           size="small"
           aria-label="Close notification"
           onClick={() => onClose(item.key)}
-          sx={{
-            width: 25,
-            height: 25,
-            color: "#9ca3af",
-            "&:hover": {
-              bgcolor: "#fee2e2",
-              color: "#dc2626",
-            },
-          }}
         >
-          <X size={15} />
+          <X size={16} />
         </IconButton>
       </Stack>
 
-      {/* CLICK MESSAGE -> OPEN CHAT PANEL */}
+      {/* MESSAGE CLICK -> OPEN CHAT */}
+
       <Button
         fullWidth
         onClick={openMessage}
-        aria-label={`Open message from ${item.name}`}
         sx={{
           display: "flex",
           justifyContent: "flex-start",
@@ -201,7 +273,7 @@ const ChatAlertItem = memo(function ChatAlertItem({
           py: 1,
           borderRadius: "9px",
           backgroundColor: "#f8fafc",
-          color: "#64748b",
+          color: "#475569",
           textAlign: "left",
           textTransform: "none",
           "&:hover": {
@@ -218,7 +290,6 @@ const ChatAlertItem = memo(function ChatAlertItem({
           sx={{
             fontSize: 12,
             lineHeight: 1.6,
-            color: "#475569",
             textAlign: "left",
             overflowWrap: "anywhere",
             whiteSpace: "normal",
@@ -229,20 +300,19 @@ const ChatAlertItem = memo(function ChatAlertItem({
       </Button>
 
       {/* ACTION BUTTONS */}
-      <Stack
-        direction="row"
-        spacing={1}
-        sx={{ mt: 1.3 }}
-      >
+
+      <Stack direction="row" spacing={1} sx={{ mt: 1.3 }}>
+        {/* REPLY BUTTON */}
+
         <Button
           fullWidth
           size="small"
-          onClick={() => onReply(item)}
+          onClick={showReply}
           startIcon={<Reply size={14} />}
           sx={{
-            height: 32,
+            height: 33,
             borderRadius: "8px",
-            bgcolor: "#171717",
+            bgcolor: replyOpen ? "#334155" : "#171717",
             color: "#fff",
             fontSize: 11,
             fontWeight: 700,
@@ -252,52 +322,159 @@ const ChatAlertItem = memo(function ChatAlertItem({
             },
           }}
         >
-          Reply
+          {replyOpen ? "Cancel" : "Reply"}
         </Button>
+
+        {/* MARK AS READ */}
 
         <Button
           fullWidth
           size="small"
-          onClick={() => onMarkRead(item)}
-          startIcon={<CheckCheck size={14} />}
+          onClick={handleMarkRead}
+          disabled={readDone || readLoading}
+          startIcon={
+            <CheckCheck
+              size={14}
+              color={readDone ? "#2684ff" : "currentColor"}
+            />
+          }
           sx={{
-            height: 32,
+            height: 33,
             borderRadius: "8px",
             border: "1px solid #dbe3ef",
-            color: "#475569",
+            color: readDone ? "#2684ff" : "#475569",
             fontSize: 11,
             fontWeight: 700,
             textTransform: "none",
-            "&:hover": {
-              bgcolor: "#eff6ff",
-            },
           }}
         >
-          Mark as read
+          {readLoading
+            ? "Reading..."
+            : readDone
+              ? "Read"
+              : "Mark as read"}
         </Button>
+
+        {/* VIEW */}
 
         <Button
           size="small"
-          onClick={() => onView(item)}
+          onClick={openMessage}
           startIcon={<Eye size={14} />}
           sx={{
-            height: 32,
+            height: 33,
             minWidth: 65,
             borderRadius: "8px",
             color: "#475569",
             fontSize: 11,
             fontWeight: 600,
             textTransform: "none",
-            "&:hover": {
-              bgcolor: "#f1f5f9",
-            },
           }}
         >
           View
         </Button>
       </Stack>
 
+      {/* INLINE REPLY BOX - NO CHAT PANEL */}
+
+      {replyOpen && (
+        <Box
+          component="form"
+          onSubmit={sendReply}
+          sx={{
+            mt: 1.5,
+            p: 1,
+            borderRadius: "11px",
+            border: "1px solid #dbe3ef",
+            backgroundColor: "#f8fafc",
+          }}
+        >
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <InputBase
+              inputRef={inputRef}
+              fullWidth
+              multiline
+              maxRows={3}
+              value={replyText}
+              onChange={(e) =>
+                setReplyText(e.target.value.slice(0, MAX_LEN))
+              }
+              placeholder="Type your reply..."
+              disabled={replySending}
+              sx={{
+                px: 1,
+                py: 0.7,
+                fontSize: 13,
+                backgroundColor: "#fff",
+                borderRadius: "8px",
+                border: "1px solid #e5e7eb",
+              }}
+            />
+
+            <IconButton
+              type="submit"
+              disabled={!replyText.trim() || replySending}
+              sx={{
+                width: 38,
+                height: 38,
+                flexShrink: 0,
+                bgcolor: "#171717",
+                color: "#fff",
+                "&:hover": { bgcolor: "#333" },
+                "&.Mui-disabled": {
+                  bgcolor: "#cbd5e1",
+                  color: "#fff",
+                },
+              }}
+              aria-label="Send reply"
+            >
+              <Send size={16} />
+            </IconButton>
+          </Stack>
+
+          <Typography
+            sx={{
+              fontSize: 10,
+              color: "#94a3b8",
+              mt: 0.7,
+              textAlign: "right",
+            }}
+          >
+            {replyText.length}/{MAX_LEN} · Enter to send
+          </Typography>
+        </Box>
+      )}
+
+      {/* SUCCESS */}
+
+      {replySent && (
+        <Stack direction="row" spacing={0.7} alignItems="center" sx={{ mt: 1 }}>
+          <Check size={13} color="#16a34a" />
+          <Typography sx={{ fontSize: 11, color: "#16a34a" }}>
+            Reply sent successfully
+          </Typography>
+        </Stack>
+      )}
+
+      {readDone && (
+        <Stack direction="row" spacing={0.7} alignItems="center" sx={{ mt: 1 }}>
+          <CheckCheck size={14} color="#2684ff" />
+          <Typography sx={{ fontSize: 11, color: "#2684ff" }}>
+            Message marked as read
+          </Typography>
+        </Stack>
+      )}
+
+      {actionError && (
+        <Typography
+          sx={{ mt: 1, fontSize: 11, color: "#dc2626" }}
+        >
+          {actionError}
+        </Typography>
+      )}
+
       {/* AUTO HIDE PROGRESS */}
+
       <Box
         sx={{
           position: "absolute",
@@ -315,7 +492,8 @@ const ChatAlertItem = memo(function ChatAlertItem({
             bgcolor: "#647eea",
             transformOrigin: "left",
             animation: `chatAlertProgress ${AUTO_HIDE_MS}ms linear forwards`,
-            animationPlayState: paused ? "paused" : "running",
+            animationPlayState:
+              paused || replyOpen || replySending ? "paused" : "running",
           }}
         />
       </Box>
@@ -339,13 +517,15 @@ export default function ChatAlertHost({ role, getMyId }) {
   const personCache = useRef(new Map());
 
   // CLOSE ALERT
+
   const close = useCallback((key) => {
     setItems((prev) =>
       prev.filter((item) => item.key !== key),
     );
   }, []);
 
-  // OPEN CORRECT CHAT PANEL
+  // OPEN CHAT ONLY FOR MESSAGE CLICK / VIEW
+
   const openChat = useCallback(
     (item) => {
       if (!item?.bookingId) return;
@@ -367,26 +547,78 @@ export default function ChatAlertHost({ role, getMyId }) {
     [close, navigate, role],
   );
 
-  // REPLY -> OPEN CHAT PANEL
-  const reply = useCallback(
-    (item) => openChat(item),
-    [openChat],
+  // ================= INLINE REPLY SEND =================
+
+  const sendReply = useCallback(
+    (item, message) => {
+      return new Promise((resolve, reject) => {
+        if (!item?.bookingId || !message?.trim()) {
+          reject(new Error("Invalid message."));
+          return;
+        }
+
+        if (!socket.connected) {
+          reject(new Error("Connection lost. Please try again."));
+          return;
+        }
+
+        socket.emit(
+          "chat:send",
+          {
+            bookingId: String(item.bookingId),
+            text: message.trim(),
+            replyToId: item.messageId || null,
+          },
+          (res) => {
+            if (res?.ok) {
+              resolve(res.message);
+            } else {
+              reject(
+                new Error(res?.message || "Could not send reply."),
+              );
+            }
+          },
+        );
+      });
+    },
+    [],
   );
 
-  // VIEW -> OPEN CHAT PANEL
-  const view = useCallback(
-    (item) => openChat(item),
-    [openChat],
-  );
+  // ================= MARK AS READ =================
 
-  // MARK READ -> OPEN CHAT PANEL
-  // ChatPanel sends the actual chat:read socket event.
-  const markRead = useCallback(
-    (item) => openChat(item),
-    [openChat],
-  );
+  const markRead = useCallback((item) => {
+    return new Promise((resolve, reject) => {
+      if (!item?.bookingId || !item?.messageId) {
+        reject(new Error("Message ID is unavailable."));
+        return;
+      }
 
-  // GET COUNTERPART PROFILE
+      if (!socket.connected) {
+        reject(new Error("Connection lost. Please try again."));
+        return;
+      }
+
+      socket.emit(
+        "chat:read",
+        {
+          bookingId: String(item.bookingId),
+          messageIds: [String(item.messageId)],
+        },
+        (res) => {
+          if (res?.ok) {
+            resolve(res);
+          } else {
+            reject(
+              new Error(res?.message || "Could not mark as read."),
+            );
+          }
+        },
+      );
+    });
+  }, []);
+
+  // ================= COUNTERPART PROFILE =================
+
   const fetchPerson = useCallback(
     async (bookingId) => {
       if (personCache.current.has(bookingId)) {
@@ -421,12 +653,14 @@ export default function ChatAlertHost({ role, getMyId }) {
     [role],
   );
 
-  // LISTEN FOR INCOMING MESSAGES
+  // ================= SOCKET MESSAGE LISTENER =================
+
   useEffect(() => {
     const onMsg = (m) => {
       if (!m) return;
 
       // IGNORE MY OWN MESSAGES
+
       if (role === "mentor") {
         if (m.senderRole === "mentor") return;
       } else {
@@ -442,7 +676,8 @@ export default function ChatAlertHost({ role, getMyId }) {
         }
       }
 
-      // IGNORE MEETING ROOM MESSAGES
+      // IGNORE MEETING ROOM
+
       if (/\/meeting(?:\/|$)/i.test(pathRef.current)) {
         return;
       }
@@ -458,10 +693,12 @@ export default function ChatAlertHost({ role, getMyId }) {
 
       if (!bookingId) return;
 
-      // IGNORE ALREADY OPEN CHAT
+      // IGNORE OPEN CHAT
+
       if (ids.some(isChatOpen)) return;
 
       // DUPLICATE PREVENTION
+
       const mid = String(m._id || m.id || "");
 
       if (mid) {
@@ -495,6 +732,7 @@ export default function ChatAlertHost({ role, getMyId }) {
       );
 
       // PROFILE PHOTO FALLBACK
+
       if (!image) {
         fetchPerson(bookingId).then((person) => {
           if (!person?.image) return;
@@ -581,8 +819,8 @@ export default function ChatAlertHost({ role, getMyId }) {
             key={item.key}
             item={item}
             onClose={close}
-            onView={view}
-            onReply={reply}
+            onView={openChat}
+            onReply={sendReply}
             onMarkRead={markRead}
           />
         ))}
