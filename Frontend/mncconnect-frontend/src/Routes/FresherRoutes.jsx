@@ -29,6 +29,7 @@ import MeetingRoom from "../Commoncomponents/Meetingroom";
 import SuspenseLoader from "../Commoncomponents/SuspenseLoader";
 import { useAuth } from "../context/AuthContext";
 import JoinGroup from "../FresherDashboard/pages/JoinGroup";
+import LaptopOnlyGuard from "../Commoncomponents/LaptopOnlyGuard";
 
 // Fresher auth pages (lazy, only loaded when opened)
 const Login = lazy(
@@ -178,7 +179,7 @@ const FresherRoutes = () => {
       {/* ---------- PROTECTED (/Home/...) ---------- */}
       <Route path="Home" element={<FresherProtectedRoute />}>
         {/* Full-screen meeting room (no header) */}
-        <Route path="meeting/:bookingId" element={<MeetingRoom />} />
+        <Route path="meeting/:bookingId" element={<LaptopOnlyGuard><MeetingRoom /></LaptopOnlyGuard>} />
 
         <Route element={<FresherLayout />}>
           <Route index element={<Home />} />

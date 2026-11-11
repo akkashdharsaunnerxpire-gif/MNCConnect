@@ -17,6 +17,7 @@ import MeetingRoom from "../Commoncomponents/Meetingroom";
 import SuspenseLoader from "../Commoncomponents/SuspenseLoader";
 import ChatAlertHost from "../Commoncomponents/ChatAlertHost";
 import { useAuth } from "../context/AuthContext";
+import LaptopOnlyGuard from "../Commoncomponents/LaptopOnlyGuard";
 
 // The server (via cookie) decides. While it answers, show the loader.
 const MentorProtectedRoute = () => {
@@ -61,7 +62,7 @@ const MentorRoutes = () => {
       {/* private */}
       <Route element={<MentorProtectedRoute />}>
         {/* Full-screen meeting room (no header, no chat alert) */}
-        <Route path="meeting/:bookingId" element={<MeetingRoom />} />
+        <Route path="meeting/:bookingId" element={<LaptopOnlyGuard><MeetingRoom /></LaptopOnlyGuard>} />
 
         <Route element={<MentorLayout />}>
           <Route index element={<Navigate to="/mentor/home" replace />} />
