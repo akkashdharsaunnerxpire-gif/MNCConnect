@@ -6,13 +6,14 @@
 const crypto = require("crypto");
 const mongoose = require("mongoose");
 const Razorpay = require("razorpay");
-const Review = require("../models/Review"); // <-- add
+const Review = require("../models/Review");
 
 const Booking = require("../models/Booking");
 const Payment = require("../models/Payment");
 const Mentor = require("../models/Mentor");
 const Fresher = require("../models/Fresher");
 const { sendMail, sessionEmail } = require("../utils/mailer");
+const { sendSessionWhatsApp } = require("../utils/whatsapp");
 const SITE_URL = (
   process.env.SITE_URL || "https://mncconnect.onrender.com"
 ).replace(/\/$/, "");
@@ -242,21 +243,38 @@ const emitBooking = (b) => {
     emitToUser(b.mentor._id || b.mentor, "booking:updated", payload);
 };
 
-// Mail to the freshers (host + friends) and the employee: "join 5 minutes early"
+/* ---------- email + WhatsApp to the people in a booking ---------- */
+
+// FIX 1: the phone number can be saved under many different field names.
+// We select all of them and pick the first one that has a value.
+const CONTACT_FIELDS =
+  "name email phone mobile phoneNumber whatsappNumber whatsapp mobileNumber contactNumber contact";
+
+const pickPhone = (d) =>
+  d &&
+  (d.whatsappNumber ||
+    d.whatsapp ||
+    d.phone ||
+    d.mobile ||
+    d.phoneNumber ||
+    d.mobileNumber ||
+    d.contactNumber ||
+    d.contact);
+
+// Mail + WhatsApp to the freshers (host + friends) and the employee: "join 5 minutes early"
 // kind: "booked" | "reminder".  opts.only = one fresher id, opts.skipMentor = true
 const emailBookingParties = async (b, kind = "booked", opts = {}) => {
   try {
     const ids = opts.only ? [String(opts.only)] : participantUserIds(b);
+
     const freshers = await Fresher.find({ _id: { $in: ids } })
-      .select("name email")
+      .select(CONTACT_FIELDS)
       .lean();
 
     const mentorDoc = b.mentor
-      ? b.mentor.email
-        ? b.mentor
-        : await Mentor.findById(b.mentor._id || b.mentor)
-            .select("name email")
-            .lean()
+      ? await Mentor.findById(b.mentor._id || b.mentor)
+          .select(CONTACT_FIELDS)
+          .lean()
       : null;
 
     const base = {
@@ -270,46 +288,103 @@ const emailBookingParties = async (b, kind = "booked", opts = {}) => {
     };
 
     const jobs = [];
+
+    // ================= FRESHER EMAIL + WHATSAPP =================
+
     for (const f of freshers) {
-      if (!f.email) continue;
-      jobs.push(
-        sendMail({
-          to: f.email,
-          toName: f.name,
-          ...sessionEmail({
-            ...base,
+      const meetingUrl = `${SITE_URL}/Home/meeting/${b.requestGroupId}`;
+
+      if (f.email) {
+        jobs.push(
+          sendMail({
+            to: f.email,
+            toName: f.name,
+            ...sessionEmail({
+              ...base,
+              name: f.name,
+              role: "fresher",
+              otherName: mentorDoc?.name || "",
+              meetingUrl,
+            }),
+          }),
+        );
+      }
+
+      const fresherPhone = pickPhone(f);
+
+      if (fresherPhone) {
+        jobs.push(
+          sendSessionWhatsApp({
+            kind,
+            to: fresherPhone,
             name: f.name,
-            role: "fresher",
-            otherName: mentorDoc?.name || "",
-            meetingUrl: `${SITE_URL}/Home/meeting/${b.requestGroupId}`,
+            date: b.date,
+            time: b.time,
+            meetingUrl,
           }),
-        }),
-      );
+        );
+      } else {
+        console.warn(`WhatsApp skipped: fresher ${f.name || f._id} has no phone number saved`);
+      }
     }
-    if (!opts.skipMentor && mentorDoc?.email) {
-      jobs.push(
-        sendMail({
-          to: mentorDoc.email,
-          toName: mentorDoc.name,
-          ...sessionEmail({
-            ...base,
+
+    // ================= MENTOR EMAIL + WHATSAPP =================
+
+    if (!opts.skipMentor && mentorDoc) {
+      const meetingUrl = `${SITE_URL}/mentor/meeting/${b.requestGroupId}`;
+
+      if (mentorDoc.email) {
+        jobs.push(
+          sendMail({
+            to: mentorDoc.email,
+            toName: mentorDoc.name,
+            ...sessionEmail({
+              ...base,
+              name: mentorDoc.name,
+              role: "mentor",
+              otherName: isGroup(b)
+                ? `${membersOf(b).length} freshers`
+                : b.fresherName,
+              meetingUrl,
+            }),
+          }),
+        );
+      }
+
+      const mentorPhone = pickPhone(mentorDoc);
+
+      if (mentorPhone) {
+        jobs.push(
+          sendSessionWhatsApp({
+            kind,
+            to: mentorPhone,
             name: mentorDoc.name,
-            role: "mentor",
-            otherName: isGroup(b)
-              ? `${membersOf(b).length} freshers`
-              : b.fresherName,
-            meetingUrl: `${SITE_URL}/mentor/meeting/${b.requestGroupId}`,
+            date: b.date,
+            time: b.time,
+            meetingUrl,
           }),
-        }),
-      );
+        );
+      } else {
+        console.warn(`WhatsApp skipped: mentor ${mentorDoc.name || mentorDoc._id} has no phone number saved`);
+      }
     }
-    await Promise.allSettled(jobs);
+
+    // ================= EXECUTE NOTIFICATIONS =================
+
+    const results = await Promise.allSettled(jobs);
+
+    results.forEach((result) => {
+      if (result.status === "rejected") {
+        console.error("Notification error:", result.reason?.message);
+      } else if (result.value?.success === false) {
+        console.error("Email/WhatsApp notification failed:", result.value.error);
+      }
+    });
   } catch (e) {
     console.error("emailBookingParties:", e.message);
   }
 };
 
-// payments of EVERY member -> assigned to the accepting mentor
 // payments of EVERY member -> assigned to the accepting mentor
 const assignMentorToAll = async (b, mentorId) => {
   await Payment.updateMany(
@@ -425,8 +500,6 @@ const fail = (res, status, message, extra = {}) =>
 
 /* ============================ REFUNDS ============================ */
 
-/* ============================ REFUNDS ============================ */
-
 // "wallet"   (default): instant, can never fail, shows in Bonus Wallet > Total Refunds
 // "original" : back to card / UPI via Razorpay (5-7 days, can fail if Razorpay balance is low)
 const REFUND_DESTINATION =
@@ -440,7 +513,6 @@ const isWalletPayment = (p) =>
   (p.method === "wallet" ||
     String(p.razorpayPaymentId || "").startsWith("wallet_pay_"));
 
-// returns "refunded" | "failed"
 // returns "refunded" | "failed"
 // RULE: only the SESSION PRICE is ever refunded.
 // The convenience fee (what the customer paid to cover Razorpay's cost) is NEVER refunded,
@@ -582,6 +654,7 @@ const refundPayment = async (payment, reason = "", options = {}) => {
     return "failed";
   }
 };
+
 // Refund EVERY member's payment. Safe to call again. Returns FRESH payment docs.
 const refundAll = async (booking, reason, options = {}) => {
   const ids = paymentIdsOf(booking);
@@ -1332,6 +1405,15 @@ exports.joinGroup = async (req, res) => {
     }
     emitBooking(updated);
 
+    // FIX 3: mentor already accepted -> the new friend also gets the
+    // "join 5 minutes early" email + WhatsApp (req.user.id is available HERE)
+    if (updated.mentor) {
+      emailBookingParties(updated, "booked", {
+        only: String(req.user.id),
+        skipMentor: true,
+      });
+    }
+
     return res.json({ success: true, booking: toClient(updated) });
   } catch (error) {
     if (error?.code === 11000)
@@ -1420,7 +1502,7 @@ exports.updateRequest = async (req, res) => {
     await assignMentorToAll(accepted, mentorId);
 
     emitBooking(accepted);
-    emailBookingParties(accepted, "booked"); // <-- ADD (not awaited, never blocks)
+    emailBookingParties(accepted, "booked"); // email + WhatsApp (not awaited, never blocks)
 
     (accepted.notified || [])
       .filter((id) => String(id) !== String(mentorId))
@@ -1825,12 +1907,11 @@ const settleCompleted = async (booking, { auto = false } = {}) => {
   }
 
   emitBooking(updated);
-  // mentor already accepted -> the new friend also gets the "join 5 minutes early" mail
-  if (updated.mentor)
-    emailBookingParties(updated, "booked", {
-      only: String(req.user.id),
-      skipMentor: true,
-    });
+
+  // FIX 2: the old "emailBookingParties(... req.user.id ...)" block was removed from here.
+  // `req` does not exist in this function -> it threw ReferenceError and crashed completion.
+  // That logic now lives in joinGroup(), where `req` is available.
+
   pushTimerOff(updated);
   return updated;
 };
@@ -2031,7 +2112,7 @@ exports.markAllFresherNotificationsRead = async (req, res) => {
 
 /* ============================ SCHEDULERS ============================ */
 let schedulerBusy = false;
-let lastReconcileAt = 0; // <-- add this
+let lastReconcileAt = 0;
 
 exports.startSchedulers = (app) => {
   setInterval(async () => {
@@ -2159,8 +2240,7 @@ exports.startSchedulers = (app) => {
       }).select("requestGroupId");
       for (const b of overdue) await completeBooking(b.requestGroupId);
 
-      // 6) reminders
-      // 6) reminders: the room is open now -> mail everyone once
+      // 6) reminders: the room is open now -> email + WhatsApp everyone once
       const soon = await Booking.find({
         status: "accepted",
         reminderSent: false,
@@ -2179,6 +2259,7 @@ exports.startSchedulers = (app) => {
           if (full) emailBookingParties(full, "reminder");
         }
       }
+
       // 7) money was taken (wallet OR Razorpay) but the booking / group join never happened -> give it back
       const orphanPaid = await Payment.find({
         status: "paid",
@@ -2198,7 +2279,6 @@ exports.startSchedulers = (app) => {
       for (const p of orphanPaid) {
         if (await paymentUsed(p.razorpayPaymentId)) continue;
 
-        const viaWallet = isWalletPayment(p);
         const result = await refundPayment(p, "Booking was not created", {});
         if (result === "refunded" && p.fresher) {
           const done = await Payment.findById(p._id)
@@ -2317,7 +2397,7 @@ exports.livekitToken = async (req, res) => {
 
     if (!["accepted", "in_progress"].includes(b.status))
       return fail(res, 409, "This session is not active");
-    // livekitToken
+
     if (Date.now() < new Date(b.startsAt).getTime() - TOKEN_OPEN_BEFORE_MS)
       return fail(res, 409, "The meeting room is not open yet");
 
