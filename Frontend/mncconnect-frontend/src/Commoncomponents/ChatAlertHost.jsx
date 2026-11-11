@@ -1,4 +1,3 @@
-
 import React, {
   memo,
   useCallback,
@@ -12,22 +11,21 @@ import { useLocation, useNavigate } from "react-router-dom";
 import {
   Avatar,
   Box,
-  Button,
+  ButtonBase,
+  CircularProgress,
   IconButton,
   InputBase,
-  Paper,
   Stack,
   Typography,
 } from "@mui/material";
 
 import {
   X,
-  MessageCircle,
   Reply,
-  Eye,
   CheckCheck,
   Send,
   Check,
+  ArrowUpRight,
 } from "lucide-react";
 
 import { socket } from "../utils/socket";
@@ -48,14 +46,19 @@ import {
 const MAX_ALERTS = 3;
 const AUTO_HIDE_MS = 7000;
 const MAX_LEN = 1000;
+const MAX_SEEN = 300;
+
+// Site theme (same as the mentor portal): blue-600 primary, slate neutrals
+const ACCENT = "#2563eb";
+const ACCENT_DARK = "#1d4ed8";
+const ACCENT_SOFT = "#eff6ff";
+const ACCENT_LINE = "#bfdbfe";
 
 const bare = (s) => String(s || "").split(":").pop();
 
 const initialsOf = (name = "") => {
   const parts = name.trim().split(/\s+/).filter(Boolean);
-
   if (!parts.length) return "?";
-
   return (
     (parts[0][0] || "") +
     (parts.length > 1 ? parts[parts.length - 1][0] : "")
@@ -86,7 +89,7 @@ const ChatAlertItem = memo(function ChatAlertItem({
   onReply,
   onMarkRead,
 }) {
-  const [paused, setPaused] = useState(false);
+  const [hovered, setHovered] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
 
   const [replyOpen, setReplyOpen] = useState(false);
@@ -101,31 +104,13 @@ const ChatAlertItem = memo(function ChatAlertItem({
 
   const inputRef = useRef(null);
 
+
+  // Single source of truth for pausing the auto-hide.
+  const paused = hovered || replyOpen || replySending;
+
   useEffect(() => {
     setImgFailed(false);
   }, [item.image]);
-
-  // Keep notification alive while replying
-  useEffect(() => {
-    if (replyOpen) setPaused(true);
-  }, [replyOpen]);
-
-  useEffect(() => {
-    if (paused || replyOpen || replySending) return undefined;
-
-    const timer = setTimeout(
-      () => onClose(item.key),
-      AUTO_HIDE_MS,
-    );
-
-    return () => clearTimeout(timer);
-  }, [
-    paused,
-    replyOpen,
-    replySending,
-    item.key,
-    onClose,
-  ]);
 
   useEffect(() => {
     if (replyOpen) {
@@ -133,24 +118,15 @@ const ChatAlertItem = memo(function ChatAlertItem({
     }
   }, [replyOpen]);
 
-  // ================= OPEN CHAT =================
-
-  const openMessage = () => {
-    onView(item);
-  };
-
-  // ================= INLINE REPLY =================
-
-  const showReply = () => {
+  const toggleReply = () => {
     setReplyOpen((prev) => !prev);
     setActionError("");
   };
 
   const sendReply = async (e) => {
-    e.preventDefault();
+    e?.preventDefault?.();
 
     const message = replyText.trim();
-
     if (!message || replySending || replySent) return;
 
     setReplySending(true);
@@ -158,7 +134,6 @@ const ChatAlertItem = memo(function ChatAlertItem({
 
     try {
       await onReply(item, message);
-
       setReplyText("");
       setReplySent(true);
       setReplyOpen(false);
@@ -169,7 +144,13 @@ const ChatAlertItem = memo(function ChatAlertItem({
     }
   };
 
-  // ================= MARK AS READ =================
+  const onKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      sendReply(e);
+    } else if (e.key === "Escape") {
+      setReplyOpen(false);
+    }
+  };
 
   const handleMarkRead = async () => {
     if (readDone || readLoading) return;
@@ -187,294 +168,300 @@ const ChatAlertItem = memo(function ChatAlertItem({
     }
   };
 
+  const pillSx = {
+    height: 32,
+    px: 1.4,
+    gap: 0.6,
+    borderRadius: "999px",
+    fontSize: 12,
+    fontWeight: 600,
+    transition: "background-color .15s, color .15s, border-color .15s",
+    "&:focus-visible": {
+      outline: `2px solid ${ACCENT}`,
+      outlineOffset: 2,
+    },
+    "&.Mui-disabled": { opacity: 0.7 },
+  };
+
   return (
-    <Paper
-      elevation={0}
+    <Box
       role="alert"
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => {
-        if (!replyOpen) setPaused(false);
-      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       sx={{
         position: "relative",
         width: "100%",
         boxSizing: "border-box",
-        p: 1.6,
-        borderRadius: "15px",
-        border: "1px solid #e5e7eb",
-        backgroundColor: "#fff",
-        boxShadow: "0 8px 28px rgba(15,23,42,0.13)",
+        p: 1.75,
+        pt: 1.5,
+        borderRadius: "18px",
+        backgroundColor: "#ffffff",
+        border: "1px solid #e2e8f0",
+        boxShadow:
+          "0 1px 2px rgba(16,24,40,.05), 0 14px 32px -8px rgba(16,24,40,.22)",
         overflow: "hidden",
         pointerEvents: "auto",
-        animation: "chatAlertIn .25s ease-out both",
+        fontFamily: "inherit",
+        "& .MuiTypography-root, & .MuiInputBase-root, & .MuiButtonBase-root": {
+          fontFamily: "inherit",
+        },
+        animation: "chatAlertIn .32s cubic-bezier(.2,.9,.3,1.1) both",
       }}
     >
       {/* HEADER */}
-
-      <Stack direction="row" alignItems="center" spacing={1}>
-        <Avatar
-          src={!imgFailed ? item.image || undefined : undefined}
-          alt={item.name}
-          imgProps={{
-            referrerPolicy: "no-referrer",
-            onError: () => setImgFailed(true),
-          }}
+      <Stack direction="row" alignItems="center" spacing={1.25}>
+        <Box
           sx={{
-            width: 38,
-            height: 38,
+            p: "2px",
+            borderRadius: "50%",
+            background: "linear-gradient(135deg, #2563eb, #06b6d4)",
             flexShrink: 0,
-            bgcolor: "#e8edff",
-            color: "#3659c9",
-            fontSize: 12,
-            fontWeight: 700,
           }}
         >
-          {initialsOf(item.name)}
-        </Avatar>
+          <Avatar
+            src={!imgFailed ? item.image || undefined : undefined}
+            alt={item.name}
+            imgProps={{
+              referrerPolicy: "no-referrer",
+              onError: () => setImgFailed(true),
+            }}
+            sx={{
+              width: 40,
+              height: 40,
+              border: "2px solid #fff",
+              bgcolor: ACCENT_SOFT,
+              color: ACCENT,
+              fontSize: 13,
+              fontWeight: 700,
+            }}
+          >
+            {initialsOf(item.name)}
+          </Avatar>
+        </Box>
 
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography
             noWrap
             sx={{
-              fontSize: 13,
+              fontSize: 14,
               fontWeight: 700,
-              color: "#171717",
+              color: "#0f172a",
+              lineHeight: 1.25,
             }}
           >
             {item.name || "New user"}
           </Typography>
-
-          <Typography sx={{ fontSize: 11, color: "#888" }}>
-            sent you a message
+          <Typography sx={{ fontSize: 12, color: "#64748b", lineHeight: 1.3 }}>
+            sent you a message · just now
           </Typography>
         </Box>
 
         <IconButton
           size="small"
-          aria-label="Close notification"
+          aria-label="Dismiss notification"
           onClick={() => onClose(item.key)}
+          sx={{
+            color: "#94a3b8",
+            "&:hover": { color: "#0f172a", bgcolor: "#f1f5f9" },
+          }}
         >
           <X size={16} />
         </IconButton>
       </Stack>
 
-      {/* MESSAGE CLICK -> OPEN CHAT */}
-
-      <Button
-        fullWidth
-        onClick={openMessage}
+      {/* MESSAGE BUBBLE — click opens the chat */}
+      <ButtonBase
+        onClick={() => onView(item)}
+        aria-label="Open conversation"
         sx={{
-          display: "flex",
-          justifyContent: "flex-start",
-          alignItems: "flex-start",
-          gap: 1,
-          mt: 1.5,
-          px: 1,
-          py: 1,
-          borderRadius: "9px",
-          backgroundColor: "#f8fafc",
-          color: "#475569",
+          display: "block",
+          width: "100%",
+          mt: 1.4,
+          px: 1.5,
+          py: 1.1,
           textAlign: "left",
-          textTransform: "none",
-          "&:hover": {
-            backgroundColor: "#eff6ff",
+          borderRadius: "4px 16px 16px 16px",
+          backgroundColor: ACCENT_SOFT,
+          border: `1px solid ${ACCENT_LINE}`,
+          transition: "border-color .15s",
+          "&:hover": { borderColor: ACCENT },
+          "&:hover .open-hint": { opacity: 1 },
+          "&:focus-visible": {
+            outline: `2px solid ${ACCENT}`,
+            outlineOffset: 2,
           },
         }}
       >
-        <MessageCircle
-          size={14}
-          style={{ flexShrink: 0, marginTop: 3 }}
-        />
-
         <Typography
           sx={{
-            fontSize: 12,
-            lineHeight: 1.6,
-            textAlign: "left",
+            fontSize: 13.5,
+            lineHeight: 1.55,
+            color: "#1e293b",
             overflowWrap: "anywhere",
-            whiteSpace: "normal",
+            display: "-webkit-box",
+            WebkitLineClamp: 3,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+            pr: 2.5,
           }}
         >
           {item.text || "You have received a new message."}
         </Typography>
-      </Button>
 
-      {/* ACTION BUTTONS */}
-
-      <Stack direction="row" spacing={1} sx={{ mt: 1.3 }}>
-        {/* REPLY BUTTON */}
-
-        <Button
-          fullWidth
-          size="small"
-          onClick={showReply}
-          startIcon={<Reply size={14} />}
+        <Box
+          className="open-hint"
           sx={{
-            height: 33,
-            borderRadius: "8px",
-            bgcolor: replyOpen ? "#334155" : "#171717",
-            color: "#fff",
-            fontSize: 11,
-            fontWeight: 700,
-            textTransform: "none",
-            "&:hover": {
-              bgcolor: "#333",
-            },
+            position: "absolute",
+            right: 10,
+            top: 8,
+            opacity: 0.45,
+            color: ACCENT,
+            display: "flex",
+            transition: "opacity .15s",
           }}
         >
+          <ArrowUpRight size={15} />
+        </Box>
+      </ButtonBase>
+
+      {/* ACTIONS */}
+      <Stack direction="row" spacing={0.9} alignItems="center" sx={{ mt: 1.4 }}>
+        <ButtonBase
+          onClick={toggleReply}
+          aria-expanded={replyOpen}
+          sx={{
+            ...pillSx,
+            bgcolor: replyOpen ? "#f1f5f9" : ACCENT,
+            color: replyOpen ? "#334155" : "#fff",
+            "&:hover": { bgcolor: replyOpen ? "#e2e8f0" : ACCENT_DARK },
+          }}
+        >
+          <Reply size={14} />
           {replyOpen ? "Cancel" : "Reply"}
-        </Button>
+        </ButtonBase>
 
-        {/* MARK AS READ */}
-
-        <Button
-          fullWidth
-          size="small"
+        <ButtonBase
           onClick={handleMarkRead}
           disabled={readDone || readLoading}
-          startIcon={
-            <CheckCheck
-              size={14}
-              color={readDone ? "#2684ff" : "currentColor"}
-            />
-          }
           sx={{
-            height: 33,
-            borderRadius: "8px",
-            border: "1px solid #dbe3ef",
-            color: readDone ? "#2684ff" : "#475569",
-            fontSize: 11,
-            fontWeight: 700,
-            textTransform: "none",
+            ...pillSx,
+            border: "1px solid",
+            borderColor: readDone ? "#bfdbfe" : "#e2e8f0",
+            bgcolor: readDone ? "#eff6ff" : "#fff",
+            color: readDone ? "#2563eb" : "#475569",
+            "&:hover": { bgcolor: readDone ? "#eff6ff" : "#f8fafc" },
           }}
         >
-          {readLoading
-            ? "Reading..."
-            : readDone
-              ? "Read"
-              : "Mark as read"}
-        </Button>
+          {readLoading ? (
+            <CircularProgress size={13} thickness={5} color="inherit" />
+          ) : (
+            <CheckCheck size={14} />
+          )}
+          {readDone ? "Read" : "Mark as read"}
+        </ButtonBase>
 
-        {/* VIEW */}
+        <Box sx={{ flex: 1 }} />
 
-        <Button
-          size="small"
-          onClick={openMessage}
-          startIcon={<Eye size={14} />}
+        <ButtonBase
+          onClick={() => onView(item)}
           sx={{
-            height: 33,
-            minWidth: 65,
-            borderRadius: "8px",
-            color: "#475569",
-            fontSize: 11,
-            fontWeight: 600,
-            textTransform: "none",
+            ...pillSx,
+            color: ACCENT,
+            "&:hover": { bgcolor: ACCENT_SOFT },
           }}
         >
-          View
-        </Button>
+          Open chat
+        </ButtonBase>
       </Stack>
 
-      {/* INLINE REPLY BOX - NO CHAT PANEL */}
-
+      {/* INLINE REPLY */}
       {replyOpen && (
         <Box
           component="form"
           onSubmit={sendReply}
-          sx={{
-            mt: 1.5,
-            p: 1,
-            borderRadius: "11px",
-            border: "1px solid #dbe3ef",
-            backgroundColor: "#f8fafc",
-          }}
+          sx={{ mt: 1.4, animation: "chatAlertIn .2s ease-out both" }}
         >
-          <Stack direction="row" alignItems="center" spacing={1}>
+          <Stack
+            direction="row"
+            alignItems="flex-end"
+            spacing={0.75}
+            sx={{
+              pl: 1.5,
+              pr: 0.6,
+              py: 0.6,
+              borderRadius: "22px",
+              border: `1.5px solid ${ACCENT_LINE}`,
+              bgcolor: "#fff",
+              transition: "border-color .15s",
+              "&:focus-within": { borderColor: ACCENT },
+            }}
+          >
             <InputBase
               inputRef={inputRef}
               fullWidth
               multiline
-              maxRows={3}
+              maxRows={4}
               value={replyText}
-              onChange={(e) =>
-                setReplyText(e.target.value.slice(0, MAX_LEN))
-              }
-              placeholder="Type your reply..."
+              onChange={(e) => setReplyText(e.target.value.slice(0, MAX_LEN))}
+              onKeyDown={onKeyDown}
+              placeholder={`Reply to ${item.name || "this message"}`}
               disabled={replySending}
-              sx={{
-                px: 1,
-                py: 0.7,
-                fontSize: 13,
-                backgroundColor: "#fff",
-                borderRadius: "8px",
-                border: "1px solid #e5e7eb",
-              }}
+              inputProps={{ "aria-label": "Reply message" }}
+              sx={{ fontSize: 13.5, py: 0.6, color: "#0f172a" }}
             />
 
             <IconButton
               type="submit"
+              aria-label="Send reply"
               disabled={!replyText.trim() || replySending}
               sx={{
-                width: 38,
-                height: 38,
+                width: 34,
+                height: 34,
                 flexShrink: 0,
-                bgcolor: "#171717",
+                bgcolor: ACCENT,
                 color: "#fff",
-                "&:hover": { bgcolor: "#333" },
-                "&.Mui-disabled": {
-                  bgcolor: "#cbd5e1",
-                  color: "#fff",
-                },
+                "&:hover": { bgcolor: ACCENT_DARK },
+                "&.Mui-disabled": { bgcolor: "#e2e8f0", color: "#94a3b8" },
               }}
-              aria-label="Send reply"
             >
-              <Send size={16} />
+              {replySending ? (
+                <CircularProgress size={15} thickness={5} color="inherit" />
+              ) : (
+                <Send size={15} />
+              )}
             </IconButton>
           </Stack>
 
           <Typography
-            sx={{
-              fontSize: 10,
-              color: "#94a3b8",
-              mt: 0.7,
-              textAlign: "right",
-            }}
+            sx={{ fontSize: 11, color: "#94a3b8", mt: 0.6, textAlign: "right" }}
           >
-            {replyText.length}/{MAX_LEN} · Enter to send
+            Enter to send · Shift+Enter for a new line · {replyText.length}/
+            {MAX_LEN}
           </Typography>
         </Box>
       )}
 
-      {/* SUCCESS */}
-
+      {/* STATUS */}
       {replySent && (
-        <Stack direction="row" spacing={0.7} alignItems="center" sx={{ mt: 1 }}>
-          <Check size={13} color="#16a34a" />
-          <Typography sx={{ fontSize: 11, color: "#16a34a" }}>
-            Reply sent successfully
-          </Typography>
-        </Stack>
-      )}
-
-      {readDone && (
-        <Stack direction="row" spacing={0.7} alignItems="center" sx={{ mt: 1 }}>
-          <CheckCheck size={14} color="#2684ff" />
-          <Typography sx={{ fontSize: 11, color: "#2684ff" }}>
-            Message marked as read
+        <Stack direction="row" spacing={0.7} alignItems="center" sx={{ mt: 1.1 }}>
+          <Check size={14} color="#10b981" />
+          <Typography sx={{ fontSize: 12, color: "#047857", fontWeight: 600 }}>
+            Reply sent
           </Typography>
         </Stack>
       )}
 
       {actionError && (
         <Typography
-          sx={{ mt: 1, fontSize: 11, color: "#dc2626" }}
+          role="status"
+          sx={{ mt: 1, fontSize: 12, color: "#dc2626", fontWeight: 500 }}
         >
           {actionError}
         </Typography>
       )}
 
-      {/* AUTO HIDE PROGRESS */}
-
+      {/* AUTO-HIDE PROGRESS — also drives the close, so pause and
+          timer can never go out of sync */}
       <Box
         sx={{
           position: "absolute",
@@ -482,22 +469,22 @@ const ChatAlertItem = memo(function ChatAlertItem({
           left: 0,
           height: "3px",
           width: "100%",
-          bgcolor: "#eef2ff",
+          bgcolor: ACCENT_SOFT,
         }}
       >
         <Box
+          onAnimationEnd={() => onClose(item.key)}
           sx={{
             height: "100%",
             width: "100%",
-            bgcolor: "#647eea",
+            bgcolor: ACCENT,
             transformOrigin: "left",
             animation: `chatAlertProgress ${AUTO_HIDE_MS}ms linear forwards`,
-            animationPlayState:
-              paused || replyOpen || replySending ? "paused" : "running",
+            animationPlayState: paused ? "paused" : "running",
           }}
         />
       </Box>
-    </Paper>
+    </Box>
   );
 });
 
@@ -510,21 +497,19 @@ export default function ChatAlertHost({ role, getMyId }) {
   const [items, setItems] = useState([]);
 
   const seen = useRef(new Set());
+  const personCache = useRef(new Map());
 
+  // Keep latest values in refs so the socket listener is not
+  // re-subscribed on every render.
   const pathRef = useRef(location.pathname);
   pathRef.current = location.pathname;
 
-  const personCache = useRef(new Map());
-
-  // CLOSE ALERT
+  const getMyIdRef = useRef(getMyId);
+  getMyIdRef.current = getMyId;
 
   const close = useCallback((key) => {
-    setItems((prev) =>
-      prev.filter((item) => item.key !== key),
-    );
+    setItems((prev) => prev.filter((item) => item.key !== key));
   }, []);
-
-  // OPEN CHAT ONLY FOR MESSAGE CLICK / VIEW
 
   const openChat = useCallback(
     (item) => {
@@ -533,9 +518,7 @@ export default function ChatAlertHost({ role, getMyId }) {
       close(item.key);
 
       const target =
-        role === "mentor"
-          ? "/mentor/sessions"
-          : "/Home/my-bookings";
+        role === "mentor" ? "/mentor/sessions" : "/Home/my-bookings";
 
       navigate(target, {
         state: {
@@ -549,40 +532,32 @@ export default function ChatAlertHost({ role, getMyId }) {
 
   // ================= INLINE REPLY SEND =================
 
-  const sendReply = useCallback(
-    (item, message) => {
-      return new Promise((resolve, reject) => {
-        if (!item?.bookingId || !message?.trim()) {
-          reject(new Error("Invalid message."));
-          return;
-        }
+  const sendReply = useCallback((item, message) => {
+    return new Promise((resolve, reject) => {
+      if (!item?.bookingId || !message?.trim()) {
+        reject(new Error("Invalid message."));
+        return;
+      }
 
-        if (!socket.connected) {
-          reject(new Error("Connection lost. Please try again."));
-          return;
-        }
+      if (!socket.connected) {
+        reject(new Error("Connection lost. Please try again."));
+        return;
+      }
 
-        socket.emit(
-          "chat:send",
-          {
-            bookingId: String(item.bookingId),
-            text: message.trim(),
-            replyToId: item.messageId || null,
-          },
-          (res) => {
-            if (res?.ok) {
-              resolve(res.message);
-            } else {
-              reject(
-                new Error(res?.message || "Could not send reply."),
-              );
-            }
-          },
-        );
-      });
-    },
-    [],
-  );
+      socket.emit(
+        "chat:send",
+        {
+          bookingId: String(item.bookingId),
+          text: message.trim(),
+          replyToId: item.messageId || null,
+        },
+        (res) => {
+          if (res?.ok) resolve(res.message);
+          else reject(new Error(res?.message || "Could not send reply."));
+        },
+      );
+    });
+  }, []);
 
   // ================= MARK AS READ =================
 
@@ -605,13 +580,8 @@ export default function ChatAlertHost({ role, getMyId }) {
           messageIds: [String(item.messageId)],
         },
         (res) => {
-          if (res?.ok) {
-            resolve(res);
-          } else {
-            reject(
-              new Error(res?.message || "Could not mark as read."),
-            );
-          }
+          if (res?.ok) resolve(res);
+          else reject(new Error(res?.message || "Could not mark as read."));
         },
       );
     });
@@ -620,34 +590,27 @@ export default function ChatAlertHost({ role, getMyId }) {
   // ================= COUNTERPART PROFILE =================
 
   const fetchPerson = useCallback(
-    async (bookingId) => {
+    (bookingId) => {
       if (personCache.current.has(bookingId)) {
         return personCache.current.get(bookingId);
       }
 
-      const call =
-        role === "mentor" ? mentorApi : fresherApi;
-
-      const eps =
-        role === "mentor"
-          ? MENTOR_ENDPOINTS
-          : FRESHER_ENDPOINTS;
+      const call = role === "mentor" ? mentorApi : fresherApi;
+      const eps = role === "mentor" ? MENTOR_ENDPOINTS : FRESHER_ENDPOINTS;
 
       const promise = Promise.resolve()
-        .then(() =>
-          call(`${eps.booking(bookingId)}/counterpart`),
-        )
+        .then(() => call(`${eps.booking(bookingId)}/counterpart`))
         .then((d) => ({
           name: d?.person?.name || "",
           image: imageFromPerson(d?.person),
         }))
-        .catch(() => ({
-          name: "",
-          image: "",
-        }));
+        .catch(() => {
+          // Do not cache failures — allow a retry next time.
+          personCache.current.delete(bookingId);
+          return { name: "", image: "" };
+        });
 
       personCache.current.set(bookingId, promise);
-
       return promise;
     },
     [role],
@@ -659,64 +622,49 @@ export default function ChatAlertHost({ role, getMyId }) {
     const onMsg = (m) => {
       if (!m) return;
 
-      // IGNORE MY OWN MESSAGES
-
+      // Ignore my own messages
       if (role === "mentor") {
         if (m.senderRole === "mentor") return;
       } else {
         const senderId = bare(m.senderId);
-        const myId = bare(getMyId?.());
+        const myId = bare(getMyIdRef.current?.());
 
-        if (
-          senderId
-            ? senderId === myId
-            : m.senderRole === "fresher"
-        ) {
+        if (senderId ? senderId === myId : m.senderRole === "fresher") {
           return;
         }
       }
 
-      // IGNORE MEETING ROOM
+      // Ignore while inside a meeting room
+      if (/\/meeting(?:\/|$)/i.test(pathRef.current)) return;
 
-      if (/\/meeting(?:\/|$)/i.test(pathRef.current)) {
-        return;
-      }
-
-      const ids = [
-        m.requestGroupId,
-        m.bookingId,
-      ]
-        .filter(Boolean)
-        .map(String);
-
+      const ids = [m.requestGroupId, m.bookingId].filter(Boolean).map(String);
       const bookingId = ids[0];
 
       if (!bookingId) return;
 
-      // IGNORE OPEN CHAT
-
+      // Ignore if that chat is already open
       if (ids.some(isChatOpen)) return;
 
-      // DUPLICATE PREVENTION
-
+      // Duplicate prevention (bounded so it cannot grow forever)
       const mid = String(m._id || m.id || "");
 
       if (mid) {
         if (seen.current.has(mid)) return;
         seen.current.add(mid);
+
+        if (seen.current.size > MAX_SEEN) {
+          const oldest = seen.current.values().next().value;
+          seen.current.delete(oldest);
+        }
       }
 
       const name =
         m.senderName ||
         m.sender?.name ||
-        (m.senderRole === "mentor"
-          ? "Employee"
-          : "Student");
+        (m.senderRole === "mentor" ? "Employee" : "Student");
 
       const image = imageFromMessage(m);
-
-      const key =
-        mid || `${Date.now()}-${Math.random()}`;
+      const key = mid || `${Date.now()}-${Math.random()}`;
 
       const item = {
         key,
@@ -727,29 +675,20 @@ export default function ChatAlertHost({ role, getMyId }) {
         image,
       };
 
-      setItems((prev) =>
-        [item, ...prev].slice(0, MAX_ALERTS),
-      );
+      setItems((prev) => [item, ...prev].slice(0, MAX_ALERTS));
 
-      // PROFILE PHOTO FALLBACK
-
+      // Profile photo fallback
       if (!image) {
         fetchPerson(bookingId).then((person) => {
           if (!person?.image) return;
 
-          if (
-            m.senderName &&
-            person.name &&
-            person.name !== m.senderName
-          ) {
+          if (m.senderName && person.name && person.name !== m.senderName) {
             return;
           }
 
           setItems((prev) =>
             prev.map((it) =>
-              it.key === key
-                ? { ...it, image: person.image }
-                : it,
+              it.key === key ? { ...it, image: person.image } : it,
             ),
           );
         });
@@ -761,7 +700,7 @@ export default function ChatAlertHost({ role, getMyId }) {
     return () => {
       socket.off("chat:message", onMsg);
     };
-  }, [role, getMyId, fetchPerson]);
+  }, [role, fetchPerson]);
 
   if (!items.length) return null;
 
@@ -770,47 +709,33 @@ export default function ChatAlertHost({ role, getMyId }) {
       <style>
         {`
           @keyframes chatAlertIn {
-            from {
-              opacity: 0;
-              transform: translateY(-8px);
-            }
-            to {
-              opacity: 1;
-              transform: translateY(0);
-            }
+            from { opacity: 0; transform: translateY(-10px) scale(.98); }
+            to   { opacity: 1; transform: translateY(0) scale(1); }
           }
 
           @keyframes chatAlertProgress {
-            from {
-              transform: scaleX(1);
-            }
-            to {
-              transform: scaleX(0);
-            }
+            from { transform: scaleX(1); }
+            to   { transform: scaleX(0); }
           }
 
           @media (prefers-reduced-motion: reduce) {
-            [role="alert"] {
-              animation: none !important;
-            }
+            [role="alert"] { animation: none !important; }
           }
         `}
       </style>
 
       <Box
+        aria-live="polite"
         sx={{
           position: "fixed",
-          top: { xs: 12, sm: 15 },
+          top: { xs: 12, sm: 16 },
           right: { xs: 10, sm: 18 },
           zIndex: 20000,
-          width: {
-            xs: "calc(100% - 20px)",
-            sm: "425px",
-          },
-          maxWidth: "425px",
+          width: { xs: "calc(100% - 20px)", sm: "400px" },
+          maxWidth: "400px",
           display: "flex",
           flexDirection: "column",
-          gap: 1,
+          gap: 1.25,
           pointerEvents: "none",
         }}
       >

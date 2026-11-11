@@ -839,7 +839,7 @@ exports.createRequest = async (req, res) => {
 
     const done = requiredFields.filter(has).length;
 
-    if (!photo || done / requiredFields.length < 0.9) {
+    if (!photo || done / requiredFields.length < 0.8) {
       return res.status(403).json({
         message:
           "Complete your profile (photo + required details) to book a session.",

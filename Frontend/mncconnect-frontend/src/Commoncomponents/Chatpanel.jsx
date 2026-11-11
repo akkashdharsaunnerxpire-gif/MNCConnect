@@ -28,6 +28,15 @@ import {
   unlockAudio,
   setChatActive,
 } from "../utils/chatSounds";
+import { fixUrl, findImage } from "../utils/imageUrl";
+import {
+  api as fresherApi,
+  ENDPOINTS as FRESHER_ENDPOINTS,
+} from "../services/fresherApi";
+import {
+  api as mentorApi,
+  ENDPOINTS as MENTOR_ENDPOINTS,
+} from "../services/mentorApi";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 const MAX_LEN = 1000;
@@ -136,20 +145,76 @@ const nameFor = (m, names = {}) =>
   names[senderIdOf(m)] ||
   (m?.senderRole === "mentor" ? "Employee" : "Member");
 
+/* ---------- IMAGE helpers ----------
+   fixUrl / findImage come from utils/imageUrl.js
+   - findImage : looks at ANY image-like field of an object
+   - fixUrl    : relative paths ("/uploads/a.jpg") -> full url          */
+
+// image that is carried by the message itself
+const imageFromMessage = (m) =>
+  fixUrl(
+    m?.senderImage ||
+      m?.senderProfilePic ||
+      m?.senderProfileImage ||
+      m?.senderPic ||
+      m?.senderAvatar ||
+      m?.senderPhoto,
+  ) ||
+  (m?.sender && typeof m.sender === "object" ? findImage(m.sender) : "") ||
+  fixUrl(m?.profilePic || m?.image);
+
 // profile photo of the sender: message payload first, then the
 // { userId: photoUrl } map (group), then the single-chat fallback
 const senderImageOf = (m, images = {}, fallback = "") =>
-  m?.senderImage ||
-  m?.senderProfilePic ||
-  m?.senderPic ||
-  m?.sender?.profilePic ||
-  m?.sender?.image ||
-  m?.sender?.avatar ||
-  m?.sender?.photo ||
-  m?.profilePic ||
-  images[senderIdOf(m)] ||
-  fallback ||
-  "";
+  imageFromMessage(m) || images[senderIdOf(m)] || fallback || "";
+
+const imageFromPerson = (p) => findImage(p);
+
+/* ---------- counterpart cache (same idea as ChatAlertHost) ----------
+   One request per booking, shared by every ChatPanel. Failures are not
+   cached so the next open can retry. */
+const counterpartCache = new Map();
+
+const loadCounterpart = (role, bookingId) => {
+  const key = `${role}:${bookingId}`;
+  if (counterpartCache.has(key)) return counterpartCache.get(key);
+
+  const call = role === "mentor" ? mentorApi : fresherApi;
+  const eps = role === "mentor" ? MENTOR_ENDPOINTS : FRESHER_ENDPOINTS;
+
+  const promise = Promise.resolve()
+    .then(() => call(`${eps.booking(bookingId)}/counterpart`))
+    .then((d) => {
+      // group: { people: [{ id, name, profilePic|image ... }] }
+      const people = {};
+      (Array.isArray(d?.people) ? d.people : []).forEach((p) => {
+        const id = bare(p?.id || p?._id || p?.userId);
+        const img = imageFromPerson(p);
+        if (id && img) people[id] = img;
+      });
+
+      const person =
+        d?.person ||
+        d?.counterpart ||
+        d?.user ||
+        d?.mentor ||
+        d?.fresher ||
+        null;
+
+      return {
+        name: person?.name || "",
+        image: imageFromPerson(person),
+        people,
+      };
+    })
+    .catch(() => {
+      counterpartCache.delete(key);
+      return { name: "", image: "", people: {} };
+    });
+
+  counterpartCache.set(key, promise);
+  return promise;
+};
 
 /**
  * WhatsApp style ticks
@@ -180,26 +245,39 @@ const initialsOf = (title = "") => {
   ).toUpperCase();
 };
 
-/* ---------- small round profile photo (falls back to the first letter) ---------- */
-const SenderAvatar = memo(function SenderAvatar({ image, name }) {
-  const [failed, setFailed] = useState(false);
-  const letter = (name || "?").trim().charAt(0).toUpperCase() || "?";
+/* tries image, then fallback, then gives up (-> letter) */
+const useImageChain = (image, fallback) => {
+  const list = useMemo(
+    () => [image, fallback].filter((x, i, a) => x && a.indexOf(x) === i),
+    [image, fallback],
+  );
+  const [idx, setIdx] = useState(0);
 
-  // a new url arrived (e.g. loaded later) -> try again
   useEffect(() => {
-    setFailed(false);
-  }, [image]);
+    setIdx(0);
+  }, [list]);
+
+  return {
+    src: list[idx] || "",
+    onError: () => setIdx((i) => i + 1),
+  };
+};
+
+/* ---------- small round profile photo (falls back to the first letter) ---------- */
+const SenderAvatar = memo(function SenderAvatar({ image, fallback, name }) {
+  const { src, onError } = useImageChain(image, fallback);
+  const letter = (name || "?").trim().charAt(0).toUpperCase() || "?";
 
   return (
     <div
       title={name || "Member"}
       className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white bg-indigo-100 text-xs font-bold text-indigo-700 shadow-sm"
     >
-      {image && !failed ? (
+      {src ? (
         <img
-          src={image}
+          src={src}
           alt={name || "Profile"}
-          onError={() => setFailed(true)}
+          onError={onError}
           referrerPolicy="no-referrer"
           className="h-full w-full object-cover"
         />
@@ -211,19 +289,15 @@ const SenderAvatar = memo(function SenderAvatar({ image, name }) {
 });
 
 /* ---------- header avatar (photo or initials) ---------- */
-const HeaderAvatar = memo(function HeaderAvatar({ image, title }) {
-  const [failed, setFailed] = useState(false);
+const HeaderAvatar = memo(function HeaderAvatar({ image, fallback, title }) {
+  const { src, onError } = useImageChain(image, fallback);
 
-  useEffect(() => {
-    setFailed(false);
-  }, [image]);
-
-  if (image && !failed) {
+  if (src) {
     return (
       <img
-        src={image}
+        src={src}
         alt={title}
-        onError={() => setFailed(true)}
+        onError={onError}
         referrerPolicy="no-referrer"
         className="h-full w-full object-cover"
       />
@@ -234,20 +308,19 @@ const HeaderAvatar = memo(function HeaderAvatar({ image, title }) {
 
 /* ---------- GROUP: tiny profile photo of one reader ---------- */
 const SeenAvatar = memo(function SeenAvatar({ r }) {
-  const [failed, setFailed] = useState(false);
+  const { src, onError } = useImageChain(findImage(r), "");
   const letter = (r.name || "?").charAt(0).toUpperCase();
-  const image = r.image || r.profilePic || "";
 
   return (
     <span
       title={`Seen by ${r.name || "Member"}`}
       className="-ml-1 flex h-[18px] w-[18px] items-center justify-center overflow-hidden rounded-full border border-white bg-indigo-100 text-[9px] font-bold text-indigo-700 first:ml-0"
     >
-      {image && !failed ? (
+      {src ? (
         <img
-          src={image}
+          src={src}
           alt={r.name}
-          onError={() => setFailed(true)}
+          onError={onError}
           referrerPolicy="no-referrer"
           className="h-full w-full object-cover"
         />
@@ -299,6 +372,7 @@ const MessageRow = memo(function MessageRow({
   group,
   senderLabel,
   senderImage,
+  senderFallback,
   quoteMine,
   quoteLabel,
   colorKey,
@@ -342,7 +416,11 @@ const MessageRow = memo(function MessageRow({
       {/* profile photo: shown on the first bubble of a run, spacer for the rest */}
       {!mine &&
         (firstInGroup ? (
-          <SenderAvatar image={senderImage} name={senderLabel || nameFor(m)} />
+          <SenderAvatar
+            image={senderImage}
+            fallback={senderFallback}
+            name={senderLabel || nameFor(m)}
+          />
         ) : (
           <span className="h-8 w-8 shrink-0" aria-hidden="true" />
         ))}
@@ -451,7 +529,10 @@ const DayDivider = memo(function DayDivider({ label }) {
  *                     myUserId is optional: the server tells the client who it is.
  *
  * peerImage        -> single chat: photo url of the other person
+ *                     (optional: ChatPanel ALSO loads it itself from /counterpart
+ *                      and uses it as a fallback if the prop url is broken)
  * images           -> group chat: { userId: photoUrl }
+ *                     (optional: if missing, ChatPanel loads them itself)
  */
 export default function ChatPanel({
   bookingId,
@@ -465,7 +546,7 @@ export default function ChatPanel({
   myUserId = "",
   names = {},
   peerImage: peerImageProp = "",
-  images = {},
+  images: imagesProp = {},
 }) {
   const peerRole = role === "mentor" ? "fresher" : "mentor";
   const peerName = title.replace(/^chat with\s+/i, "").trim() || "Contact";
@@ -473,6 +554,33 @@ export default function ChatPanel({
   // my user id: from the prop, or (fallback) from the server on chat:join
   const [serverMeId, setServerMeId] = useState("");
   const selfId = bare(myUserId || serverMeId);
+
+  /* ---------------- profile photos ----------------
+     1. /counterpart of the booking (cached) - always loaded
+     2. props from the parent
+     3. the message itself (senderImage / image / profilePic ...)         */
+  const [fetchedPeerImage, setFetchedPeerImage] = useState("");
+  const [fetchedImages, setFetchedImages] = useState({});
+
+  const peerImageFixed = fixUrl(peerImageProp);
+
+  useEffect(() => {
+    setFetchedPeerImage("");
+    setFetchedImages({});
+    if (!bookingId) return undefined;
+
+    let cancelled = false;
+
+    loadCounterpart(role, bookingId).then((p) => {
+      if (cancelled) return;
+      if (!group) setFetchedPeerImage(p.image || "");
+      else setFetchedImages(p.people || {});
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bookingId, group, role]);
 
   const mineIdsRef = useRef(new Set());
 
@@ -512,6 +620,46 @@ export default function ChatPanel({
   const [replyTo, setReplyTo] = useState(null);
   const [highlightId, setHighlightId] = useState(null);
   const highlightTimer = useRef(null);
+
+  // single chat: photo the other person's own messages carry
+  const messagesPeerImage = useMemo(() => {
+    if (group) return "";
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const m = messages[i];
+      if (m.senderRole === role) continue;
+      const img = imageFromMessage(m);
+      if (img) return img;
+    }
+    return "";
+  }, [messages, group, role]);
+
+  // main photo = loaded from /counterpart (most reliable), then the rest
+  const peerImage = fetchedPeerImage || peerImageFixed || messagesPeerImage;
+  // used when the main url fails to load
+  const peerImageFallback =
+    [peerImageFixed, messagesPeerImage].find((u) => u && u !== peerImage) || "";
+
+  // group: photos the messages themselves carry  { senderId: url }
+  const learnedImages = useMemo(() => {
+    if (!group) return {};
+    const out = {};
+    messages.forEach((m) => {
+      const id = senderIdOf(m);
+      const img = imageFromMessage(m);
+      if (id && img) out[id] = img;
+    });
+    return out;
+  }, [messages, group]);
+
+  // group: learned < fetched < props
+  const images = useMemo(() => {
+    const fromProps = {};
+    Object.entries(imagesProp || {}).forEach(([k, v]) => {
+      const u = fixUrl(v);
+      if (k && u) fromProps[k] = u;
+    });
+    return { ...learnedImages, ...fetchedImages, ...fromProps };
+  }, [learnedImages, fetchedImages, imagesProp]);
 
   const scrollRef = useRef(null);
   const textareaRef = useRef(null);
@@ -1028,7 +1176,8 @@ export default function ChatPanel({
         firstInGroup,
         lastInGroup,
         senderLabel,
-        senderImage: senderImageOf(m, images, group ? "" : peerImageProp),
+        senderImage: senderImageOf(m, images, group ? "" : peerImage),
+        senderFallback: group ? "" : peerImageFallback,
         colorKey: senderIdOf(m) || senderLabel,
         quoteMine,
         quoteLabel: quoteMine
@@ -1041,7 +1190,18 @@ export default function ChatPanel({
     });
 
     return out;
-  }, [messages, isMine, group, names, images, peerImageProp, role, selfId, peerName]);
+  }, [
+    messages,
+    isMine,
+    group,
+    names,
+    images,
+    peerImage,
+    peerImageFallback,
+    role,
+    selfId,
+    peerName,
+  ]);
 
   /* ---------------- UI ---------------- */
   const statusText = !joined
@@ -1053,10 +1213,8 @@ export default function ChatPanel({
         : formatLastSeen(peerLastSeen) || "Offline";
 
   // header photo: single chat only (group has no single "other person")
-  const headerImage = group
-    ? ""
-    : peerImageProp ||
-      senderImageOf(messages.find((m) => !isMine(m) && senderImageOf(m)) || {});
+  const headerImage = group ? "" : peerImage;
+  const headerFallback = group ? "" : peerImageFallback;
 
   const body = (
     <>
@@ -1065,7 +1223,11 @@ export default function ChatPanel({
         <div className="flex min-w-0 items-center gap-3">
           <div className="relative h-10 w-10 shrink-0">
             <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-sm font-semibold text-white">
-              <HeaderAvatar image={headerImage} title={title} />
+              <HeaderAvatar
+                image={headerImage}
+                fallback={headerFallback}
+                title={title}
+              />
             </div>
             <span
               className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white ${
@@ -1156,6 +1318,7 @@ export default function ChatPanel({
                     group={group}
                     senderLabel={row.senderLabel}
                     senderImage={row.senderImage}
+                    senderFallback={row.senderFallback}
                     colorKey={row.colorKey}
                     quoteMine={row.quoteMine}
                     quoteLabel={row.quoteLabel}

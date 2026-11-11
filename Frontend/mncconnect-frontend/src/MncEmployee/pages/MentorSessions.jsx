@@ -41,6 +41,7 @@ import {
   TIMER_POLL_MS,
   hasTimerFinished,
 } from "../../utils/sessionTiming";
+import { fixUrl, findImage } from "../../utils/imageUrl";
 import ChatPanel from "../../Commoncomponents/Chatpanel";
 import PersonDetailsModal from "../../Commoncomponents/Persondetailsmodal";
 
@@ -68,6 +69,59 @@ const mapBookingStatus = (status) => {
     default:
       return null;
   }
+};
+
+/* ------------------------------------------------------------------ */
+/* FRESHER PHOTO                                                       */
+/* The sessions list does not carry the fresher's profile photo, so we */
+/* load it once per session from the booking's /counterpart endpoint   */
+/* and cache it (no repeated requests when the page re-renders).       */
+/* findImage() finds the photo whatever the field is called, and       */
+/* fixUrl() turns "/uploads/x.jpg" into a full url.                    */
+/* ------------------------------------------------------------------ */
+const imageOfPerson = (p) => findImage(p);
+
+const photoCache = new Map(); // sessionId -> Promise<string>
+
+const loadPersonImage = (id) => {
+  const key = String(id);
+
+  if (!photoCache.has(key)) {
+    const promise = api(`${ENDPOINTS.booking(key)}/counterpart`)
+      .then((d) =>
+        imageOfPerson(d?.person || d?.fresher || d?.user || d?.counterpart),
+      )
+      .catch(() => {
+        photoCache.delete(key); // allow a retry next time
+        return "";
+      });
+    photoCache.set(key, promise);
+  }
+
+  return photoCache.get(key);
+};
+
+// returns the photo the list already has, otherwise the loaded one
+const usePersonImage = (id, existing, enabled) => {
+  const [loaded, setLoaded] = useState("");
+
+  useEffect(() => {
+    if (!enabled || existing || !id) {
+      setLoaded("");
+      return undefined;
+    }
+
+    let alive = true;
+    loadPersonImage(id).then((url) => {
+      if (alive) setLoaded(url);
+    });
+
+    return () => {
+      alive = false;
+    };
+  }, [id, existing, enabled]);
+
+  return existing || loaded;
 };
 
 /* ------------------------------------------------------------------ */
@@ -278,20 +332,37 @@ const eduText = (e) => {
     .join(" · ");
 };
 
-const Avatar = ({ p, size = "h-10 w-10", text = "text-sm" }) =>
-  p.image ? (
+// round photo, falls back to the first letter (also when the image fails to load)
+// p.image can be missing -> findImage(p) looks at any image-like field
+const Avatar = ({
+  p,
+  size = "h-10 w-10",
+  text = "text-sm",
+  className = "",
+}) => {
+  const [failed, setFailed] = useState(false);
+  const src = fixUrl(p.image) || findImage(p);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  return src && !failed ? (
     <img
-      src={p.image}
+      src={src}
       alt={p.name}
-      className={`${size} shrink-0 rounded-full object-cover`}
+      onError={() => setFailed(true)}
+      referrerPolicy="no-referrer"
+      className={`${size} shrink-0 rounded-full object-cover ${className}`}
     />
   ) : (
     <div
-      className={`${size} ${text} flex shrink-0 items-center justify-center rounded-full bg-blue-100 font-bold text-blue-700`}
+      className={`${size} ${text} flex shrink-0 items-center justify-center rounded-full bg-blue-100 font-bold text-blue-700 ${className}`}
     >
       {(p.name || "?").charAt(0).toUpperCase()}
     </div>
   );
+};
 
 const Chips = ({ items, tone = "blue" }) => (
   <div className="flex flex-wrap gap-1.5">
@@ -789,6 +860,7 @@ const MentorSessions = () => {
     socket.on(evt, onUpdated);
     return () => socket.off(evt, onUpdated);
   }, [setOverride]);
+
   const location = useLocation();
   const [autoOpenId, setAutoOpenId] = useState(null);
 
@@ -985,6 +1057,7 @@ const SessionCard = ({
     if (!autoOpen) return;
     openChat(session);
     onAutoOpened?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpen]);
 
   const isUpcoming = session.status === "Upcoming";
@@ -1003,6 +1076,13 @@ const SessionCard = ({
   const namesText =
     names.slice(0, NAMES_SHOWN).join(", ") +
     (names.length > NAMES_SHOWN ? ` +${names.length - NAMES_SHOWN} more` : "");
+
+  // fresher's profile photo (single sessions): from the list, else loaded once
+  const fresherPhoto = usePersonImage(
+    session.id,
+    fixUrl(session.avatar),
+    !isGroup,
+  );
 
   const base = getJoinStatus(session, nowMs);
   const c = countdownParts(base.msUntilStart);
@@ -1089,10 +1169,11 @@ const SessionCard = ({
                 <Users size={22} />
               </div>
             ) : (
-              <img
-                src={session.avatar}
-                alt={session.name}
-                className="h-12 w-12 rounded-full border-2 border-blue-100 object-cover"
+              <Avatar
+                p={{ name: session.name, image: fresherPhoto }}
+                size="h-12 w-12"
+                text="text-sm"
+                className="border-2 border-blue-100"
               />
             )}
             <div className="min-w-0">
@@ -1333,7 +1414,7 @@ const SessionCard = ({
           variant="modal"
           bookingId={chatFor.id}
           role="mentor"
-          peerImage={chatFor.avatar || ""}
+          peerImage={isGroup ? "" : fresherPhoto || ""}
           group={isGroup}
           title={isGroup ? "Group chat" : `Chat with ${chatFor.name}`}
           onClose={closeChat}

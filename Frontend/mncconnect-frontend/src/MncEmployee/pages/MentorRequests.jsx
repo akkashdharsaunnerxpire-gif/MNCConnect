@@ -10,11 +10,18 @@ import {
   X,
   CheckCircle2,
   Loader2,
+  Timer,
+  Briefcase,
+  Globe,
+  Users,
+  MessageSquare,
+  ShieldCheck,
+  AlertTriangle,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { socket } from "../../utils/socket";
 import useMentorSessions from "../../hooks/useMentorSessions";
-import { api, ENDPOINTS } from "../../services/mentorApi";
+import { api, ENDPOINTS, inr } from "../../services/mentorApi";
 import { notifyRequestsChanged } from "../../utils/requestEvents";
 import { notifySessionsChanged } from "../../utils/sessionEvents";
 import {
@@ -30,6 +37,10 @@ import {
 } from "../../utils/sessionRequests";
 
 const FALLBACK_AVATAR = "https://i.pravatar.cc/150?img=12";
+
+const PLATFORM_FEE = 0.25;
+const mentorShare = (amount) =>
+  Math.round((Number(amount) || 0) * (1 - PLATFORM_FEE));
 
 const TABS = [
   { label: "Pending", icon: Clock3 },
@@ -368,6 +379,12 @@ const MentorRequests = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 sm:p-6 lg:p-8">
+      <style>{`
+        @keyframes mr-modal-in { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: scale(1); } }
+        .mr-modal-in { animation: mr-modal-in .28s cubic-bezier(.2,.7,.2,1) both; }
+        @media (prefers-reduced-motion: reduce) { .mr-modal-in { animation: none; } }
+      `}</style>
+
       <div className="mx-auto max-w-7xl">
         <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -513,162 +530,291 @@ const MentorRequests = () => {
       </div>
 
       {selectedRequest && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="confirm-title"
-        >
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
-            <div className="mb-5 flex items-start justify-between">
-              <div>
-                <h2
-                  id="confirm-title"
-                  className="text-lg font-bold text-slate-900"
-                >
-                  {actionType === "accept"
-                    ? "Accept Request?"
-                    : "Reject Request?"}
-                </h2>
-
-                <p className="mt-1 text-sm text-slate-500">
-                  {selectedRequest.name}
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={closeConfirmation}
-                disabled={actionLoading}
-                aria-label="Close"
-                className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {actionType === "accept" && (
-              <div className="mb-5 rounded-xl border border-blue-100 bg-blue-50 p-4">
-                <div className="flex gap-3">
-                  <CalendarDays
-                    size={19}
-                    className="mt-0.5 shrink-0 text-blue-600"
-                  />
-
-                  <div>
-                    <p className="text-sm font-semibold text-blue-900">
-                      {SESSION_GAP_MINUTES}-minute gap rule
-                    </p>
-
-                    <p className="mt-1 text-xs leading-5 text-blue-700">
-                      Every session must have at least {SESSION_GAP_MINUTES}{" "}
-                      minutes gap from the previous or next session.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {acceptError && (
-              <div
-                className="mb-5 rounded-xl border border-red-200 bg-red-50 p-4"
-                role="alert"
-              >
-                <p className="text-sm leading-5 text-red-700">{acceptError}</p>
-              </div>
-            )}
-
-            <div className="mb-6 rounded-xl bg-slate-50 p-4">
-              <div className="mb-4 flex items-center gap-3">
-                <img
-                  src={selectedRequest.avatar || FALLBACK_AVATAR}
-                  alt={selectedRequest.name}
-                  className="h-12 w-12 rounded-full object-cover"
-                />
-
-                <div>
-                  <p className="font-semibold text-slate-900">
-                    {selectedRequest.name}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {selectedRequest.role}
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-xs text-slate-500">Date</p>
-                  <p className="mt-1 text-sm font-semibold text-slate-900">
-                    {selectedRequest.date || "Not specified"}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs text-slate-500">Time</p>
-                  <p className="mt-1 text-sm font-semibold text-slate-900">
-                    {selectedRequest.time || "Not specified"}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs text-slate-500">Duration</p>
-                  <p className="mt-1 text-sm font-semibold text-slate-900">
-                    {formatDuration(selectedRequest.duration)}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs text-slate-500">Amount</p>
-                  <p className="mt-1 flex items-center text-sm font-semibold text-slate-900">
-                    <IndianRupee size={14} />
-                    {selectedRequest.amount}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={closeConfirmation}
-                disabled={actionLoading}
-                className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={confirmAction}
-                disabled={actionLoading}
-                className={`flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 ${
-                  actionType === "accept"
-                    ? "bg-emerald-600 hover:bg-emerald-700"
-                    : "bg-red-600 hover:bg-red-700"
-                }`}
-              >
-                {actionLoading ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <Loader2 size={16} className="animate-spin" />
-                    Processing...
-                  </span>
-                ) : actionType === "accept" ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <CheckCircle2 size={16} />
-                    Accept Request
-                  </span>
-                ) : (
-                  "Reject Request"
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmRequestModal
+          request={selectedRequest}
+          actionType={actionType}
+          loading={actionLoading}
+          error={acceptError}
+          onCancel={closeConfirmation}
+          onConfirm={confirmAction}
+        />
       )}
     </div>
   );
 };
+
+/* ============================================================
+   CONFIRM MODAL (accept = full details, reject = short summary)
+============================================================ */
+
+const ConfirmRequestModal = ({
+  request,
+  actionType,
+  loading,
+  error,
+  onCancel,
+  onConfirm,
+}) => {
+  const isAccept = actionType === "accept";
+
+  // lives only while the modal is mounted, so it resets for every request
+  const [ackMatch, setAckMatch] = useState(false);
+
+  const rows = [
+    {
+      icon: CalendarDays,
+      label: "Date",
+      value: request.date || "Not specified",
+      strong: true,
+    },
+    {
+      icon: Clock3,
+      label: "Time",
+      value: request.time || "Not specified",
+      strong: true,
+    },
+    {
+      icon: Timer,
+      label: "Duration",
+      value: `${getDurationMinutes(request.duration)} minutes`,
+      strong: true,
+    },
+    {
+      icon: Briefcase,
+      label: "Role wanted",
+      value:
+        request.role === "Other" && request.otherRole
+          ? request.otherRole
+          : request.role || "Not specified",
+    },
+    {
+      icon: Globe,
+      label: "Language",
+      value: request.language || "Any",
+    },
+    {
+      icon: Users,
+      label: "Gender preference",
+      value: request.gender || "No preference",
+    },
+    {
+      icon: IndianRupee,
+      label: "You will earn",
+      value: inr(mentorShare(request.amount)),
+      strong: true,
+      green: true,
+    },
+  ];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-title"
+    >
+      <div className="mr-modal-in w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl">
+        {/* Header */}
+        <div
+          className={`px-6 py-5 text-white ${
+            isAccept
+              ? "bg-gradient-to-r from-blue-600 to-cyan-500"
+              : "bg-gradient-to-r from-red-600 to-rose-500"
+          }`}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p
+                className={`text-xs font-semibold uppercase tracking-wider ${
+                  isAccept ? "text-blue-100" : "text-red-100"
+                }`}
+              >
+                {isAccept ? "Review before accepting" : "Review before rejecting"}
+              </p>
+              <h2 id="confirm-title" className="mt-1 text-xl font-bold">
+                {isAccept
+                  ? "Check the fresher's requirements"
+                  : "Reject this request?"}
+              </h2>
+            </div>
+
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={loading}
+              aria-label="Close"
+              className="rounded-lg p-1.5 text-white/80 transition hover:bg-white/10 disabled:opacity-40"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="max-h-[60vh] overflow-y-auto px-6 py-5">
+          <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <img
+              src={request.avatar || FALLBACK_AVATAR}
+              alt={request.name}
+              className="h-11 w-11 shrink-0 rounded-full object-cover"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-semibold text-slate-900">
+                {request.name}
+              </p>
+              <p className="truncate text-xs text-slate-500">
+                {request.topic || request.role || "Mentoring session"}
+                {request.company ? ` · ${request.company}` : ""}
+              </p>
+            </div>
+          </div>
+
+          {error && (
+            <div
+              className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4"
+              role="alert"
+            >
+              <p className="text-sm leading-5 text-red-700">{error}</p>
+            </div>
+          )}
+
+          {isAccept ? (
+            <>
+              <div className="mt-4 space-y-2">
+                {rows.map((r) => {
+                  const Icon = r.icon;
+                  return (
+                    <div
+                      key={r.label}
+                      className="flex items-center justify-between gap-4 rounded-xl border border-slate-100 bg-white px-4 py-3"
+                    >
+                      <div className="flex items-center gap-2.5 text-slate-500">
+                        <Icon size={15} />
+                        <span className="text-xs font-medium">{r.label}</span>
+                      </div>
+                      <span
+                        className={`text-right text-sm ${
+                          r.strong ? "font-bold" : "font-medium"
+                        } ${r.green ? "text-emerald-600" : "text-slate-900"}`}
+                      >
+                        {r.value}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {request.message && (
+                <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/60 p-4">
+                  <div className="mb-1 flex items-center gap-2 text-xs font-semibold text-blue-700">
+                    <MessageSquare size={13} />
+                    Why the fresher wants this session
+                  </div>
+                  <p className="text-sm leading-6 text-slate-700">
+                    {request.message}
+                  </p>
+                </div>
+              )}
+
+              <div className="mt-4 flex gap-3 rounded-xl border border-blue-100 bg-blue-50 p-4">
+                <CalendarDays
+                  size={19}
+                  className="mt-0.5 shrink-0 text-blue-600"
+                />
+                <div>
+                  <p className="text-sm font-semibold text-blue-900">
+                    {SESSION_GAP_MINUTES}-minute gap rule
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-blue-700">
+                    Every session must have at least {SESSION_GAP_MINUTES}{" "}
+                    minutes gap from the previous or next session.
+                  </p>
+                </div>
+              </div>
+
+              <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <input
+                  type="checkbox"
+                  checked={ackMatch}
+                  onChange={(e) => setAckMatch(e.target.checked)}
+                  disabled={loading}
+                  className="mt-0.5 h-5 w-5 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
+                />
+                <span className="text-sm text-emerald-900">
+                  <strong>I can handle this session.</strong> I match the
+                  requirements above, I'll be on time, and I'll follow the
+                  mentor guidelines.
+                </span>
+              </label>
+
+              <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                <span>
+                  Only accept if you genuinely match the language, role, gender
+                  preference and timing. The fresher is paying for this session.
+                </span>
+              </div>
+            </>
+          ) : (
+            <div className="mt-4 grid grid-cols-2 gap-4 rounded-xl bg-slate-50 p-4">
+              <Detail label="Date" value={request.date || "Not specified"} />
+              <Detail label="Time" value={request.time || "Not specified"} />
+              <Detail
+                label="Duration"
+                value={formatDuration(request.duration)}
+              />
+              <Detail label="Amount" value={inr(request.amount)} />
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex flex-col-reverse gap-2 border-t border-slate-100 bg-slate-50 px-6 py-4 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={loading}
+            className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={loading || (isAccept && !ackMatch)}
+            className={`inline-flex items-center justify-center gap-2 rounded-xl px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${
+              isAccept
+                ? "bg-emerald-600 hover:bg-emerald-700"
+                : "bg-red-600 hover:bg-red-700"
+            }`}
+          >
+            {loading ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                Processing...
+              </>
+            ) : isAccept ? (
+              <>
+                <ShieldCheck size={16} />
+                Confirm &amp; accept
+              </>
+            ) : (
+              "Reject Request"
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const Detail = ({ label, value }) => (
+  <div>
+    <p className="text-xs text-slate-500">{label}</p>
+    <p className="mt-1 text-sm font-semibold text-slate-900">{value}</p>
+  </div>
+);
 
 const FilterSelect = ({ label, value, options, onChange }) => (
   <div>
