@@ -42,6 +42,7 @@ import {
   TIMER_POLL_MS,
   liveRemaining,
   hasTimerFinished,
+  isPollWindow,
 } from "../../utils/sessionTiming";
 import {
   api,
@@ -56,7 +57,8 @@ import {
 // same room-open time as the mentor side (shared constant)
 const OPEN_BEFORE_MS = JOIN_OPEN_MS;
 const IST = "Asia/Kolkata";
-
+// missed / cancelled bookings can be rebooked for 24h, then the server deletes them
+const CLOSED_REBOOK_MS = 24 * 60 * 60 * 1000;
 const fmtTimeIST = (ms) =>
   Number.isFinite(ms)
     ? new Date(ms).toLocaleTimeString("en-IN", {
@@ -356,6 +358,8 @@ const MyBookings = () => {
   }, []);
 
   const bookings = data?.bookings || [];
+  const bookingsRef = useRef([]);
+  bookingsRef.current = bookings;
 
   const markFinished = (ids) => {
     const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
@@ -500,6 +504,12 @@ const MyBookings = () => {
     let cancelled = false;
 
     const fetchTimers = async () => {
+      const nowTs = Date.now();
+      const due = ids.filter((id) => {
+        const b = bookingsRef.current.find((x) => x.requestGroupId === id);
+        return b && isPollWindow(b.startsAt, b.endsAt, nowTs);
+      });
+      if (!due.length) return;
       const results = {};
       const justFinished = [];
 
@@ -798,8 +808,15 @@ const MyBookings = () => {
               const sessionHappened =
                 ["completed", "awaiting_confirmation"].includes(b.status) ||
                 Boolean(finishedIds[b.requestGroupId]);
+              const closedRebook =
+                ["missed", "cancelled"].includes(b.status) &&
+                Boolean(b.mentor?.id) &&
+                (!b.closedAt ||
+                  now - new Date(b.closedAt).getTime() < CLOSED_REBOOK_MS);
               const canRebook =
-                tab === "past" && sessionHappened && Boolean(b.mentor?.id);
+                tab === "past" &&
+                Boolean(b.mentor?.id) &&
+                (sessionHappened || closedRebook);
               const unread = unreadCounts[String(b.requestGroupId)] || 0;
 
               return (
@@ -924,6 +941,14 @@ const MyBookings = () => {
                                 : "refunded"
                               : "amount held"}
                         </div>
+                      )}
+                      {["expired", "missed", "cancelled"].includes(
+                        b.status,
+                      ) && (
+                        <p className="text-center text-[11px] text-slate-400">
+                          Removed automatically after 24 hours. Rebook before
+                          that.
+                        </p>
                       )}
 
                       {canRebook && (

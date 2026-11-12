@@ -506,10 +506,80 @@ const getCompanyDepartments = async (req, res) => {
       .json({ success: false, message: "Failed to load roles" });
   }
 };
+// ============================================================================
+// SEARCH ONE EMPLOYEE OF A COMPANY (name or employee ID) -> direct booking
+// GET /api/mentor/company-search/:companyName?q=...   (fresher login)
+// ============================================================================
+
+const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const searchCompanyMentors = async (req, res) => {
+  try {
+    const company = String(req.params.companyName || "").trim();
+    const q = String(req.query.q || "").trim().slice(0, 40);
+
+    if (!company) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Company name is required" });
+    }
+
+    // ONLY this company (exact match, case-insensitive)
+    const filter = {
+      verificationStatus: "approved",
+      accountStatus: "active",
+      currentCompany: new RegExp(`^${escapeRegex(company)}$`, "i"),
+    };
+
+    if (q) {
+      const safe = escapeRegex(q);
+      filter.$or = [
+        { name: new RegExp(safe, "i") }, // name: partial match
+        { mentorCode: new RegExp(`^${safe}`, "i") }, // ARUN#4356356: full or starting part
+        { employeeId: new RegExp(`^${safe}$`, "i") }, // company employee ID: exact only
+      ];
+    }
+
+    const list = await Mentor.find(filter)
+      .select(
+        "name designation department profilePic mentorCode currentCompany yearsOfExperience languages",
+      )
+      .sort({ name: 1 })
+      .limit(30)
+      .lean();
+
+    const online = req.app.get("onlineMentors");
+
+    const mentors = list.map((m) => {
+      const entry = online && online.get(String(m._id));
+      return {
+        id: String(m._id),
+        name: m.name,
+        designation: m.designation || "",
+        department: m.department || "",
+        image: m.profilePic || "",
+        companyName: m.currentCompany || company,
+        code: m.mentorCode || "",
+        yearsOfExperience: m.yearsOfExperience || 0,
+        languages: m.languages || [],
+        isOnline: Boolean(entry && (entry.size === undefined || entry.size > 0)),
+      };
+    });
+
+    // online employees first
+    mentors.sort((a, b) => Number(b.isOnline) - Number(a.isOnline));
+
+    return res.json({ success: true, mentors });
+  } catch (error) {
+    console.error("searchCompanyMentors error:", error);
+    return res.status(500).json({ success: false, message: "Search failed" });
+  }
+};
 
 module.exports = {
   getMentorProfile,
   getMentorsByCompany,
   UpdateMentorProfile,
   getCompanyDepartments,
+  searchCompanyMentors,
 };

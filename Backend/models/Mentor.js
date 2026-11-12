@@ -28,7 +28,6 @@ const mentorSchema = new mongoose.Schema(
     },
 
     // Full number stored as countryCode + national digits, e.g. "+919876543210"
-    // (same format as the Fresher model, so duplicate checks work across both)
     mobile: {
       type: String,
       required: true,
@@ -50,10 +49,20 @@ const mentorSchema = new mongoose.Schema(
       default: "",
     },
 
+    // Company's own employee ID (private, never shown to freshers)
     employeeId: {
       type: String,
       required: true,
       trim: true,
+    },
+
+    // Public unique ID, e.g. ARUN#4356356 (freshers can search with it)
+    mentorCode: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      unique: true,
+      sparse: true,
     },
 
     workEmail: {
@@ -108,7 +117,6 @@ const mentorSchema = new mongoose.Schema(
       default: "",
     },
 
-    // NEW: registration form sends skills, but schema did not have it
     skills: {
       type: [String],
       default: [],
@@ -205,6 +213,7 @@ const mentorSchema = new mongoose.Schema(
       default: undefined,
       select: false,
     },
+
     profilePicPublicId: {
       type: String,
       default: "",
@@ -215,5 +224,7 @@ const mentorSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+mentorSchema.index({ currentCompany: 1, name: 1 });
 
 module.exports = mongoose.model("Mentor", mentorSchema);

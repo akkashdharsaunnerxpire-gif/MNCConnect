@@ -8,7 +8,6 @@ import React, {
 } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
-  CalendarDays,
   CheckCircle2,
   ChevronRight,
   IndianRupee,
@@ -33,6 +32,7 @@ import {
   Circle,
   Info,
   WifiOff,
+  Search,
 } from "lucide-react";
 import useUserEvents from "../../hooks/useUserEvents";
 import useLive from "../../hooks/useLive";
@@ -40,6 +40,7 @@ import {
   getProfileStatus,
   REQUIRED_PERCENT,
 } from "../../utils/profileCompletion";
+import { JOIN_OPEN_MS } from "../../utils/sessionTiming";
 import {
   api,
   ENDPOINTS,
@@ -54,6 +55,7 @@ import {
   startFrom,
   inr,
 } from "../../services/fresherApi";
+import FindEmployeeModal from "./FindEmployee";
 
 const SESSION_TYPES = [
   { value: "company_prep", label: "How to get into this company" },
@@ -91,7 +93,8 @@ const groupPriceFor = (minutes) =>
   Math.round((GROUP_RATE_PER_HOUR * minutes) / 60);
 
 const MIN_LEAD_MIN = 30;
-const OPEN_BEFORE_MIN = 2;
+// same value as backend + meeting room + My Bookings + Mentor Sessions (shared constant)
+const OPEN_BEFORE_MIN = JOIN_OPEN_MS / 60000;
 
 const WALLET_PAY_ENDPOINT =
   ENDPOINTS.payWithWallet || "/payments/pay-with-wallet";
@@ -361,10 +364,25 @@ export default function SessionBoard() {
   const user = useMemo(() => getUser(), []);
   const userId = useMemo(() => getUserId(), []);
 
+  // rebook = a mentor is locked in. Comes from "Book again" (MyBookings)
+  // OR from the employee popup below (picked: true).
   const [rebook, setRebook] = useState(location.state?.rebook || null);
   useEffect(() => {
     setRebook(location.state?.rebook || null);
   }, [location.state]);
+
+  /* ---------- pick ONE employee (popup, only this company) ---------- */
+  const [showFinder, setShowFinder] = useState(false);
+
+  const pickMentor = (m) => {
+    setRebook({
+      mentorId: m.id,
+      mentorName: m.name,
+      companyName,
+      picked: true,
+    });
+    setShowFinder(false);
+  };
 
   const [f, setF] = useState(() => makeEmptyForm(user));
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
@@ -445,8 +463,8 @@ export default function SessionBoard() {
     let cancelled = false;
     setQuote(null);
     api(`/payments/fee-quote?amount=${price}`)
-      .then((q) => {
-        if (!cancelled) setQuote(q);
+      .then((q2) => {
+        if (!cancelled) setQuote(q2);
       })
       .catch(() => {
         if (!cancelled) setQuote(null);
@@ -854,6 +872,15 @@ export default function SessionBoard() {
       ? `${toApiDate(f.date)} at ${toApiTime(f.time)}`
       : "Not selected";
 
+  // time when an unaccepted request is cancelled + refunded (server decides: ~10 min before start)
+  const refundBy = booking?.expiresAt
+    ? new Date(booking.expiresAt).toLocaleTimeString("en-IN", {
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: "Asia/Kolkata",
+      })
+    : toApiTime(f.time);
+
   const genderSummary = effectiveGender
     ? `${effectiveGender === "male" ? "Male" : "Female"} employee`
     : isGroup
@@ -947,16 +974,18 @@ export default function SessionBoard() {
               </div>
               <div>
                 <p className="text-sm font-bold text-blue-900">
-                  Booking again with {rebook.mentorName || "your mentor"}
+                  {rebook.picked ? "Booking with" : "Booking again with"}{" "}
+                  {rebook.mentorName || "your mentor"}
                 </p>
                 <p className="text-xs text-blue-700">
-                  Your request goes only to this mentor. If they can't take it,
-                  you are refunded.
+                  Your request goes only to this employee. If they can't take
+                  it, you are refunded.
                 </p>
               </div>
             </div>
             <button
               type="button"
+              disabled={Boolean(stage)}
               onClick={() => setRebook(null)}
               className="flex items-center gap-1 rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
             >
@@ -967,6 +996,29 @@ export default function SessionBoard() {
 
         <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-7">
           <div className="space-y-6">
+            {/* SEARCH ONE EMPLOYEE: click opens the popup (only this company) */}
+            {!rebook && (
+              <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                <h2 className="text-lg font-bold text-slate-950">
+                  Want a specific {companyName} employee?
+                </h2>
+                <p className="mt-0.5 text-sm text-slate-500">
+                  Search by name or employee ID. Or skip this and we match
+                  anyone.
+                </p>
+
+                <button
+                  type="button"
+                  disabled={Boolean(stage)}
+                  onClick={() => setShowFinder(true)}
+                  className="mt-4 flex h-12 w-full items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 text-left text-sm text-slate-400 transition hover:border-blue-300 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50"
+                >
+                  <Search size={16} className="shrink-0 text-slate-400" />
+                  Name or employee ID
+                </button>
+              </section>
+            )}
+
             {/* 1. SINGLE / GROUP */}
             <Section
               step={1}
@@ -1224,7 +1276,7 @@ export default function SessionBoard() {
               </div>
             </Section>
 
-            {/* 4. PREFERENCES */}
+            {/* 4. PREFERENCES (hidden when one employee is picked / rebooked) */}
             {!rebook && (
               <Section
                 step={4}
@@ -1397,10 +1449,10 @@ export default function SessionBoard() {
                     the employee and you (the host) accept.
                   </p>
                   <p>
-                    <b className="text-slate-900">4.</b> If nobody accepts
-                    before your start time, or the session does not start,{" "}
-                    {isGroup ? "everyone in the group is" : "you are"} refunded
-                    automatically.
+                    <b className="text-slate-900">4.</b> If nobody accepts about
+                    10 minutes before your start time, or the session does not
+                    start, {isGroup ? "everyone in the group is" : "you are"}{" "}
+                    refunded automatically.
                   </p>
                   <p>
                     <b className="text-slate-900">5.</b> After the session,{" "}
@@ -1607,7 +1659,10 @@ export default function SessionBoard() {
               </button>
               {problems.length === 0 && (
                 <p className="mt-2 hidden text-center text-xs text-slate-500 lg:block">
-                  Then we will {actionWord} to {companyName} employees
+                  Then we will {actionWord} to{" "}
+                  {rebook
+                    ? rebook.mentorName || "your mentor"
+                    : `${companyName} employees`}
                 </p>
               )}
               <p className="mt-3 flex items-center justify-center gap-1.5 text-center text-xs text-slate-400">
@@ -1640,6 +1695,15 @@ export default function SessionBoard() {
           </button>
         </div>
       </div>
+
+      {/* ---------- find employee popup (same page, only this company) ---------- */}
+      {showFinder && !rebook && (
+        <FindEmployeeModal
+          companyName={companyName}
+          onPick={pickMentor}
+          onClose={() => setShowFinder(false)}
+        />
+      )}
 
       {/* ---------- status modals ---------- */}
       {showProfileGate && (
@@ -1764,7 +1828,7 @@ export default function SessionBoard() {
               : "Waiting for an employee to accept…"}
           </div>
           <p className="mt-4 flex items-center justify-center gap-2 text-xs text-slate-400">
-            <TimerReset size={14} /> Not accepted before {toApiTime(f.time)}?{" "}
+            <TimerReset size={14} /> Not accepted before {refundBy}?{" "}
             {isGroup ? "Everyone is" : "You're"} refunded automatically.
           </p>
           <button
@@ -1851,7 +1915,7 @@ export default function SessionBoard() {
               : "Nobody accepted your request in time."}{" "}
             {paidByWalletRef.current
               ? `${inr(refundedAmount)} is back in your wallet.`
-              : `${inr(refundedAmount)} (including any convenience fee) is being refunded to your wallet or original payment method.`}
+              : `${inr(price)} is back in your wallet. The convenience fee is not refunded.`}
             {isGroup && " Friends who joined are refunded to their wallets."}
           </p>
           <button

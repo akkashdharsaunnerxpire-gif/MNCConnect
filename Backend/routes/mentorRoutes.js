@@ -6,20 +6,16 @@ const {
   getMentorProfile,
   getMentorsByCompany,
   UpdateMentorProfile,
-  getCompanyDepartments
+  searchCompanyMentors,
+  getCompanyDepartments,
 } = require("../controllers/mentorController");
 
 router.get("/companies", getMentorsByCompany);
 
 router.get("/company-departments/:companyName", getCompanyDepartments);
-router.get(
-  "/:mentoremail",
-  getMentorProfile
-);
+router.get("/company-search/:companyName", searchCompanyMentors);
+router.get("/:mentoremail", getMentorProfile);
 
-router.put(
-  "/:mentoremail",
-  UpdateMentorProfile
-);
+router.put("/:mentoremail", UpdateMentorProfile);
 
 module.exports = router;

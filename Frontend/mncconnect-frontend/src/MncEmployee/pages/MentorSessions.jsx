@@ -12,6 +12,13 @@ import CircularProgress from "@mui/material/CircularProgress";
 import Typography from "@mui/material/Typography";
 import useChatNotificationSound from "../../hooks/useChatNotificationSound";
 import {
+  JOIN_OPEN_MS,
+  FINAL_WARNING_MS,
+  TIMER_POLL_MS,
+  hasTimerFinished,
+  isPollWindow,
+} from "../../utils/sessionTiming";
+import {
   CalendarDays,
   CheckCircle2,
   Clock3,
@@ -35,12 +42,6 @@ import useMentorSessions from "../../hooks/useMentorSessions";
 import { inr, api, ENDPOINTS, EVENTS } from "../../services/mentorApi";
 import { socket } from "../../utils/socket";
 import { notifySessionsChanged } from "../../utils/sessionEvents";
-import {
-  JOIN_OPEN_MS,
-  FINAL_WARNING_MS,
-  TIMER_POLL_MS,
-  hasTimerFinished,
-} from "../../utils/sessionTiming";
 import { fixUrl, findImage } from "../../utils/imageUrl";
 import ChatPanel from "../../Commoncomponents/Chatpanel";
 import PersonDetailsModal from "../../Commoncomponents/Persondetailsmodal";
@@ -63,8 +64,10 @@ const mapBookingStatus = (status) => {
       return "awaiting_confirmation";
     case "completed":
       return "Completed";
-    case "cancelled":
     case "canceled":
+    case "missed":
+    case "expired":
+    case "disputed":
       return "Cancelled";
     default:
       return null;
@@ -301,9 +304,9 @@ const getJoinStatus = (session, nowMs) => {
       joinOpenAt: null,
       sessionEndAt: null,
       msUntilStart: 0,
+      msUntilOpen: 0,
     };
   }
-  // same window as the fresher side (shared constant)
   const joinOpen = session.startsAt - JOIN_OPEN_MS;
   return {
     isLive: nowMs >= session.startsAt && nowMs < session.endsAt,
@@ -312,9 +315,9 @@ const getJoinStatus = (session, nowMs) => {
     joinOpenAt: new Date(joinOpen),
     sessionEndAt: new Date(session.endsAt),
     msUntilStart: Math.max(0, session.startsAt - nowMs),
+    msUntilOpen: Math.max(0, joinOpen - nowMs),
   };
 };
-
 /* ------------------------------------------------------------------ */
 /* GROUP details modal                                                 */
 /* LEFT  : every fresher of the group (host first)                     */
@@ -631,6 +634,9 @@ const MentorSessions = () => {
       }),
     [mergedServer, statusOverrides],
   );
+  // always the latest sessions inside the polling interval (no re-creating the interval)
+  const sessionsRef = useRef([]);
+  sessionsRef.current = sessions;
 
   const setOverride = useCallback(
     (id, status) => {
@@ -728,6 +734,18 @@ const MentorSessions = () => {
     let cancelled = false;
 
     const fetchTimers = async () => {
+      const nowTs = Date.now();
+      // poll ONLY bookings where something can change (room open - 30s ... end + 30min)
+      const due = ids.filter((id) => {
+        const s = sessionsRef.current.find((x) => String(x.id) === String(id));
+        return (
+          s &&
+          (s.status === "awaiting_confirmation" ||
+            isPollWindow(s.startsAt, s.endsAt, nowTs))
+        );
+      });
+      if (!due.length) return;
+
       const timerResults = {};
       const statusResults = {};
       let changed = false;
@@ -1085,8 +1103,6 @@ const SessionCard = ({
   );
 
   const base = getJoinStatus(session, nowMs);
-  const c = countdownParts(base.msUntilStart);
-  const pad = (n) => String(n).padStart(2, "0");
 
   const timeRange =
     session.startsAt && session.endsAt
@@ -1135,11 +1151,9 @@ const SessionCard = ({
     </>
   ) : (
     <>
-      <Clock3 size={13} />
+       <Clock3 size={13} />
       <span className="font-mono text-[10px] sm:text-[11px]">
-        {c.days > 0 && <>{c.days}d : </>}
-        {(c.days > 0 || c.hours > 0) && <>{pad(c.hours)}h : </>}
-        {pad(c.minutes)}m : {pad(c.seconds)}s
+        Opens in {fmtClock(base.msUntilOpen)}
       </span>
     </>
   );

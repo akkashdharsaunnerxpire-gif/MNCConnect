@@ -58,7 +58,7 @@ const bookingSchema = new Schema(
       index: true,
     },
 
-    // "Book again": the fresher picked this exact mentor. null = normal broadcast request.
+    // "Book again" / "search & pick": the fresher chose this exact mentor. null = normal broadcast.
     preferredMentor: {
       type: Schema.Types.ObjectId,
       ref: "Mentor",
@@ -72,6 +72,10 @@ const bookingSchema = new Schema(
     expiresAt: { type: Date, required: true },
     acceptedAt: { type: Date, default: null },
     completedAt: { type: Date, default: null },
+
+    // NEW: the moment the booking became expired / missed / cancelled.
+    // The scheduler deletes the booking 24h after this (storage saving).
+    closedAt: { type: Date, default: null },
 
     // the HOST's payment (friends' payments are inside `participants`)
     razorpayPaymentId: { type: String, default: "" },
@@ -128,6 +132,8 @@ bookingSchema.index({ status: 1, expiresAt: 1 });
 bookingSchema.index({ mentor: 1, status: 1, startsAt: 1 });
 bookingSchema.index({ status: 1, "meeting.timerEndsAt": 1 });
 bookingSchema.index({ status: 1, refundStatus: 1 });
+// NEW: the 24h cleanup query
+bookingSchema.index({ status: 1, refundStatus: 1, closedAt: 1 });
 
 // Prevent duplicate bookings using the same Razorpay payment ID (host payment)
 bookingSchema.index(

@@ -43,13 +43,21 @@ const loadWallet = async (mentorId) => {
   const reserved = agg[0]?.total || 0;
 
   // ---- list for the "My Sessions" page ----
-  // Built from payments, but ONLY the ones that still have a booking.
-  // (A deleted booking used to keep showing up here because its payment was still in the DB.)
-  // Each row also carries the real booking status, so the page does not have to guess
-  // "Completed" just because the end time has passed.
-  // NOTE: the wallet balance above still uses ALL paid payments (money is never hidden).
+  // FIX: refunded payments (missed / cancelled sessions) are included too, so the mentor
+  // sees them in the "Cancelled" tab. Their earning is 0 (money went back to the fresher).
+  // After the booking is deleted (24h), the row disappears automatically
+  // because we only keep payments that still have a booking.
+  // The wallet balance above is NOT affected (it still uses only "paid" payments).
+  const refundedRows = await Payment.find({ mentor: mentorId, status: "refunded" })
+    .select("-payerEmail -payerContact -fresherEmail -method -razorpayOrderId -razorpayPaymentId")
+    .sort({ paidAt: -1 })
+    .limit(100)
+    .lean();
+
+  const allRows = [...payments, ...refundedRows];
+
   const requestIds = [
-    ...new Set(payments.map((p) => p.requestGroupId).filter(Boolean)),
+    ...new Set(allRows.map((p) => p.requestGroupId).filter(Boolean)),
   ];
   const bookings = requestIds.length
     ? await Booking.find({ requestGroupId: { $in: requestIds } })
@@ -58,11 +66,12 @@ const loadWallet = async (mentorId) => {
     : [];
   const bookingById = new Map(bookings.map((b) => [b.requestGroupId, b]));
 
-  const sessionPayments = payments
+  const sessionPayments = allRows
     .filter((p) => p.requestGroupId && bookingById.has(p.requestGroupId))
     .map((p) => ({
       ...p,
       bookingStatus: bookingById.get(p.requestGroupId).status,
+      ...(p.status === "refunded" ? { mentorEarning: 0 } : {}),
     }));
 
   return {

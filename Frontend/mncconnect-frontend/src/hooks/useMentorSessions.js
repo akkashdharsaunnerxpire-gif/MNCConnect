@@ -1,7 +1,8 @@
 // src/hooks/useMentorSessions.js
-// Builds the mentor's session list from the live wallet payments.
-// The server now sends `sessionPayments`: only payments that still have a booking,
-// each with the real `bookingStatus`. Refreshes on "wallet:updated".
+// Builds the mentor's session list from the wallet API.
+// The server sends `sessionPayments`: paid rows + refunded rows (missed / cancelled)
+// that still have a booking. Each row carries the real `bookingStatus`.
+// Refunded rows are ALWAYS shown as "Cancelled" and earn 0.
 
 import { useEffect, useMemo, useState } from "react";
 import useLive from "./useLive";
@@ -28,8 +29,10 @@ export const toSession = (p, now) => {
   const endsAt = p.sessionEndsAt ? new Date(p.sessionEndsAt).getTime() : null;
   const startsAt = endsAt ? endsAt - dur * 60000 : null;
 
+  const refunded = p.status === "refunded";
+
   let status = "Upcoming";
-  if (p.sessionStatus === "cancelled") status = "Cancelled";
+  if (refunded || p.sessionStatus === "cancelled") status = "Cancelled";
   else if (BOOKING_TO_PAGE[p.bookingStatus]) status = BOOKING_TO_PAGE[p.bookingStatus];
   else if (endsAt && endsAt <= now) status = "Completed"; // old server (no bookingStatus)
 
@@ -44,7 +47,8 @@ export const toSession = (p, now) => {
     time: p.sessionTime || "",
     duration: `${dur} mins`,
     amount: Number(p.amount) || 0,
-    earning: Number(p.mentorEarning) || 0,
+    // money went back to the fresher -> the mentor earns nothing
+    earning: refunded || status === "Cancelled" ? 0 : Number(p.mentorEarning) || 0,
     message: "",
     status,
     startsAt,
@@ -57,7 +61,7 @@ export default function useMentorSessions() {
 
   const live = useLive({
     fetcher: () => api(ENDPOINTS.wallet),
-    events: [EVENTS.walletUpdated],
+    events: [EVENTS.walletUpdated, "booking:updated"],
     pollMs: 60000,
   });
 
@@ -78,12 +82,17 @@ export default function useMentorSessions() {
       .sort((a, b) =>
         a.status === "Upcoming" && b.status === "Upcoming"
           ? (a.startsAt || 0) - (b.startsAt || 0)
-          : (b.startsAt || 0) - (a.startsAt || 0)
+          : (b.startsAt || 0) - (a.startsAt || 0),
       );
   }, [live.data, now]);
 
   const wallet = {
-    available: 0, pending: 0, lifetime: 0, week: 0, month: 0, withdrawn: 0,
+    available: 0,
+    pending: 0,
+    lifetime: 0,
+    week: 0,
+    month: 0,
+    withdrawn: 0,
     ...(live.data?.wallet || {}),
   };
 

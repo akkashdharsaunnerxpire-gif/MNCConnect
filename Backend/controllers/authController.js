@@ -4,6 +4,7 @@ const crypto = require("crypto");
 
 const Fresher = require("../models/Fresher");
 const Mentor = require("../models/Mentor");
+const { generateMentorCode } = require("../utils/mentorCode");
 const {
   uploadFromBuffer,
   deleteFromCloudinary,
@@ -705,9 +706,6 @@ exports.markWelcomeBonusSeen = async (req, res) => {
 //   2. exports.registerMentor
 // Everything else in the file stays exactly the same.
 // =====================================================
-
-// ---------- 1. sanitizeMentor (helpers section) ----------
-
 const sanitizeMentor = (mentor) => {
   return {
     id: mentor._id,
@@ -719,6 +717,7 @@ const sanitizeMentor = (mentor) => {
     gender: mentor.gender || "",
     profilePic: mentor.profilePic || "",
     employeeId: mentor.employeeId || "",
+    mentorCode: mentor.mentorCode || "",
     currentCompany: mentor.currentCompany || "",
     designation: mentor.designation || "",
     department: mentor.department || "",
@@ -847,11 +846,11 @@ exports.registerMentor = async (req, res) => {
     } else if (nationalNumber.length < 6 || totalDigits > 15) {
       return res.status(400).json({
         success: false,
-        message: "Please provide a valid mobile number for the selected country.",
+        message:
+          "Please provide a valid mobile number for the selected country.",
       });
     }
 
-    // stored the same way as Fresher: "+" + countryCode + national digits
     const cleanMobile = cleanCountryCode + nationalNumber;
 
     // 7. Validate company
@@ -973,7 +972,7 @@ exports.registerMentor = async (req, res) => {
       });
     }
 
-    // 17. Validate skills  (saved in `skills`, NOT in `languages`)
+    // 17. Validate skills (saved in `skills`, NOT in `languages`)
     const skillList = String(skills || "")
       .split(",")
       .map((item) => item.trim())
@@ -1010,7 +1009,7 @@ exports.registerMentor = async (req, res) => {
     const cleanLinkedin = linkedin ? String(linkedin).trim() : "";
     const cleanBio = bio ? String(bio).trim() : "";
 
-    // UNIQUENESS CHECKS  (done BEFORE uploading, so nothing to clean up)
+    // UNIQUENESS CHECKS (done BEFORE uploading, so nothing to clean up)
     if (await Mentor.findOne({ email: normalizedEmail })) {
       return res.status(409).json({
         success: false,
@@ -1080,6 +1079,9 @@ exports.registerMentor = async (req, res) => {
     // CREATE MENTOR
     const hashedPassword = await bcrypt.hash(password, 12);
 
+    // public unique ID, e.g. ARUN#4356356
+    const mentorCode = await generateMentorCode(Mentor, cleanName);
+
     const mentor = await Mentor.create({
       name: cleanName,
       email: normalizedEmail,
@@ -1087,6 +1089,7 @@ exports.registerMentor = async (req, res) => {
       mobile: cleanMobile,
       password: hashedPassword,
       employeeId: cleanEmployeeId,
+      mentorCode,
       workEmail: normalizedEmail,
       linkedinProfile: cleanLinkedin,
       yearsOfExperience: parsedExperience,

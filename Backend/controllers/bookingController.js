@@ -73,7 +73,9 @@ const CONFIRM_WAIT_MS =
   (Number(process.env.CONFIRM_WAIT_HOURS) || 24) * 60 * 60 * 1000;
 const UNCONFIRMED_ACTION =
   process.env.UNCONFIRMED_ACTION === "refund" ? "refund" : "release";
-
+// closed (expired / missed / cancelled) + refunded bookings are deleted after this
+const CLOSED_RETENTION_MS =
+  (Number(process.env.CLOSED_RETENTION_HOURS) || 24) * 60 * 60 * 1000;
 // ---- pricing ----
 const RATE_PER_HOUR = Number(process.env.SESSION_RATE_PER_HOUR) || 400;
 // group: price PER PERSON per hour (30 min = half)
@@ -324,7 +326,9 @@ const emailBookingParties = async (b, kind = "booked", opts = {}) => {
           }),
         );
       } else {
-        console.warn(`WhatsApp skipped: fresher ${f.name || f._id} has no phone number saved`);
+        console.warn(
+          `WhatsApp skipped: fresher ${f.name || f._id} has no phone number saved`,
+        );
       }
     }
 
@@ -365,7 +369,9 @@ const emailBookingParties = async (b, kind = "booked", opts = {}) => {
           }),
         );
       } else {
-        console.warn(`WhatsApp skipped: mentor ${mentorDoc.name || mentorDoc._id} has no phone number saved`);
+        console.warn(
+          `WhatsApp skipped: mentor ${mentorDoc.name || mentorDoc._id} has no phone number saved`,
+        );
       }
     }
 
@@ -377,7 +383,10 @@ const emailBookingParties = async (b, kind = "booked", opts = {}) => {
       if (result.status === "rejected") {
         console.error("Notification error:", result.reason?.message);
       } else if (result.value?.success === false) {
-        console.error("Email/WhatsApp notification failed:", result.value.error);
+        console.error(
+          "Email/WhatsApp notification failed:",
+          result.value.error,
+        );
       }
     });
   } catch (e) {
@@ -480,6 +489,7 @@ function toClient(b) {
     direct: Boolean(b.preferredMentor),
     reviewed: Boolean(b.reviewed),
     refundStatus: b.refundStatus || "",
+    closedAt: b.closedAt || null,
     remainingMs: remainingOf(b),
     timerRunning: isRunning(b),
     // ---- group ----
@@ -715,7 +725,7 @@ const closeAndRefund = async (
 ) => {
   const locked = await Booking.findOneAndUpdate(
     { _id: bookingId, status: { $in: from } },
-    { $set: { status: to } },
+    { $set: { status: to, closedAt: new Date() } },
     { returnDocument: "after" },
   );
   if (!locked) return null;
@@ -2297,6 +2307,25 @@ exports.startSchedulers = (app) => {
             link: toWallet ? "/Home/bonus-wallet" : "/Home",
           });
         }
+      }
+      // 9) closed + refunded bookings -> delete after 24h (storage saving)
+      //    - refundStatus must be "refunded" (a failed refund keeps the booking so the retry job can finish)
+      //    - Payment records are NEVER deleted (money proof)
+      //    - "disputed" is not deleted (evidence)
+      const oldClosed = await Booking.find({
+        status: { $in: ["expired", "missed", "cancelled"] },
+        refundStatus: "refunded",
+        closedAt: {
+          $ne: null,
+          $lte: new Date(now.getTime() - CLOSED_RETENTION_MS),
+        },
+      })
+        .select("_id")
+        .limit(50)
+        .lean();
+
+      if (oldClosed.length) {
+        await Booking.deleteMany({ _id: { $in: oldClosed.map((b) => b._id) } });
       }
 
       // 8) Razorpay money captured but verify never reached us / abandoned or failed checkouts (every 5 min)
