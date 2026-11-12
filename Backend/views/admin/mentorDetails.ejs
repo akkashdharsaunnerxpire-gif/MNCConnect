@@ -68,6 +68,8 @@
     const sigOk = signals.filter(function (x) { return x.tone === 'ok'; }).length;
     const sigBad = signals.some(function (x) { return x.tone === 'bad'; });
     const sigWarn = signals.some(function (x) { return x.tone === 'warn'; });
+    const sigPct = Math.round((sigOk / signals.length) * 100);
+    const sigTone = sigBad ? 'bad' : (sigWarn ? 'warn' : 'ok');
     const toneIcon = { ok: 'fa-circle-check', bad: 'fa-circle-xmark', warn: 'fa-triangle-exclamation' };
 
     // ---- Manual review progress ----
@@ -83,7 +85,165 @@
       mentor.officeLocation, mentor.hourlyRate, mentor.bio, (mentor.languages && mentor.languages.length), mentor.profilePic
     ];
     const completeness = Math.round((fields.filter(Boolean).length / fields.length) * 100);
+    const firstDoc = Math.max(0, docList.findIndex(function (d) { return d.url; }));
 %>
+
+<style>
+  .mdx { --ok:#34d399; --warn:#fbbf24; --bad:#f87171; --line:var(--border, rgba(255,255,255,.08)); }
+  .mdx .card { margin-bottom:16px; }
+  .mdx h3 { margin:0; font-size:15px; font-weight:700; color:var(--text); }
+  .mdx .cap { text-transform:capitalize; }
+
+  /* ---- crumb ---- */
+  .mdx .md-crumb { display:flex; align-items:center; gap:10px; margin-bottom:14px; font-size:13px; color:var(--muted); }
+  .mdx .md-crumb a:hover { color:var(--primary-h); }
+  .mdx .md-crumb .sep { font-size:9px; opacity:.6; }
+  .mdx .md-crumb .cur { color:var(--text); font-weight:600; }
+
+  /* ---- hero ---- */
+  .x-hero { display:grid; grid-template-columns:auto 1fr auto; gap:22px; align-items:center; padding:24px; position:relative; overflow:hidden; }
+  .x-hero::before { content:""; position:absolute; inset:0 0 auto 0; height:4px; background:var(--primary); }
+  .x-hero.st-approved::before { background:var(--ok); } .x-hero.st-pending::before { background:var(--warn); } .x-hero.st-rejected::before { background:var(--bad); }
+  .md-avatar { width:84px; height:84px; border-radius:22px; overflow:hidden; display:grid; place-items:center; font-size:34px; font-weight:800; background:rgba(99,102,241,.2); color:#a5b4fc; }
+  .md-avatar img { width:100%; height:100%; object-fit:cover; }
+  .x-id h3 { font-size:22px; letter-spacing:-.02em; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .x-id .sub { margin-top:4px; color:var(--muted); font-size:14px; }
+  .x-facts { display:flex; flex-wrap:wrap; gap:8px 18px; margin-top:12px; font-size:12.5px; color:var(--muted); }
+  .x-facts i { margin-right:7px; color:var(--primary-h); }
+
+  /* trust ring */
+  .x-ring { --c:var(--ok); width:92px; height:92px; border-radius:50%; display:grid; place-items:center; background:conic-gradient(var(--c) calc(var(--p) * 1%), rgba(255,255,255,.08) 0); position:relative; text-align:center; }
+  .x-ring.warn { --c:var(--warn); } .x-ring.bad { --c:var(--bad); }
+  .x-ring::before { content:""; position:absolute; inset:8px; border-radius:50%; background:var(--surface); }
+  .x-ring span { position:relative; line-height:1.1; }
+  .x-ring b { display:block; font-size:20px; font-variant-numeric:tabular-nums; }
+  .x-ring small { font-size:10px; color:var(--muted); }
+
+  /* ---- duplicate alert ---- */
+  .dup-alert { margin-bottom:16px; padding:14px 18px; border-radius:14px; border:1px solid rgba(248,113,113,.4); background:rgba(248,113,113,.08); }
+  .dup-alert h4 { margin:0 0 8px; font-size:14px; color:#fca5a5; display:flex; gap:8px; align-items:center; }
+  .dup-alert ul { margin:0; padding-left:20px; font-size:13px; }
+  .dup-alert a { font-weight:700; text-decoration:underline; }
+
+  /* ---- stat strip (one connected bar) ---- */
+  .x-stats { display:grid; grid-template-columns:repeat(4,1fr); padding:0; overflow:hidden; }
+  .x-stat { padding:16px 20px; border-right:1px solid var(--line); }
+  .x-stat:last-child { border-right:0; }
+  .x-stat small { display:block; font-size:12px; color:var(--muted); }
+  .x-stat b { display:block; margin-top:4px; font-size:22px; font-variant-numeric:tabular-nums; }
+  .x-stat em { font-style:normal; font-size:13px; color:var(--muted); font-weight:500; }
+
+  /* ---- layout ---- */
+  .md-grid { display:grid; grid-template-columns:minmax(0,1fr) 380px; gap:20px; align-items:start; }
+  .mdx .md-side { position:sticky; top:88px; display:block; max-height:calc(100vh - 104px); overflow-y:auto; padding-right:4px; }
+  .mdx .card-head { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:16px 20px; border-bottom:1px solid var(--line); }
+  .mdx .card-head p { margin:3px 0 0; font-size:12.5px; color:var(--muted); }
+  .mdx .card-body { padding:20px; }
+
+  /* ---- tabs (JS hooks kept: .md-tab[data-tab], .md-pane#pane-*) ---- */
+  .mdx .md-tabs { display:flex; gap:4px; margin-bottom:16px; padding:0; width:auto; background:none; border:0; border-bottom:1px solid var(--line); border-radius:0; }
+  .mdx .md-tab { border-radius:0; display:inline-flex; align-items:center; gap:8px; padding:12px 16px; font-size:13.5px; font-weight:600; color:var(--muted); background:none; border:0; border-bottom:2px solid transparent; margin-bottom:-1px; cursor:pointer; transition:color .15s,border-color .15s; }
+  .mdx .md-tab:hover { color:var(--text); }
+  .mdx .md-tab.active { background:none; color:var(--primary-h); border-bottom-color:var(--primary); }
+  .mdx .md-tab:focus-visible { outline:2px solid var(--primary-h); outline-offset:-2px; border-radius:6px; }
+  .mdx .md-pane { display:none; }
+  .mdx .md-pane.active { display:block; }
+
+  /* ---- quick checks ---- */
+  .qc-list { display:grid; grid-template-columns:1fr 1fr; gap:0 28px; }
+  .mdx .qc-list .qc { display:flex; gap:12px; padding:12px 0; background:none; border:0; border-bottom:1px solid var(--line); border-radius:0; font-size:13.5px; }
+  .qc i { margin-top:2px; font-size:15px; }
+  .qc.ok i { color:var(--ok); } .qc.bad i { color:var(--bad); } .qc.warn i { color:var(--warn); }
+  .qc small { display:block; margin-top:2px; color:var(--muted); font-size:12px; }
+
+  /* ---- details as definition rows ---- */
+  .x-dl { display:grid; grid-template-columns:1fr 1fr; gap:0 32px; margin:0; }
+  .mdx .x-dl .info { display:grid; grid-template-columns:120px 1fr; gap:12px; padding:12px 0; background:none; border:0; border-bottom:1px solid var(--line); border-radius:0; align-items:center; min-width:0; }
+  .x-dl .k { font-size:12.5px; color:var(--muted); }
+  .x-dl .v { font-size:14px; color:var(--text); min-width:0; overflow-wrap:anywhere; }
+  .x-dl .v.has-copy { display:flex; align-items:center; gap:8px; }
+  .x-dl .link { color:var(--primary-h); font-weight:600; }
+  .copy-btn { opacity:0; border:0; background:rgba(255,255,255,.06); color:var(--muted); width:26px; height:26px; border-radius:7px; cursor:pointer; transition:opacity .15s; flex-shrink:0; }
+  .info:hover .copy-btn, .copy-btn:focus-visible { opacity:1; }
+  .copy-btn:hover { color:var(--text); }
+  .langs { margin-top:16px; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .langs .label { margin:0; font-size:12.5px; color:var(--muted); }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; }
+  .chip { padding:4px 11px; border-radius:99px; font-size:12px; font-weight:600; background:rgba(99,102,241,.14); color:#c7d2fe; }
+  .prose { margin:0; font-size:14px; line-height:1.7; color:var(--text); max-width:70ch; white-space:pre-line; }
+  .head-actions { display:flex; gap:8px; flex-wrap:wrap; }
+
+  /* ---- document viewer ---- */
+  .x-docs { display:grid; grid-template-columns:260px 1fr; min-height:420px; }
+  .x-doclist { border-right:1px solid var(--line); padding:12px; display:flex; flex-direction:column; gap:6px; }
+  .x-docitem { display:flex; gap:12px; align-items:center; width:100%; text-align:left; padding:12px; border-radius:12px; border:1px solid transparent; background:none; color:inherit; cursor:pointer; transition:background .15s,border-color .15s; }
+  .x-docitem:hover { background:rgba(255,255,255,.04); }
+  .x-docitem.on { background:rgba(99,102,241,.12); border-color:rgba(99,102,241,.45); }
+  .x-docitem:focus-visible { outline:2px solid var(--primary-h); }
+  .x-docitem .ic { width:36px; height:36px; border-radius:9px; display:grid; place-items:center; background:rgba(255,255,255,.06); flex-shrink:0; }
+  .x-docitem b { display:block; font-size:13.5px; }
+  .x-docitem small { font-size:12px; }
+  .x-docitem .st-ok { color:var(--ok); } .x-docitem .st-bad { color:var(--bad); }
+  .x-stage { padding:20px; display:flex; flex-direction:column; gap:14px; }
+  .x-view { display:none; flex-direction:column; gap:14px; height:100%; }
+  .x-view.on { display:flex; }
+  .x-preview { flex:1; min-height:300px; border-radius:12px; border:1px dashed var(--line); display:grid; place-items:center; overflow:hidden; background:rgba(0,0,0,.18); text-align:center; color:var(--muted); }
+  .x-preview img { max-width:100%; max-height:520px; object-fit:contain; }
+  .x-preview i { font-size:40px; margin-bottom:10px; display:block; }
+  .x-viewbar { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+  .md-doc-warn { display:flex; gap:12px; padding:12px 16px; margin:20px 20px 0; border-radius:12px; font-size:13px; line-height:1.55; color:#fde68a; background:rgba(251,191,36,.08); border:1px solid rgba(251,191,36,.3); }
+
+  /* ---- activity ---- */
+  .au-row { display:flex; gap:14px; padding:12px 0; border-bottom:1px solid var(--line); }
+  .au-row:last-child { border-bottom:0; }
+  .au-dot { width:32px; height:32px; border-radius:50%; display:grid; place-items:center; flex-shrink:0; font-size:13px; background:rgba(255,255,255,.07); }
+  .au-dot.ok { background:rgba(52,211,153,.15); color:var(--ok); } .au-dot.bad { background:rgba(248,113,113,.15); color:var(--bad); } .au-dot.warn { background:rgba(251,191,36,.15); color:var(--warn); }
+  .timeline { position:relative; }
+  .tl { display:flex; gap:14px; padding:0 0 18px; position:relative; }
+  .tl:not(:last-child)::before { content:""; position:absolute; left:15px; top:32px; bottom:2px; width:1px; background:var(--line); }
+  .tl > i { border:0; width:32px; height:32px; border-radius:50%; display:grid; place-items:center; background:rgba(99,102,241,.15); color:#a5b4fc; font-size:13px; flex-shrink:0; }
+  .text-bad { color:#fca5a5; }
+
+  /* ---- progress (JS sets width from data-w) ---- */
+  .progress { height:6px; border-radius:99px; background:rgba(255,255,255,.08); overflow:hidden; margin-top:10px; }
+  .progress.flush { margin:0 0 16px; }
+  .progress i { display:block; height:100%; width:0; border-radius:99px; background:var(--primary); transition:width .5s ease; }
+  .progress i[data-ok="1"] { background:var(--ok); }
+
+  /* ---- decision desk ---- */
+  .md-decision { display:flex; flex-direction:column; gap:10px; }
+  .md-decision .btn { width:100%; justify-content:center; }
+  .md-ready { display:flex; gap:10px; align-items:flex-start; padding:12px 14px; border-radius:12px; font-size:13px; line-height:1.5; }
+  .md-ready.yes { background:rgba(52,211,153,.1); border:1px solid rgba(52,211,153,.35); color:#a7f3d0; }
+  .md-ready.no { background:rgba(248,113,113,.08); border:1px solid rgba(248,113,113,.3); color:#fecaca; }
+  .md-ready i { margin-top:2px; }
+  .reject-box { padding:12px 14px; border-radius:12px; background:rgba(248,113,113,.06); border:1px solid rgba(248,113,113,.25); }
+  .btn[disabled] { opacity:.45; cursor:not-allowed; }
+
+  /* ---- checklist ---- */
+  .rv-item { display:flex; gap:12px; padding:12px; margin-bottom:8px; border-radius:12px; border:1px solid var(--line); cursor:pointer; transition:border-color .15s,background .15s; }
+  .rv-item:hover { border-color:rgba(99,102,241,.5); }
+  .rv-item.on { background:rgba(52,211,153,.07); border-color:rgba(52,211,153,.4); }
+  .rv-item input { margin-top:3px; accent-color:var(--ok); width:16px; height:16px; flex-shrink:0; }
+  .rv-item b { font-size:13.5px; }
+  .rv-item small { display:block; margin-top:3px; font-size:12px; color:var(--muted); line-height:1.45; }
+  .rv-req { color:var(--bad); } .rv-opt { font-size:11px; font-weight:500; color:var(--muted); margin-left:4px; }
+  .rv-notes { width:100%; margin-top:6px; resize:vertical; }
+  .rv-foot { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:12px; }
+  .rv-meta { font-size:12px; color:var(--muted); line-height:1.5; }
+
+  @media (max-width:1100px) { .md-grid { grid-template-columns:1fr; } .mdx .md-side { position:static; max-height:none; overflow:visible; } }
+  @media (max-width:760px) {
+    .x-hero { grid-template-columns:auto 1fr; } .x-ring { grid-column:1 / -1; justify-self:start; }
+    .x-stats { grid-template-columns:1fr 1fr; } .x-stat:nth-child(2) { border-right:0; } .x-stat:nth-child(-n+2) { border-bottom:1px solid var(--line); }
+    .qc-list, .x-dl { grid-template-columns:1fr; }
+    .x-docs { grid-template-columns:1fr; } .x-doclist { border-right:0; border-bottom:1px solid var(--line); flex-direction:row; overflow-x:auto; }
+    .x-docitem { min-width:200px; }
+  }
+  @media (prefers-reduced-motion:reduce) { .mdx * { transition:none !important; } }
+</style>
+
+<div class="mdx">
 
 <!-- Breadcrumb -->
 <div class="md-crumb">
@@ -93,22 +253,22 @@
 </div>
 
 <!-- Hero -->
-<div class="card md-hero">
-    <div class="md-cover st-<%= mentor.status %>"></div>
-    <div class="md-hero-body">
-        <div class="md-avatar">
-            <% if (mentor.profilePic) { %><img src="<%= mentor.profilePic %>" alt="<%= mentor.name %>"><% } else { %><%= (mentor.name || '?').charAt(0).toUpperCase() %><% } %>
+<div class="card x-hero st-<%= mentor.status %>">
+    <div class="md-avatar">
+        <% if (mentor.profilePic) { %><img src="<%= mentor.profilePic %>" alt="<%= mentor.name %>"><% } else { %><%= (mentor.name || '?').charAt(0).toUpperCase() %><% } %>
+    </div>
+    <div class="x-id">
+        <h3><%= mentor.name || 'N/A' %> <%- include('partials/status-badge', { st: mentor.status }) %></h3>
+        <div class="sub"><%= mentor.designation || 'Designation not provided' %><% if (mentor.currentCompany) { %> at <%= mentor.currentCompany %><% } %></div>
+        <div class="x-facts">
+            <% if (mentor.officeLocation) { %><span><i class="fas fa-location-dot"></i><%= mentor.officeLocation %></span><% } %>
+            <% if (mentor.department) { %><span><i class="fas fa-sitemap"></i><%= mentor.department %></span><% } %>
+            <span><i class="fas fa-calendar-check"></i>Registered <%= ago(mentor.createdAt) || '—' %></span>
+            <% if (mentor.employeeId) { %><span><i class="fas fa-id-badge"></i>ID <%= mentor.employeeId %></span><% } %>
         </div>
-        <div class="md-id">
-            <h3><%= mentor.name || 'N/A' %> <%- include('partials/status-badge', { st: mentor.status }) %></h3>
-            <div class="sub"><%= mentor.designation || 'Designation not provided' %><% if (mentor.currentCompany) { %> · <%= mentor.currentCompany %><% } %></div>
-            <div class="md-meta">
-                <% if (mentor.officeLocation) { %><span><i class="fas fa-location-dot"></i><%= mentor.officeLocation %></span><% } %>
-                <% if (mentor.department) { %><span><i class="fas fa-sitemap"></i><%= mentor.department %></span><% } %>
-                <span><i class="fas fa-calendar-check"></i>Registered <%= ago(mentor.createdAt) || '—' %></span>
-                <% if (mentor.employeeId) { %><span><i class="fas fa-id-badge"></i>ID: <%= mentor.employeeId %></span><% } %>
-            </div>
-        </div>
+    </div>
+    <div class="x-ring <%= sigTone %>" style="--p:<%= sigPct %>" title="<%= sigOk %> of <%= signals.length %> automatic checks passed">
+        <span><b><%= sigOk %>/<%= signals.length %></b><small>auto checks</small></span>
     </div>
 </div>
 
@@ -129,21 +289,19 @@
 <% } %>
 
 <!-- Stat strip -->
-<div class="md-stats">
-    <div class="card md-stat t-primary"><small>Experience</small><b><%= mentor.yearsOfExperience != null ? mentor.yearsOfExperience : 0 %> <em>yrs</em></b></div>
-    <div class="card md-stat t-ok"><small>Hourly rate</small><b><%= mentor.hourlyRate ? '₹' + Number(mentor.hourlyRate).toLocaleString('en-IN') : '—' %></b></div>
-    <div class="card md-stat t-warn"><small>Documents</small><b><%= docsDone %><em> / <%= docList.length %></em></b></div>
-    <div class="card md-stat t-info">
-        <small>Profile complete</small><b><%= completeness %>%</b>
-        <div class="progress"><i data-w="<%= completeness %>"></i></div>
-    </div>
+<div class="card x-stats">
+    <div class="x-stat"><small>Experience</small><b><%= mentor.yearsOfExperience != null ? mentor.yearsOfExperience : 0 %> <em>yrs</em></b></div>
+    <div class="x-stat"><small>Hourly rate</small><b><%= mentor.hourlyRate ? '₹' + Number(mentor.hourlyRate).toLocaleString('en-IN') : '—' %></b></div>
+    <div class="x-stat"><small>Documents</small><b><%= docsDone %><em> / <%= docList.length %></em></b></div>
+    <div class="x-stat"><small>Profile complete</small><b><%= completeness %>%</b>
+        <div class="progress"><i data-w="<%= completeness %>"></i></div></div>
 </div>
 
 <div class="md-grid">
 
     <!-- ============ MAIN ============ -->
     <div>
-        <div class="md-tabs">
+        <div class="md-tabs" role="tablist">
             <button type="button" class="md-tab active" data-tab="overview"><i class="fas fa-user"></i> Overview</button>
             <button type="button" class="md-tab" data-tab="documents"><i class="fas fa-file-shield"></i> Documents <span class="badge <%= docsDone === docList.length ? 'b-ok' : 'b-warn' %>"><%= docsDone %>/<%= docList.length %></span></button>
             <button type="button" class="md-tab" data-tab="activity"><i class="fas fa-clock-rotate-left"></i> Activity</button>
@@ -152,15 +310,13 @@
         <!-- Overview -->
         <div class="md-pane active" id="pane-overview">
 
-            <!-- Quick checks (automatic hints) -->
             <div class="card">
                 <div class="card-head">
-                    <div class="sec-title t-info"><div class="sec-ico"><i class="fas fa-wand-magic-sparkles"></i></div>
-                        <div><h3>Quick checks</h3><p>Automatic hints only. The final decision is yours.</p></div></div>
+                    <div><h3>Quick checks</h3><p>Automatic hints only. The final decision is yours.</p></div>
                     <span class="badge <%= sigBad ? 'b-bad' : (sigWarn ? 'b-warn' : 'b-ok') %>"><%= sigOk %>/<%= signals.length %> passed</span>
                 </div>
                 <div class="card-body">
-                    <div class="qc-grid">
+                    <div class="qc-list">
                         <% signals.forEach(function (s) { %>
                             <div class="qc <%= s.tone %>">
                                 <i class="fas <%= toneIcon[s.tone] %>"></i>
@@ -173,8 +329,7 @@
 
             <div class="card">
                 <div class="card-head">
-                    <div class="sec-title t-primary"><div class="sec-ico"><i class="fas fa-user"></i></div>
-                        <div><h3>Personal information</h3><p>Basic details and contact</p></div></div>
+                    <div><h3>Personal information</h3><p>Identity and contact</p></div>
                     <div class="head-actions">
                         <% if (mentor.email) { %><a class="btn btn-ghost btn-sm" href="mailto:<%= mentor.email %>"><i class="fas fa-paper-plane"></i> Email</a><% } %>
                         <% if (phone) { %><a class="btn btn-ghost btn-sm" href="tel:<%= telHref %>"><i class="fas fa-phone-volume"></i> Call</a><% } %>
@@ -182,12 +337,12 @@
                     </div>
                 </div>
                 <div class="card-body">
-                    <div class="info-grid">
+                    <div class="x-dl">
                         <div class="info"><div class="k">Full name</div><div class="v"><%= mentor.name || 'Not provided' %></div></div>
-                        <div class="info"><div class="k">Email</div><div class="v has-copy"><span><%= mentor.email || 'Not provided' %></span><% if (mentor.email) { %><button type="button" class="copy-btn" data-copy="<%= mentor.email %>" title="Copy"><i class="fas fa-copy"></i></button><% } %></div></div>
-                        <div class="info"><div class="k">Mobile</div><div class="v has-copy"><span><%= phone || 'Not provided' %></span><% if (phone) { %><button type="button" class="copy-btn" data-copy="<%= phone %>" title="Copy"><i class="fas fa-copy"></i></button><% } %></div></div>
-                        <div class="info"><div class="k">Work email</div><div class="v has-copy"><span><%= mentor.workEmail || 'Not provided' %></span><% if (mentor.workEmail) { %><button type="button" class="copy-btn" data-copy="<%= mentor.workEmail %>" title="Copy"><i class="fas fa-copy"></i></button><% } %></div></div>
-                        <div class="info"><div class="k">Employee ID</div><div class="v has-copy"><span><%= mentor.employeeId || 'Not provided' %></span><% if (mentor.employeeId) { %><button type="button" class="copy-btn" data-copy="<%= mentor.employeeId %>" title="Copy"><i class="fas fa-copy"></i></button><% } %></div></div>
+                        <div class="info"><div class="k">Email</div><div class="v has-copy"><span><%= mentor.email || 'Not provided' %></span><% if (mentor.email) { %><button type="button" class="copy-btn" data-copy="<%= mentor.email %>" title="Copy email" aria-label="Copy email"><i class="fas fa-copy"></i></button><% } %></div></div>
+                        <div class="info"><div class="k">Mobile</div><div class="v has-copy"><span><%= phone || 'Not provided' %></span><% if (phone) { %><button type="button" class="copy-btn" data-copy="<%= phone %>" title="Copy mobile" aria-label="Copy mobile"><i class="fas fa-copy"></i></button><% } %></div></div>
+                        <div class="info"><div class="k">Work email</div><div class="v has-copy"><span><%= mentor.workEmail || 'Not provided' %></span><% if (mentor.workEmail) { %><button type="button" class="copy-btn" data-copy="<%= mentor.workEmail %>" title="Copy work email" aria-label="Copy work email"><i class="fas fa-copy"></i></button><% } %></div></div>
+                        <div class="info"><div class="k">Employee ID</div><div class="v has-copy"><span><%= mentor.employeeId || 'Not provided' %></span><% if (mentor.employeeId) { %><button type="button" class="copy-btn" data-copy="<%= mentor.employeeId %>" title="Copy employee ID" aria-label="Copy employee ID"><i class="fas fa-copy"></i></button><% } %></div></div>
                         <div class="info"><div class="k">LinkedIn</div>
                             <div class="v"><% if (linkedin) { %><a href="<%= linkedin %>" target="_blank" rel="noopener noreferrer" class="link"><i class="fab fa-linkedin"></i> View profile</a><% } else { %>Not provided<% } %></div></div>
                     </div>
@@ -195,20 +350,16 @@
             </div>
 
             <div class="card">
-                <div class="card-head">
-                    <div class="sec-title t-info"><div class="sec-ico"><i class="fas fa-briefcase"></i></div>
-                        <div><h3>Professional information</h3><p>Current employment details</p></div></div>
-                </div>
+                <div class="card-head"><div><h3>Professional information</h3><p>Current employment</p></div></div>
                 <div class="card-body">
-                    <div class="info-grid">
+                    <div class="x-dl">
                         <div class="info"><div class="k">Company</div><div class="v"><%= mentor.currentCompany || 'Not provided' %></div></div>
                         <div class="info"><div class="k">Designation</div><div class="v"><%= mentor.designation || 'Not provided' %></div></div>
                         <div class="info"><div class="k">Department</div><div class="v"><%= mentor.department || 'Not provided' %></div></div>
                         <div class="info"><div class="k">Experience</div><div class="v"><%= mentor.yearsOfExperience != null ? mentor.yearsOfExperience : 0 %> years</div></div>
-                        <div class="info"><div class="k">Office location</div><div class="v"><%= mentor.officeLocation || 'Not provided' %></div></div>
+                        <div class="info"><div class="k">Office</div><div class="v"><%= mentor.officeLocation || 'Not provided' %></div></div>
                         <div class="info"><div class="k">Hourly rate</div><div class="v"><%= mentor.hourlyRate ? '₹' + mentor.hourlyRate : 'Not specified' %></div></div>
                     </div>
-
                     <% if (mentor.languages && mentor.languages.length) { %>
                         <div class="langs">
                             <div class="label">Languages</div>
@@ -220,48 +371,45 @@
 
             <% if (mentor.bio) { %>
             <div class="card">
-                <div class="card-head"><div class="sec-title t-purple"><div class="sec-ico"><i class="fas fa-align-left"></i></div><div><h3>About the mentor</h3></div></div></div>
+                <div class="card-head"><h3>About the mentor</h3></div>
                 <div class="card-body"><p class="prose"><%= mentor.bio %></p></div>
             </div>
             <% } %>
         </div>
 
-        <!-- Documents -->
+        <!-- Documents: list on the left, viewer on the right -->
         <div class="md-pane" id="pane-documents">
             <div class="card">
                 <div class="card-head">
-                    <div class="sec-title t-warn"><div class="sec-ico"><i class="fas fa-file-shield"></i></div>
-                        <div><h3>Verification documents</h3><p>Inspect each file carefully. Uploaded does not mean genuine.</p></div></div>
+                    <div><h3>Verification documents</h3><p>Uploaded does not mean genuine. Inspect each file.</p></div>
                 </div>
-                <div class="card-body docs-body">
-                    <div class="md-doc-warn"><i class="fas fa-magnifying-glass"></i><span>Look for mismatched fonts, pasted or blurry text, wrong letterhead or signatory, and name, company or date that disagree with the profile. Documents can be edited in minutes, so use the checklist on the right.</span></div>
-                    <div class="docs">
-                        <% docList.forEach(function (d) { %>
-                            <div class="md-doc">
-                                <% if (d.url && d.img) { %>
-                                    <a class="md-doc-thumb" href="<%= d.url %>" target="_blank" rel="noopener noreferrer" title="Open in new tab">
-                                        <img src="<%= d.url %>" alt="<%= d.t %>" loading="lazy" referrerpolicy="no-referrer">
-                                        <span class="badge b-info tag"><i class="dot"></i>Uploaded</span>
-                                        <span class="hint"><i class="fas fa-up-right-from-square"></i> Open full image</span>
-                                    </a>
-                                <% } else { %>
-                                    <div class="md-doc-thumb">
-                                        <i class="fas <%= d.i %>"></i>
-                                        <% if (d.url) { %><span class="badge b-info tag"><i class="dot"></i>Uploaded</span>
-                                        <% } else { %><span class="badge b-bad tag"><i class="dot"></i>Missing</span><% } %>
-                                    </div>
-                                <% } %>
-                                <div class="md-doc-body">
-                                    <div>
-                                        <h4><%= d.t %></h4>
-                                        <span class="muted small"><%= d.s %><% if (d.url) { %> · <%= d.type %><% } %></span>
-                                    </div>
-                                    <% if (d.url) { %>
-                                        <div class="md-doc-row">
-                                            <a href="<%= d.url %>" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm"><i class="fas fa-up-right-from-square"></i> Open in new tab</a>
-                                        </div>
+                <div class="md-doc-warn"><i class="fas fa-magnifying-glass"></i><span>Look for mismatched fonts, pasted or blurry text, the wrong letterhead or signatory, and a name, company or date that disagrees with the profile. Then use the checklist on the right.</span></div>
+                <div class="x-docs" style="margin-top:16px;border-top:1px solid var(--line)">
+                    <div class="x-doclist" role="tablist" aria-label="Documents">
+                        <% docList.forEach(function (d, i) { %>
+                            <button type="button" class="x-docitem <%= i === firstDoc ? 'on' : '' %>" data-doc="<%= i %>">
+                                <span class="ic"><i class="fas <%= d.i %>"></i></span>
+                                <span>
+                                    <b><%= d.t %></b>
+                                    <small class="<%= d.url ? 'st-ok' : 'st-bad' %>"><%= d.url ? 'Uploaded · ' + d.type : 'Missing' %></small>
+                                </span>
+                            </button>
+                        <% }) %>
+                    </div>
+                    <div class="x-stage">
+                        <% docList.forEach(function (d, i) { %>
+                            <div class="x-view <%= i === firstDoc ? 'on' : '' %>" data-view="<%= i %>">
+                                <div class="x-viewbar">
+                                    <div><h3><%= d.t %></h3><span class="muted small"><%= d.s %></span></div>
+                                    <% if (d.url) { %><a href="<%= d.url %>" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm"><i class="fas fa-up-right-from-square"></i> Open in new tab</a><% } %>
+                                </div>
+                                <div class="x-preview">
+                                    <% if (d.url && d.img) { %>
+                                        <a href="<%= d.url %>" target="_blank" rel="noopener noreferrer"><img src="<%= d.url %>" alt="<%= d.t %>" loading="lazy" referrerpolicy="no-referrer"></a>
+                                    <% } else if (d.url) { %>
+                                        <div><i class="fas <%= d.i %>"></i><%= d.type %> file. Open it in a new tab to inspect.</div>
                                     <% } else { %>
-                                        <span class="muted small">Mentor has not uploaded this document.</span>
+                                        <div><i class="fas fa-file-circle-xmark"></i>The mentor has not uploaded this document.</div>
                                     <% } %>
                                 </div>
                             </div>
@@ -297,7 +445,7 @@
             </div>
 
             <div class="card">
-                <div class="card-head"><div><h3>Account timeline</h3></div></div>
+                <div class="card-head"><h3>Account timeline</h3></div>
                 <div class="card-body timeline">
                     <div class="tl"><i class="fas fa-user-plus"></i><div><b>Registered</b><div class="muted small"><%= dt(mentor.createdAt) %> · <%= ago(mentor.createdAt) %></div></div></div>
                     <div class="tl"><i class="fas fa-pen"></i><div><b>Profile last updated</b><div class="muted small"><%= dt(mentor.updatedAt) %> · <%= ago(mentor.updatedAt) %></div></div></div>
@@ -315,7 +463,7 @@
     <!-- ============ SIDEBAR ============ -->
     <aside class="md-side">
 
-        <!-- Decision panel -->
+        <!-- Decision -->
         <div class="card">
             <div class="card-head"><h3>Verification decision</h3><%- include('partials/status-badge', { st: mentor.status }) %></div>
             <div class="card-body md-decision">
@@ -360,13 +508,13 @@
                         <label class="rv-item <%= review.checks[c.key] ? 'on' : '' %>">
                             <input type="checkbox" name="<%= c.key %>" data-required="<%= c.required ? '1' : '0' %>" <%= review.checks[c.key] ? 'checked' : '' %>>
                             <span>
-                                <b><%= c.label %> <% if (c.required) { %><span class="rv-req">*</span><% } else { %><span class="rv-opt">optional</span><% } %></b>
+                                <b><%= c.label %> <% if (c.required) { %><span class="rv-req" title="Required">*</span><% } else { %><span class="rv-opt">optional</span><% } %></b>
                                 <small><%= c.hint %></small>
                             </span>
                         </label>
                     <% }) %>
 
-                    <textarea class="textarea rv-notes" name="notes" rows="3" maxlength="1000" placeholder="Private admin notes (what you checked, who you spoke to...)"><%= review.notes %></textarea>
+                    <textarea class="textarea rv-notes" name="notes" rows="3" maxlength="1000" placeholder="Private admin notes: what you checked, who you spoke to…"><%= review.notes %></textarea>
 
                     <div class="rv-foot">
                         <span class="rv-meta" id="rvMeta"><% if (review.reviewedAt) { %>Last saved by <b><%= review.reviewedBy && review.reviewedBy.name %></b><br><%= dt(review.reviewedAt) %><% } else { %>Not saved yet<% } %></span>
@@ -378,7 +526,23 @@
     </aside>
 </div>
 
+</div>
+
 <script src="/admin/js/mentor-details.js"></script>
+<script>
+  // Document viewer: switch between the three documents (independent of mentor-details.js)
+  (function () {
+    var items = document.querySelectorAll('.x-docitem');
+    var views = document.querySelectorAll('.x-view');
+    items.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var i = btn.getAttribute('data-doc');
+        items.forEach(function (b) { b.classList.toggle('on', b === btn); });
+        views.forEach(function (v) { v.classList.toggle('on', v.getAttribute('data-view') === i); });
+      });
+    });
+  })();
+</script>
 
 <% } %>
 

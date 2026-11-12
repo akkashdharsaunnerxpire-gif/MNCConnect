@@ -59,7 +59,12 @@ const getFinanceSummary = async () => {
                 {
                   $cond: [
                     isRefunded,
-                    { $subtract: [f("gatewayFeeCollected"), f("convenienceFeeRefunded")] },
+                    {
+                      $subtract: [
+                        f("gatewayFeeCollected"),
+                        f("convenienceFeeRefunded"),
+                      ],
+                    },
                     0,
                   ],
                 },
@@ -73,30 +78,24 @@ const getFinanceSummary = async () => {
           // Razorpay keeps its fee even on refunds, so refunded rows count.
           gatewayCostRecognized: sumIf(recognizedRow, "$gatewayFee"),
           gatewayCostHeld: sumIf(paidOpen, "$gatewayFee"),
-          estimatedRows: sumIf({ $and: [paidOrRefunded, { $eq: ["$feeEstimated", true] }] }, 1),
+          estimatedRows: sumIf(
+            { $and: [paidOrRefunded, { $eq: ["$feeEstimated", true] }] },
+            1,
+          ),
         },
       },
     ]),
-    Withdrawal.aggregate([{ $group: { _id: "$status", total: { $sum: "$amount" } } }]),
-    CompanyPayout.aggregate([{ $group: { _id: null, total: { $sum: "$amount" } } }]),
+    Withdrawal.aggregate([
+      { $group: { _id: "$status", total: { $sum: "$amount" } } },
+    ]),
+    CompanyPayout.aggregate([
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]),
 
     // refunds that were credited to wallets and are not spent yet = money we OWE (cash must stay in bank)
     // (promo money like welcome bonus is not cash, so it is capped by totalRefunds)
     Fresher.aggregate([
-      {
-        $group: {
-          _id: null,
-          total: {
-            $sum: {
-              $cond: [
-                { $lt: [f("walletBalance"), f("totalRefunds")] },
-                f("walletBalance"),
-                f("totalRefunds"),
-              ],
-            },
-          },
-        },
-      },
+      { $group: { _id: null, total: { $sum: f("refundableBalance") } } },
     ]),
   ]);
 
@@ -106,16 +105,24 @@ const getFinanceSummary = async () => {
     if (wd[r._id] !== undefined) wd[r._id] = r.total;
   });
 
-  const walletLiability = round2(Math.max(walletAgg[0] ? walletAgg[0].total : 0, 0));
-  const convenienceRetained = round2((p.convenienceCollected || 0) - (p.refundedConvenience || 0));
+  const walletLiability = round2(
+    Math.max(walletAgg[0] ? walletAgg[0].total : 0, 0),
+  );
+  const convenienceRetained = round2(
+    (p.convenienceCollected || 0) - (p.refundedConvenience || 0),
+  );
   const convenienceRecognized = round2(p.convenienceRecognized);
   const gatewayCostRecognized = round2(p.gatewayCostRecognized);
 
   // Profit = platform fee (completed sessions) + convenience fee that is really ours
   //          - Razorpay cost of the SAME finished rows
-  const netProfit = round2((p.grossProfit || 0) + convenienceRecognized - gatewayCostRecognized);
+  const netProfit = round2(
+    (p.grossProfit || 0) + convenienceRecognized - gatewayCostRecognized,
+  );
   const companyTaken = round2(coAgg[0] ? coAgg[0].total : 0);
-  const mentorOwed = round2(Math.max((p.mentorEarned || 0) - wd.paid - wd.requested, 0));
+  const mentorOwed = round2(
+    Math.max((p.mentorEarned || 0) - wd.paid - wd.requested, 0),
+  );
 
   const gap = round2(gatewayCostRecognized - convenienceRecognized);
 
@@ -170,7 +177,13 @@ const getFinanceSummary = async () => {
 
 const getTopMentors = (limit = 10) =>
   Payment.aggregate([
-    { $match: { status: "paid", sessionStatus: "completed", mentor: { $ne: null } } },
+    {
+      $match: {
+        status: "paid",
+        sessionStatus: "completed",
+        mentor: { $ne: null },
+      },
+    },
     {
       $group: {
         _id: "$mentor",
@@ -179,9 +192,24 @@ const getTopMentors = (limit = 10) =>
         sessions: { $sum: 1 },
       },
     },
-    { $lookup: { from: "mentors", localField: "_id", foreignField: "_id", as: "m" } },
+    {
+      $lookup: {
+        from: "mentors",
+        localField: "_id",
+        foreignField: "_id",
+        as: "m",
+      },
+    },
     { $unwind: "$m" },
-    { $project: { name: "$m.name", email: "$m.email", earned: 1, fee: 1, sessions: 1 } },
+    {
+      $project: {
+        name: "$m.name",
+        email: "$m.email",
+        earned: 1,
+        fee: 1,
+        sessions: 1,
+      },
+    },
     { $sort: { earned: -1 } },
     { $limit: limit },
   ]);

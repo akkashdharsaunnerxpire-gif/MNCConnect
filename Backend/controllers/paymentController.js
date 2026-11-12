@@ -5,10 +5,12 @@ const mongoose = require("mongoose");
 
 const Payment = require("../models/Payment");
 const Fresher = require("../models/Fresher");
-const { optionalAuth } = require("../middleware/panelAuth");
+const Booking = require("../models/Booking");
 const { notify, emitToUser } = require("../utils/realtime");
 const { buildSessionFields } = require("../utils/sessionTime");
 const { splitAmount } = require("../utils/wallet");
+const { debitWallet } = require("../utils/walletLedger");
+const { expectedPrice, validDuration } = require("../utils/sessionPrice");
 const {
   calcConvenienceFee,
   validateGatewayAmounts,
@@ -46,14 +48,19 @@ const safeEqual = (a, b) => {
   return x.length === y.length && crypto.timingSafeEqual(x, y);
 };
 
-const currentFresher = async (req) => {
-  try {
-    optionalAuth(req, null, () => {});
-    if (!req.user || req.user.role !== "fresher") return null;
-    return await Fresher.findById(req.user.id).select("name email").lean();
-  } catch (_) {
+// Route has requireAuth("fresher"); this is the 2nd line of defence.
+// Returns the fresher or sends 401 and returns null.
+const requireFresher = async (req, res) => {
+  if (!req.user || req.user.role !== "fresher" || !req.user.id) {
+    res.status(401).json({ success: false, message: "Please login to continue." });
     return null;
   }
+  const f = await Fresher.findById(req.user.id).select("name email").lean();
+  if (!f) {
+    res.status(401).json({ success: false, message: "Account not found." });
+    return null;
+  }
+  return f;
 };
 
 const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
@@ -81,35 +88,71 @@ const orConditionFor = (paymentId) => ({
   $or: [{ razorpayPaymentId: paymentId }, { razorpayOrderId: paymentId }],
 });
 
+// SERVER decides the price. The client never sends an amount we trust.
+//   friend joining a group : { inviteCode }                 -> price comes from the booking
+//   everything else        : { duration (minutes), mode }   -> price comes from env rates
+const resolveSessionAmount = async (body) => {
+  const code = String(body.inviteCode || "").trim().toUpperCase();
+  if (code) {
+    const b = await Booking.findOne({ inviteCode: code, sessionMode: "group" })
+      .select("perPersonAmount amount")
+      .lean();
+    if (!b) return { error: "This invite link is not valid." };
+    const amount = round2(Number(b.perPersonAmount || b.amount));
+    if (!(amount > 0)) return { error: "Invalid group price." };
+    return { amount, mode: "group" };
+  }
+
+  const minutes = Number(body.duration);
+  if (!validDuration(minutes)) return { error: "Invalid duration" };
+  const mode = body.mode === "group" ? "group" : "single";
+  const amount = round2(expectedPrice(minutes, mode));
+  if (!(amount > 0)) return { error: "Invalid amount" };
+  return { amount, mode, minutes };
+};
+
+const sessionFieldsOf = (body) =>
+  body.requestGroupId
+    ? buildSessionFields({
+        date: body.date,
+        time: body.time,
+        duration: body.duration,
+      })
+    : {};
+
 // ============================================================
-// FEE QUOTE   GET /api/payments/fee-quote?amount=400
+// FEE QUOTE   GET /api/payments/fee-quote?duration=60&mode=single  (or ?inviteCode=XXXX)
+// display only; the real price is recalculated in createOrder
 // ============================================================
 
-exports.quoteFee = (req, res) => {
-  const amount = round2(Number(req.query.amount));
-  if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) {
-    return res.status(400).json({ success: false, message: "Invalid amount" });
-  }
+exports.quoteFee = async (req, res) => {
+  const r = await resolveSessionAmount(req.query || {});
+  if (r.error) return res.status(400).json({ success: false, message: r.error });
   return res.json({
     success: true,
-    ...calcConvenienceFee({ amount, channel: "razorpay" }),
+    sessionAmount: r.amount,
+    ...calcConvenienceFee({ amount: r.amount, channel: "razorpay" }),
     walletFee: 0,
   });
 };
 
 // ============================================================
-// 1. CREATE ORDER   POST /api/payments/create-order  { amount }
-//    amount = ORIGINAL SESSION PRICE. Server adds the convenience fee.
+// 1. CREATE ORDER   POST /api/payments/create-order
+//    body: { duration, mode, topic, requestGroupId, date, time }  or  { inviteCode }
+//    (any `amount` sent by the client is IGNORED)
 // ============================================================
 
 exports.createOrder = async (req, res) => {
   try {
-    const body = req.body || {};
-    const amount = round2(Number(body.amount));
+    const fresher = await requireFresher(req, res);
+    if (!fresher) return;
 
-    if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) {
-      return res.status(400).json({ message: "Invalid amount" });
+    const body = req.body || {};
+    const priced = await resolveSessionAmount(body);
+    if (priced.error) {
+      return res.status(400).json({ success: false, message: priced.error });
     }
+    const amount = priced.amount;
 
     const quote = calcConvenienceFee({ amount, channel: "razorpay" });
     const orderAmountPaise = toPaise(quote.orderAmount);
@@ -118,7 +161,6 @@ exports.createOrder = async (req, res) => {
     }
 
     const receipt = `rcpt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const fresher = await currentFresher(req);
     const { fee, earning } = splitAmount(amount, PLATFORM_FEE_PERCENT);
 
     const order = await getRazorpay().orders.create({
@@ -151,19 +193,13 @@ exports.createOrder = async (req, res) => {
         verifyRejected: false,
         status: "created",
 
-        fresher: fresher ? fresher._id : null,
-        fresherName: fresher ? fresher.name : "",
-        fresherEmail: fresher ? fresher.email : "",
+        fresher: fresher._id, // owner is ALWAYS the logged-in fresher
+        fresherName: fresher.name || "",
+        fresherEmail: fresher.email || "",
 
         topic: body.topic ? String(body.topic).slice(0, 120) : "",
         requestGroupId: body.requestGroupId ? String(body.requestGroupId) : "",
-        ...(body.requestGroupId
-          ? buildSessionFields({
-              date: body.date,
-              time: body.time,
-              duration: body.duration,
-            })
-          : {}),
+        ...sessionFieldsOf(body),
       });
     } catch (dbError) {
       console.error("Payment record save failed:", order.id, dbError.message);
@@ -247,10 +283,7 @@ const rejectMismatch = async (payment, rzPayment, reason) => {
         { _id: payment._id },
         {
           $set: {
-            refundError: String(e?.error?.description || e.message).slice(
-              0,
-              300,
-            ),
+            refundError: String(e?.error?.description || e.message).slice(0, 300),
             refundFailedAt: new Date(),
           },
         },
@@ -297,27 +330,15 @@ const settleGatewayPayment = async ({
     }
   }
   if (!rzPayment) {
-    return {
-      ok: false,
-      pending: true,
-      reason: "Unable to fetch Razorpay payment",
-    };
+    return { ok: false, pending: true, reason: "Unable to fetch Razorpay payment" };
   }
 
   if (rzPayment.status !== "captured") {
-    return {
-      ok: false,
-      pending: true,
-      reason: `Payment is ${rzPayment.status}`,
-    };
+    return { ok: false, pending: true, reason: `Payment is ${rzPayment.status}` };
   }
 
   if (!order) {
-    return {
-      ok: false,
-      pending: true,
-      reason: "Unable to fetch Razorpay order",
-    };
+    return { ok: false, pending: true, reason: "Unable to fetch Razorpay order" };
   }
 
   const stored = payment.toObject ? payment.toObject() : payment;
@@ -328,25 +349,19 @@ const settleGatewayPayment = async ({
       : Number(stored.amount);
   let amountVerified = false;
 
-  if (rzPayment && order) {
-    const check = validateGatewayAmounts({
-      payment: stored,
-      order,
-      rzPayment,
-    });
-    if (!check.ok) {
-      await rejectMismatch(payment, rzPayment, check.reason);
-      return { ok: false, rejected: true, reason: check.reason };
-    }
-    convenienceFee = check.convenienceFee;
-    checkoutAmount = check.checkoutAmount;
-    amountVerified = true;
+  const check = validateGatewayAmounts({ payment: stored, order, rzPayment });
+  if (!check.ok) {
+    await rejectMismatch(payment, rzPayment, check.reason);
+    return { ok: false, rejected: true, reason: check.reason };
   }
+  convenienceFee = check.convenienceFee;
+  checkoutAmount = check.checkoutAmount;
+  amountVerified = true;
 
   let gatewayFee = 0;
   let gatewayTax = 0;
   let feeEstimated = false;
-  if (rzPayment && rzPayment.fee !== null && rzPayment.fee !== undefined) {
+  if (rzPayment.fee !== null && rzPayment.fee !== undefined) {
     gatewayFee = toRupees(rzPayment.fee); // already includes GST
     gatewayTax = toRupees(rzPayment.tax || 0);
   } else {
@@ -369,13 +384,9 @@ const settleGatewayPayment = async ({
     feeEstimated,
     gatewayFeeSyncedAt: feeEstimated ? null : new Date(),
     ...(signature ? { razorpaySignature: signature } : {}),
-    ...(rzPayment
-      ? {
-          method: rzPayment.method || "",
-          payerEmail: rzPayment.email || "",
-          payerContact: rzPayment.contact || "",
-        }
-      : {}),
+    method: rzPayment.method || "",
+    payerEmail: rzPayment.email || "",
+    payerContact: rzPayment.contact || "",
     ...(fresher && !payment.fresher
       ? {
           fresher: fresher._id,
@@ -422,10 +433,13 @@ const settleGatewayPayment = async ({
 };
 
 // ============================================================
-// 2. VERIFY PAYMENT   POST /api/payments/verify-payment
+// 2. VERIFY PAYMENT   POST /api/payments/verify-payment   (fresher, owner only)
 // ============================================================
 
 exports.verifyPayment = async (req, res) => {
+  const fresher = await requireFresher(req, res);
+  if (!fresher) return;
+
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
     req.body || {};
 
@@ -448,11 +462,14 @@ exports.verifyPayment = async (req, res) => {
     .digest("hex");
 
   if (!safeEqual(expected, razorpay_signature)) {
+    // only the OWNER's own order can be marked failed
     await Payment.updateOne(
-      { razorpayOrderId: razorpay_order_id, status: "created" },
       {
-        $set: { status: "failed", failureReason: "Invalid payment signature" },
+        razorpayOrderId: String(razorpay_order_id),
+        status: "created",
+        fresher: fresher._id,
       },
+      { $set: { status: "failed", failureReason: "Invalid payment signature" } },
     ).catch(() => {});
     return res
       .status(400)
@@ -461,7 +478,7 @@ exports.verifyPayment = async (req, res) => {
 
   try {
     const payment = await Payment.findOne({
-      razorpayOrderId: razorpay_order_id,
+      razorpayOrderId: String(razorpay_order_id),
     });
     if (!payment) {
       console.error(
@@ -472,6 +489,13 @@ exports.verifyPayment = async (req, res) => {
         success: false,
         message: "Payment record missing. Please contact support.",
       });
+    }
+
+    // OWNERSHIP: this order must belong to the logged-in fresher
+    if (!payment.fresher || String(payment.fresher) !== String(fresher._id)) {
+      return res
+        .status(403)
+        .json({ success: false, message: "This payment belongs to another account." });
     }
 
     if (payment.status === "paid") {
@@ -504,14 +528,11 @@ exports.verifyPayment = async (req, res) => {
       );
     }
 
-    const fresher = payment.fresher ? null : await currentFresher(req);
-
     const result = await settleGatewayPayment({
       payment,
       order,
       paymentId: razorpay_payment_id,
       signature: razorpay_signature,
-      fresher,
     });
 
     if (result.ok) {
@@ -560,17 +581,23 @@ exports.verifyPayment = async (req, res) => {
 
 exports.markPaymentFailed = async (req, res) => {
   try {
-    const { razorpay_order_id, reason } = req.body || {};
-    if (razorpay_order_id) {
-      await Payment.updateOne(
-        { razorpayOrderId: String(razorpay_order_id), status: "created" },
-        {
-          $set: {
-            status: "failed",
-            failureReason: String(reason || "Payment failed").slice(0, 200),
+    if (req.user && req.user.role === "fresher") {
+      const { razorpay_order_id, reason } = req.body || {};
+      if (razorpay_order_id) {
+        await Payment.updateOne(
+          {
+            razorpayOrderId: String(razorpay_order_id),
+            status: "created",
+            fresher: req.user.id, // owner only
           },
-        },
-      );
+          {
+            $set: {
+              status: "failed",
+              failureReason: String(reason || "Payment failed").slice(0, 200),
+            },
+          },
+        );
+      }
     }
     return res.json({ success: true });
   } catch (e) {
@@ -581,107 +608,170 @@ exports.markFailed = exports.markPaymentFailed;
 
 // ============================================================
 // 2b. PAY WITH WALLET   POST /api/payments/pay-with-wallet  (fresher)
+//     body: { duration, mode, requestGroupId, topic, date, time, idempotencyKey? }
+//        or { inviteCode, idempotencyKey? }
+//
+//  - price calculated on the SERVER
+//  - debit + Payment record happen in ONE Mongo transaction (all or nothing)
+//  - idempotency: same key twice -> second call returns the SAME payment, no 2nd debit
+//  Idempotency key: header "Idempotency-Key" / body.idempotencyKey / body.requestGroupId
+//                   (friends joining: "join:<inviteCode>")
 // ============================================================
 
-exports.payWithWallet = async (req, res) => {
-  try {
-    const body = req.body || {};
-    const amount = round2(Number(body.amount));
+const walletSuccess = async (payment, fresherId, duplicate = false) => {
+  const f = await Fresher.findById(fresherId)
+    .select("refundableBalance bonusBalance referralBalance")
+    .lean();
+  const walletBalance = f
+    ? round2(
+        (f.refundableBalance || 0) + (f.bonusBalance || 0) + (f.referralBalance || 0),
+      )
+    : 0;
+  return {
+    success: true,
+    duplicate,
+    paymentId: payment.razorpayPaymentId,
+    amount: payment.amount,
+    checkoutAmount: payment.checkoutAmount,
+    walletBalance,
+  };
+};
 
-    if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) {
+exports.payWithWallet = async (req, res) => {
+  let session = null;
+  try {
+    const fresher = await requireFresher(req, res);
+    if (!fresher) return;
+    const fresherId = String(fresher._id);
+
+    const body = req.body || {};
+
+    const clientKey = String(
+      req.get("Idempotency-Key") ||
+        body.idempotencyKey ||
+        body.requestGroupId ||
+        (body.inviteCode ? `join:${String(body.inviteCode).toUpperCase()}` : ""),
+    ).trim();
+    if (!clientKey || clientKey.length > 100) {
       return res
         .status(400)
-        .json({ success: false, message: "Invalid amount" });
+        .json({ success: false, message: "Idempotency key required." });
     }
+    const idempotencyKey = `${fresherId}:${clientKey}`;
 
-    const fresherId = req.user.id;
-
-    const fresher = await Fresher.findOneAndUpdate(
-      { _id: fresherId, walletBalance: { $gte: amount } },
-      { $inc: { walletBalance: -amount } },
-      { new: true },
-    );
-
-    if (!fresher) {
+    // fast path: same request already processed -> return the same result
+    const already = await Payment.findOne({ idempotencyKey });
+    if (already) {
+      if (already.status === "paid" || already.status === "refunded") {
+        return res.json(await walletSuccess(already, fresherId, true));
+      }
       return res
-        .status(402)
-        .json({ success: false, message: "Insufficient wallet balance" });
+        .status(409)
+        .json({ success: false, message: "Payment is already being processed." });
     }
+
+    const priced = await resolveSessionAmount(body);
+    if (priced.error) {
+      return res.status(400).json({ success: false, message: priced.error });
+    }
+    const amount = priced.amount;
 
     const { fee, earning } = splitAmount(amount, PLATFORM_FEE_PERCENT);
     const paymentId = `wallet_pay_${new mongoose.Types.ObjectId()}`;
     const orderId = `wallet_order_${new mongoose.Types.ObjectId()}`;
 
+    let outcome = null;
+    session = await mongoose.startSession();
+
     try {
-      const payment = await Payment.create({
-        razorpayOrderId: orderId,
-        razorpayPaymentId: paymentId,
-        amount,
-        currency: "INR",
-        platformFeePercent: PLATFORM_FEE_PERCENT,
-        platformFee: fee,
-        mentorEarning: earning,
-        convenienceFeeMode: "none",
-        convenienceFee: 0,
-        checkoutAmount: amount,
-        orderAmount: amount,
-        gatewayFeeCollected: 0,
-        convenienceFeeRefunded: 0,
-        gatewayFee: 0,
-        gatewayTax: 0,
-        feeEstimated: false,
-        amountVerified: true,
-        verifyRejected: false,
-        method: "wallet",
-        status: "paid",
-        paidAt: new Date(),
-        fresher: fresher._id,
-        fresherName: fresher.name || "",
-        fresherEmail: fresher.email || "",
-        topic: body.topic ? String(body.topic).slice(0, 120) : "",
-        requestGroupId: body.requestGroupId ? String(body.requestGroupId) : "",
-        ...(body.requestGroupId
-          ? buildSessionFields({
-              date: body.date,
-              time: body.time,
-              duration: body.duration,
-            })
-          : {}),
-      });
+      await session.withTransaction(async () => {
+        outcome = null; // the callback can be retried by the driver
 
-      emitToUser(String(fresher._id), "wallet:updated", { amount: -amount });
+        const debit = await debitWallet(fresherId, amount, session);
+        if (!debit.ok) {
+          outcome = { failed: debit.reason };
+          return; // nothing written -> nothing to roll back
+        }
 
-      return res.json({
-        success: true,
-        paymentId: payment.razorpayPaymentId,
-        amount: payment.amount,
-        checkoutAmount: payment.checkoutAmount,
-        walletBalance: fresher.walletBalance,
+        const [payment] = await Payment.create(
+          [
+            {
+              razorpayOrderId: orderId,
+              razorpayPaymentId: paymentId,
+              idempotencyKey,
+              amount,
+              currency: "INR",
+              platformFeePercent: PLATFORM_FEE_PERCENT,
+              platformFee: fee,
+              mentorEarning: earning,
+              convenienceFeeMode: "none",
+              convenienceFee: 0,
+              checkoutAmount: amount,
+              orderAmount: amount,
+              gatewayFeeCollected: 0,
+              convenienceFeeRefunded: 0,
+              gatewayFee: 0,
+              gatewayTax: 0,
+              feeEstimated: false,
+              amountVerified: true,
+              verifyRejected: false,
+              method: "wallet",
+              walletBreakdown: debit.plan, // { bonus, referral, refundable }
+              status: "paid",
+              paidAt: new Date(),
+              fresher: fresher._id,
+              fresherName: fresher.name || "",
+              fresherEmail: fresher.email || "",
+              topic: body.topic ? String(body.topic).slice(0, 120) : "",
+              requestGroupId: body.requestGroupId ? String(body.requestGroupId) : "",
+              ...sessionFieldsOf(body),
+            },
+          ],
+          { session },
+        );
+        outcome = { payment };
       });
-    } catch (dbError) {
-      await Fresher.updateOne(
-        { _id: fresherId },
-        { $inc: { walletBalance: amount } },
-      ).catch((e) => console.error("Wallet rollback failed:", e.message));
-      console.error("Wallet payment record save failed:", dbError);
-      return res.status(500).json({
+    } catch (e) {
+      if (e && e.code === 11000) {
+        // double click / retry: transaction rolled back (no 2nd debit). Return the first result.
+        const first = await Payment.findOne({ idempotencyKey });
+        if (first && (first.status === "paid" || first.status === "refunded")) {
+          return res.json(await walletSuccess(first, fresherId, true));
+        }
+        return res
+          .status(409)
+          .json({ success: false, message: "Payment is already being processed." });
+      }
+      throw e;
+    }
+
+    if (!outcome || outcome.failed) {
+      if (outcome && outcome.failed === "INSUFFICIENT") {
+        return res
+          .status(402)
+          .json({ success: false, message: "Insufficient wallet balance" });
+      }
+      return res.status(409).json({
         success: false,
-        message:
-          "Unable to complete wallet payment. Your balance was restored if possible.",
+        message: "Wallet is busy. Please try again.",
       });
     }
+
+    const out = await walletSuccess(outcome.payment, fresherId, false);
+    emitToUser(fresherId, "wallet:updated", { amount: -amount });
+    return res.json(out);
   } catch (error) {
     console.error("Wallet payment error:", error);
     return res
       .status(500)
       .json({ success: false, message: "Unable to process wallet payment" });
+  } finally {
+    if (session) session.endSession();
   }
 };
 
 // ============================================================
 // 3. LINK PAYMENT TO REQUEST
-//    accepts  ({ razorpayPaymentId, requestGroupId, topic, date, time, duration })
-//    or       (paymentId, requestGroupId)
 // ============================================================
 
 exports.linkPaymentToRequest = async (a, b) => {
@@ -698,11 +788,7 @@ exports.linkPaymentToRequest = async (a, b) => {
     try {
       Object.assign(
         set,
-        buildSessionFields({
-          date: o.date,
-          time: o.time,
-          duration: o.duration,
-        }),
+        buildSessionFields({ date: o.date, time: o.time, duration: o.duration }),
       );
     } catch (_) {
       /* ignore unreadable date */
@@ -718,8 +804,6 @@ exports.linkPaymentToRequest = async (a, b) => {
 
 // ============================================================
 // 4. ASSIGN MENTOR TO REQUEST
-//    accepts  ({ requestGroupId | razorpayPaymentId, mentorId })
-//    or       (paymentId, mentorId)
 // ============================================================
 
 exports.assignMentorToRequest = async (a, b) => {
@@ -743,7 +827,6 @@ exports.assignMentorToRequest = async (a, b) => {
 
 // ============================================================
 // 5. CLAIM PAYMENT  (a paid payment can belong to only ONE booking / join)
-//    FIX: the old code had two `$or` keys, the 2nd silently replaced the 1st
 // ============================================================
 
 exports.claimPayment = async (paymentId, bookingId) => {
@@ -770,7 +853,8 @@ exports.claimPayment = async (paymentId, bookingId) => {
 };
 
 // ============================================================
-// 6. RAZORPAY WEBHOOK  (route needs express.raw({ type: "application/json" }))
+// 6. RAZORPAY WEBHOOK  (NO user auth: protected by signature)
+//    route needs express.raw({ type: "application/json" })
 // ============================================================
 
 exports.razorpayWebhook = async (req, res) => {
@@ -788,10 +872,7 @@ exports.razorpayWebhook = async (req, res) => {
       ? req.body
       : Buffer.from(JSON.stringify(req.body || {}));
 
-    const expected = crypto
-      .createHmac("sha256", secret)
-      .update(body)
-      .digest("hex");
+    const expected = crypto.createHmac("sha256", secret).update(body).digest("hex");
     if (!safeEqual(expected, signature)) {
       return res
         .status(400)
@@ -824,11 +905,7 @@ exports.razorpayWebhook = async (req, res) => {
       const payment = await Payment.findOne({
         razorpayOrderId: paymentEntity.order_id,
       });
-      if (
-        payment &&
-        payment.status !== "paid" &&
-        payment.status !== "refunded"
-      ) {
+      if (payment && payment.status !== "paid" && payment.status !== "refunded") {
         const order = await getRazorpay().orders.fetch(paymentEntity.order_id);
         await settleGatewayPayment({
           payment,
@@ -849,7 +926,6 @@ exports.razorpayWebhook = async (req, res) => {
 
 // ============================================================
 // 7. RECONCILE STALE ORDERS (call from the scheduler)
-//    FIX: duplicate `razorpayOrderId` key in the old query
 // ============================================================
 
 exports.reconcileStaleOrders = async () => {
@@ -904,13 +980,7 @@ exports.reconcileStaleOrders = async () => {
       }
     }
 
-    return {
-      success: true,
-      checked: stalePayments.length,
-      processed,
-      pending,
-      failed,
-    };
+    return { success: true, checked: stalePayments.length, processed, pending, failed };
   } catch (error) {
     console.error("reconcileStaleOrders error:", error);
     return { success: false, message: error.message };

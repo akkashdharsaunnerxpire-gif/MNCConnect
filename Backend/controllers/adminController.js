@@ -16,6 +16,8 @@ const { REVIEW_CHECKS, isComplete } = MentorReview;
 // ============================================================
 
 const PAGE_SIZE = 10;
+const COMPANY_PAGE_SIZE = 12; // company cards per page
+const NEW_DAYS = 7; // an employee is "NEW" for this many days
 const STATUSES = ["pending", "approved", "rejected"];
 const PAID_STATUSES = [
   "success",
@@ -294,9 +296,16 @@ const dashboard = async (req, res) => {
     const since = new Date(months[0].y, months[0].m - 1, 1);
 
     const [
-      totalMentors, pendingMentors, approvedMentors, rejectedMentors,
-      monthlyRaw, topCompaniesRaw, recentRaw, pendingRaw,
-      totalPayments, revenueAgg,
+      totalMentors,
+      pendingMentors,
+      approvedMentors,
+      rejectedMentors,
+      monthlyRaw,
+      topCompaniesRaw,
+      recentRaw,
+      pendingRaw,
+      totalPayments,
+      revenueAgg,
     ] = await Promise.all([
       Mentor.countDocuments(),
       Mentor.countDocuments({ verificationStatus: "pending" }),
@@ -304,7 +313,12 @@ const dashboard = async (req, res) => {
       Mentor.countDocuments({ verificationStatus: "rejected" }),
       Mentor.aggregate([
         { $match: { createdAt: { $gte: since } } },
-        { $group: { _id: { y: { $year: "$createdAt" }, m: { $month: "$createdAt" } }, count: { $sum: 1 } } },
+        {
+          $group: {
+            _id: { y: { $year: "$createdAt" }, m: { $month: "$createdAt" } },
+            count: { $sum: 1 },
+          },
+        },
       ]),
       Mentor.aggregate([
         { $match: { currentCompany: { $exists: true, $nin: [null, ""] } } },
@@ -312,16 +326,28 @@ const dashboard = async (req, res) => {
         { $sort: { count: -1 } },
         { $limit: 5 },
       ]),
-      Mentor.find().sort({ createdAt: -1 }).limit(5)
-        .select("name email designation currentCompany verificationStatus isVerified createdAt profilePic").lean(),
-      Mentor.find({ verificationStatus: "pending" }).sort({ createdAt: 1 }).limit(5)
-        .select("name email currentCompany createdAt").lean(),
+      Mentor.find()
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .select(
+          "name email designation currentCompany verificationStatus isVerified createdAt profilePic",
+        )
+        .lean(),
+      Mentor.find({ verificationStatus: "pending" })
+        .sort({ createdAt: 1 })
+        .limit(5)
+        .select("name email currentCompany createdAt")
+        .lean(),
       Payment ? safe(() => Payment.countDocuments()) : null,
       Payment
-        ? safe(() => Payment.aggregate([
-            { $match: { status: { $in: PAID_STATUSES } } },
-            { $group: { _id: null, total: { $sum: "$amount" } } },
-          ]), [])
+        ? safe(
+            () =>
+              Payment.aggregate([
+                { $match: { status: { $in: PAID_STATUSES } } },
+                { $group: { _id: null, total: { $sum: "$amount" } } },
+              ]),
+            [],
+          )
         : null,
     ]);
 
@@ -330,7 +356,9 @@ const dashboard = async (req, res) => {
       if (slot) slot.count = r.count;
     });
 
-    const approvalRate = totalMentors ? Math.round((approvedMentors / totalMentors) * 100) : 0;
+    const approvalRate = totalMentors
+      ? Math.round((approvedMentors / totalMentors) * 100)
+      : 0;
 
     return res.render("admin/dashboard", {
       admin: req.session.admin,
@@ -338,13 +366,21 @@ const dashboard = async (req, res) => {
       pageTitle: "Dashboard",
       pageSubtitle: `Welcome back, ${req.session.admin ? req.session.admin.name : "Admin"}`,
       stats: {
-        totalMentors, pendingMentors, approvedMentors, rejectedMentors,
-        totalUsers: null, totalFreshers: null, totalPayments,
+        totalMentors,
+        pendingMentors,
+        approvedMentors,
+        rejectedMentors,
+        totalUsers: null,
+        totalFreshers: null,
+        totalPayments,
         revenue: revenueAgg ? (revenueAgg[0] ? revenueAgg[0].total : 0) : null,
       },
       approvalRate,
       monthly: months,
-      topCompanies: topCompaniesRaw.map((c) => ({ name: c._id, count: c.count })),
+      topCompanies: topCompaniesRaw.map((c) => ({
+        name: c._id,
+        count: c.count,
+      })),
       recentMentors: recentRaw.map(normalizeMentor),
       pendingQueue: pendingRaw,
     });
@@ -385,6 +421,104 @@ const mentorFilter = ({ search = "", status = "all" }) => {
   return filter;
 };
 
+// ---------- "NEW employee" + company helpers ----------
+const NO_COMPANY = "__none__";
+
+const newSince = () => new Date(Date.now() - NEW_DAYS * 24 * 60 * 60 * 1000);
+
+// normalizeMentor + isNew flag (joined within the last NEW_DAYS days)
+const withNew = (m, since) => ({
+  ...normalizeMentor(m),
+  isNew: Boolean(m.createdAt && new Date(m.createdAt) >= since),
+});
+
+// Mongo filter for ONE company (key = lower-cased company name, or "__none__")
+const companyMatch = (key) => {
+  if (key === NO_COMPANY) {
+    return {
+      $or: [
+        { currentCompany: { $exists: false } },
+        { currentCompany: null },
+        { currentCompany: /^\s*$/ },
+      ],
+    };
+  }
+  return {
+    currentCompany: new RegExp(`^\\s*${escapeRegex(key)}\\s*$`, "i"),
+  };
+};
+
+// One row per company: totals, status counts and how many are NEW
+const companySummary = async (filter, since) => {
+  const count = (st) => ({
+    $sum: { $cond: [{ $eq: ["$_st", st] }, 1, 0] },
+  });
+
+  const rows = await Mentor.aggregate([
+    { $match: filter },
+    {
+      $addFields: {
+        _name: {
+          $trim: {
+            input: { $toString: { $ifNull: ["$currentCompany", ""] } },
+          },
+        },
+        _st: {
+          $switch: {
+            branches: [
+              {
+                case: { $in: ["$verificationStatus", STATUSES] },
+                then: "$verificationStatus",
+              },
+              { case: { $eq: ["$isVerified", true] }, then: "approved" },
+            ],
+            default: "pending",
+          },
+        },
+      },
+    },
+    {
+      $group: {
+        _id: { $toLower: "$_name" },
+        name: { $first: "$_name" },
+        total: { $sum: 1 },
+        pending: count("pending"),
+        approved: count("approved"),
+        rejected: count("rejected"),
+        newCount: {
+          $sum: { $cond: [{ $gte: ["$createdAt", since] }, 1, 0] },
+        },
+        latest: { $max: "$createdAt" },
+      },
+    },
+  ]);
+
+  const list = rows.map((r) => ({
+    key: r._id || NO_COMPANY,
+    name: r.name || "No company",
+    total: r.total,
+    counts: {
+      pending: r.pending,
+      approved: r.approved,
+      rejected: r.rejected,
+    },
+    newCount: r.newCount,
+    latest: r.latest,
+  }));
+
+  // companies with NEW employees first, then A-Z, "No company" always last
+  return list.sort((a, b) => {
+    if (a.key === NO_COMPANY) return 1;
+    if (b.key === NO_COMPANY) return -1;
+    if (b.newCount !== a.newCount) return b.newCount - a.newCount;
+    return a.name.localeCompare(b.name);
+  });
+};
+
+// ---------- MENTORS LIST ----------
+// view = "companies" -> grid of companies
+// view = "company"   -> employees of ONE company  (?company=<key>)
+// view = "flat"      -> all mentors in one table  (?group=flat)
 const listMentors = async (req, res) => {
   try {
     const search = String(req.query.search || "");
@@ -392,22 +526,22 @@ const listMentors = async (req, res) => {
       ? req.query.status
       : "all";
     const sort = SORTS[req.query.sort] ? req.query.sort : "newest";
+    const group = req.query.group === "flat" ? "flat" : "company";
+    const companyKey =
+      group === "company"
+        ? String(req.query.company || "")
+            .trim()
+            .toLowerCase()
+        : "";
 
-    const { page, limit, skip } = getPage(req);
-    const filter = mentorFilter({ search, status });
+    const since = newSince();
+    const scopeParts = [mentorFilter({ search })];
+    if (companyKey) scopeParts.push(companyMatch(companyKey));
 
-    const [mentorsRaw, total, countRows] = await Promise.all([
-      Mentor.find(filter)
-        .select("-password")
-        .sort(SORTS[sort])
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      Mentor.countDocuments(filter),
-      Mentor.aggregate([
-        { $match: mentorFilter({ search }) },
-        { $group: { _id: "$verificationStatus", count: { $sum: 1 } } },
-      ]),
+    // tab counts (inside the selected company when one is open)
+    const countRows = await Mentor.aggregate([
+      { $match: { $and: scopeParts } },
+      { $group: { _id: "$verificationStatus", count: { $sum: 1 } } },
     ]);
 
     const counts = { all: 0, pending: 0, approved: 0, rejected: 0 };
@@ -417,18 +551,103 @@ const listMentors = async (req, res) => {
       counts.all += r.count;
     });
 
-    return res.render("admin/mentors", {
+    const base = {
       admin: req.session.admin,
       currentPage: "mentors",
       pageTitle: "Mentors",
       pageSubtitle: "Manage all mentor profiles",
-      mentors: mentorsRaw.map(normalizeMentor),
       counts,
       search,
       status,
       sort,
+      group,
+      companyKey,
+      newDays: NEW_DAYS,
+      companies: [],
+      company: null,
+      mentors: [],
+      totalCompanies: 0,
+      totalMentors: 0,
+      totalNew: 0,
+    };
+
+    // ---------- 1) GRID OF COMPANIES ----------
+    if (group === "company" && !companyKey) {
+      const all = await companySummary(mentorFilter({ search, status }), since);
+
+      const limit = COMPANY_PAGE_SIZE;
+      const pages = Math.max(Math.ceil(all.length / limit), 1);
+      const page = Math.min(
+        Math.max(parseInt(req.query.page, 10) || 1, 1),
+        pages,
+      );
+      const skip = (page - 1) * limit;
+
+      return res.render("admin/mentors", {
+        ...base,
+        view: "companies",
+        companies: all.slice(skip, skip + limit),
+        totalCompanies: all.length,
+        totalMentors: all.reduce((s, c) => s + c.total, 0),
+        totalNew: all.reduce((s, c) => s + c.newCount, 0),
+        pagination: makePagination(page, limit, all.length),
+        baseQuery: buildQuery({ search, status, sort, group }),
+      });
+    }
+
+    // ---------- 2) EMPLOYEES OF ONE COMPANY  /  3) FLAT LIST ----------
+    const filter = {
+      $and: [mentorFilter({ search, status }), ...scopeParts.slice(1)],
+    };
+    const { page, limit, skip } = getPage(req);
+
+    const [mentorsRaw, total] = await Promise.all([
+      Mentor.find(filter)
+        .select("-password")
+        .sort(SORTS[sort])
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Mentor.countDocuments(filter),
+    ]);
+
+    const mentors = mentorsRaw.map((m) => withNew(m, since));
+
+    if (companyKey) {
+      // real company name for the heading (keeps original capital letters)
+      let name = companyKey === NO_COMPANY ? "No company" : companyKey;
+      const one = await Mentor.findOne({
+        $and: [companyMatch(companyKey)],
+      })
+        .select("currentCompany")
+        .lean();
+      if (one && String(one.currentCompany || "").trim()) {
+        name = String(one.currentCompany).trim();
+      }
+
+      const totalNew = await Mentor.countDocuments({
+        $and: [companyMatch(companyKey), { createdAt: { $gte: since } }],
+      });
+
+      return res.render("admin/mentors", {
+        ...base,
+        view: "company",
+        company: { key: companyKey, name, totalNew },
+        mentors,
+        totalMentors: total,
+        totalNew,
+        pagination: makePagination(page, limit, total),
+        baseQuery: buildQuery({ search, status, sort, group, company: companyKey }),
+      });
+    }
+
+    return res.render("admin/mentors", {
+      ...base,
+      view: "flat",
+      mentors,
+      totalMentors: total,
       pagination: makePagination(page, limit, total),
-      baseQuery: buildQuery({ search, status, sort }),
+      baseQuery: buildQuery({ search, status, sort, group }),
     });
   } catch (error) {
     console.error("List mentors error:", error);
@@ -701,11 +920,11 @@ const saveReview = async (req, res) => {
           },
         },
       },
-     {
-  upsert: true,
-  returnDocument: "after",
-  setDefaultsOnInsert: true
-},
+      {
+        upsert: true,
+        returnDocument: "after",
+        setDefaultsOnInsert: true,
+      },
     );
 
     const complete = isComplete(doc.checks);
@@ -922,20 +1141,16 @@ const bulkMentorAction = async (req, res) => {
       });
     }
     if (action === "reject" && reason.length < MIN_REJECT_REASON) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: `A rejection reason (min ${MIN_REJECT_REASON} chars) is required.`,
-        });
+      return res.status(400).json({
+        success: false,
+        message: `A rejection reason (min ${MIN_REJECT_REASON} chars) is required.`,
+      });
     }
     if (ids.length > 100) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Select at most 100 mentors at once.",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Select at most 100 mentors at once.",
+      });
     }
 
     const validIds = ids.filter((i) => mongoose.Types.ObjectId.isValid(i));
@@ -1075,12 +1290,10 @@ const toggleUser = async (req, res) => {
         .status(404)
         .json({ success: false, message: "User not found." });
     if (user.role === "admin") {
-      return res
-        .status(403)
-        .json({
-          success: false,
-          message: "Admin accounts cannot be deactivated here.",
-        });
+      return res.status(403).json({
+        success: false,
+        message: "Admin accounts cannot be deactivated here.",
+      });
     }
 
     user.isActive = user.isActive === false ? true : false;
@@ -1110,7 +1323,9 @@ const toggleUser = async (req, res) => {
 const listPayments = async (req, res) => {
   try {
     const Payment = loadModel("Payment", "Payment", "Transaction");
-    const status = ["success", "pending", "failed", "refunded"].includes(req.query.status)
+    const status = ["success", "pending", "failed", "refunded"].includes(
+      req.query.status,
+    )
       ? req.query.status
       : "all";
     const { page, limit, skip } = getPage(req);
@@ -1139,10 +1354,16 @@ const listPayments = async (req, res) => {
     else if (status === "failed") filter.status = { $in: FAILED_STATUSES };
     else if (status === "refunded") filter.status = "refunded";
     else if (status === "pending")
-      filter.status = { $nin: [...PAID_STATUSES, ...FAILED_STATUSES, "refunded"] };
+      filter.status = {
+        $nin: [...PAID_STATUSES, ...FAILED_STATUSES, "refunded"],
+      };
 
     const [payments, total, finance] = await Promise.all([
-      Payment.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      Payment.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
       Payment.countDocuments(filter),
       getFinanceSummary(),
     ]);

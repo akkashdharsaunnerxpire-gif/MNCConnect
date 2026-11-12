@@ -1,80 +1,260 @@
 <%- include('partials/layout-start') %>
 
 <%
+  const inCompany = view === 'company';
+  const isGrid = view === 'companies';
+
   const tabs = [
     { k: 'all', l: 'All', c: counts.all },
     { k: 'pending', l: 'Pending', c: counts.pending },
     { k: 'approved', l: 'Approved', c: counts.approved },
     { k: 'rejected', l: 'Rejected', c: counts.rejected }
   ];
-  const tabUrl = (k) => '/admin/mentors?' + new URLSearchParams({ status: k, search: search || '', sort: sort }).toString();
+
+  const q = (o) => '/admin/mentors?' + new URLSearchParams(o).toString();
+  const base = { status: status, search: search || '', sort: sort, group: group };
+
+  const tabUrl = (k) => q(Object.assign({}, base, { status: k }, inCompany ? { company: companyKey } : {}));
+  const groupUrl = (g) => q({ status: status, search: search || '', sort: sort, group: g });
+  const companyUrl = (key) => q(Object.assign({}, base, { company: key }));
+  const backUrl = q({ status: 'all', search: '', sort: sort, group: 'company' });
+  const resetUrl = inCompany ? q({ status: 'all', sort: sort, group: 'company', company: companyKey }) : '/admin/mentors';
   const exportUrl = '/admin/mentors/export?' + new URLSearchParams({ status: status, search: search || '' }).toString();
+
+  const phoneOf = (m) => m.phone || ([m.countryCode, m.mobile].filter(Boolean).join(' ') || 'N/A');
+  const pct = (n, t) => t ? Math.round((n / t) * 1000) / 10 : 0;
+
+  const palette = [
+    ['rgba(99,102,241,.20)', '#a5b4fc'], ['rgba(16,185,129,.18)', '#6ee7b7'],
+    ['rgba(245,158,11,.18)', '#fcd34d'], ['rgba(236,72,153,.18)', '#f9a8d4'],
+    ['rgba(168,85,247,.20)', '#d8b4fe'], ['rgba(56,189,248,.18)', '#7dd3fc']
+  ];
+  const tone = (s) => palette[(String(s || '?').charCodeAt(0) || 0) % palette.length];
 %>
 
-<div class="tabs">
-    <% tabs.forEach(function (t) { %>
-        <a href="<%= tabUrl(t.k) %>" class="<%= status === t.k ? 'active' : '' %>"><%= t.l %> <b><%= t.c %></b></a>
-    <% }) %>
+<style>
+  .ml { --ok:#34d399; --warn:#fbbf24; --bad:#f87171; --line:var(--border, rgba(255,255,255,.08)); }
+
+  /* ---------- command bar ---------- */
+  .ml-bar { display:flex; flex-wrap:wrap; align-items:center; gap:12px; justify-content:space-between; margin-bottom:16px; }
+  .ml-seg { display:inline-flex; padding:4px; gap:2px; border:1px solid var(--line); border-radius:12px; background:var(--surface); }
+  .ml-seg a { display:inline-flex; align-items:center; gap:8px; padding:8px 14px; border-radius:9px; font-size:13px; font-weight:600; color:var(--muted); transition:background .15s,color .15s; }
+  .ml-seg a b { font-size:11px; padding:1px 7px; border-radius:99px; background:rgba(255,255,255,.07); color:var(--muted); }
+  .ml-seg a:hover { color:var(--text); }
+  .ml-seg a.active { background:var(--primary); color:#fff; }
+  .ml-seg a.active b { background:rgba(255,255,255,.22); color:#fff; }
+  .ml-seg a:focus-visible, .ml-row:focus-visible { outline:2px solid var(--primary-h); outline-offset:2px; }
+
+  .ml-search { display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:14px 16px; margin-bottom:16px; }
+  .ml-search .search-box { flex:1 1 280px; position:relative; }
+  .ml-search .search-box i { position:absolute; left:14px; top:50%; transform:translateY(-50%); color:var(--muted); pointer-events:none; }
+  .ml-search .search-box .input { width:100%; padding-left:40px; }
+
+  .ml-meta { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:12px; font-size:13px; color:var(--muted); }
+  .ml-meta b { color:var(--text); font-weight:700; }
+  .ml-new { display:inline-flex; align-items:center; gap:7px; padding:4px 11px; border-radius:99px; font-size:12px; font-weight:700; color:#fca5a5; background:rgba(239,68,68,.12); border:1px solid rgba(239,68,68,.35); }
+  .ml-new::before { content:""; width:7px; height:7px; border-radius:50%; background:#ef4444; box-shadow:0 0 0 4px rgba(239,68,68,.2); }
+
+  /* ---------- company ledger ---------- */
+  .ml-ledger { overflow:hidden; padding:0; }
+  .ml-head, .ml-row { display:grid; grid-template-columns:minmax(220px,2.2fr) minmax(160px,1.6fr) repeat(3,72px) 28px; align-items:center; gap:16px; padding:0 20px; }
+  .ml-head { height:40px; font-size:12px; font-weight:600; color:var(--muted); border-bottom:1px solid var(--line); background:rgba(255,255,255,.02); }
+  .ml-head span:nth-child(n+3):nth-child(-n+5) { text-align:right; }
+  .ml-row { min-height:68px; border-bottom:1px solid var(--line); transition:background .15s; position:relative; }
+  .ml-row:last-child { border-bottom:0; }
+  .ml-row:hover { background:rgba(99,102,241,.07); }
+  .ml-row.has-new::before { content:""; position:absolute; left:0; top:12px; bottom:12px; width:3px; border-radius:0 3px 3px 0; background:#ef4444; }
+  .ml-co { display:flex; align-items:center; gap:14px; min-width:0; }
+  .ml-logo { width:40px; height:40px; border-radius:10px; display:grid; place-items:center; font-weight:800; font-size:16px; flex-shrink:0; }
+  .ml-co b { display:block; font-size:14px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ml-co small { color:var(--muted); font-size:12px; }
+  .ml-co .tag-new { margin-left:8px; padding:1px 7px; border-radius:99px; font-size:10px; font-weight:800; background:#ef4444; color:#fff; vertical-align:middle; }
+  .ml-split { display:flex; height:8px; border-radius:99px; overflow:hidden; background:rgba(255,255,255,.06); }
+  .ml-split i { display:block; height:100%; }
+  .ml-split .a { background:var(--ok); } .ml-split .p { background:var(--warn); } .ml-split .r { background:var(--bad); }
+  .ml-n { text-align:right; font-variant-numeric:tabular-nums; font-weight:700; font-size:14px; }
+  .ml-n.zero { color:var(--muted); font-weight:500; opacity:.5; }
+  .ml-n.p { color:var(--warn); } .ml-n.a { color:var(--ok); } .ml-n.r { color:var(--bad); }
+  .ml-go { color:var(--muted); font-size:12px; transition:transform .15s,color .15s; }
+  .ml-row:hover .ml-go { color:var(--primary-h); transform:translateX(3px); }
+
+  /* ---------- company header ---------- */
+  .ml-crumb { display:inline-flex; align-items:center; gap:8px; margin-bottom:14px; font-size:13px; font-weight:600; color:var(--muted); }
+  .ml-crumb:hover { color:var(--primary-h); }
+  .ml-hero { display:grid; grid-template-columns:auto 1fr auto; gap:20px; align-items:center; padding:22px 24px; margin-bottom:16px; }
+  .ml-hero .ml-logo { width:64px; height:64px; font-size:28px; border-radius:16px; }
+  .ml-hero h2 { margin:0; font-size:22px; letter-spacing:-.02em; color:var(--text); }
+  .ml-hero p { margin:4px 0 0; font-size:13px; color:var(--muted); }
+  .ml-kpis { display:flex; gap:0; border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  .ml-kpis div { padding:10px 18px; text-align:center; border-right:1px solid var(--line); min-width:84px; }
+  .ml-kpis div:last-child { border-right:0; }
+  .ml-kpis b { display:block; font-size:20px; font-variant-numeric:tabular-nums; }
+  .ml-kpis small { font-size:11px; color:var(--muted); }
+  .ml-kpis .p b { color:var(--warn); } .ml-kpis .a b { color:var(--ok); } .ml-kpis .r b { color:var(--bad); }
+
+  /* ---------- mentor table ---------- */
+  .ml-tbl td, .ml-tbl th { vertical-align:middle; }
+  .ml-person { display:flex; align-items:center; gap:12px; }
+  .ml-person .av { width:38px; height:38px; border-radius:50%; overflow:hidden; display:grid; place-items:center; background:rgba(99,102,241,.2); color:#a5b4fc; font-weight:700; flex-shrink:0; }
+  .ml-person .av img { width:100%; height:100%; object-fit:cover; }
+  .ml-person b { display:block; color:var(--text); }
+  .ml-person small { display:block; color:var(--muted); font-size:12px; }
+  .new-tag { margin-left:8px; padding:2px 7px; border-radius:6px; font-size:10px; font-weight:800; background:linear-gradient(135deg,#ef4444,#f97316); color:#fff; vertical-align:middle; }
+  .ml-tbl tr.is-new td { background:rgba(239,68,68,.05); }
+  .ml-tbl tr.is-new td:first-child { box-shadow:inset 3px 0 0 #ef4444; }
+  .ml-tbl tbody tr:hover td { background:rgba(99,102,241,.07); }
+
+  @media (max-width: 860px) {
+    .ml-head { display:none; }
+    .ml-row { grid-template-columns:1fr auto; row-gap:10px; padding:14px 16px; }
+    .ml-row .ml-split { grid-column:1 / -1; order:3; }
+    .ml-row .ml-n { display:none; }
+    .ml-hero { grid-template-columns:auto 1fr; }
+    .ml-kpis { grid-column:1 / -1; }
+    .ml-kpis div { flex:1; }
+  }
+</style>
+
+<div class="ml">
+
+<!-- ======================= STATUS SEGMENTS ======================= -->
+<div class="ml-bar">
+    <nav class="ml-seg" aria-label="Filter by status">
+        <% tabs.forEach(function (t) { %>
+            <a href="<%= tabUrl(t.k) %>" class="<%= status === t.k ? 'active' : '' %>"><%= t.l %> <b><%= t.c %></b></a>
+        <% }) %>
+    </nav>
+
+    <% if (!inCompany) { %>
+    <nav class="ml-seg" aria-label="Group mentors">
+        <a href="<%= groupUrl('company') %>" class="<%= group === 'company' ? 'active' : '' %>"><i class="fas fa-building"></i> By company</a>
+        <a href="<%= groupUrl('flat') %>" class="<%= group === 'flat' ? 'active' : '' %>"><i class="fas fa-list"></i> All mentors</a>
+    </nav>
+    <% } %>
 </div>
 
-<div class="card mb">
-    <div class="card-body" style="padding:16px 20px;">
-        <form method="GET" action="/admin/mentors" class="filters">
-            <input type="hidden" name="status" value="<%= status %>">
-            <div class="search-box">
-                <i class="fas fa-search"></i>
-                <input class="input" type="text" name="search" value="<%= search %>"
-                       placeholder="Search name, email, phone, company...  (press / )">
+<!-- ======================= SEARCH ======================= -->
+<form method="GET" action="/admin/mentors" class="card ml-search filters">
+    <input type="hidden" name="status" value="<%= status %>">
+    <input type="hidden" name="group" value="<%= group %>">
+    <% if (inCompany) { %><input type="hidden" name="company" value="<%= companyKey %>"><% } %>
+    <div class="search-box">
+        <i class="fas fa-search"></i>
+        <input class="input" type="text" name="search" value="<%= search %>"
+               placeholder="<%= inCompany ? 'Search in ' + company.name + '…' : 'Search company, name, email or phone…' %>  (press / )">
+    </div>
+    <select name="sort" class="select" data-autosubmit aria-label="Sort">
+        <option value="newest" <%= sort === 'newest' ? 'selected' : '' %>>Newest first</option>
+        <option value="oldest" <%= sort === 'oldest' ? 'selected' : '' %>>Oldest first</option>
+        <option value="name" <%= sort === 'name' ? 'selected' : '' %>>Name A–Z</option>
+        <option value="experience" <%= sort === 'experience' ? 'selected' : '' %>>Most experienced</option>
+    </select>
+    <button class="btn btn-primary" type="submit"><i class="fas fa-search"></i> Search</button>
+    <a href="<%= resetUrl %>" class="btn btn-ghost"><i class="fas fa-rotate-left"></i> Reset</a>
+    <a href="<%= exportUrl %>" class="btn btn-ghost"><i class="fas fa-file-csv"></i> Export CSV</a>
+</form>
+
+<% if (!inCompany) { %>
+<div class="ml-meta">
+    <% if (isGrid) { %><span><b><%= totalCompanies %></b> companies</span><% } %>
+    <span><b><%= totalMentors %></b> mentors</span>
+    <% if (isGrid && totalNew > 0) { %><span class="ml-new"><%= totalNew %> new in the last <%= newDays %> days</span><% } %>
+</div>
+<% } %>
+
+<% if (isGrid) { %>
+<!-- ======================= COMPANY LEDGER ======================= -->
+    <% if (companies.length) { %>
+    <div class="card ml-ledger">
+        <div class="ml-head">
+            <span>Company</span><span>Verification mix</span><span>Pending</span><span>Approved</span><span>Rejected</span><span></span>
+        </div>
+        <% companies.forEach(function (c) { var t = tone(c.name); %>
+        <a class="ml-row <%= c.newCount > 0 ? 'has-new' : '' %>" href="<%= companyUrl(c.key) %>" title="<%= c.name %>">
+            <div class="ml-co">
+                <div class="ml-logo" style="background:<%= t[0] %>;color:<%= t[1] %>;"><%= (c.name || '?').charAt(0).toUpperCase() %></div>
+                <div style="min-width:0">
+                    <b><%= c.name %><% if (c.newCount > 0) { %><span class="tag-new" title="Joined in the last <%= newDays %> days"><%= c.newCount %> new</span><% } %></b>
+                    <small><%= c.total %> employee<%= c.total === 1 ? '' : 's' %></small>
+                </div>
             </div>
-            <select name="sort" class="select" data-autosubmit>
-                <option value="newest" <%= sort === 'newest' ? 'selected' : '' %>>Newest first</option>
-                <option value="oldest" <%= sort === 'oldest' ? 'selected' : '' %>>Oldest first</option>
-                <option value="name" <%= sort === 'name' ? 'selected' : '' %>>Name A–Z</option>
-                <option value="experience" <%= sort === 'experience' ? 'selected' : '' %>>Most experienced</option>
-            </select>
-            <button class="btn btn-primary" type="submit"><i class="fas fa-search"></i> Search</button>
-            <a href="/admin/mentors" class="btn btn-ghost"><i class="fas fa-rotate-left"></i> Reset</a>
-            <a href="<%= exportUrl %>" class="btn btn-ghost"><i class="fas fa-file-csv"></i> Export CSV</a>
-        </form>
+            <div class="ml-split" role="img" aria-label="<%= c.counts.approved || 0 %> approved, <%= c.counts.pending || 0 %> pending, <%= c.counts.rejected || 0 %> rejected">
+                <i class="a" style="width:<%= pct(c.counts.approved || 0, c.total) %>%"></i>
+                <i class="p" style="width:<%= pct(c.counts.pending || 0, c.total) %>%"></i>
+                <i class="r" style="width:<%= pct(c.counts.rejected || 0, c.total) %>%"></i>
+            </div>
+            <span class="ml-n p <%= c.counts.pending ? '' : 'zero' %>"><%= c.counts.pending || 0 %></span>
+            <span class="ml-n a <%= c.counts.approved ? '' : 'zero' %>"><%= c.counts.approved || 0 %></span>
+            <span class="ml-n r <%= c.counts.rejected ? '' : 'zero' %>"><%= c.counts.rejected || 0 %></span>
+            <i class="fas fa-chevron-right ml-go"></i>
+        </a>
+        <% }) %>
+    </div>
+    <div class="card" style="margin-top:14px"><%- include('partials/pagination') %></div>
+    <% } else { %>
+    <div class="card">
+        <div class="empty">
+            <i class="fas fa-building-circle-xmark"></i>
+            <h4>No companies match</h4>
+            <p>Clear the search or switch the status filter.</p>
+            <a href="<%= resetUrl %>" class="btn btn-ghost">Reset filters</a>
+        </div>
+    </div>
+    <% } %>
+<% } %>
+
+<% if (inCompany) { %>
+<!-- ======================= ONE COMPANY ======================= -->
+<% var ct = tone(company.name); %>
+<a href="<%= backUrl %>" class="ml-crumb"><i class="fas fa-arrow-left"></i> All companies</a>
+
+<div class="card ml-hero">
+    <div class="ml-logo" style="background:<%= ct[0] %>;color:<%= ct[1] %>;"><%= (company.name || '?').charAt(0).toUpperCase() %></div>
+    <div>
+        <h2><%= company.name %></h2>
+        <p><%= counts.all %> employee<%= counts.all === 1 ? '' : 's' %> registered<% if (company.totalNew > 0) { %> &nbsp;<span class="ml-new"><%= company.totalNew %> new</span><% } %></p>
+    </div>
+    <div class="ml-kpis">
+        <div class="p"><b><%= counts.pending || 0 %></b><small>Pending</small></div>
+        <div class="a"><b><%= counts.approved || 0 %></b><small>Approved</small></div>
+        <div class="r"><b><%= counts.rejected || 0 %></b><small>Rejected</small></div>
     </div>
 </div>
+<% } %>
 
+<% if (inCompany || view === 'flat') { %>
+<!-- ======================= MENTOR TABLE ======================= -->
 <div class="card">
     <% if (mentors.length) { %>
     <div class="table-wrap">
-        <table>
+        <table class="ml-tbl">
             <thead>
                 <tr>
-                    <th>Mentor</th>
-                    <th>Contact</th>
-                    <th>Experience</th>
-                    <th>Status</th>
-                    <th>Joined</th>
-                    <th class="t-right">Actions</th>
+                    <th>Mentor</th><th>Contact</th><th>Experience</th><th>Status</th><th>Joined</th><th class="t-right">Actions</th>
                 </tr>
             </thead>
             <tbody>
             <% mentors.forEach(function (m) { %>
-                <tr>
+                <tr class="<%= m.isNew ? 'is-new' : '' %>">
                     <td>
-                        <div class="cell-user">
+                        <div class="ml-person">
                             <div class="av"><% if (m.profilePic) { %><img src="<%= m.profilePic %>" alt=""><% } else { %><%= (m.name || 'M').charAt(0).toUpperCase() %><% } %></div>
                             <div>
-                                <b><%= m.name || 'Unnamed mentor' %></b>
-                                <span class="muted small"><%= m.designation || '—' %><% if (m.currentCompany) { %> · <%= m.currentCompany %><% } %></span>
+                                <b><%= m.name || 'Unnamed mentor' %><% if (m.isNew) { %><span class="new-tag" title="Joined in the last <%= newDays %> days">NEW</span><% } %></b>
+                                <small><%= m.designation || '—' %><% if (!inCompany && m.currentCompany) { %> at <%= m.currentCompany %><% } %></small>
                             </div>
                         </div>
                     </td>
                     <td>
                         <div><%= m.email || 'N/A' %></div>
-                        <div class="muted small"><%= m.phone || ([m.countryCode, m.mobile].filter(Boolean).join(' ') || 'N/A') %></div>
+                        <div class="muted small"><%= phoneOf(m) %></div>
                     </td>
                     <td class="muted"><%= m.yearsOfExperience != null ? m.yearsOfExperience + ' yrs' : '—' %></td>
                     <td><%- include('partials/status-badge', { st: m.status }) %></td>
                     <td class="muted small"><%= m.createdAt ? new Date(m.createdAt).toLocaleDateString('en-GB') : 'N/A' %></td>
                     <td>
                         <div class="row-actions">
-                            <a href="/admin/mentors/<%= m._id %>" class="btn btn-ghost btn-sm"><i class="fas fa-eye"></i> View</a>
+                            <a href="/admin/mentors/<%= m._id %>" class="btn btn-ghost btn-sm"><i class="fas fa-eye"></i> Review</a>
                         </div>
                     </td>
                 </tr>
@@ -86,10 +266,13 @@
     <% } else { %>
         <div class="empty">
             <i class="fas fa-user-slash"></i>
-            <h4>No mentors found</h4>
-            <p>Try adjusting your search or filter.</p>
+            <h4>No mentors match</h4>
+            <p>Clear the search or switch the status filter.</p>
         </div>
     <% } %>
+</div>
+<% } %>
+
 </div>
 
 <%- include('partials/layout-end') %>

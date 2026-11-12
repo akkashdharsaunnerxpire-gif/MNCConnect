@@ -1456,21 +1456,47 @@ const AvatarStack = ({ mentors = [], total = 0, max = 4 }) => {
 };
 
 // Solid badges so they are readable on top of ANY cover photo
-const OnlineBadge = ({ count }) =>
-  count > 0 ? (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500 px-3 py-1 text-xs font-bold text-white shadow-lg shadow-emerald-500/40 ring-2 ring-white/80">
-      <span className="relative flex h-2 w-2">
-        <span className="absolute inline-flex h-full w-full rounded-full bg-white opacity-70 motion-safe:animate-ping" />
-        <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
-      </span>
-      {count} online
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-900/65 px-3 py-1 text-xs font-semibold text-white ring-1 ring-white/30 backdrop-blur">
-      <span className="h-2 w-2 rounded-full bg-slate-300" />
-      Offline
+// variant="overlay" -> on top of a cover photo (frosted glass)
+// variant="inline"  -> on a white background (list row)
+const OnlineBadge = ({ count = 0, variant = "overlay" }) => {
+  const online = count > 0;
+  const overlay = variant === "overlay";
+
+  const shell =
+    "inline-flex items-center gap-2 rounded-full py-1 pl-2.5 pr-3 text-[11px] font-semibold leading-none tracking-wide transition";
+
+  const tone = overlay
+    ? online
+      ? "bg-white/90 text-slate-900 shadow-lg shadow-black/10 ring-1 ring-black/5 backdrop-blur-md"
+      : "bg-slate-900/55 text-white/90 ring-1 ring-white/25 backdrop-blur-md"
+    : online
+      ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+      : "bg-slate-100 text-slate-500 ring-1 ring-slate-200";
+
+  return (
+    <span className={`${shell} ${tone}`}>
+      {online ? (
+        <span className="relative flex h-2 w-2">
+          <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 motion-safe:animate-ping" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+        </span>
+      ) : (
+        <span
+          className={`h-2 w-2 rounded-full ${
+            overlay ? "bg-white/50" : "bg-slate-400"
+          }`}
+        />
+      )}
+      {online ? (
+        <span>
+          <span className="font-bold">{count}</span> online
+        </span>
+      ) : (
+        "Offline"
+      )}
     </span>
   );
+};
 
 const RatingText = ({ company }) => {
   const rating =
@@ -1513,7 +1539,7 @@ const CompanyCard = ({ company, index, query }) => {
         <CoverImage company={company} />
         <div className="absolute inset-0 bg-gradient-to-t from-slate-900/35 to-transparent" />
         <div className="absolute right-3 top-3">
-          <OnlineBadge count={company.onlineCount || 0} />
+        <OnlineBadge count={company.onlineCount || 0} variant="inline" />
         </div>
       </div>
 

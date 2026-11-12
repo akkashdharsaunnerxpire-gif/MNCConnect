@@ -2,115 +2,282 @@
 
 <%
   const fmt = (n) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+  const safe = Number(finance.profitAvailable || 0);
+  const keep = Number(finance.mustKeep || 0);
+  const cashTotal = Math.max(safe + keep, 0);
+  const safePct = cashTotal ? Math.round((safe / cashTotal) * 1000) / 10 : 0;
+  const unrec = Number(finance.unrecoveredGatewayCharges || 0);
+
+  const kpis = [
+    { g: 'Revenue and fees', items: [
+      { t: 'Session revenue', v: finance.sessionRevenue, n: 'Paid, not refunded. Completed ₹' + fmt(finance.completedRevenue) + '. Customers paid ₹' + fmt(finance.checkoutGross) + ' incl. fees.', c: 'primary' },
+      { t: 'Convenience fees kept', v: finance.convenienceRetained, n: 'Gross ₹' + fmt(finance.convenienceCollected) + ' minus refunded ₹' + fmt(finance.refundedConvenience), c: 'ok' },
+      { t: 'Razorpay gateway charges', v: finance.gatewayCost, n: finance.estimatedRows ? finance.estimatedRows + ' estimated' : 'All actual', c: 'bad' }
+    ]},
+    { g: 'Profit and mentors', items: [
+      { t: 'Unrecovered gateway charges', v: unrec, n: finance.convenienceSurplus > 0 ? 'Surplus (fees above charges): ₹' + fmt(finance.convenienceSurplus) : 'Fees cover the charges', c: unrec > 0 ? 'bad' : 'ok' },
+      { t: 'Platform profit (net)', v: finance.netProfit, n: 'On hold: ₹' + fmt(finance.heldProfit), c: 'ok' },
+      { t: 'Mentor earnings', v: finance.mentorEarned, n: 'Paid ₹' + fmt(finance.mentorPaid) + ', owed ₹' + fmt(finance.mentorOwed), c: 'primary' }
+    ]},
+    { g: 'Refunds', items: [
+      { t: 'Refunded to customers', v: finance.refundedTotal, n: 'Session ₹' + fmt(finance.refunded) + ', convenience ₹' + fmt(finance.refundedConvenience), c: 'bad' },
+      { t: 'Refunds in fresher wallets', v: finance.walletLiability, n: 'We owe this amount', c: 'warn' },
+      { t: 'Gateway cost on open sessions', v: finance.gatewayCostHeld, n: 'Not counted until sessions finish', c: 'muted' }
+    ]}
+  ];
+
+  const ledger = [
+    { s: '+', t: 'Platform fee from completed sessions', d: 'Session price only', v: finance.grossProfit },
+    { s: '+', t: 'Convenience fees that are ours', d: 'Completed sessions, or kept after a refund', v: finance.convenienceRecognized },
+    { s: '=', t: 'Net platform profit', v: finance.netProfit, k: 'total' },
+    { s: '−', t: 'Already taken by company', v: finance.companyTaken },
+    { s: '=', t: 'Safe to take now', v: finance.profitAvailable, k: 'key' }
+  ];
+  const side = [
+    ['Profit on hold', 'Sessions not finished', finance.heldProfit],
+    ['Convenience fees on hold', 'Sessions not finished, may still be refunded', finance.convenienceHeld],
+    ['Razorpay cost on open sessions', 'Not counted yet', finance.gatewayCostHeld],
+    ['Refunds in fresher wallets', 'We owe this', finance.walletLiability]
+  ];
 %>
 
+<style>
+  .fn { --line:var(--border); --ok:#34d399; --warn:#fbbf24; --bad:#f87171; --pri:#a5b4fc; }
+  .fn h4 { font-size:15px; font-weight:700; }
+  .fn .sec { margin:26px 0 12px; font-size:13px; font-weight:600; color:var(--muted); }
+
+  /* ---- hero ---- */
+  .fn-hero { display:grid; grid-template-columns:1.1fr 1.4fr; gap:0; overflow:hidden; margin-bottom:8px; }
+  .fn-hero > div { padding:26px 28px; }
+  .fn-hero > div + div { border-left:1px solid var(--line); }
+  .fn-big small { color:var(--muted); font-size:13px; }
+  .fn-big b { display:block; margin:6px 0 4px; font-size:40px; letter-spacing:-.03em; font-variant-numeric:tabular-nums; color:var(--ok); }
+  .fn-big p { color:var(--muted); font-size:13px; }
+  .fn-big .row { display:flex; gap:22px; margin-top:18px; flex-wrap:wrap; }
+  .fn-big .row div small { display:block; font-size:12px; }
+  .fn-big .row div span { font-size:16px; font-weight:700; font-variant-numeric:tabular-nums; }
+
+  .fn-split { display:flex; height:14px; border-radius:99px; overflow:hidden; background:var(--surface-2); margin:14px 0 16px; }
+  .fn-split i { display:block; height:100%; transition:width .6s ease; }
+  .fn-split .a { background:var(--ok); } .fn-split .b { background:#6366f1; }
+  .fn-legend { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .fn-legend div { display:flex; gap:10px; align-items:flex-start; }
+  .fn-legend i { width:10px; height:10px; border-radius:3px; margin-top:5px; flex-shrink:0; }
+  .fn-legend small { display:block; color:var(--muted); font-size:12px; }
+  .fn-legend b { font-size:18px; font-variant-numeric:tabular-nums; }
+
+  /* ---- kpis ---- */
+  .fn-kgrid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+  .fn-kpi { padding:16px 18px; position:relative; }
+  .fn-kpi::before { content:""; position:absolute; left:0; top:16px; bottom:16px; width:3px; border-radius:0 3px 3px 0; background:var(--muted); }
+  .fn-kpi.primary::before { background:#6366f1; } .fn-kpi.ok::before { background:var(--ok); }
+  .fn-kpi.bad::before { background:var(--bad); } .fn-kpi.warn::before { background:var(--warn); }
+  .fn-kpi small { display:block; color:var(--muted); font-size:12.5px; }
+  .fn-kpi b { display:block; margin:4px 0 6px; font-size:24px; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
+  .fn-kpi p { font-size:12px; color:var(--muted); line-height:1.5; }
+
+  /* ---- two column: ledger + actions ---- */
+  .fn-two { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(0,1fr); gap:16px; align-items:start; margin-top:16px; }
+  .fn-pad { padding:20px 22px; }
+  .fn-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; margin-bottom:6px; }
+  .fn-head p { color:var(--muted); font-size:12.5px; margin-top:3px; }
+
+  .fn-led { margin-top:12px; }
+  .fn-led .r { display:grid; grid-template-columns:28px 1fr auto; gap:12px; align-items:center; padding:13px 0; border-top:1px solid var(--line); }
+  .fn-led .r:first-child { border-top:0; }
+  .fn-led .op { width:24px; height:24px; border-radius:7px; display:grid; place-items:center; font-weight:700; font-size:13px; background:var(--surface-2); color:var(--muted); }
+  .fn-led small { display:block; color:var(--muted); font-size:12px; }
+  .fn-led .amt { font-weight:700; font-variant-numeric:tabular-nums; }
+  .fn-led .r.total { border-top:2px solid var(--line); }
+  .fn-led .r.total .amt { font-size:16px; }
+  .fn-led .r.key { margin:6px -12px 0; padding:14px 12px; border:1px solid rgba(16,185,129,.4); border-radius:12px; background:rgba(16,185,129,.08); }
+  .fn-led .r.key .amt { color:var(--ok); font-size:18px; }
+  .fn-led .r.key .op { background:rgba(16,185,129,.2); color:var(--ok); }
+  .fn-aside { margin-top:16px; padding-top:6px; border-top:1px dashed var(--line); }
+  .fn-aside .r { display:flex; justify-content:space-between; gap:12px; padding:9px 0; font-size:13px; color:var(--muted); }
+  .fn-aside .r small { display:block; font-size:11.5px; opacity:.8; }
+  .fn-aside .r span:last-child { font-variant-numeric:tabular-nums; color:var(--text); }
+  .fn-note { margin-top:12px; font-size:12px; color:var(--muted); line-height:1.6; }
+
+  /* ---- payout form ---- */
+  .fn-form { display:grid; gap:12px; margin-top:14px; }
+  .fn-form .label { margin-bottom:6px; }
+  .fn-amt { position:relative; }
+  .fn-amt > span { position:absolute; left:14px; top:50%; transform:translateY(-50%); color:var(--muted); font-weight:600; }
+  .fn-amt .input { padding-left:30px; padding-right:96px; }
+  .fn-amt button { position:absolute; right:6px; top:50%; transform:translateY(-50%); }
+  .fn-steps { margin:12px 0 0; padding:0; list-style:none; display:grid; gap:8px; font-size:12.5px; color:var(--muted); }
+  .fn-steps li { display:flex; gap:10px; }
+  .fn-steps li b { width:20px; height:20px; border-radius:50%; display:grid; place-items:center; font-size:11px; background:var(--surface-2); color:var(--text); flex-shrink:0; }
+  .fn-lock { display:flex; gap:10px; padding:11px 13px; border-radius:12px; font-size:12.5px; background:rgba(245,158,11,.08); border:1px solid rgba(245,158,11,.3); color:#fcd34d; }
+  .fn-sync { margin-top:18px; padding-top:16px; border-top:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+  .fn-sync p { font-size:12.5px; color:var(--muted); max-width:34ch; }
+
+  /* ---- tables ---- */
+  .fn-tables { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:16px; margin-top:16px; }
+  .fn-tables table th:last-child, .fn-tables table td:last-child { text-align:right; }
+  .fn-tables .num { font-variant-numeric:tabular-nums; font-weight:600; }
+  .fn-empty { text-align:center; padding:30px 10px; color:var(--muted); font-size:13px; }
+  .fn-empty i { display:block; font-size:26px; margin-bottom:8px; opacity:.5; }
+
+  @media (max-width:1100px) { .fn-two { grid-template-columns:1fr; } .fn-hero { grid-template-columns:1fr; } .fn-hero > div + div { border-left:0; border-top:1px solid var(--line); } }
+  @media (max-width:860px) { .fn-kgrid { grid-template-columns:1fr; } }
+  @media (max-width:560px) { .fn-legend { grid-template-columns:1fr; } .fn-big b { font-size:32px; } }
+</style>
+
+<div class="fn">
+
 <% if (convenienceMode === 'off') { %>
-<div class="alert alert-warn" style="margin-bottom:14px;">
+<div class="alert alert-warn">
     <i class="fas fa-circle-info"></i>
-    <div>Convenience fee is <b>OFF</b> (<code>CONVENIENCE_FEE_MODE=off</code>). Razorpay charges are fully borne by the platform.</div>
+    <div>Convenience fee is <b>OFF</b> (<code>CONVENIENCE_FEE_MODE=off</code>). The platform pays all Razorpay charges.</div>
 </div>
 <% } %>
 
-<!-- 1) Revenue / gateway / fees -->
-<div class="grid g-3 mb">
-    <div class="card stat t-primary"><div><small>Total session revenue (paid, not refunded)</small><h3>₹<%= fmt(finance.sessionRevenue) %></h3>
-        <small class="muted">Completed ₹<%= fmt(finance.completedRevenue) %> · customers paid ₹<%= fmt(finance.checkoutGross) %> incl. fees</small></div><div class="stat-ico"><i class="fas fa-indian-rupee-sign"></i></div></div>
-    <div class="card stat t-ok"><div><small>Convenience fees collected (after refunds)</small><h3>₹<%= fmt(finance.convenienceRetained) %></h3>
-        <small class="muted">Gross ₹<%= fmt(finance.convenienceCollected) %> − refunded ₹<%= fmt(finance.refundedConvenience) %></small></div><div class="stat-ico"><i class="fas fa-hand-holding-dollar"></i></div></div>
-    <div class="card stat t-bad"><div><small>Actual Razorpay gateway charges</small><h3>₹<%= fmt(finance.gatewayCost) %></h3>
-        <% if (finance.estimatedRows) { %><small class="muted"><%= finance.estimatedRows %> estimated</small><% } %></div><div class="stat-ico"><i class="fas fa-credit-card"></i></div></div>
-</div>
-
-<!-- 2) Unrecovered / profit / mentors -->
-<div class="grid g-3 mb">
-    <div class="card stat <%= finance.unrecoveredGatewayCharges > 0 ? 't-bad' : 't-ok' %>"><div><small>Unrecovered gateway charges</small><h3>₹<%= fmt(finance.unrecoveredGatewayCharges) %></h3>
-        <% if (finance.convenienceSurplus > 0) { %><small class="muted">Surplus (fees &gt; charges): ₹<%= fmt(finance.convenienceSurplus) %></small><% } %></div><div class="stat-ico"><i class="fas fa-triangle-exclamation"></i></div></div>
-    <div class="card stat t-ok"><div><small>Platform profit (net)</small><h3>₹<%= fmt(finance.netProfit) %></h3>
-        <small class="muted">On hold: ₹<%= fmt(finance.heldProfit) %></small></div><div class="stat-ico"><i class="fas fa-chart-line"></i></div></div>
-    <div class="card stat t-primary"><div><small>Mentor earnings</small><h3>₹<%= fmt(finance.mentorEarned) %></h3>
-        <small class="muted">Paid ₹<%= fmt(finance.mentorPaid) %> · owed ₹<%= fmt(finance.mentorOwed) %></small></div><div class="stat-ico"><i class="fas fa-users"></i></div></div>
-</div>
-
-<!-- 3) Refunds + cash position -->
-<div class="grid g-3 mb">
-    <div class="card stat t-bad"><div><small>Refunds (returned to customers)</small><h3>₹<%= fmt(finance.refundedTotal) %></h3>
-        <small class="muted">Session ₹<%= fmt(finance.refunded) %> · convenience ₹<%= fmt(finance.refundedConvenience) %></small></div><div class="stat-ico"><i class="fas fa-rotate-left"></i></div></div>
-    <div class="card stat t-ok"><div><small>Safe to take as company profit</small><h3>₹<%= fmt(finance.profitAvailable) %></h3></div><div class="stat-ico"><i class="fas fa-building-columns"></i></div></div>
-    <div class="card stat t-primary"><div><small>Must stay in bank (mentors + refund hold)</small><h3>₹<%= fmt(finance.mustKeep) %></h3>
-        <small class="muted">Already taken by company ₹<%= fmt(finance.companyTaken) %></small></div><div class="stat-ico"><i class="fas fa-lock"></i></div></div>
-</div>
-
-<div class="card" style="padding:18px;margin-bottom:16px;">
-    <h4 style="margin-bottom:10px;">Profit calculation (<%= feePercent %>% platform fee, convenience fee mode: <%= convenienceMode %>)</h4>
-    <div class="table-wrap">
-    <table>
-        <tbody>
-            <tr><td>Platform fee from completed sessions (session price only)</td><td><b>₹<%= fmt(finance.grossProfit) %></b></td></tr>
-            <tr><td>+ Convenience fees that are ours (completed sessions, or kept after a refund)</td><td><b>₹<%= fmt(finance.convenienceRecognized) %></b></td></tr>
-           <tr><td class="muted">Razorpay cost on sessions not finished yet (not counted yet)</td><td class="muted">₹<%= fmt(finance.gatewayCostHeld) %></td></tr>
-<tr><td class="muted">Refunds sitting in fresher wallets (we owe this)</td><td class="muted">₹<%= fmt(finance.walletLiability) %></td></tr>
-            <tr><td>= Net platform profit</td><td><b>₹<%= fmt(finance.netProfit) %></b></td></tr>
-            <tr><td>− Already taken by company</td><td><b>₹<%= fmt(finance.companyTaken) %></b></td></tr>
-            <tr><td>= Safe to take now</td><td><b>₹<%= fmt(finance.profitAvailable) %></b></td></tr>
-            <tr><td class="muted">Profit on hold (sessions not finished)</td><td class="muted">₹<%= fmt(finance.heldProfit) %></td></tr>
-            <tr><td class="muted">Convenience fees on hold (sessions not finished, may still be refunded)</td><td class="muted">₹<%= fmt(finance.convenienceHeld) %></td></tr>
-            <tr><td class="muted">Mentors: earned / paid / pending request / owed</td>
-                <td class="muted">₹<%= fmt(finance.mentorEarned) %> / ₹<%= fmt(finance.mentorPaid) %> / ₹<%= fmt(finance.mentorRequested) %> / ₹<%= fmt(finance.mentorOwed) %></td></tr>
-        </tbody>
-    </table>
+<!-- ============ HERO: what can I take, what must stay ============ -->
+<div class="card fn-hero">
+    <div class="fn-big">
+        <small>Safe to take as company profit</small>
+        <b>₹<%= fmt(safe) %></b>
+        <p>After mentors, refunds and open sessions are covered.</p>
+        <div class="row">
+            <div><small>Net platform profit</small><span>₹<%= fmt(finance.netProfit) %></span></div>
+            <div><small>Already taken</small><span>₹<%= fmt(finance.companyTaken) %></span></div>
+            <div><small>On hold</small><span>₹<%= fmt(finance.heldProfit) %></span></div>
+        </div>
     </div>
-    <p class="muted small" style="margin-top:10px;">Mentor earnings and the platform fee are always calculated from the original session price. Convenience fees never reach mentors.</p>
-    <div style="margin-top:12px;">
-        <button type="button" id="syncBtn" style="cursor:pointer;">Sync real Razorpay fees</button>
+    <div>
+        <h4>Where the money sits</h4>
+        <div class="fn-split" role="img" aria-label="Safe to take ₹<%= fmt(safe) %>, must stay ₹<%= fmt(keep) %>">
+            <i class="a" style="width:<%= safePct %>%"></i><i class="b" style="width:<%= cashTotal ? (100 - safePct) : 0 %>%"></i>
+        </div>
+        <div class="fn-legend">
+            <div><i style="background:var(--ok)"></i><span><small>Safe to take</small><b>₹<%= fmt(safe) %></b></span></div>
+            <div><i style="background:#6366f1"></i><span><small>Must stay in bank (mentors + refund hold)</small><b>₹<%= fmt(keep) %></b></span></div>
+        </div>
     </div>
 </div>
 
-<div class="card" style="padding:18px;margin-bottom:16px;">
-    <h4 style="margin-bottom:10px;">Move profit to company account</h4>
-    <p class="muted small">1) Transfer from your Razorpay-settled bank to the company account. 2) Enter the bank reference here. The system blocks anything above the safe amount.</p>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
-        <input id="coAmount" type="number" min="1" step="0.01" placeholder="Amount" style="padding:8px;">
-        <input id="coRef" placeholder="Bank / UTR reference" style="padding:8px;">
-        <input id="coNote" placeholder="Note (optional)" style="padding:8px;">
-        <button type="button" id="coBtn" style="cursor:pointer;">Record payout</button>
+<!-- ============ KPIs ============ -->
+<% kpis.forEach(function (grp) { %>
+    <div class="sec"><%= grp.g %></div>
+    <div class="fn-kgrid">
+        <% grp.items.forEach(function (k) { %>
+        <div class="card fn-kpi <%= k.c %>">
+            <small><%= k.t %></small>
+            <b>₹<%= fmt(k.v) %></b>
+            <p><%= k.n %></p>
+        </div>
+        <% }) %>
+    </div>
+<% }) %>
+
+<!-- ============ Ledger + payout ============ -->
+<div class="fn-two">
+    <div class="card fn-pad">
+        <div class="fn-head">
+            <div><h4>Profit calculation</h4><p><%= feePercent %>% platform fee · convenience fee mode: <%= convenienceMode %></p></div>
+        </div>
+        <div class="fn-led">
+            <% ledger.forEach(function (r) { %>
+            <div class="r <%= r.k || '' %>">
+                <span class="op"><%= r.s %></span>
+                <span><b><%= r.t %></b><% if (r.d) { %><small><%= r.d %></small><% } %></span>
+                <span class="amt">₹<%= fmt(r.v) %></span>
+            </div>
+            <% }) %>
+        </div>
+        <div class="fn-aside">
+            <% side.forEach(function (r) { %>
+            <div class="r"><span><%= r[0] %><small><%= r[1] %></small></span><span>₹<%= fmt(r[2]) %></span></div>
+            <% }) %>
+            <div class="r"><span>Mentors<small>Earned / paid / pending request / owed</small></span>
+                <span>₹<%= fmt(finance.mentorEarned) %> / ₹<%= fmt(finance.mentorPaid) %> / ₹<%= fmt(finance.mentorRequested) %> / ₹<%= fmt(finance.mentorOwed) %></span></div>
+        </div>
+        <p class="fn-note">Mentor earnings and the platform fee always come from the original session price. Convenience fees never reach mentors.</p>
+    </div>
+
+    <div class="card fn-pad">
+        <h4>Move profit to company account</h4>
+        <ul class="fn-steps">
+            <li><b>1</b><span>Transfer from your Razorpay-settled bank to the company account.</span></li>
+            <li><b>2</b><span>Enter the amount and bank reference here to record it.</span></li>
+        </ul>
+
+        <div class="fn-form">
+            <div>
+                <label class="label" for="coAmount">Amount</label>
+                <div class="fn-amt">
+                    <span>₹</span>
+                    <input id="coAmount" class="input" type="number" min="1" step="0.01" max="<%= safe %>" placeholder="0.00">
+                    <button type="button" class="btn btn-ghost btn-sm" id="coMax" data-max="<%= safe %>">Use max</button>
+                </div>
+            </div>
+            <div>
+                <label class="label" for="coRef">Bank or UTR reference</label>
+                <input id="coRef" class="input" placeholder="e.g. UTR123456789">
+            </div>
+            <div>
+                <label class="label" for="coNote">Note (optional)</label>
+                <input id="coNote" class="input" placeholder="What is this payout for?">
+            </div>
+            <div class="fn-lock"><i class="fas fa-lock"></i><span>The system blocks anything above ₹<%= fmt(safe) %>. A recorded payout cannot be undone.</span></div>
+            <button type="button" class="btn btn-primary" id="coBtn" <%= safe > 0 ? '' : 'disabled' %>><i class="fas fa-building-columns"></i> Record payout</button>
+        </div>
+
+        <div class="fn-sync">
+            <p>Pull the real fees from Razorpay to replace estimated charges.</p>
+            <button type="button" class="btn btn-ghost" id="syncBtn"><i class="fas fa-rotate"></i> Sync Razorpay fees</button>
+        </div>
     </div>
 </div>
 
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-bottom:16px;">
-    <div class="card" style="padding:18px;">
-        <h4 style="margin-bottom:10px;">Top mentors (completed sessions)</h4>
+<!-- ============ Tables ============ -->
+<div class="fn-tables">
+    <div class="card">
+        <div class="card-head"><div><h3>Top mentors</h3><p>Completed sessions</p></div></div>
         <% if (topMentors.length) { %>
         <div class="table-wrap"><table>
             <thead><tr><th>Mentor</th><th>Sessions</th><th>Mentor earned</th><th>Platform fee</th></tr></thead>
             <tbody>
             <% topMentors.forEach(function (m) { %>
-                <tr><td><b><%= m.name %></b><br><span class="muted small"><%= m.email %></span></td>
-                    <td><%= m.sessions %></td><td>₹<%= fmt(m.earned) %></td><td>₹<%= fmt(m.fee) %></td></tr>
+                <tr>
+                    <td><b><%= m.name %></b><div class="muted small"><%= m.email %></div></td>
+                    <td class="num"><%= m.sessions %></td>
+                    <td class="num">₹<%= fmt(m.earned) %></td>
+                    <td class="num">₹<%= fmt(m.fee) %></td>
+                </tr>
             <% }) %>
             </tbody>
         </table></div>
-        <% } else { %><p class="muted small">No completed sessions yet.</p><% } %>
+        <% } else { %><div class="fn-empty"><i class="fas fa-user-clock"></i>No completed sessions yet.</div><% } %>
     </div>
 
-    <div class="card" style="padding:18px;">
-        <h4 style="margin-bottom:10px;">Company payout history</h4>
+    <div class="card">
+        <div class="card-head"><div><h3>Company payout history</h3><p>Money moved to the company account</p></div></div>
         <% if (payouts.length) { %>
         <div class="table-wrap"><table>
-            <thead><tr><th>Date</th><th>Amount</th><th>Reference</th><th>By</th></tr></thead>
+            <thead><tr><th>Date</th><th>Reference</th><th>By</th><th>Amount</th></tr></thead>
             <tbody>
             <% payouts.forEach(function (p) { %>
-                <tr><td class="muted small"><%= new Date(p.paidAt).toLocaleString('en-GB') %></td>
-                    <td><b>₹<%= fmt(p.amount) %></b></td><td class="mono"><%= p.reference %></td>
-                    <td class="muted small"><%= p.paidBy %></td></tr>
+                <tr>
+                    <td class="muted small"><%= new Date(p.paidAt).toLocaleString('en-GB') %></td>
+                    <td class="mono"><%= p.reference %></td>
+                    <td class="muted small"><%= p.paidBy %></td>
+                    <td class="num">₹<%= fmt(p.amount) %></td>
+                </tr>
             <% }) %>
             </tbody>
         </table></div>
-        <% } else { %><p class="muted small">No company payouts yet.</p><% } %>
+        <% } else { %><div class="fn-empty"><i class="fas fa-receipt"></i>No company payouts yet.</div><% } %>
     </div>
 </div>
 
+</div>
+
 <script>
-    async function post(url, body) {
+    async function post(url, body, btn) {
+        if (btn) btn.disabled = true;
         try {
             var res = await fetch(url, {
                 method: 'POST',
@@ -119,12 +286,17 @@
             });
             var data = await res.json().catch(function () { return {}; });
             alert(data.message || (res.ok ? 'Done' : 'Failed'));
-            if (res.ok) location.reload();
+            if (res.ok) { location.reload(); return; }
         } catch (e) { alert('Network error. Please try again.'); }
+        if (btn) btn.disabled = false;
     }
 
     document.getElementById('syncBtn').addEventListener('click', function () {
-        post('/admin/finance/sync-fees');
+        post('/admin/finance/sync-fees', {}, this);
+    });
+
+    document.getElementById('coMax').addEventListener('click', function () {
+        document.getElementById('coAmount').value = this.getAttribute('data-max');
     });
 
     document.getElementById('coBtn').addEventListener('click', function () {
@@ -134,7 +306,7 @@
         if (!confirm('Record ₹' + amount + ' as taken by the company? This cannot be undone.')) return;
         post('/admin/finance/company-payout', {
             amount: amount, reference: ref, note: document.getElementById('coNote').value
-        });
+        }, this);
     });
 </script>
 
