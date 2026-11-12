@@ -462,7 +462,7 @@ export default function SessionBoard() {
   useEffect(() => {
     let cancelled = false;
     setQuote(null);
-    api(`/payments/fee-quote?amount=${price}`)
+    api(`/payments/fee-quote?duration=${f.minutes}&mode=${f.mode}`)
       .then((q2) => {
         if (!cancelled) setQuote(q2);
       })
@@ -762,7 +762,11 @@ export default function SessionBoard() {
 
       const order = await api(ENDPOINTS.createOrder, {
         method: "POST",
-        body: { amount: price },
+        body: {
+          duration: f.minutes,
+          mode: f.mode,
+          topic: companyName,
+        },
       });
 
       const serverCheckoutAmount = Number(

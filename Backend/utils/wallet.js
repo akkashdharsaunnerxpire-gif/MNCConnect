@@ -18,7 +18,6 @@ const computeWallet = (payments, reserved = 0, now = new Date()) => {
     completedCount: 0,
     pendingCount: 0,
   };
-
   for (const p of payments) {
     // refunded / cancelled / unpaid money is never the mentor's
     if (p.status && p.status !== "paid") continue;
@@ -32,7 +31,9 @@ const computeWallet = (payments, reserved = 0, now = new Date()) => {
       continue;
     }
 
-    const releasedAt = new Date(p.releasedAt || p.sessionEndsAt || p.paidAt || now);
+    const releasedAt = new Date(
+      p.releasedAt || p.sessionEndsAt || p.paidAt || now,
+    );
     wallet.lifetime += earning;
     wallet.completedCount += 1;
 
@@ -61,4 +62,10 @@ const splitAmount = (amountRupees, percent = PLATFORM_FEE_PERCENT) => {
   return { fee: feePaise / 100, earning: earningPaise / 100 };
 };
 
-module.exports = { PLATFORM_FEE_PERCENT, round2, isReleased, computeWallet, splitAmount };
+module.exports = {
+  PLATFORM_FEE_PERCENT,
+  round2,
+  isReleased,
+  computeWallet,
+  splitAmount,
+};

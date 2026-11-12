@@ -18,6 +18,7 @@ const mentorPanelRoutes = require("./routes/mentorPanelRoutes");
 const fresherBookingRoutes = require("./routes/fresherBookingRoutes");
 const instructionRoutes = require("./routes/instructionRoutes");
 const chatRoutes = require("./routes/chatRoutes");
+const whatsappWebhook = require("./routes/whatsappWebhook");
 const {
   adminRouter: adminCompanyRoutes,
   publicRouter: publicCompanyRoutes,
@@ -100,6 +101,7 @@ app.post(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+app.use("/api/whatsapp/webhook", whatsappWebhook);
 
 // ================= SESSION =================
 

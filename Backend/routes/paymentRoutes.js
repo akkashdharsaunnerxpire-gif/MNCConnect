@@ -14,25 +14,13 @@ const {
 } = require("../controllers/paymentController");
 
 // Fee quote
-router.get("/fee-quote", quoteFee);
+router.get("/fee-quote", requireAuth("fresher"), quoteFee);
+router.post("/create-order", requireAuth("fresher"), createOrder);
+router.post("/verify-payment", requireAuth("fresher"), verifyPayment);
+router.post("/failed", requireAuth("fresher"), markPaymentFailed);
+router.post("/pay-with-wallet", requireAuth("fresher"), payWithWallet);
 
-// Razorpay
-router.post("/create-order", createOrder);
-router.post("/verify-payment", verifyPayment);
-router.post("/failed", markPaymentFailed);
-
-// Wallet
-router.post(
-  "/pay-with-wallet",
-  requireAuth("fresher"),
-  payWithWallet
-);
-
-// Razorpay Webhook
-router.post(
-  "/webhook",
-  express.raw({ type: "application/json" }),
-  razorpayWebhook
-);
+// NO requireAuth here (Razorpay calls it, signature protects it)
+router.post("/webhook", express.raw({ type: "application/json" }), razorpayWebhook);
 
 module.exports = router;

@@ -13,6 +13,8 @@ const Payment = require("../models/Payment");
 const Mentor = require("../models/Mentor");
 const Fresher = require("../models/Fresher");
 const { sendMail, sessionEmail } = require("../utils/mailer");
+const { expectedPrice, MAX_GROUP } = require("../utils/sessionPrice");
+const { creditWallet } = require("../utils/walletLedger");
 const { sendSessionWhatsApp } = require("../utils/whatsapp");
 const SITE_URL = (
   process.env.SITE_URL || "https://mncconnect.onrender.com"
@@ -76,17 +78,6 @@ const UNCONFIRMED_ACTION =
 // closed (expired / missed / cancelled) + refunded bookings are deleted after this
 const CLOSED_RETENTION_MS =
   (Number(process.env.CLOSED_RETENTION_HOURS) || 24) * 60 * 60 * 1000;
-// ---- pricing ----
-const RATE_PER_HOUR = Number(process.env.SESSION_RATE_PER_HOUR) || 400;
-// group: price PER PERSON per hour (30 min = half)
-const GROUP_RATE_PER_HOUR = Number(process.env.GROUP_RATE_PER_HOUR) || 50;
-const MAX_GROUP = Number(process.env.MAX_GROUP_MEMBERS) || 60; // college batch = up to 60
-
-const expectedPrice = (minutes, mode = "single") =>
-  Math.round(
-    ((mode === "group" ? GROUP_RATE_PER_HOUR : RATE_PER_HOUR) * minutes) / 60,
-  );
-
 /* ============================ HELPERS ============================ */
 
 let razorpay = null;
@@ -593,17 +584,34 @@ const refundPayment = async (payment, reason = "", options = {}) => {
     ).catch(() => {});
   };
 
-  const creditWallet = async () => {
-    await Fresher.updateOne(
-      { _id: before.fresher },
-      { $inc: { walletBalance: amount, totalRefunds: amount } },
-    );
+  const creditWalletNow = async () => {
+    // wallet-paid payment -> back to the SAME buckets it came from.
+    // Razorpay-paid (or old wallet payments without breakdown) -> refundable cash.
+    const wb = before.walletBreakdown || {};
+    const hasBreakdown =
+      isWalletPayment(before) &&
+      (Number(wb.bonus) > 0 ||
+        Number(wb.referral) > 0 ||
+        Number(wb.refundable) > 0);
+
+    const credit = hasBreakdown
+      ? { bonus: wb.bonus, referral: wb.referral, refundable: wb.refundable }
+      : { refundable: amount };
+
+    await creditWalletNow(before.fresher, credit);
+
+    // totalRefunds = lifetime stat of CASH refunded only
+    if (Number(credit.refundable) > 0) {
+      await Fresher.updateOne(
+        { _id: before.fresher },
+        { $inc: { totalRefunds: Number(credit.refundable) } },
+      );
+    }
     emitToUser(String(before.fresher), "wallet:updated", { amount });
   };
-
   try {
     if (toWallet) {
-      await creditWallet(); // money is given from here: NEVER unlock after this line
+      await creditWalletNow(); // money is given from here: NEVER unlock after this line
       return "refunded";
     }
 
@@ -2308,10 +2316,6 @@ exports.startSchedulers = (app) => {
           });
         }
       }
-      // 9) closed + refunded bookings -> delete after 24h (storage saving)
-      //    - refundStatus must be "refunded" (a failed refund keeps the booking so the retry job can finish)
-      //    - Payment records are NEVER deleted (money proof)
-      //    - "disputed" is not deleted (evidence)
       const oldClosed = await Booking.find({
         status: { $in: ["expired", "missed", "cancelled"] },
         refundStatus: "refunded",
