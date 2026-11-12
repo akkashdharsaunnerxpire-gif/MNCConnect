@@ -83,6 +83,7 @@ const SkeletonRow = () => (
 
 /**
  * Popup to find ONE employee of ONE company (name / mentor ID like ARUN#4356356).
+ * Shows only a few employees + the total count. The rest are found by searching.
  * Props:
  *   companyName : only this company's employees are shown
  *   onPick(m)   : called when an employee is selected
@@ -91,6 +92,7 @@ const SkeletonRow = () => (
 export default function FindEmployeeModal({ companyName, onPick, onClose }) {
   const [q, setQ] = useState("");
   const [list, setList] = useState([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activeIdx, setActiveIdx] = useState(-1);
@@ -124,12 +126,15 @@ export default function FindEmployeeModal({ companyName, onPick, onClose }) {
           `/mentor/company-search/${encodeURIComponent(companyName)}?q=${encodeURIComponent(qRef.current)}`,
         );
         if (id !== reqRef.current) return;
-        setList(onlyThisCompany(Array.isArray(r?.mentors) ? r.mentors : []));
+        const arr = onlyThisCompany(Array.isArray(r?.mentors) ? r.mentors : []);
+        setList(arr);
+        setTotal(Number(r?.total) || arr.length);
         setError("");
       } catch (e) {
         if (id !== reqRef.current) return;
         if (!silent) {
           setList([]);
+          setTotal(0);
           setError(e.message || "Could not load employees");
         }
       } finally {
@@ -221,6 +226,7 @@ export default function FindEmployeeModal({ companyName, onPick, onClose }) {
   };
 
   const refreshing = loading && list.length > 0; // old list stays, dimmed
+  const hiddenCount = Math.max(0, total - list.length);
 
   return createPortal(
     <div
@@ -297,7 +303,7 @@ export default function FindEmployeeModal({ companyName, onPick, onClose }) {
           </label>
         </div>
 
-        {/* ---------- section label + progress line ---------- */}
+        {/* ---------- count + progress line ---------- */}
         <div className="relative mt-4 px-6">
           <div className="flex items-center justify-between pb-2">
             <p
@@ -307,8 +313,8 @@ export default function FindEmployeeModal({ companyName, onPick, onClose }) {
               {loading
                 ? "Searching…"
                 : keyword
-                  ? `${list.length} ${list.length === 1 ? "result" : "results"} for “${keyword}”`
-                  : `Employees · ${list.length}`}
+                  ? `${total} ${total === 1 ? "result" : "results"} for “${keyword}”`
+                  : `${total} ${total === 1 ? "employee" : "employees"} at ${companyName}`}
             </p>
           </div>
           <div className="relative h-px w-full overflow-hidden bg-neutral-200">
@@ -359,82 +365,97 @@ export default function FindEmployeeModal({ companyName, onPick, onClose }) {
               </p>
             </div>
           ) : (
-            <ul className="space-y-0.5">
-              {list.map((m, i) => {
-                const role = [m.designation, m.department]
-                  .filter(Boolean)
-                  .join(" · ");
-                const active = i === activeIdx;
+            <>
+              <ul className="space-y-0.5">
+                {list.map((m, i) => {
+                  const role = [m.designation, m.department]
+                    .filter(Boolean)
+                    .join(" · ");
+                  const active = i === activeIdx;
 
-                return (
-                  <li key={m.id}>
-                    <button
-                      type="button"
-                      data-idx={i}
-                      onClick={() => onPick(m)}
-                      onMouseEnter={() => setActiveIdx(i)}
-                      className={`group flex w-full items-center gap-3.5 rounded-xl px-3 py-3 text-left transition ${
-                        active ? "bg-neutral-100" : "hover:bg-neutral-50"
-                      }`}
-                    >
-                      <Avatar m={m} />
+                  return (
+                    <li key={m.id}>
+                      <button
+                        type="button"
+                        data-idx={i}
+                        onClick={() => onPick(m)}
+                        onMouseEnter={() => setActiveIdx(i)}
+                        className={`group flex w-full items-center gap-3.5 rounded-xl px-3 py-3 text-left transition ${
+                          active ? "bg-neutral-100" : "hover:bg-neutral-50"
+                        }`}
+                      >
+                        <Avatar m={m} />
 
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-2">
-                          <span className="truncate text-[15px] font-semibold text-black">
-                            <Highlight text={m.name} query={keyword} />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-2">
+                            <span className="truncate text-[15px] font-semibold text-black">
+                              <Highlight text={m.name} query={keyword} />
+                            </span>
+                            {m.isOnline && (
+                              <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-emerald-600">
+                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                Online
+                              </span>
+                            )}
                           </span>
-                          {m.isOnline && (
-                            <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-emerald-600">
-                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                              Online
+
+                          <span className="mt-0.5 block truncate text-sm text-neutral-500">
+                            {role || "Employee"}
+                          </span>
+
+                          {/* mentor ID: visible on every screen size */}
+                          {m.code && (
+                            <span className="mt-1 inline-block rounded-md border border-neutral-300 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-neutral-700">
+                              <Highlight text={m.code} query={keyword} />
                             </span>
                           )}
                         </span>
 
-                        <span className="mt-0.5 block truncate text-sm text-neutral-500">
-                          {role || "Employee"}
+                        {/* right side meta (big screens) */}
+                        <span className="hidden shrink-0 items-center gap-2 md:flex">
+                          {m.yearsOfExperience > 0 && (
+                            <span className="rounded-md bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-600">
+                              {m.yearsOfExperience}{" "}
+                              {m.yearsOfExperience === 1 ? "yr" : "yrs"}
+                            </span>
+                          )}
+                          {m.languages?.length > 0 && (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-600">
+                              <Languages size={11} />
+                              {m.languages.slice(0, 2).join(", ")}
+                            </span>
+                          )}
                         </span>
 
-                        {/* mentor ID: visible on every screen size */}
-                        {m.code && (
-                          <span className="mt-1 inline-block rounded-md border border-neutral-300 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-neutral-700">
-                            <Highlight text={m.code} query={keyword} />
-                          </span>
-                        )}
-                      </span>
+                        <span
+                          className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-semibold transition ${
+                            active
+                              ? "bg-black text-white"
+                              : "border border-neutral-300 bg-white text-black group-hover:border-black group-hover:bg-black group-hover:text-white"
+                          }`}
+                        >
+                          Select
+                          <ArrowRight size={14} />
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
 
-                      {/* right side meta (big screens) */}
-                      <span className="hidden shrink-0 items-center gap-2 md:flex">
-                        {m.yearsOfExperience > 0 && (
-                          <span className="rounded-md bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-600">
-                            {m.yearsOfExperience}{" "}
-                            {m.yearsOfExperience === 1 ? "yr" : "yrs"}
-                          </span>
-                        )}
-                        {m.languages?.length > 0 && (
-                          <span className="inline-flex items-center gap-1 rounded-md bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-600">
-                            <Languages size={11} />
-                            {m.languages.slice(0, 2).join(", ")}
-                          </span>
-                        )}
-                      </span>
-
-                      <span
-                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-semibold transition ${
-                          active
-                            ? "bg-black text-white"
-                            : "border border-neutral-300 bg-white text-black group-hover:border-black group-hover:bg-black group-hover:text-white"
-                        }`}
-                      >
-                        Select
-                        <ArrowRight size={14} />
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+              {/* the rest are found by searching */}
+              {hiddenCount > 0 && (
+                <div className="mx-2 my-3 rounded-xl border border-dashed border-neutral-300 bg-neutral-50 px-4 py-4 text-center">
+                  <p className="text-sm font-semibold text-black">
+                    Showing {list.length} of {total}
+                  </p>
+                  <p className="mt-0.5 text-xs text-neutral-500">
+                    Type a name or ID in the search box to find the other{" "}
+                    {hiddenCount} {hiddenCount === 1 ? "employee" : "employees"}.
+                  </p>
+                </div>
+              )}
+            </>
           )}
         </div>
 

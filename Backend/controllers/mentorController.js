@@ -517,8 +517,9 @@ const searchCompanyMentors = async (req, res) => {
   try {
     const company = String(req.params.companyName || "").trim();
     const q = String(req.query.q || "").trim().slice(0, 40);
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const PAGE_SIZE = 30;
+    const LIMIT = 10;
+    const SELECT =
+      "name designation department profilePic mentorCode currentCompany yearsOfExperience languages";
 
     if (!company) {
       return res
@@ -542,49 +543,63 @@ const searchCompanyMentors = async (req, res) => {
       ];
     }
 
-    // real total (not limited to one page)
+    // real total of this company / this search
     const total = await Mentor.countDocuments(filter);
 
-    const list = await Mentor.find(filter)
-      .select(
-        "name designation department profilePic mentorCode currentCompany yearsOfExperience languages",
-      )
-      .sort({ name: 1, _id: 1 })
-      .skip((page - 1) * PAGE_SIZE)
-      .limit(PAGE_SIZE)
-      .lean();
-
     const online = req.app.get("onlineMentors");
+    const isOnlineId = (id) => {
+      const entry = online && online.get(String(id));
+      return Boolean(entry && (entry.size === undefined || entry.size > 0));
+    };
 
-    const mentors = list.map((m) => {
-      const entry = online && online.get(String(m._id));
-      return {
-        id: String(m._id),
-        name: m.name,
-        designation: m.designation || "",
-        department: m.department || "",
-        image: m.profilePic || "",
-        companyName: m.currentCompany || company,
-        code: m.mentorCode || "",
-        yearsOfExperience: m.yearsOfExperience || 0,
-        languages: m.languages || [],
-        isOnline: Boolean(entry && (entry.size === undefined || entry.size > 0)),
-      };
-    });
+    // online employees first, then the rest (A-Z). Only 10 in total.
+    let list = [];
 
-    return res.json({
-      success: true,
-      mentors,
-      total,
-      page,
-      pageSize: PAGE_SIZE,
-      hasMore: page * PAGE_SIZE < total,
-    });
+    if (online && online.size) {
+      const onlineIds = [...online.keys()].filter(
+        (id) => /^[a-f\d]{24}$/i.test(String(id)) && isOnlineId(id),
+      );
+      if (onlineIds.length) {
+        list = await Mentor.find({ ...filter, _id: { $in: onlineIds } })
+          .select(SELECT)
+          .sort({ name: 1, _id: 1 })
+          .limit(LIMIT)
+          .lean();
+      }
+    }
+
+    if (list.length < LIMIT) {
+      const rest = await Mentor.find({
+        ...filter,
+        _id: { $nin: list.map((m) => m._id) },
+      })
+        .select(SELECT)
+        .sort({ name: 1, _id: 1 })
+        .limit(LIMIT - list.length)
+        .lean();
+      list = [...list, ...rest];
+    }
+
+    const mentors = list.map((m) => ({
+      id: String(m._id),
+      name: m.name,
+      designation: m.designation || "",
+      department: m.department || "",
+      image: m.profilePic || "",
+      companyName: m.currentCompany || company,
+      code: m.mentorCode || "",
+      yearsOfExperience: m.yearsOfExperience || 0,
+      languages: m.languages || [],
+      isOnline: isOnlineId(m._id),
+    }));
+
+    return res.json({ success: true, mentors, total, limit: LIMIT });
   } catch (error) {
     console.error("searchCompanyMentors error:", error);
     return res.status(500).json({ success: false, message: "Search failed" });
   }
 };
+
 module.exports = {
   getMentorProfile,
   getMentorsByCompany,
