@@ -517,6 +517,8 @@ const searchCompanyMentors = async (req, res) => {
   try {
     const company = String(req.params.companyName || "").trim();
     const q = String(req.query.q || "").trim().slice(0, 40);
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const PAGE_SIZE = 30;
 
     if (!company) {
       return res
@@ -540,12 +542,16 @@ const searchCompanyMentors = async (req, res) => {
       ];
     }
 
+    // real total (not limited to one page)
+    const total = await Mentor.countDocuments(filter);
+
     const list = await Mentor.find(filter)
       .select(
         "name designation department profilePic mentorCode currentCompany yearsOfExperience languages",
       )
-      .sort({ name: 1 })
-      .limit(30)
+      .sort({ name: 1, _id: 1 })
+      .skip((page - 1) * PAGE_SIZE)
+      .limit(PAGE_SIZE)
       .lean();
 
     const online = req.app.get("onlineMentors");
@@ -566,16 +572,19 @@ const searchCompanyMentors = async (req, res) => {
       };
     });
 
-    // online employees first
-    mentors.sort((a, b) => Number(b.isOnline) - Number(a.isOnline));
-
-    return res.json({ success: true, mentors });
+    return res.json({
+      success: true,
+      mentors,
+      total,
+      page,
+      pageSize: PAGE_SIZE,
+      hasMore: page * PAGE_SIZE < total,
+    });
   } catch (error) {
     console.error("searchCompanyMentors error:", error);
     return res.status(500).json({ success: false, message: "Search failed" });
   }
 };
-
 module.exports = {
   getMentorProfile,
   getMentorsByCompany,
