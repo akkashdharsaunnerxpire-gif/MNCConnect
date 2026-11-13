@@ -332,29 +332,70 @@ const passwordChangedEmail = (mentor) => {
 // ============================================================
 // OTP VERIFICATION EMAIL
 // ============================================================
+// ============================================================
+// OTP VERIFICATION EMAIL (Gmail-style digit boxes)
+// ============================================================
 const otpVerificationEmail = (name, otp) => {
-  const subject = "Verify your MNCConnect account";
-  const text = `Hi ${name},\n\nYour OTP for MNCConnect verification is: ${otp}\n\nThis OTP is valid for 10 minutes. Do not share this with anyone.\n\nTeam MNCConnect`;
-  
-  const html = layout({
-    preheader: "Your MNCConnect verification code is inside.",
-    heading: `Verify your email, ${escapeHtml(name)}`,
-    paragraphsHtml: `
-      <p style="margin:0 0 14px;font-size:15px;line-height:1.7;color:#334155;">
-        Thank you for signing up with MNCConnect. Please use the following OTP to verify your email address.
-      </p>
-      <div style="margin:24px 0;text-align:center;">
-        <span style="display:inline-block;padding:12px 32px;font-size:32px;font-weight:800;letter-spacing:8px;color:#1d4ed8;background:#eff6ff;border-radius:12px;border:1px dashed #93c5fd;">
-          ${otp}
-        </span>
-      </div>
-      <p style="margin:0 0 14px;font-size:15px;line-height:1.7;color:#334155;">
-        This OTP is valid for <b>10 minutes</b>. If you didn't create this account, ignore this email.
-      </p>
-    `,
-    listItems: [],
-    footerNote: "This is an automated message, please do not reply.",
-  });
+  const first = String(name || "there").trim().split(" ")[0] || "there";
+  const code = String(otp == null ? "" : otp).trim();
+  const subject = `Your Verification Code for MNCConnect`;
+
+  const text = [
+    `Dear ${first},`,
+    "",
+    `Greetings! Your verification code for MNCConnect is ${code}. Please keep this code confidential and do not share it with anyone.`,
+    "",
+    "This code is valid for 10 minutes.",
+    "",
+    "Thank you,",
+    "Team MNCConnect",
+  ].join("\n");
+
+  // One box per digit
+  const digitBoxes = code
+    .split("")
+    .map(
+      (d) => `<td style="padding:0 3px;">
+        <div style="width:34px;height:44px;line-height:44px;text-align:center;background:#ffffff;border:1px solid #cbd5e1;border-radius:6px;font-size:24px;font-weight:700;color:#0f172a;font-family:Arial,Helvetica,sans-serif;">${escapeHtml(d)}</div>
+      </td>`
+    )
+    .join("");
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#1e293b;">
+  <span style="display:none;max-height:0;overflow:hidden;opacity:0;">Your MNCConnect verification code is ${escapeHtml(code)}</span>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;padding:24px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+
+        <!-- Code card -->
+        <tr><td style="background:#eef2f7;border-radius:16px;padding:22px 24px;">
+          <div style="font-size:15px;color:#334155;margin-bottom:14px;">Code Requested</div>
+          <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 20px;">
+            <tr>${digitBoxes}</tr>
+          </table>
+          <div style="font-size:13px;color:#64748b;">Valid for 10 minutes</div>
+        </td></tr>
+
+        <!-- Body -->
+        <tr><td style="padding:24px 4px 8px;font-size:15px;line-height:1.7;color:#1e293b;">
+          <p style="margin:0 0 18px;">Dear ${escapeHtml(first)},</p>
+          <p style="margin:0 0 18px;">Greetings! Your verification code for MNCConnect is <b>${escapeHtml(code)}</b>. Please keep this code confidential and do not share it with anyone.</p>
+          <p style="margin:0 0 18px;">If you didn't create this account, you can safely ignore this email.</p>
+          <p style="margin:0;">Thank you,<br>Team MNCConnect</p>
+        </td></tr>
+
+        <tr><td style="padding:20px 4px 0;font-size:12px;color:#94a3b8;">
+          This is an automated message, please do not reply. &copy; ${new Date().getFullYear()} MNCConnect
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
 
   return { subject, text, html };
 };

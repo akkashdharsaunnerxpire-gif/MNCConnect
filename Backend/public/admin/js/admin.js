@@ -50,7 +50,15 @@
       mCancel = $('modalCancel'), mOk = $('modalOk');
   var pending = null;
 
+  
   function openModal(opts) {
+    // Prevent crash if modal HTML is missing
+    if (!modal || !mTitle || !mMsg || !mReasonWrap ||
+        !mReason || !mCancel || !mOk) {
+      toast('error', 'Confirmation modal is missing from this page.');
+      return;
+    }
+
     pending = opts;
     mTitle.textContent = opts.title;
     mMsg.textContent = opts.message;
