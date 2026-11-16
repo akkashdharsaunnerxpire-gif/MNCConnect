@@ -86,6 +86,81 @@ const isGroupFriendOf = (b, userId) =>
   b.mode === "group" && String(b.hostId) !== String(userId);
 
 /* =========================================================================
+   SKELETON  (shown while the bookings are loading)
+   Same layout as the real card so nothing jumps when data arrives
+========================================================================= */
+
+const Bone = ({ className = "" }) => (
+  <div className={`animate-pulse rounded-md bg-slate-200 ${className}`} />
+);
+
+const BookingCardSkeleton = () => (
+  <div
+    className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm"
+    aria-hidden="true"
+  >
+    <div className="flex flex-col gap-5 p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between">
+      {/* left: icon + details */}
+      <div className="flex min-w-0 flex-1 gap-4">
+        <Bone className="h-14 w-14 shrink-0 !rounded-2xl" />
+        <div className="min-w-0 flex-1">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <Bone className="h-5 w-40 sm:w-52" />
+            <Bone className="h-6 w-24 !rounded-full" />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Bone className="h-4 w-32" />
+            <Bone className="h-4 w-36" />
+            <Bone className="h-4 w-28" />
+            <Bone className="h-4 w-40" />
+          </div>
+          <Bone className="mt-4 h-4 w-full max-w-sm" />
+        </div>
+      </div>
+
+      {/* right: buttons */}
+      <div className="flex shrink-0 flex-col gap-2 lg:w-56">
+        <Bone className="h-11 w-full !rounded-xl" />
+        <Bone className="h-11 w-full !rounded-xl" />
+      </div>
+    </div>
+
+    {/* stepper */}
+    <div className="mx-3 mb-4 sm:mx-6">
+      <div className="mx-auto flex max-w-2xl">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="flex min-w-0 flex-1 flex-col items-center">
+            <Bone className="h-7 w-7 !rounded-full" />
+            <Bone className="mt-2 h-3 w-14" />
+            <Bone className="mt-1.5 h-2.5 w-16" />
+          </div>
+        ))}
+      </div>
+    </div>
+
+    {/* footer */}
+    <div className="flex justify-between border-t border-slate-100 bg-slate-50 px-5 py-3 sm:px-6">
+      <Bone className="h-3.5 w-40" />
+      <Bone className="h-3.5 w-16" />
+    </div>
+  </div>
+);
+
+const BookingsSkeleton = ({ count = 3 }) => (
+  <div
+    className="space-y-5"
+    role="status"
+    aria-busy="true"
+    aria-label="Loading bookings"
+  >
+    {Array.from({ length: count }).map((_, i) => (
+      <BookingCardSkeleton key={i} />
+    ))}
+    <span className="sr-only">Loading bookings…</span>
+  </div>
+);
+
+/* =========================================================================
    BOOKING STEPPER  (Requested -> Accepted -> Session -> Completed)
    Theme: BLUE + WHITE   |   COMPACT size
 ========================================================================= */
@@ -360,6 +435,10 @@ const MyBookings = () => {
   const bookings = data?.bookings || [];
   const bookingsRef = useRef([]);
   bookingsRef.current = bookings;
+
+  // first load only: skeleton shows until the first data arrives.
+  // (background reloads keep the old cards on screen -> no flicker)
+  const showSkeleton = loading && !data;
 
   const markFinished = (ids) => {
     const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
@@ -737,8 +816,8 @@ const MyBookings = () => {
           </div>
           <div className="flex gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
             {[
-              ["upcoming", `Upcoming (${upcoming.length})`],
-              ["past", `Past (${past.length})`],
+              ["upcoming", showSkeleton ? "Upcoming" : `Upcoming (${upcoming.length})`],
+              ["past", showSkeleton ? "Past" : `Past (${past.length})`],
             ].map(([k, l]) => (
               <button
                 key={k}
@@ -761,10 +840,8 @@ const MyBookings = () => {
           </div>
         )}
 
-        {loading ? (
-          <div className="flex justify-center py-24">
-            <Loader2 className="animate-spin text-blue-600" />
-          </div>
+        {showSkeleton ? (
+          <BookingsSkeleton count={3} />
         ) : list.length === 0 ? (
           <div className="flex min-h-[360px] flex-col items-center justify-center rounded-3xl border border-slate-200 bg-white px-6 text-center shadow-sm">
             <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
