@@ -32,6 +32,7 @@ import { useAuth } from "../context/AuthContext";
 import { ThemeProvider } from "../context/ThemeContext";
 import JoinGroup from "../FresherDashboard/pages/JoinGroup";
 import LaptopOnlyGuard from "../Commoncomponents/LaptopOnlyGuard";
+import SiteAssistant from "../Commoncomponents/SiteAssistant";
 
 // Fresher auth pages (lazy, only loaded when opened)
 const Login = lazy(
@@ -148,6 +149,7 @@ const FresherLayout = () => (
     <Header />
     <ChatAlertHost role="fresher" getMyId={getUserId} />
     <Outlet />
+    <SiteAssistant />
   </div>
 );
 

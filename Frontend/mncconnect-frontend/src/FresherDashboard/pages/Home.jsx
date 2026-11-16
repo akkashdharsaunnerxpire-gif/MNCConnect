@@ -1198,12 +1198,13 @@ const BrowseMentors = () => {
         </div>
       </section>
 
-      {/* floating "Search" button (appears after you scroll past the search card) */}
+      {/* floating "Search" button (appears after you scroll past the search card).
+          bottom-24 keeps it ABOVE the MNC Assistant chat bubble (bottom-5). */}
       <button
         type="button"
         onClick={goToSearch}
         aria-label="Go to search"
-        className={`fixed bottom-6 right-6 z-40 inline-flex items-center gap-2 rounded-full bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-xl shadow-blue-300/60 transition-all duration-300 hover:bg-blue-700 active:scale-95 ${
+        className={`fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-xl shadow-blue-300/60 transition-all duration-300 hover:bg-blue-700 active:scale-95 ${
           showFab
             ? "translate-y-0 opacity-100"
             : "pointer-events-none translate-y-6 opacity-0"
@@ -1539,7 +1540,7 @@ const CompanyCard = ({ company, index, query }) => {
         <CoverImage company={company} />
         <div className="absolute inset-0 bg-gradient-to-t from-slate-900/35 to-transparent" />
         <div className="absolute right-3 top-3">
-        <OnlineBadge count={company.onlineCount || 0} variant="inline" />
+          <OnlineBadge count={company.onlineCount || 0} variant="inline" />
         </div>
       </div>
 

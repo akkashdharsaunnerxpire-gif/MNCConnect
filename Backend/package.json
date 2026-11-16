@@ -11,6 +11,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
     "cloudinary": "^2.10.1",
@@ -21,7 +22,7 @@
     "dotenv": "^17.4.2",
     "ejs": "^6.0.1",
     "express": "^5.2.1",
-    "express-rate-limit": "^8.7.1",
+    "express-rate-limit": "^8.7.4",
     "express-session": "^1.19.0",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",

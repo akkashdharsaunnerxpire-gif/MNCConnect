@@ -18,6 +18,7 @@ const mentorPanelRoutes = require("./routes/mentorPanelRoutes");
 const fresherBookingRoutes = require("./routes/fresherBookingRoutes");
 const instructionRoutes = require("./routes/instructionRoutes");
 const chatRoutes = require("./routes/chatRoutes");
+const assistantRoutes = require("./routes/assistantRoute");   // ← singular (route)
 const whatsappWebhook = require("./routes/whatsappWebhook");
 const {
   adminRouter: adminCompanyRoutes,
@@ -156,6 +157,7 @@ app.get("/health", (req, res) => {
 
 app.use("/api/auth", authRoutes);
 app.use("/api/chat", chatRoutes);
+app.use("/api/assistant", assistantRoutes);   
 
 // Booking router FIRST so it owns PATCH /api/session/session-requests/:id
 app.use("/api", fresherBookingRoutes);
