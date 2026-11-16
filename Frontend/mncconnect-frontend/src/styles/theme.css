@@ -1,0 +1,520 @@
+/* =====================================================================
+   MNCConnect theme  (light = soft white + blue accent | dark = deep navy + blue accent)
+   - Re-points Tailwind's colour palette to CSS variables,
+     so NO .jsx file needs to be edited and every fresher page follows the theme.
+   - FRESHER SIDE ONLY: active when <html> has class "fresher-ui" (added by FresherRoutes).
+     Dark mode = extra class "dark" on <html> (see ThemeContext.jsx). Mentor side is untouched.
+   - Import ONCE in main.jsx AFTER your index.css:   import "./styles/theme.css";
+   ===================================================================== */
+
+:root.fresher-ui {
+  color-scheme: light;
+  --page: #f8fafc;
+  --surface: #ffffff;
+  --ink: #0f172a;
+  --accent: #2563eb;
+  --track: #e2e8f0;
+
+  /* neutrals (slate, gray, zinc, neutral, stone) */
+  --t-n-50: 248 250 252;
+  --t-n-100: 241 245 249;
+  --t-n-200: 226 232 240;
+  --t-n-300: 203 213 225;
+  --t-n-400: 148 163 184;
+  --t-n-500: 100 116 139;
+  --t-n-600: 71 85 105;
+  --t-n-700: 51 65 85;
+  --t-n-800: 30 41 59;
+  --t-n-900: 15 23 42;
+  --t-n-950: 2 6 23;
+
+  /* accent (blue, indigo, sky, cyan, violet, purple, teal) = BLUE */
+  --t-a-50: 239 246 255;
+  --t-a-100: 219 234 254;
+  --t-a-200: 191 219 254;
+  --t-a-300: 147 197 253;
+  --t-a-400: 96 165 250;
+  --t-a-500: 59 130 246;
+  --t-a-600: 37 99 235;
+  --t-a-700: 29 78 216;
+  --t-a-800: 30 64 175;
+  --t-a-900: 30 58 138;
+  --t-a-950: 23 37 84;
+
+  --t-emerald-50: 236 253 245;
+  --t-emerald-100: 209 250 229;
+  --t-emerald-200: 167 243 208;
+  --t-emerald-300: 110 231 183;
+  --t-emerald-400: 52 211 153;
+  --t-emerald-500: 16 185 129;
+  --t-emerald-600: 5 150 105;
+  --t-emerald-700: 4 120 87;
+  --t-emerald-800: 6 95 70;
+  --t-emerald-900: 6 78 59;
+  --t-emerald-950: 2 44 34;
+
+  --t-green-50: 240 253 244;
+  --t-green-100: 220 252 231;
+  --t-green-200: 187 247 208;
+  --t-green-300: 134 239 172;
+  --t-green-400: 74 222 128;
+  --t-green-500: 34 197 94;
+  --t-green-600: 22 163 74;
+  --t-green-700: 21 128 61;
+  --t-green-800: 22 101 52;
+  --t-green-900: 20 83 45;
+  --t-green-950: 5 46 22;
+
+  --t-red-50: 254 242 242;
+  --t-red-100: 254 226 226;
+  --t-red-200: 254 202 202;
+  --t-red-300: 252 165 165;
+  --t-red-400: 248 113 113;
+  --t-red-500: 239 68 68;
+  --t-red-600: 220 38 38;
+  --t-red-700: 185 28 28;
+  --t-red-800: 153 27 27;
+  --t-red-900: 127 29 29;
+  --t-red-950: 69 10 10;
+
+  --t-amber-50: 255 251 235;
+  --t-amber-100: 254 243 199;
+  --t-amber-200: 253 230 138;
+  --t-amber-300: 252 211 77;
+  --t-amber-400: 251 191 36;
+  --t-amber-500: 245 158 11;
+  --t-amber-600: 217 119 6;
+  --t-amber-700: 180 83 9;
+  --t-amber-800: 146 64 14;
+  --t-amber-900: 120 53 15;
+  --t-amber-950: 69 26 3;
+
+  --t-yellow-50: 254 252 232;
+  --t-yellow-100: 254 249 195;
+  --t-yellow-200: 254 240 138;
+  --t-yellow-300: 253 224 71;
+  --t-yellow-400: 250 204 21;
+  --t-yellow-500: 234 179 8;
+  --t-yellow-600: 202 138 4;
+  --t-yellow-700: 161 98 7;
+  --t-yellow-800: 133 77 14;
+  --t-yellow-900: 113 63 18;
+  --t-yellow-950: 66 32 6;
+
+  --t-orange-50: 255 247 237;
+  --t-orange-100: 255 237 213;
+  --t-orange-200: 254 215 170;
+  --t-orange-300: 253 186 116;
+  --t-orange-400: 251 146 60;
+  --t-orange-500: 249 115 22;
+  --t-orange-600: 234 88 12;
+  --t-orange-700: 194 65 12;
+  --t-orange-800: 154 52 18;
+  --t-orange-900: 124 45 18;
+  --t-orange-950: 67 20 7;
+
+  --t-rose-50: 255 241 242;
+  --t-rose-100: 255 228 230;
+  --t-rose-200: 254 205 211;
+  --t-rose-300: 253 164 175;
+  --t-rose-400: 251 113 133;
+  --t-rose-500: 244 63 94;
+  --t-rose-600: 225 29 72;
+  --t-rose-700: 190 18 60;
+  --t-rose-800: 159 18 57;
+  --t-rose-900: 136 19 55;
+  --t-rose-950: 76 5 25;
+}
+
+:root.fresher-ui.dark {
+  color-scheme: dark;
+  --page: #0b1220;
+  --surface: #111a2e;
+  --ink: #eef2f9;
+  --accent: #93c5fd;
+  --track: #1e2a44;
+
+  /* neutral navy */
+  --t-n-50: 11 18 32;
+  --t-n-100: 22 32 54;
+  --t-n-200: 32 44 70;
+  --t-n-300: 46 60 90;
+  --t-n-400: 110 124 150;
+  --t-n-500: 140 153 176;
+  --t-n-600: 168 179 198;
+  --t-n-700: 198 206 220;
+  --t-n-800: 224 229 238;
+  --t-n-900: 240 243 248;
+  --t-n-950: 250 251 253;
+
+  /* blue accent: soft tints (50-300) so nothing glows */
+  --t-a-50: 16 28 48;
+  --t-a-100: 20 36 66;
+  --t-a-200: 26 50 92;
+  --t-a-300: 30 64 130;
+  --t-a-400: 96 165 250;
+  --t-a-500: 59 130 246;
+  --t-a-600: 37 99 235;
+  --t-a-700: 147 197 253;
+  --t-a-800: 191 219 254;
+  --t-a-900: 219 234 254;
+  --t-a-950: 239 246 255;
+
+  --t-emerald-50: 2 44 34;
+  --t-emerald-100: 6 78 59;
+  --t-emerald-200: 6 95 70;
+  --t-emerald-300: 4 120 87;
+  --t-emerald-400: 52 211 153;
+  --t-emerald-500: 16 185 129;
+  --t-emerald-600: 5 150 105;
+  --t-emerald-700: 110 231 183;
+  --t-emerald-800: 167 243 208;
+  --t-emerald-900: 209 250 229;
+  --t-emerald-950: 236 253 245;
+
+  --t-green-50: 5 46 22;
+  --t-green-100: 20 83 45;
+  --t-green-200: 22 101 52;
+  --t-green-300: 21 128 61;
+  --t-green-400: 74 222 128;
+  --t-green-500: 34 197 94;
+  --t-green-600: 22 163 74;
+  --t-green-700: 134 239 172;
+  --t-green-800: 187 247 208;
+  --t-green-900: 220 252 231;
+  --t-green-950: 240 253 244;
+
+  --t-red-50: 69 10 10;
+  --t-red-100: 127 29 29;
+  --t-red-200: 153 27 27;
+  --t-red-300: 185 28 28;
+  --t-red-400: 248 113 113;
+  --t-red-500: 239 68 68;
+  --t-red-600: 220 38 38;
+  --t-red-700: 252 165 165;
+  --t-red-800: 254 202 202;
+  --t-red-900: 254 226 226;
+  --t-red-950: 254 242 242;
+
+  --t-amber-50: 69 26 3;
+  --t-amber-100: 120 53 15;
+  --t-amber-200: 146 64 14;
+  --t-amber-300: 180 83 9;
+  --t-amber-400: 251 191 36;
+  --t-amber-500: 245 158 11;
+  --t-amber-600: 217 119 6;
+  --t-amber-700: 252 211 77;
+  --t-amber-800: 253 230 138;
+  --t-amber-900: 254 243 199;
+  --t-amber-950: 255 251 235;
+
+  --t-yellow-50: 66 32 6;
+  --t-yellow-100: 113 63 18;
+  --t-yellow-200: 133 77 14;
+  --t-yellow-300: 161 98 7;
+  --t-yellow-400: 250 204 21;
+  --t-yellow-500: 234 179 8;
+  --t-yellow-600: 202 138 4;
+  --t-yellow-700: 253 224 71;
+  --t-yellow-800: 254 240 138;
+  --t-yellow-900: 254 249 195;
+  --t-yellow-950: 254 252 232;
+
+  --t-orange-50: 67 20 7;
+  --t-orange-100: 124 45 18;
+  --t-orange-200: 154 52 18;
+  --t-orange-300: 194 65 12;
+  --t-orange-400: 251 146 60;
+  --t-orange-500: 249 115 22;
+  --t-orange-600: 234 88 12;
+  --t-orange-700: 253 186 116;
+  --t-orange-800: 254 215 170;
+  --t-orange-900: 255 237 213;
+  --t-orange-950: 255 247 237;
+
+  --t-rose-50: 76 5 25;
+  --t-rose-100: 136 19 55;
+  --t-rose-200: 159 18 57;
+  --t-rose-300: 190 18 60;
+  --t-rose-400: 251 113 133;
+  --t-rose-500: 244 63 94;
+  --t-rose-600: 225 29 72;
+  --t-rose-700: 253 164 175;
+  --t-rose-800: 254 205 211;
+  --t-rose-900: 255 228 230;
+  --t-rose-950: 255 241 242;
+}
+
+/* ---------- base ---------- */
+.fresher-ui body { background-color: var(--page); color: var(--ink); }
+.fresher-ui .bg-\[\#f4f7f9\] { background-color: var(--page); }
+
+/* progress ring on the profile page (hard-coded colours in the svg) */
+html.fresher-ui svg circle[stroke="#2563eb"] { stroke: var(--accent); }
+html.fresher-ui svg circle[stroke="#e2e8f0"] { stroke: var(--track); }
+
+/* =====================================================================
+   NO GLOW: coloured shadows (shadow-blue-500/20 etc.) become soft neutral shadows
+   ===================================================================== */
+.fresher-ui [class*="shadow-blue-"],
+.fresher-ui [class*="shadow-indigo-"],
+.fresher-ui [class*="shadow-sky-"],
+.fresher-ui [class*="shadow-cyan-"],
+.fresher-ui [class*="shadow-teal-"],
+.fresher-ui [class*="shadow-violet-"],
+.fresher-ui [class*="shadow-purple-"],
+.fresher-ui [class*="shadow-emerald-"],
+.fresher-ui [class*="shadow-green-"] {
+  --tw-shadow-color: rgb(15 23 42 / 0.1) !important;
+}
+.fresher-ui.dark [class*="shadow-blue-"],
+.fresher-ui.dark [class*="shadow-indigo-"],
+.fresher-ui.dark [class*="shadow-sky-"],
+.fresher-ui.dark [class*="shadow-cyan-"],
+.fresher-ui.dark [class*="shadow-teal-"],
+.fresher-ui.dark [class*="shadow-violet-"],
+.fresher-ui.dark [class*="shadow-purple-"],
+.fresher-ui.dark [class*="shadow-emerald-"],
+.fresher-ui.dark [class*="shadow-green-"] {
+  --tw-shadow-color: rgb(0 0 0 / 0.35) !important;
+}
+/* custom glow shadows like shadow-[0_0_40px_...] -> plain soft shadow in dark */
+.fresher-ui.dark [class*="shadow-["] {
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px -10px rgb(0 0 0 / 0.5) !important;
+}
+
+/* =====================================================================
+   DARK MODE  - things a palette swap alone cannot solve
+   (white / black surfaces, overlays, solid dark buttons, gradients)
+   ===================================================================== */
+.fresher-ui.dark .bg-white,
+.fresher-ui.dark .hover\:bg-white:hover,
+.fresher-ui.dark .group:hover .group-hover\:bg-white { background-color: var(--surface); }
+.fresher-ui.dark .border-white { border-color: var(--surface); }
+
+.fresher-ui.dark .bg-white\/40 { background-color: color-mix(in srgb, var(--surface) 40%, transparent); }
+.fresher-ui.dark .bg-white\/50 { background-color: color-mix(in srgb, var(--surface) 50%, transparent); }
+.fresher-ui.dark .bg-white\/60 { background-color: color-mix(in srgb, var(--surface) 60%, transparent); }
+.fresher-ui.dark .bg-white\/70 { background-color: color-mix(in srgb, var(--surface) 70%, transparent); }
+.fresher-ui.dark .bg-white\/90 { background-color: color-mix(in srgb, var(--surface) 90%, transparent); }
+.fresher-ui.dark .bg-white\/95 { background-color: color-mix(in srgb, var(--surface) 95%, transparent); }
+
+/* page / section gradients that end in white */
+.fresher-ui.dark [class*="bg-gradient-to-"].via-white { background-image: none; background-color: var(--surface); }
+.fresher-ui.dark .from-slate-900\/35 { background-image: linear-gradient(to top, rgb(0 0 0 / .45), transparent); }
+
+/* blue-tinted borders -> neutral (hover keeps a light blue hint) */
+.fresher-ui.dark .border-blue-50,   .fresher-ui.dark .border-blue-100,   .fresher-ui.dark .border-blue-200,   .fresher-ui.dark .border-blue-300,
+.fresher-ui.dark .border-indigo-50, .fresher-ui.dark .border-indigo-100, .fresher-ui.dark .border-indigo-200, .fresher-ui.dark .border-indigo-300,
+.fresher-ui.dark .border-sky-100,   .fresher-ui.dark .border-sky-200,
+.fresher-ui.dark .border-cyan-100,  .fresher-ui.dark .border-cyan-200,
+.fresher-ui.dark .border-teal-100,  .fresher-ui.dark .border-teal-200,
+.fresher-ui.dark .border-violet-100,.fresher-ui.dark .border-violet-200,
+.fresher-ui.dark .border-purple-100,.fresher-ui.dark .border-purple-200 { border-color: rgb(var(--t-n-200)); }
+
+.fresher-ui.dark .hover\:border-blue-200:hover,
+.fresher-ui.dark .hover\:border-blue-300:hover,
+.fresher-ui.dark .hover\:border-indigo-200:hover,
+.fresher-ui.dark .hover\:border-indigo-300:hover { border-color: rgb(var(--t-a-600)); }
+
+/* black / near-black text + borders */
+.fresher-ui.dark .text-black,
+.fresher-ui.dark .hover\:text-black:hover { color: var(--ink); }
+.fresher-ui.dark .border-black,
+.fresher-ui.dark .hover\:border-black:hover,
+.fresher-ui.dark .focus-within\:border-black:focus-within,
+.fresher-ui.dark .group:hover .group-hover\:border-black { border-color: #8493ad; }
+.fresher-ui.dark .focus-within\:ring-black\/10:focus-within,
+.fresher-ui.dark .ring-black\/10,
+.fresher-ui.dark .ring-black\/5 { --tw-ring-color: rgb(255 255 255 / .1); }
+
+/* solid dark buttons / chips (they keep white text) */
+.fresher-ui.dark .bg-black,
+.fresher-ui.dark .bg-slate-800,  .fresher-ui.dark .bg-slate-900,  .fresher-ui.dark .bg-slate-950,
+.fresher-ui.dark .bg-gray-800,   .fresher-ui.dark .bg-gray-900,   .fresher-ui.dark .bg-gray-950,
+.fresher-ui.dark .bg-zinc-800,   .fresher-ui.dark .bg-zinc-900,   .fresher-ui.dark .bg-zinc-950,
+.fresher-ui.dark .bg-neutral-800,.fresher-ui.dark .bg-neutral-900,.fresher-ui.dark .bg-neutral-950,
+.fresher-ui.dark .bg-stone-800,  .fresher-ui.dark .bg-stone-900,  .fresher-ui.dark .bg-stone-950 {
+  background-color: #1e2b47;
+}
+.fresher-ui.dark .hover\:bg-black:hover,
+.fresher-ui.dark .group:hover .group-hover\:bg-black,
+.fresher-ui.dark .hover\:bg-slate-800:hover,  .fresher-ui.dark .hover\:bg-slate-900:hover,  .fresher-ui.dark .hover\:bg-slate-950:hover,
+.fresher-ui.dark .hover\:bg-gray-800:hover,   .fresher-ui.dark .hover\:bg-gray-900:hover,   .fresher-ui.dark .hover\:bg-gray-950:hover,
+.fresher-ui.dark .hover\:bg-zinc-800:hover,   .fresher-ui.dark .hover\:bg-zinc-900:hover,   .fresher-ui.dark .hover\:bg-zinc-950:hover,
+.fresher-ui.dark .hover\:bg-neutral-800:hover,.fresher-ui.dark .hover\:bg-neutral-900:hover,.fresher-ui.dark .hover\:bg-neutral-950:hover,
+.fresher-ui.dark .hover\:bg-stone-800:hover,  .fresher-ui.dark .hover\:bg-stone-900:hover,  .fresher-ui.dark .hover\:bg-stone-950:hover {
+  background-color: #2a3b5e;
+}
+
+/* modal backdrops (every opacity, so no overlay turns into a light wash) */
+.fresher-ui.dark .bg-slate-900\/10, .fresher-ui.dark .bg-slate-950\/10, .fresher-ui.dark .bg-black\/10 { background-color: rgb(0 0 0 / 0.1); }
+.fresher-ui.dark .bg-slate-900\/20, .fresher-ui.dark .bg-slate-950\/20, .fresher-ui.dark .bg-black\/20 { background-color: rgb(0 0 0 / 0.2); }
+.fresher-ui.dark .bg-slate-900\/25, .fresher-ui.dark .bg-slate-950\/25, .fresher-ui.dark .bg-black\/25 { background-color: rgb(0 0 0 / 0.25); }
+.fresher-ui.dark .bg-slate-900\/30, .fresher-ui.dark .bg-slate-950\/30, .fresher-ui.dark .bg-black\/30 { background-color: rgb(0 0 0 / 0.55); }
+.fresher-ui.dark .bg-slate-900\/35, .fresher-ui.dark .bg-slate-950\/35, .fresher-ui.dark .bg-black\/35 { background-color: rgb(0 0 0 / 0.55); }
+.fresher-ui.dark .bg-slate-900\/40, .fresher-ui.dark .bg-slate-950\/40, .fresher-ui.dark .bg-black\/40 { background-color: rgb(0 0 0 / 0.55); }
+.fresher-ui.dark .bg-slate-900\/45, .fresher-ui.dark .bg-slate-950\/45, .fresher-ui.dark .bg-black\/45 { background-color: rgb(0 0 0 / 0.55); }
+.fresher-ui.dark .bg-slate-900\/50, .fresher-ui.dark .bg-slate-950\/50, .fresher-ui.dark .bg-black\/50 { background-color: rgb(0 0 0 / 0.6); }
+.fresher-ui.dark .bg-slate-900\/55, .fresher-ui.dark .bg-slate-950\/55, .fresher-ui.dark .bg-black\/55 { background-color: rgb(0 0 0 / 0.6); }
+.fresher-ui.dark .bg-slate-900\/60, .fresher-ui.dark .bg-slate-950\/60, .fresher-ui.dark .bg-black\/60 { background-color: rgb(0 0 0 / 0.65); }
+.fresher-ui.dark .bg-slate-900\/65, .fresher-ui.dark .bg-slate-950\/65, .fresher-ui.dark .bg-black\/65 { background-color: rgb(0 0 0 / 0.65); }
+.fresher-ui.dark .bg-slate-900\/70, .fresher-ui.dark .bg-slate-950\/70, .fresher-ui.dark .bg-black\/70 { background-color: rgb(0 0 0 / 0.7); }
+.fresher-ui.dark .bg-slate-900\/75, .fresher-ui.dark .bg-slate-950\/75, .fresher-ui.dark .bg-black\/75 { background-color: rgb(0 0 0 / 0.75); }
+.fresher-ui.dark .bg-slate-900\/80, .fresher-ui.dark .bg-slate-950\/80, .fresher-ui.dark .bg-black\/80 { background-color: rgb(0 0 0 / 0.8); }
+
+/* safety net: ANY full-screen overlay (fixed + inset-0) with a slate/black tint stays dark */
+.fresher-ui.dark .fixed.inset-0[class*="bg-slate-900/"],
+.fresher-ui.dark .fixed.inset-0[class*="bg-slate-950/"],
+.fresher-ui.dark .fixed.inset-0[class*="bg-black/"] { background-color: rgb(0 0 0 / 0.6); }
+
+/* accent: text on dark must be light, hover buttons must stay visible */
+.fresher-ui.dark .text-blue-600,   .fresher-ui.dark .hover\:text-blue-600:hover,
+.fresher-ui.dark .text-indigo-600, .fresher-ui.dark .hover\:text-indigo-600:hover,
+.fresher-ui.dark .text-sky-600,    .fresher-ui.dark .hover\:text-sky-600:hover,
+.fresher-ui.dark .text-cyan-600,   .fresher-ui.dark .hover\:text-cyan-600:hover,
+.fresher-ui.dark .text-violet-600, .fresher-ui.dark .hover\:text-violet-600:hover,
+.fresher-ui.dark .text-purple-600, .fresher-ui.dark .hover\:text-purple-600:hover,
+.fresher-ui.dark .text-teal-600,   .fresher-ui.dark .hover\:text-teal-600:hover { color: #93c5fd; }
+
+.fresher-ui.dark .hover\:bg-blue-700:hover,
+.fresher-ui.dark .hover\:bg-indigo-700:hover,
+.fresher-ui.dark .hover\:bg-sky-700:hover,
+.fresher-ui.dark .hover\:bg-cyan-700:hover,
+.fresher-ui.dark .hover\:bg-violet-700:hover,
+.fresher-ui.dark .hover\:bg-purple-700:hover,
+.fresher-ui.dark .hover\:bg-teal-700:hover { background-color: #3b82f6; }
+
+.fresher-ui.dark .border-t-blue-600 { border-top-color: #93c5fd; }
+.fresher-ui.dark .text-indigo-100 { color: #dbeafe; }
+.fresher-ui.dark .hover\:bg-red-700:hover { background-color: #b91c1c; }
+.fresher-ui.dark .hover\:bg-amber-700:hover { background-color: #b45309; }
+.fresher-ui.dark .hover\:bg-green-700:hover { background-color: #15803d; }
+.fresher-ui.dark .hover\:bg-emerald-700:hover { background-color: #047857; }
+
+/* referral coin overlay always has its own dark backdrop */
+.fresher-ui.dark [role="status"] .text-emerald-200 { color: #a7f3d0; }
+.fresher-ui.dark [role="status"] .text-slate-300 { color: #cbd5e1; }
+.fresher-ui.dark [role="status"] .bg-clip-text { background-image: linear-gradient(to bottom, #fef3c7, #fbbf24); }
+
+/* switch knobs (Online now, Dark mode ...) stay bright in dark mode */
+.fresher-ui.dark .bg-white.rounded-full.shadow { background-color: #f1f4f9; }
+
+/* =====================================================================
+   CHAT (ChatPanel + ChatAlertHost) - hardcoded colours
+   ===================================================================== */
+.fresher-ui.dark .bg-\[\#efeae2\] { background-color: #0a101d; }
+.fresher-ui.dark .bg-\[\#d9fdd3\] { background-color: rgb(var(--t-a-200)); }
+.fresher-ui.dark .bg-black\/5 { background-color: rgb(255 255 255 / 0.07); }
+.fresher-ui.dark .text-\[\#53bdeb\] { color: #53bdeb; }
+
+/* chat alert popup (MUI card) */
+.fresher-ui.dark .chat-alert {
+  background-color: var(--surface) !important;
+  border-color: rgb(var(--t-n-200)) !important;
+}
+.fresher-ui.dark .chat-alert .MuiTypography-root { color: var(--ink) !important; }
+.fresher-ui.dark .chat-alert .MuiButtonBase-root[aria-label="Open conversation"] {
+  background-color: rgb(var(--t-a-100)) !important;
+  border-color: rgb(var(--t-a-300)) !important;
+}
+.fresher-ui.dark .chat-alert .MuiButtonBase-root[aria-label="Open conversation"] .MuiTypography-root { color: var(--ink) !important; }
+.fresher-ui.dark .chat-alert form > .MuiStack-root {
+  background-color: var(--surface) !important;
+  border-color: rgb(var(--t-a-300)) !important;
+}
+
+/* =====================================================================
+   CHAT ALERT - blue buttons (light + dark)
+   ===================================================================== */
+.fresher-ui .chat-alert .ca-reply:not(.Mui-disabled) { background-color: rgb(var(--t-a-600)) !important; color: #fff !important; }
+.fresher-ui .chat-alert .ca-reply:hover { background-color: rgb(var(--t-a-700)) !important; }
+.fresher-ui .chat-alert .ca-reply[aria-expanded="true"] { background-color: rgb(var(--t-n-100)) !important; color: rgb(var(--t-n-700)) !important; }
+
+.fresher-ui .chat-alert .ca-read { background-color: var(--surface) !important; border-color: rgb(var(--t-n-200)) !important; color: rgb(var(--t-n-600)) !important; }
+.fresher-ui .chat-alert .ca-read:hover { background-color: rgb(var(--t-n-100)) !important; }
+
+.fresher-ui .chat-alert .ca-open { color: var(--accent) !important; }
+.fresher-ui .chat-alert .ca-open:hover { background-color: rgb(var(--t-a-100)) !important; }
+
+.fresher-ui .chat-alert .ca-send { background-color: rgb(var(--t-a-600)) !important; color: #fff !important; }
+.fresher-ui .chat-alert .ca-send:hover { background-color: rgb(var(--t-a-700)) !important; }
+.fresher-ui .chat-alert .ca-send.Mui-disabled { background-color: rgb(var(--t-n-200)) !important; color: rgb(var(--t-n-400)) !important; }
+
+.fresher-ui .chat-alert .ca-track { background-color: rgb(var(--t-a-100)) !important; }
+.fresher-ui .chat-alert .ca-bar { background-color: rgb(var(--t-a-500)) !important; }
+.fresher-ui .chat-alert .ca-ring { background: linear-gradient(135deg, rgb(var(--t-a-500)), rgb(var(--t-a-300))) !important; }
+
+.fresher-ui .chat-alert .MuiButtonBase-root[aria-label="Open conversation"]:hover { border-color: rgb(var(--t-a-500)) !important; }
+.fresher-ui .chat-alert .open-hint { color: var(--accent) !important; }
+
+.fresher-ui.dark .chat-alert .ca-reply[aria-expanded="true"] { background-color: rgb(var(--t-n-200)) !important; color: rgb(var(--t-n-800)) !important; }
+.fresher-ui.dark .chat-alert .ca-read { border-color: rgb(var(--t-n-300)) !important; }
+.fresher-ui.dark .chat-alert .ca-track { background-color: rgb(var(--t-a-200)) !important; }
+.fresher-ui.dark .chat-alert textarea,
+.fresher-ui.dark .chat-alert .MuiInputBase-root { color: var(--ink) !important; }
+.fresher-ui.dark .chat-alert .MuiIconButton-root:hover { background-color: #1e2a44 !important; }
+
+/* =====================================================================
+   INPUTS (dark): focus keeps dark bg, light text, readable placeholder
+   ===================================================================== */
+.fresher-ui.dark .focus\:bg-white:focus { background-color: var(--surface); }
+.fresher-ui.dark .focus\:border-blue-400:focus { border-color: rgb(var(--t-a-400)); }
+.fresher-ui.dark .focus\:ring-blue-100:focus { --tw-ring-color: rgb(var(--t-a-200)); }
+
+.fresher-ui.dark input,
+.fresher-ui.dark textarea,
+.fresher-ui.dark select {
+  color: var(--ink);
+  caret-color: var(--accent);
+}
+.fresher-ui.dark input::placeholder,
+.fresher-ui.dark textarea::placeholder { color: #6b7a94; }
+
+
+/* =====================================================================
+   NO SCROLLBARS (fresher side): page still scrolls with wheel / touch / keys
+   ===================================================================== */
+html.fresher-ui,
+.fresher-ui * {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+html.fresher-ui::-webkit-scrollbar,
+.fresher-ui *::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* =====================================================================
+   FORM FIELDS (dark): textarea / input / select all use the card surface
+   ===================================================================== */
+.fresher-ui.dark textarea,
+.fresher-ui.dark select,
+.fresher-ui.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]) {
+  background-color: var(--surface);
+}
+.fresher-ui.dark textarea:focus,
+.fresher-ui.dark select:focus,
+.fresher-ui.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):focus {
+  background-color: rgb(var(--t-n-100));
+}
+.fresher-ui.dark select option {
+  background-color: var(--surface);
+  color: var(--ink);
+}
+.fresher-ui.dark input[type="date"],
+.fresher-ui.dark input[type="time"] { color-scheme: dark; }
+
+/* disabled fields */
+.fresher-ui.dark textarea:disabled,
+.fresher-ui.dark select:disabled,
+.fresher-ui.dark input:disabled { background-color: rgb(var(--t-n-50)); opacity: .7; }
+
+/* =====================================================================
+   PERSON DETAILS MODAL: banner
+   ===================================================================== */
+.fresher-ui.dark .pdm-banner {
+  background-image: linear-gradient(to right, rgb(var(--t-a-300)), rgb(var(--t-a-200)));
+}

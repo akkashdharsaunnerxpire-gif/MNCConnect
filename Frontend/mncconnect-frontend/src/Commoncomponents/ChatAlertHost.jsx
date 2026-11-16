@@ -1,10 +1,4 @@
-import React, {
-  memo,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import React, { memo, useCallback, useEffect, useRef, useState } from "react";
 
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -19,14 +13,7 @@ import {
   Typography,
 } from "@mui/material";
 
-import {
-  X,
-  Reply,
-  CheckCheck,
-  Send,
-  Check,
-  ArrowUpRight,
-} from "lucide-react";
+import { X, Reply, CheckCheck, Send, Check, ArrowUpRight } from "lucide-react";
 
 import { socket } from "../utils/socket";
 import { isChatOpen } from "../utils/chatOpenRegistry";
@@ -48,20 +35,23 @@ const AUTO_HIDE_MS = 7000;
 const MAX_LEN = 1000;
 const MAX_SEEN = 300;
 
-// Site theme (same as the mentor portal): blue-600 primary, slate neutrals
+// Default colours (mentor side keeps these).
+// Fresher side is re-coloured by theme.css through the "ca-*" class names.
 const ACCENT = "#2563eb";
 const ACCENT_DARK = "#1d4ed8";
 const ACCENT_SOFT = "#eff6ff";
 const ACCENT_LINE = "#bfdbfe";
 
-const bare = (s) => String(s || "").split(":").pop();
+const bare = (s) =>
+  String(s || "")
+    .split(":")
+    .pop();
 
 const initialsOf = (name = "") => {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return "?";
   return (
-    (parts[0][0] || "") +
-    (parts.length > 1 ? parts[parts.length - 1][0] : "")
+    (parts[0][0] || "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")
   ).toUpperCase();
 };
 
@@ -103,7 +93,6 @@ const ChatAlertItem = memo(function ChatAlertItem({
   const [actionError, setActionError] = useState("");
 
   const inputRef = useRef(null);
-
 
   // Single source of truth for pausing the auto-hide.
   const paused = hovered || replyOpen || replySending;
@@ -186,6 +175,7 @@ const ChatAlertItem = memo(function ChatAlertItem({
   return (
     <Box
       role="alert"
+      className="chat-alert"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       sx={{
@@ -211,6 +201,7 @@ const ChatAlertItem = memo(function ChatAlertItem({
       {/* HEADER */}
       <Stack direction="row" alignItems="center" spacing={1.25}>
         <Box
+          className="ca-ring"
           sx={{
             p: "2px",
             borderRadius: "50%",
@@ -329,6 +320,7 @@ const ChatAlertItem = memo(function ChatAlertItem({
         <ButtonBase
           onClick={toggleReply}
           aria-expanded={replyOpen}
+          className="ca-reply"
           sx={{
             ...pillSx,
             bgcolor: replyOpen ? "#f1f5f9" : ACCENT,
@@ -343,6 +335,7 @@ const ChatAlertItem = memo(function ChatAlertItem({
         <ButtonBase
           onClick={handleMarkRead}
           disabled={readDone || readLoading}
+          className="ca-read"
           sx={{
             ...pillSx,
             border: "1px solid",
@@ -364,6 +357,7 @@ const ChatAlertItem = memo(function ChatAlertItem({
 
         <ButtonBase
           onClick={() => onView(item)}
+          className="ca-open"
           sx={{
             ...pillSx,
             color: ACCENT,
@@ -412,6 +406,7 @@ const ChatAlertItem = memo(function ChatAlertItem({
 
             <IconButton
               type="submit"
+              className="ca-send"
               aria-label="Send reply"
               disabled={!replyText.trim() || replySending}
               sx={{
@@ -443,7 +438,12 @@ const ChatAlertItem = memo(function ChatAlertItem({
 
       {/* STATUS */}
       {replySent && (
-        <Stack direction="row" spacing={0.7} alignItems="center" sx={{ mt: 1.1 }}>
+        <Stack
+          direction="row"
+          spacing={0.7}
+          alignItems="center"
+          sx={{ mt: 1.1 }}
+        >
           <Check size={14} color="#10b981" />
           <Typography sx={{ fontSize: 12, color: "#047857", fontWeight: 600 }}>
             Reply sent
@@ -463,6 +463,7 @@ const ChatAlertItem = memo(function ChatAlertItem({
       {/* AUTO-HIDE PROGRESS — also drives the close, so pause and
           timer can never go out of sync */}
       <Box
+        className="ca-track"
         sx={{
           position: "absolute",
           bottom: 0,
@@ -473,6 +474,7 @@ const ChatAlertItem = memo(function ChatAlertItem({
         }}
       >
         <Box
+          className="ca-bar"
           onAnimationEnd={() => onClose(item.key)}
           sx={{
             height: "100%",

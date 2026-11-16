@@ -5,7 +5,6 @@
 //
 //   PUBLIC     /login  /forgot-password  /reset-password/:token
 //   PROTECTED  /Home/...  (fresher cookie required)
-import React, { lazy } from "react";
 import {
   Routes,
   Route,
@@ -16,6 +15,8 @@ import {
 } from "react-router-dom";
 import ChatAlertHost from "../Commoncomponents/ChatAlertHost";
 import { getUserId } from "../services/fresherApi";
+import React, { lazy, useEffect } from "react";
+import FresherSettings from "../FresherDashboard/pages/FresherSettings";
 
 import Home from "../FresherDashboard/pages/Home";
 import FresherProfile from "../FresherDashboard/pages/FresherProfile";
@@ -28,6 +29,7 @@ import BonusWallet from "../FresherDashboard/pages/FresherWallet";
 import MeetingRoom from "../Commoncomponents/Meetingroom";
 import SuspenseLoader from "../Commoncomponents/SuspenseLoader";
 import { useAuth } from "../context/AuthContext";
+import { ThemeProvider } from "../context/ThemeContext";
 import JoinGroup from "../FresherDashboard/pages/JoinGroup";
 import LaptopOnlyGuard from "../Commoncomponents/LaptopOnlyGuard";
 
@@ -105,6 +107,15 @@ const FresherLoginRoute = () => {
 const FresherProtectedRoute = () => {
   const { role, loading } = useAuth();
   const location = useLocation();
+  const isFresher = role === "fresher";
+
+  // fresher theme is switched on ONLY while a fresher is inside /Home
+  useEffect(() => {
+    if (!isFresher) return undefined;
+    const root = document.documentElement;
+    root.classList.add("fresher-ui");
+    return () => root.classList.remove("fresher-ui");
+  }, [isFresher]);
 
   if (loading) return <SuspenseLoader />;
 
@@ -124,7 +135,12 @@ const FresherProtectedRoute = () => {
   // arrived at the remembered link -> forget it
   if (saved && saved === here) clearAfterLogin();
 
-  return <Outlet />;
+  // ThemeProvider lives ONLY here, so dark mode never touches login / mentor pages
+  return (
+    <ThemeProvider>
+      <Outlet />
+    </ThemeProvider>
+  );
 };
 
 const FresherLayout = () => (
@@ -179,7 +195,14 @@ const FresherRoutes = () => {
       {/* ---------- PROTECTED (/Home/...) ---------- */}
       <Route path="Home" element={<FresherProtectedRoute />}>
         {/* Full-screen meeting room (no header) */}
-        <Route path="meeting/:bookingId" element={<LaptopOnlyGuard><MeetingRoom /></LaptopOnlyGuard>} />
+        <Route
+          path="meeting/:bookingId"
+          element={
+            <LaptopOnlyGuard>
+              <MeetingRoom />
+            </LaptopOnlyGuard>
+          }
+        />
 
         <Route element={<FresherLayout />}>
           <Route index element={<Home />} />
@@ -198,6 +221,7 @@ const FresherRoutes = () => {
           <Route path="my-bookings" element={<MyBookings />} />
           <Route path="notifications" element={<Notifications />} />
           <Route path="profile" element={<FresherProfile />} />
+          <Route path="settings" element={<FresherSettings />} />
           <Route path="mnc-logos" element={<Mnclogos />} />
           <Route path=":companyName" element={<SessionBoardRoute />} />
           <Route path="*" element={<UnknownHomeRoute />} />

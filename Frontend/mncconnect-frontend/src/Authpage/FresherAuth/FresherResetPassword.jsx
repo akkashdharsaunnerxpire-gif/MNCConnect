@@ -1,6 +1,7 @@
 
 import React, { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import useGlobalLoading from "../../hooks/useGlobalLoading";
 import {
   ArrowLeft,
   KeyRound,
@@ -22,6 +23,7 @@ const FresherResetPassword = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  useGlobalLoading(isLoading);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
 

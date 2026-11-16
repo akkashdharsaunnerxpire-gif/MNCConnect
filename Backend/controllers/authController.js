@@ -81,7 +81,6 @@ const generateOtp = () => crypto.randomInt(100000, 999999).toString();
 const tempMobile = () =>
   `+910${String(crypto.randomInt(0, 999999999)).padStart(9, "0")}`;
 
-
 const sanitizeFresher = (user) => {
   return {
     id: user._id,
@@ -124,6 +123,34 @@ const sanitizeFresher = (user) => {
   };
 };
 
+// Gives the ₹25 welcome bonus safely (atomic, can never be given twice).
+// Works when:
+//  - bonus never given (welcomeBonusClaimed != true)
+//  - OR flag is true but wallet is empty and the gift was never opened (broken old data)
+// Returns the updated fresher document, or null when nothing was granted.
+const grantWelcomeBonus = async (fresherId) => {
+  return Fresher.findOneAndUpdate(
+    {
+      _id: fresherId,
+      name: { $ne: TEMP_NAME },
+      $or: [
+        { welcomeBonusClaimed: { $ne: true } },
+        {
+          welcomeBonusSeen: { $ne: true },
+          $or: [
+            { bonusBalance: { $lt: WELCOME_BONUS } },
+            { bonusBalance: { $exists: false } },
+          ],
+        },
+      ],
+    },
+    {
+      $inc: { bonusBalance: WELCOME_BONUS },
+      $set: { welcomeBonusClaimed: true, welcomeBonusSeen: false },
+    },
+    { returnDocument: "after" },
+  );
+};
 
 // Gives the referrer REFERRAL_REWARD (atomic, one query) and links the new user.
 // Returns true when a reward was paid.
@@ -170,8 +197,15 @@ const rewardReferrer = async ({ fresher, referralCode }) => {
 
 exports.registerFresher = async (req, res) => {
   try {
-    const { name, email, mobile, countryCode, password, referralInput, gender } =
-      req.body;
+    const {
+      name,
+      email,
+      mobile,
+      countryCode,
+      password,
+      referralInput,
+      gender,
+    } = req.body;
 
     // ---------- validations ----------
     if (!name || !email || !mobile || !password) {
@@ -193,7 +227,9 @@ exports.registerFresher = async (req, res) => {
     }
 
     // gender is required: it decides which employee gets a single meeting
-    const cleanGender = String(gender || "").trim().toLowerCase();
+    const cleanGender = String(gender || "")
+      .trim()
+      .toLowerCase();
     if (!["male", "female"].includes(cleanGender)) {
       return res.status(400).json({
         success: false,
@@ -302,8 +338,8 @@ exports.registerFresher = async (req, res) => {
       existingFresher.countryCode = cleanCountryCode;
       existingFresher.password = hashedPassword;
       existingFresher.referralCode = myReferralCode;
-      existingFresher.walletBalance = WELCOME_BONUS;
-      existingFresher.welcomeBonusClaimed = true;
+      // NOTE: welcome bonus is NOT set here anymore.
+      // grantWelcomeBonus() gives it below (atomic, never twice).
 
       if (needsOtp) {
         existingFresher.emailOtp = generateOtp();
@@ -323,13 +359,21 @@ exports.registerFresher = async (req, res) => {
         countryCode: cleanCountryCode,
         password: hashedPassword,
         referralCode: myReferralCode,
-        walletBalance: WELCOME_BONUS,
-        welcomeBonusClaimed: true,
+        // NOTE: walletBalance / welcomeBonusClaimed are NOT set here anymore.
+        // grantWelcomeBonus() gives them below.
 
         isEmailVerified: false,
         emailOtp: generateOtp(),
         emailOtpExpiresAt: new Date(Date.now() + 10 * 60 * 1000),
       });
+    }
+
+    // ---------- welcome bonus ₹25 ----------
+    try {
+      const bonusUser = await grantWelcomeBonus(fresher._id);
+      if (bonusUser) fresher = bonusUser;
+    } catch (bonusErr) {
+      console.error("Welcome bonus error:", bonusErr.message);
     }
 
     // ---------- referral: referrer gets +₹10 ----------
@@ -502,10 +546,14 @@ exports.verifyFresherOtp = async (req, res) => {
     fresher.emailOtpExpiresAt = null;
     await fresher.save();
 
+    // ✅ Make sure the ₹25 welcome bonus is in the wallet
+    const bonusUser = await grantWelcomeBonus(fresher._id).catch(() => null);
+    const finalUser = bonusUser || fresher;
+
     return res.status(200).json({
       success: true,
       message: "Email verified successfully!",
-      user: sanitizeFresher(fresher),
+      user: sanitizeFresher(finalUser),
     });
   } catch (error) {
     console.error("OTP verification error:", error);
@@ -560,13 +608,17 @@ exports.loginFresher = async (req, res) => {
     fresher.lastLoginAt = new Date();
     await fresher.save();
 
+    // ✅ Old accounts that never got the ₹25 bonus get it now
+    const bonusUser = await grantWelcomeBonus(fresher._id).catch(() => null);
+    const finalUser = bonusUser || fresher;
+
     const token = generateToken(fresher._id, "fresher");
     setAuthCookie(res, token);
 
     return res.status(200).json({
       success: true,
       message: "Fresher login successful.",
-      user: sanitizeFresher(fresher),
+      user: sanitizeFresher(finalUser),
     });
   } catch (error) {
     return res
@@ -640,7 +692,7 @@ exports.applyReferral = async (req, res) => {
       referrer._id,
       {
         $inc: {
-          walletBalance: REFERRAL_REWARD,
+          referralBalance: REFERRAL_REWARD, // <- walletBalance illa
           referralEarnings: REFERRAL_REWARD,
         },
       },
@@ -700,12 +752,6 @@ exports.markWelcomeBonusSeen = async (req, res) => {
 // POST /api/auth/mentor/register
 // =====================================================
 
-// =====================================================
-// REPLACE these 2 things in your authController.js
-//   1. sanitizeMentor   (helpers section)
-//   2. exports.registerMentor
-// Everything else in the file stays exactly the same.
-// =====================================================
 const sanitizeMentor = (mentor) => {
   return {
     id: mentor._id,
@@ -1285,11 +1331,20 @@ exports.getMe = async (req, res) => {
     }
 
     if (req.user.role === "fresher") {
-      const fresher = await Fresher.findById(req.user.id).select("-password");
+      let fresher = await Fresher.findById(req.user.id).select("-password");
       if (!fresher)
         return res
           .status(404)
           .json({ success: false, message: "Fresher account not found." });
+
+      // ✅ Self-heal: verified accounts that never got the ₹25 bonus get it now
+      if (fresher.isEmailVerified && fresher.name !== TEMP_NAME) {
+        const bonusUser = await grantWelcomeBonus(fresher._id).catch(
+          () => null,
+        );
+        if (bonusUser) fresher = bonusUser;
+      }
+
       return res.status(200).json({
         success: true,
         message: "Fresher data fetched successfully.",
@@ -1438,8 +1493,7 @@ exports.uploadProfileAvatar = async (req, res) => {
       });
     }
 
-    const Model =
-      req.user.role === "mentor" ? Mentor : Fresher;
+    const Model = req.user.role === "mentor" ? Mentor : Fresher;
 
     const user = await Model.findById(req.user.id);
 
@@ -1455,7 +1509,7 @@ exports.uploadProfileAvatar = async (req, res) => {
       file.buffer,
       `profiles/${req.user.role}`,
       `${req.user.role}_${user._id}_${Date.now()}`,
-      { resource_type: "image" }
+      { resource_type: "image" },
     );
 
     uploadedPublicId = result.public_id;
@@ -1473,10 +1527,7 @@ exports.uploadProfileAvatar = async (req, res) => {
       try {
         await deleteFromCloudinary(oldPublicId);
       } catch (deleteError) {
-        console.error(
-          "Old avatar deletion failed:",
-          deleteError.message
-        );
+        console.error("Old avatar deletion failed:", deleteError.message);
       }
     }
 
@@ -1487,7 +1538,6 @@ exports.uploadProfileAvatar = async (req, res) => {
         profilePic: user.profilePic,
       },
     });
-
   } catch (error) {
     console.error("Avatar upload error:", error);
 
@@ -1503,7 +1553,6 @@ exports.uploadProfileAvatar = async (req, res) => {
   }
 };
 
-
 // ============================================================
 // REMOVE PROFILE AVATAR
 // DELETE /api/auth/avatar
@@ -1518,8 +1567,7 @@ exports.removeProfileAvatar = async (req, res) => {
       });
     }
 
-    const Model =
-      req.user.role === "mentor" ? Mentor : Fresher;
+    const Model = req.user.role === "mentor" ? Mentor : Fresher;
 
     const user = await Model.findById(req.user.id);
 
@@ -1552,7 +1600,6 @@ exports.removeProfileAvatar = async (req, res) => {
         profilePic: "",
       },
     });
-
   } catch (error) {
     console.error("Avatar removal error:", error);
 
@@ -1608,10 +1655,7 @@ exports.updateFresherProfile = async (req, res) => {
     }
 
     // Frontend uses "phone"; database uses "mobile".
-    if (
-      req.body.phone !== undefined &&
-      req.body.mobile === undefined
-    ) {
+    if (req.body.phone !== undefined && req.body.mobile === undefined) {
       fresher.mobile = req.body.phone;
     }
 

@@ -13,19 +13,13 @@ import {
   IndianRupee,
   Loader2,
   ShieldCheck,
-  Send,
   UserRound,
-  Briefcase,
-  Mail,
-  TimerReset,
   AlertTriangle,
   AlertCircle,
   RotateCcw,
   X,
   Wallet,
   Users,
-  Copy,
-  Share2,
   Check,
   Lock,
   CreditCard,
@@ -36,6 +30,7 @@ import {
 } from "lucide-react";
 import useUserEvents from "../../hooks/useUserEvents";
 import useLive from "../../hooks/useLive";
+import useGlobalLoading from "../../hooks/useGlobalLoading";
 import {
   getProfileStatus,
   REQUIRED_PERCENT,
@@ -95,6 +90,9 @@ const groupPriceFor = (minutes) =>
 const MIN_LEAD_MIN = 30;
 // same value as backend + meeting room + My Bookings + Mentor Sessions (shared constant)
 const OPEN_BEFORE_MIN = JOIN_OPEN_MS / 60000;
+
+// after the request is sent: progress bar fills, then we go to My Bookings
+const REDIRECT_MS = 1800;
 
 const WALLET_PAY_ENDPOINT =
   ENDPOINTS.payWithWallet || "/payments/pay-with-wallet";
@@ -399,9 +397,9 @@ export default function SessionBoard() {
           },
     );
 
+  // stage: null | "paying" | "sending" | "redirecting" | "expired" | "error"
   const [stage, setStage] = useState(null);
   const [booking, setBooking] = useState(null);
-  const [notifiedCount, setNotifiedCount] = useState(0);
   const [error, setError] = useState("");
   const [errorStatus, setErrorStatus] = useState(0);
   const [showErrors, setShowErrors] = useState(false); // show red field errors after a pay attempt
@@ -601,9 +599,10 @@ export default function SessionBoard() {
     (b) => {
       if (!b || b.requestGroupId !== reqIdRef.current) return;
       setBooking((prev) => ({ ...(prev || {}), ...b }));
-      if (b.status === "accepted") setStage("accepted");
-      else if (["expired", "missed", "cancelled"].includes(b.status)) {
-        setStage("expired");
+      // Accepted status is shown in My Bookings now, so we don't change the stage for it.
+      // If the request is already redirecting, keep going: My Bookings shows the refund.
+      if (["expired", "missed", "cancelled"].includes(b.status)) {
+        setStage((s) => (s === "redirecting" ? s : "expired"));
         refreshWallet();
       }
     },
@@ -612,15 +611,19 @@ export default function SessionBoard() {
 
   useUserEvents(userId, { [EVENTS.booking]: applyBooking });
 
+  /* ---------- request sent -> linear progress -> My Bookings ---------- */
+  // The progress bar is the global one at the top of the page (App.jsx -> LinearProgress).
+  // It runs while the request is being sent and until we reach My Bookings.
+  useGlobalLoading(stage === "sending" || stage === "redirecting");
+
   useEffect(() => {
-    if (stage !== "waiting") return undefined;
-    const t = setInterval(() => {
-      api(ENDPOINTS.booking(reqIdRef.current))
-        .then((r) => applyBooking(r.booking))
-        .catch(() => {});
-    }, 20000);
-    return () => clearInterval(t);
-  }, [stage, applyBooking]);
+    if (stage !== "redirecting") return undefined;
+    const t = setTimeout(
+      () => navigate("/Home/my-bookings", { replace: true }),
+      REDIRECT_MS,
+    );
+    return () => clearTimeout(t);
+  }, [stage, navigate]);
 
   /* ---------- send the request (after payment / wallet) ---------- */
   const submitBooking = useCallback(async () => {
@@ -660,9 +663,9 @@ export default function SessionBoard() {
           },
         },
       });
-      setNotifiedCount(res.notifiedCount || 0);
       setBooking(res.booking);
-      setStage(res.booking.status === "accepted" ? "accepted" : "waiting");
+      // Request sent -> show the progress bar, then go to My Bookings
+      setStage("redirecting");
       canRetryRef.current = false;
       refreshWallet();
     } catch (e) {
@@ -862,28 +865,10 @@ export default function SessionBoard() {
     setErrorStatus(0);
   };
 
-  const bookAnother = () => {
-    closeAll();
-    setF(makeEmptyForm(user));
-    setShowErrors(false);
-    setNotifiedCount(0);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const mentor = booking?.mentor;
   const when =
     f.date && f.time
       ? `${toApiDate(f.date)} at ${toApiTime(f.time)}`
       : "Not selected";
-
-  // time when an unaccepted request is cancelled + refunded (server decides: ~10 min before start)
-  const refundBy = booking?.expiresAt
-    ? new Date(booking.expiresAt).toLocaleTimeString("en-IN", {
-        hour: "numeric",
-        minute: "2-digit",
-        timeZone: "Asia/Kolkata",
-      })
-    : toApiTime(f.time);
 
   const genderSummary = effectiveGender
     ? `${effectiveGender === "male" ? "Male" : "Female"} employee`
@@ -1441,9 +1426,10 @@ export default function SessionBoard() {
                   )}
                   {isGroup && (
                     <p>
-                      <b className="text-slate-900">+</b> Share your group link.
-                      Each friend pays {inr(price)} and joins. Friends can join
-                      until the session starts. Unfilled spots are left empty.
+                      <b className="text-slate-900">+</b> Share your group link
+                      from My Bookings. Each friend pays {inr(price)} and joins.
+                      Friends can join until the session starts. Unfilled spots
+                      are left empty.
                     </p>
                   )}
                   <p>
@@ -1804,104 +1790,22 @@ export default function SessionBoard() {
         </Overlay>
       )}
 
-      {stage === "waiting" && (
-        <Overlay>
-          <div className="relative mx-auto flex h-24 w-24 items-center justify-center rounded-full bg-blue-50">
-            <div className="absolute inset-1 animate-spin rounded-full border-4 border-transparent border-t-blue-600" />
-            <Send size={30} className="text-blue-600" />
-          </div>
-          <h2 className="mt-6 text-2xl font-bold text-slate-900">
-            {isGroup ? "Group created" : "Request sent"}
-          </h2>
-          <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-slate-500">
-            {rebook
-              ? notifiedCount > 0
-                ? `Sent to ${rebook.mentorName || "your mentor"}. Your session is confirmed as soon as they accept.`
-                : `${rebook.mentorName || "Your mentor"} is not online right now. They will see your request when they come online, before your start time.`
-              : notifiedCount > 0
-                ? `Sent to ${notifiedCount} online ${companyName} employee${notifiedCount > 1 ? "s" : ""}. The first one to accept gets your session.`
-                : `No matching ${companyName} employee is online right now. We'll offer it to anyone matching who comes online before your start time.`}
-          </p>
-
-          <InviteBox booking={booking} perPerson={price} />
-
-          <div className="mt-5 flex items-center justify-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm font-semibold text-blue-700">
-            <Loader2 size={16} className="animate-spin" />{" "}
-            {rebook
-              ? `Waiting for ${rebook.mentorName || "your mentor"} to accept…`
-              : "Waiting for an employee to accept…"}
-          </div>
-          <p className="mt-4 flex items-center justify-center gap-2 text-xs text-slate-400">
-            <TimerReset size={14} /> Not accepted before {refundBy}?{" "}
-            {isGroup ? "Everyone is" : "You're"} refunded automatically.
-          </p>
-          <button
-            type="button"
-            onClick={() => navigate("/Home/my-bookings")}
-            className="mt-5 text-sm font-semibold text-blue-600 hover:underline"
-          >
-            You can leave this page. Track it in My Bookings
-          </button>
-        </Overlay>
-      )}
-
-      {stage === "accepted" && (
+      {/* REQUEST SENT: progress bar fills, then auto-redirect to My Bookings */}
+      {stage === "redirecting" && (
         <Overlay>
           <CheckCircle2 size={44} className="mx-auto text-emerald-600" />
           <h2 className="mt-4 text-2xl font-bold text-slate-900">
-            Session confirmed
+            {isGroup ? "Group created" : "Request sent"}
           </h2>
-          <div className="mt-5 flex items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left">
-            {mentor?.image ? (
-              <img
-                src={mentor.image}
-                alt={mentor.name}
-                className="h-14 w-14 rounded-full object-cover"
-              />
-            ) : (
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-200">
-                <UserRound className="text-slate-500" />
-              </div>
-            )}
-            <div className="min-w-0 text-sm">
-              <p className="text-base font-bold text-slate-900">
-                {mentor?.name || "Employee"}
-              </p>
-              {mentor?.designation && (
-                <p className="flex items-center gap-1.5 text-slate-500">
-                  <Briefcase size={13} />
-                  {mentor.designation}
-                </p>
-              )}
-              {mentor?.email && (
-                <p className="flex items-center gap-1.5 break-all text-slate-500">
-                  <Mail size={13} />
-                  {mentor.email}
-                </p>
-              )}
-            </div>
-          </div>
-          <p className="mt-4 text-sm text-slate-500">
-            {booking?.date} at {booking?.time}. The meeting room opens{" "}
-            {OPEN_BEFORE_MIN} minutes before, and we'll send you an alert.
+          <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-slate-500">
+            {isGroup
+              ? "Your invite link is in My Bookings."
+              : "You will see it in My Bookings as soon as an employee accepts."}
           </p>
 
-          <InviteBox booking={booking} perPerson={price} />
-
-          <button
-            type="button"
-            onClick={() => navigate("/Home/my-bookings")}
-            className="mt-6 w-full rounded-xl bg-slate-950 py-3.5 text-sm font-bold text-white hover:bg-slate-800"
-          >
-            Go to My Bookings
-          </button>
-          <button
-            type="button"
-            onClick={bookAnother}
-            className="mt-2 w-full rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            Book another session
-          </button>
+          <p className="mt-4 text-xs font-medium text-slate-500">
+            Taking you to My Bookings…
+          </p>
         </Overlay>
       )}
 
@@ -1998,98 +1902,6 @@ export default function SessionBoard() {
     </div>
   );
 }
-
-/* ---------- invite link (group only) ---------- */
-const InviteBox = ({ booking, perPerson }) => {
-  const [copied, setCopied] = useState(false);
-  if (!booking || booking.mode !== "group" || !booking.inviteCode) return null;
-
-  const link = `${window.location.origin}/Home/join/${booking.inviteCode}`;
-  const joined = booking.members?.length || 1;
-  const host = booking.members?.[0]?.name;
-  const seatsLeft = Math.max(0, (booking.maxMembers || 0) - joined);
-
-  // ONE message with the link inside it (do NOT send the link again as `url`,
-  // otherwise WhatsApp shows it twice)
-  const message = [
-    `Hi! 👋 ${host ? `${host} here. ` : ""}I booked a live MNCConnect group meeting with an employee from ${booking.companyName || "a top company"} and I'd love for you to join me.`,
-    "",
-    `📌 Topic: ${booking.sessionType || "Career guidance"}`,
-    `📅 Date: ${booking.date}`,
-    `🕒 Time: ${booking.time} (${durationLabel(booking.durationMinutes)})`,
-    `💰 Your share: only ${inr(perPerson)} per person`,
-    `👥 Seats: ${seatsLeft > 0 ? `${seatsLeft} left` : "limited"} (max ${booking.maxMembers} people)`,
-    "",
-    "Tap the link below, pay your share and your seat is confirmed. You can join until the session starts:",
-    link,
-  ].join("\n");
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(message);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      window.prompt("Copy this message", message);
-    }
-  };
-
-  const share = async () => {
-    try {
-      if (navigator.share) {
-        await navigator.share({
-          title: "MNCConnect group session",
-          text: message,
-        });
-      } else {
-        window.open(
-          `https://wa.me/?text=${encodeURIComponent(message)}`,
-          "_blank",
-          "noopener",
-        );
-      }
-    } catch {
-      /* cancelled */
-    }
-  };
-
-  return (
-    <div className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50 p-4 text-left">
-      <div className="flex items-center justify-between gap-2">
-        <p className="flex items-center gap-1.5 text-sm font-bold text-indigo-900">
-          <Users size={15} /> Invite your friends
-        </p>
-        <span className="rounded-full bg-white px-2.5 py-0.5 text-xs font-semibold text-indigo-700">
-          {joined}/{booking.maxMembers} joined
-        </span>
-      </div>
-      <p className="mt-1 text-xs text-indigo-700">
-        Each friend pays {inr(perPerson)} for their own seat.
-      </p>
-
-      <div className="mt-3 flex items-center gap-2 rounded-xl border border-indigo-100 bg-white px-3 py-2">
-        <span className="min-w-0 flex-1 truncate text-xs text-slate-600">
-          {link}
-        </span>
-        <button
-          type="button"
-          onClick={copy}
-          className="flex shrink-0 items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"
-        >
-          {copied ? <Check size={13} /> : <Copy size={13} />}{" "}
-          {copied ? "Copied" : "Copy"}
-        </button>
-        <button
-          type="button"
-          onClick={share}
-          className="flex shrink-0 items-center gap-1 rounded-lg border border-indigo-200 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
-        >
-          <Share2 size={13} /> Share
-        </button>
-      </div>
-    </div>
-  );
-};
 
 const Overlay = ({ children }) => (
   <div className="fixed inset-0 z-[110] flex items-center justify-center overflow-y-auto bg-slate-950/75 px-4 py-6 backdrop-blur-sm">

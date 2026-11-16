@@ -1,6 +1,7 @@
 
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import useGlobalLoading from "../../hooks/useGlobalLoading";
 import {
   ArrowLeft,
   ArrowRight,
@@ -18,6 +19,7 @@ const Forgetpassword = () => {
 
   const [email, setEmail] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  useGlobalLoading(isLoading);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
 

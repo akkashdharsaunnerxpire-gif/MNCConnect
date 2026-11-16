@@ -2,6 +2,7 @@
 import React, { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { LockKeyhole, Eye, EyeOff, CheckCircle2, AlertCircle } from "lucide-react";
+import useGlobalLoading from "../../hooks/useGlobalLoading";
 
 const API_URL =
   import.meta.env.VITE_API_URL || "http://localhost:5000";
@@ -17,7 +18,7 @@ export default function ResetPassword() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
-
+   useGlobalLoading(loading);
   const inputClass =
     "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50";
 

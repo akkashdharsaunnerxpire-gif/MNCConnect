@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Mail, ArrowLeft, CheckCircle2, AlertCircle } from 'lucide-react';
-
+import useGlobalLoading from "../../hooks/useGlobalLoading";
 const API_URL =
   import.meta.env.VITE_API_URL || "http://localhost:5000";
   
@@ -17,6 +17,7 @@ export default function ForgotPassword() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  useGlobalLoading(isLoading); 
 
   const handleSubmit = async (e) => {
     e.preventDefault();

@@ -46,6 +46,10 @@ const HomeRoute = () => {
 function AppContent() {
   const { isLoading, start, stop } = useLoading();
 
+  // Login check (/auth/me) runs inside AuthProvider. While it runs, the top bar shows.
+  // This is the ONE place that does it, so route guards do not need their own call.
+  const { loading: authLoading } = useAuth();
+
   // Old keys from the previous localStorage-based login. Removed once per browser.
   useEffect(() => {
     clearLegacyStorage();
@@ -58,7 +62,8 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-white font-sans text-gray-900">
-      <LinearProgress isLoading={isLoading} />
+      {/* top bar: any api call (isLoading) OR the login check (authLoading) */}
+      <LinearProgress isLoading={isLoading || authLoading} />
       <RouteProgress />
 
       {/* every new page opens from the top */}

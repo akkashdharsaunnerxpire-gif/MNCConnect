@@ -152,11 +152,13 @@ const Stat = ({ icon, value, label, tone, small }) => (
   </div>
 );
 
-const InfoRow = ({ icon, label, children }) => {
+const InfoRow = ({ icon, label, children, className = "" }) => {
   if (!children) return null;
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3.5 py-3">
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
+    <div
+      className={`flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3.5 py-3 ${className}`}
+    >
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-blue-600">
         {icon}
       </span>
       <div className="min-w-0 flex-1">

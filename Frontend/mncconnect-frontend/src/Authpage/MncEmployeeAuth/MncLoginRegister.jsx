@@ -20,6 +20,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { COUNTRY_CODES } from "../../data/countryCodes"; // <-- adjust path to your folder
 import { useAuth } from "../../context/AuthContext";
 import FormAlert from "../../Commoncomponents/FormAlert";
+import useGlobalLoading from "../../hooks/useGlobalLoading";
 const API_URL = import.meta.env.VITE_API_URL;
 
 // Auth endpoints / storage keys. Keep these in one place if your backend paths differ.
@@ -285,6 +286,7 @@ export default function MncLoginRegister() {
   const [profile, setProfile] = useState(initialProfile);
   const [files, setFiles] = useState(emptyFiles);
   const [isSubmitting, setIsSubmitting] = useState(false);
+    useGlobalLoading(isSubmitting);   // register submit
   const [preview, setPreview] = useState(null);
 
   // --- Validation state -----------------------------------------------------
