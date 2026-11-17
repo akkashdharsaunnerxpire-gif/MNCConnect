@@ -145,10 +145,10 @@ const ProgressRing = ({ percent, size = 88 }) => (
 /* ============================== MODALS ============================== */
 const ModalShell = ({ title, onClose, children }) => (
   <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-    className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-900/50 backdrop-blur-sm sm:items-center sm:p-4" onClick={onClose}>
+    className="fixed inset-0 z-[100] flex items-end justify-center overscroll-contain bg-slate-900/50 backdrop-blur-sm sm:items-center sm:p-4" onClick={onClose}>
     <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }}
       onClick={(e) => e.stopPropagation()}
-      className="max-h-[92dvh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-6 shadow-2xl sm:rounded-2xl">
+      className="max-h-[92dvh] w-full max-w-lg overflow-y-auto overscroll-contain rounded-t-2xl bg-white p-6 shadow-2xl sm:rounded-2xl">
       <div className="mb-5 flex items-center justify-between">
         <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
         <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100"><X size={18} /></button>
@@ -325,7 +325,7 @@ const EditProfileModal = ({ user, saving, onClose, onSave, onAvatarUpload, onAva
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm" onClick={onClose}>
+      className="fixed inset-0 z-[90] flex items-center justify-center overscroll-contain bg-slate-900/60 p-4 backdrop-blur-sm" onClick={onClose}>
       <motion.div initial={{ opacity: 0, scale: 0.96, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 20 }}
         onClick={(e) => e.stopPropagation()}
         className="flex max-h-[92dvh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
@@ -334,7 +334,7 @@ const EditProfileModal = ({ user, saving, onClose, onSave, onAvatarUpload, onAva
           <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100"><X size={17} /></button>
         </div>
         <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
-          <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5">
+          <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-6 py-5">
             <div className="flex flex-col items-center gap-4 rounded-2xl border border-slate-100 bg-slate-50 p-5 sm:flex-row">
               <div className="relative">
                 <AvatarImage src={preview || avatarUrl} name={user?.name} className="h-20 w-20 rounded-2xl" textClass="text-2xl" />
@@ -415,6 +415,32 @@ const FresherProfile = () => {
   const [previewImage, setPreviewImage] = useState(null);
   const [uploading, setUploading] = useState(false);
   const toastTimer = useRef(null);
+
+  // Lock the page behind any profile modal and restore its scroll position on close.
+  useEffect(() => {
+    const modalOpen = editOpen || Boolean(modal);
+    if (!modalOpen) return;
+
+    const scrollY = window.scrollY;
+    const body = document.body;
+    const previousPosition = body.style.position;
+    const previousTop = body.style.top;
+    const previousWidth = body.style.width;
+    const previousOverflow = body.style.overflow;
+
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.width = "100%";
+    body.style.overflow = "hidden";
+
+    return () => {
+      body.style.position = previousPosition;
+      body.style.top = previousTop;
+      body.style.width = previousWidth;
+      body.style.overflow = previousOverflow;
+      window.scrollTo(0, scrollY);
+    };
+  }, [editOpen, modal]);
 
   const showToast = useCallback((type, message) => {
     setToast({ type, message });
