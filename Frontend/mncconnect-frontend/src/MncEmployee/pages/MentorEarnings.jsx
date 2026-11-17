@@ -91,12 +91,11 @@ const MentorEarnings = () => {
     year: "numeric",
   });
 
+  // Data is late -> show the skeleton (same layout as the real page)
+  // until the first response arrives. Later background reloads keep the
+  // old data on screen, so there is no flash.
   if (loading && !data) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-white">
-        <Loader2 className="animate-spin text-blue-600" />
-      </div>
-    );
+    return <EarningsSkeleton />;
   }
 
   const withdrawDisabled =
@@ -346,6 +345,143 @@ const MentorEarnings = () => {
   );
 };
 
+/* ------------------------------------------------------------------ */
+/* SKELETON: same layout + sizes as the real page, so nothing jumps   */
+/* when the data arrives. Shown until the first response comes.       */
+/* ------------------------------------------------------------------ */
+const Bone = ({ className = "" }) => (
+  <div className={`rounded-md bg-slate-200 ${className}`} />
+);
+
+const EarningsSkeleton = () => (
+  <div
+    className="min-h-screen bg-white text-slate-900"
+    role="status"
+    aria-label="Loading earnings"
+  >
+    <main
+      className="mx-auto w-full max-w-7xl animate-pulse px-4 py-8 sm:px-6 lg:px-8"
+      aria-hidden="true"
+    >
+      {/* header */}
+      <header className="mb-8 space-y-3">
+        <Bone className="h-4 w-28" />
+        <Bone className="h-8 w-56" />
+        <Bone className="h-3.5 w-80 max-w-full" />
+      </header>
+
+      {/* 4 stat cards */}
+      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {[0, 1, 2, 3].map((i) => (
+          <div
+            key={i}
+            className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+          >
+            <Bone className="h-11 w-11 !rounded-xl" />
+            <Bone className="mt-5 h-3 w-24" />
+            <Bone className="mt-3 h-7 w-28" />
+            <Bone className="mt-3 h-3 w-36" />
+          </div>
+        ))}
+      </div>
+
+      {/* withdraw card + payout status */}
+      <div className="mb-8 grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm lg:col-span-2">
+          <div className="flex items-center justify-between">
+            <div className="space-y-3">
+              <Bone className="h-3.5 w-40" />
+              <Bone className="h-10 w-44" />
+            </div>
+            <Bone className="h-14 w-14 !rounded-2xl" />
+          </div>
+          <Bone className="mt-7 h-11 w-44 !rounded-xl" />
+        </div>
+
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex items-center gap-3">
+            <Bone className="h-11 w-11 !rounded-xl" />
+            <div className="space-y-2">
+              <Bone className="h-4 w-28" />
+              <Bone className="h-3 w-40" />
+            </div>
+          </div>
+          <div className="mt-6 space-y-4">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center justify-between gap-3">
+                <Bone className="h-3 w-32" />
+                <Bone className="h-3 w-16" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* transaction history */}
+      <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-200 p-5 sm:p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-2">
+              <Bone className="h-5 w-44" />
+              <Bone className="h-3 w-32" />
+            </div>
+            <Bone className="h-11 w-full !rounded-xl lg:w-[280px]" />
+          </div>
+          <div className="mt-5 flex gap-2">
+            {[0, 1, 2].map((i) => (
+              <Bone key={i} className="h-8 w-20 !rounded-lg" />
+            ))}
+          </div>
+        </div>
+
+        <div className="divide-y divide-slate-100">
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="flex items-center gap-4">
+                <Bone className="h-11 w-11 !rounded-xl" />
+                <div className="space-y-2">
+                  <Bone className="h-4 w-32" />
+                  <Bone className="h-3 w-44" />
+                </div>
+              </div>
+              <Bone className="h-3.5 w-24" />
+              <Bone className="h-7 w-24 !rounded-full" />
+              <Bone className="h-4 w-20" />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* withdrawal requests */}
+      <div className="mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <div className="space-y-2 border-b border-slate-200 p-5 sm:p-6">
+          <Bone className="h-5 w-44" />
+          <Bone className="h-3 w-56" />
+        </div>
+        <div className="p-5">
+          <Bone className="h-10 w-full" />
+        </div>
+      </div>
+
+      {/* mini summaries */}
+      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+          >
+            <Bone className="h-3 w-32" />
+            <Bone className="mt-3 h-5 w-20" />
+          </div>
+        ))}
+      </div>
+    </main>
+  </div>
+);
+
 const WithdrawModal = ({ available, onClose, onDone }) => {
   const [amount, setAmount] = useState(String(available));
   const [upiId, setUpiId] = useState("");
@@ -513,7 +649,10 @@ const Stepper = ({ status }) => {
   const steps = [
     { label: "Requested", state: "done" },
     { label: "Processing", state: paid || rejected ? "done" : "current" },
-    { label: rejected ? "Rejected" : "Paid", state: paid ? "done" : rejected ? "bad" : "todo" },
+    {
+      label: rejected ? "Rejected" : "Paid",
+      state: paid ? "done" : rejected ? "bad" : "todo",
+    },
   ];
   const dot = {
     done: "bg-emerald-500",

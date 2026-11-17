@@ -133,7 +133,8 @@ const useCountUp = (target, duration = 700) => {
 
 const Home = () => {
   const navigate = useNavigate();
-  const [mentorName, setMentorName] = useState("Mentor");
+  // empty until /auth/me answers -> the title shows a skeleton, not "Mentor"
+  const [mentorName, setMentorName] = useState("");
   const [connected, setConnected] = useState(socket.connected);
   const [requests, setRequests] = useState([]);
   const [now, setNow] = useState(Date.now());
@@ -142,6 +143,8 @@ const Home = () => {
   const [tab, setTab] = useState("upcoming");
   // sound preference lives in memory only (nothing in localStorage)
   const [soundOn, setSoundOn] = useState(true);
+  // becomes true after the FIRST sessions/wallet response
+  const [loadedOnce, setLoadedOnce] = useState(false);
 
   // Confirm modal state
   const [confirmRequest, setConfirmRequest] = useState(null);
@@ -163,9 +166,11 @@ const Home = () => {
     fetch(`${import.meta.env.VITE_API_URL}/auth/me`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (alive && d?.user?.name) setMentorName(d.user.name);
+        if (alive) setMentorName(d?.user?.name || "Mentor");
       })
-      .catch(() => {});
+      .catch(() => {
+        if (alive) setMentorName("Mentor");
+      });
     return () => {
       alive = false;
     };
@@ -180,15 +185,24 @@ const Home = () => {
     reload: reloadWallet,
   } = useMentorSessions();
 
-  const { data: notifData } = useLive({
+  const { data: notifData, loading: notifLoading } = useLive({
     fetcher: () => api(`${ENDPOINTS.notifications}?limit=5`),
     events: [EVENTS.notification],
   });
 
-  const { data: reviewData } = useLive({
+  const { data: reviewData, loading: reviewsLoading } = useLive({
     fetcher: () => api(ENDPOINTS.reviews),
     events: [EVENTS.reviewNew, EVENTS.reviewUpdated],
   });
+
+  // skeleton only until the FIRST response (background reloads keep old data)
+  useEffect(() => {
+    if (!sessionsLoading) setLoadedOnce(true);
+  }, [sessionsLoading]);
+
+  const initialLoading = !loadedOnce;
+  const reviewsInitial = reviewsLoading && !reviewData;
+  const notifInitial = notifLoading && !notifData;
 
   const rating = useMemo(() => {
     const list = reviewData?.reviews || [];
@@ -428,7 +442,14 @@ const Home = () => {
               {greetingFor(new Date(now))}
             </p>
             <h1 className="mt-1 text-3xl font-semibold tracking-tight">
-              Welcome back, {mentorName}
+              {mentorName ? (
+                `Welcome back, ${mentorName}`
+              ) : (
+                <span
+                  className="inline-block h-8 w-64 max-w-full animate-pulse rounded-md bg-slate-200 align-middle"
+                  aria-label="Loading"
+                />
+              )}
             </h1>
             <p className="mt-1 text-sm text-slate-500">
               Requests, earnings and reviews update the moment they happen.
@@ -469,19 +490,26 @@ const Home = () => {
               <span className="sr-only">Toggle sound alerts</span>
             </button>
 
-            <Link
-              to="/mentor/reviews"
-              className="group flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 transition hover:-translate-y-0.5 hover:border-yellow-300 hover:shadow-md"
-            >
-              <Star
-                size={16}
-                className="fill-yellow-400 text-yellow-400 transition group-hover:rotate-12 group-hover:scale-110"
+            {reviewsInitial ? (
+              <div
+                className="h-[46px] w-36 animate-pulse rounded-2xl border border-slate-200 bg-slate-100"
+                aria-hidden="true"
               />
-              <span className="text-lg font-semibold">{rating.avg}</span>
-              <span className="text-xs text-slate-500">
-                {rating.count} review{rating.count !== 1 ? "s" : ""}
-              </span>
-            </Link>
+            ) : (
+              <Link
+                to="/mentor/reviews"
+                className="group flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 transition hover:-translate-y-0.5 hover:border-yellow-300 hover:shadow-md"
+              >
+                <Star
+                  size={16}
+                  className="fill-yellow-400 text-yellow-400 transition group-hover:rotate-12 group-hover:scale-110"
+                />
+                <span className="text-lg font-semibold">{rating.avg}</span>
+                <span className="text-xs text-slate-500">
+                  {rating.count} review{rating.count !== 1 ? "s" : ""}
+                </span>
+              </Link>
+            )}
           </div>
         </header>
 
@@ -557,21 +585,25 @@ const Home = () => {
               amount={wallet.available}
               icon={Wallet}
               strong
+              loading={initialLoading}
             />
             <Stat
               label="Clearing after sessions"
               amount={wallet.pending}
               icon={Clock3}
+              loading={initialLoading}
             />
             <Stat
               label="Earned this week"
               amount={wallet.week}
               icon={IndianRupee}
+              loading={initialLoading}
             />
             <Stat
               label="Lifetime earnings"
               amount={wallet.lifetime}
               icon={Star}
+              loading={initialLoading}
             />
           </div>
           <div className="flex flex-col gap-3 border-t border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -638,9 +670,13 @@ const Home = () => {
                 {
                   id: "upcoming",
                   label: "Upcoming",
-                  count: upcomingSessions.length,
+                  count: initialLoading ? 0 : upcomingSessions.length,
                 },
-                { id: "activity", label: "Activity", count: unreadActivity },
+                {
+                  id: "activity",
+                  label: "Activity",
+                  count: notifInitial ? 0 : unreadActivity,
+                },
               ].map((t) => (
                 <button
                   key={t.id}
@@ -672,7 +708,7 @@ const Home = () => {
 
             <div key={tab} className="mc-fade-up">
               {tab === "upcoming" ? (
-                sessionsLoading ? (
+                initialLoading ? (
                   <SkeletonList />
                 ) : upcomingSessions.length === 0 ? (
                   <Empty
@@ -727,6 +763,8 @@ const Home = () => {
                     </Link>
                   </>
                 )
+              ) : notifInitial ? (
+                <SkeletonList />
               ) : activity.length === 0 ? (
                 <Empty
                   icon={Bell}
@@ -1006,8 +1044,27 @@ const ConfirmAcceptModal = ({ req, busy, onCancel, onConfirm }) => {
 
 /* ---------- pieces ---------- */
 
-const Stat = ({ label, amount, icon: Icon, strong }) => {
-  const shown = useCountUp(amount);
+const Stat = ({ label, amount, icon: Icon, strong, loading }) => {
+  // hook runs every render (rules of hooks); 0 while loading, so the first
+  // real value counts up from 0 when the data arrives
+  const shown = useCountUp(loading ? 0 : amount);
+
+  if (loading) {
+    return (
+      <div className="animate-pulse bg-white p-5" aria-hidden="true">
+        <div className="flex items-center gap-2">
+          <div className="h-4 w-4 rounded bg-slate-200" />
+          <div className="h-3 w-28 rounded bg-slate-200" />
+        </div>
+        <div
+          className={`mt-3 rounded-md bg-slate-200 ${
+            strong ? "h-9 w-32" : "h-8 w-24"
+          }`}
+        />
+      </div>
+    );
+  }
+
   return (
     <Link
       to="/mentor/earnings"
