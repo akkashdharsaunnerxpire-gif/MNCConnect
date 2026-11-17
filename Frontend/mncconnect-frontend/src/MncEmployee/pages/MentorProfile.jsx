@@ -298,7 +298,7 @@ const MentorProfile = () => {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+      <div className="flex min-h-screen items-center justify-center bg-white">
         <div className="flex flex-col items-center">
           <div className="h-12 w-12 animate-spin rounded-full border-4 border-blue-100 border-t-blue-600" />
           <p className="mt-4 text-sm text-slate-500">Loading profile...</p>
@@ -309,8 +309,8 @@ const MentorProfile = () => {
 
   if (error || !profile) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
-        <div className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-xl">
+      <div className="flex min-h-screen items-center justify-center bg-white px-4">
+        <div className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-xl ring-1 ring-slate-200">
           <ShieldCheck size={48} className="mx-auto text-red-500" />
           <h2 className="mt-4 text-xl font-bold text-slate-900">
             Profile unavailable
@@ -346,12 +346,12 @@ const MentorProfile = () => {
     profile.accountStatus === "active";
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800">
-      <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-white text-slate-900">
+      <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         {/* page title */}
         <div className="mb-6 flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+            <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
               My profile
             </h1>
             <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">

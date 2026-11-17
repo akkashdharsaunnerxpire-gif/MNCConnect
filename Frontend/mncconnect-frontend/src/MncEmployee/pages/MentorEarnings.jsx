@@ -1,7 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import {
-  ArrowLeft,
   Wallet,
   TrendingUp,
   Clock3,
@@ -95,7 +93,7 @@ const MentorEarnings = () => {
 
   if (loading && !data) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+      <div className="flex min-h-screen items-center justify-center bg-white">
         <Loader2 className="animate-spin text-blue-600" />
       </div>
     );
@@ -105,33 +103,23 @@ const MentorEarnings = () => {
     wallet.available < MIN_WITHDRAWAL || hasPendingWithdrawal;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-white via-sky-50 to-blue-100 text-slate-800">
-      <main className="relative z-10 mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mb-8 flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-blue-600">
-              Mentor Finance
-            </p>
-            <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-              Your Earnings
-            </h2>
-            <p className="mt-2 flex items-center gap-2 text-sm text-slate-500">
-              Updates live as sessions end. You earn{" "}
-              {data?.mentorSharePercent ?? 75}% of every session.
-              <span
-                className={`inline-flex items-center gap-1 text-xs font-medium ${connected ? "text-emerald-600" : "text-amber-600"}`}
-              >
-                <Radio size={12} /> {connected ? "Live" : "Reconnecting…"}
-              </span>
-            </p>
-          </div>
-          <Link
-            to="/mentor/home"
-            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-blue-50 hover:text-blue-600"
-          >
-            Back to Home <ArrowLeft size={16} />
-          </Link>
-        </div>
+    <div className="min-h-screen bg-white text-slate-900">
+      <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        <header className="mb-8">
+          <p className="text-sm font-medium text-blue-600">Mentor finance</p>
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight">
+            Your Earnings
+          </h1>
+          <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+            Updates live as sessions end. You earn{" "}
+            {data?.mentorSharePercent ?? 75}% of every session.
+            <span
+              className={`inline-flex items-center gap-1 text-xs font-medium ${connected ? "text-emerald-600" : "text-amber-600"}`}
+            >
+              <Radio size={12} /> {connected ? "Live" : "Reconnecting…"}
+            </span>
+          </p>
+        </header>
 
         {error && (
           <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">

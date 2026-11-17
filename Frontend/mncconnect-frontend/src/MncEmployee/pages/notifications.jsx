@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
-import { ArrowLeft, Bell, CheckCircle2, Info, IndianRupee, Star, CalendarDays, AlertTriangle, Loader2, Radio } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Bell, CheckCircle2, Info, IndianRupee, Star, CalendarDays, AlertTriangle, Loader2, Radio } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import useLive from "../../hooks/useLive";
 import { api, ENDPOINTS, EVENTS, NOTIFICATIONS_CHANGED, timeAgo } from "../../services/mentorApi";
 
@@ -73,18 +73,17 @@ const MentorNotifications = () => {
   };
 
   return (
-    <div className="min-h-screen bg-white p-5 md:p-10">
-      <div className="mx-auto max-w-4xl">
-        <Link to="/mentor/home" className="mb-8 inline-flex items-center gap-2 text-sm text-slate-500 transition hover:text-slate-900">
-          <ArrowLeft size={17} /> Back to home
-        </Link>
-
-        <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-white"><Bell size={20} /></div>
+    <div className="min-h-screen bg-white text-slate-900">
+      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        {/* header */}
+        <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white">
+              <Bell size={22} />
+            </div>
             <div>
-              <h1 className="text-3xl font-semibold text-slate-900">Notifications</h1>
-              <p className="mt-1 flex items-center gap-2 text-sm text-slate-500">
+              <h1 className="text-3xl font-semibold tracking-tight">Notifications</h1>
+              <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
                 Updates about your requests, sessions and payouts.
                 <span className={`inline-flex items-center gap-1 text-xs font-medium ${connected ? "text-emerald-600" : "text-amber-600"}`}>
                   <Radio size={12} /> {connected ? "Live" : "Reconnecting…"}
@@ -92,12 +91,17 @@ const MentorNotifications = () => {
               </p>
             </div>
           </div>
+
           {unread > 0 && (
-            <button onClick={markAll} disabled={busy} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-60">
+            <button
+              onClick={markAll}
+              disabled={busy}
+              className="self-start rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 active:scale-95 disabled:opacity-60 sm:self-auto"
+            >
               Mark all as read ({unread})
             </button>
           )}
-        </div>
+        </header>
 
         {error && (
           <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -121,19 +125,20 @@ const MentorNotifications = () => {
                 <li key={n.id}>
                   {/* <button> may only contain inline content, so spans (not div / h3) go inside it */}
                   <button
-                    type="button" onClick={() => openNotification(n)}
-                    className={`flex w-full gap-4 border-b border-slate-100 p-5 text-left transition last:border-b-0 hover:bg-slate-50 md:p-6 ${n.read ? "" : "bg-blue-50/40"}`}
+                    type="button"
+                    onClick={() => openNotification(n)}
+                    className={`flex w-full items-start gap-4 border-b border-slate-100 p-4 text-left transition last:border-b-0 hover:bg-slate-50 sm:p-5 ${n.read ? "" : "bg-blue-50/50"}`}
                   >
                     <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${cls}`}><Icon size={20} /></span>
                     <span className="block min-w-0 flex-1">
-                      <span className="flex justify-between gap-4">
-                        <span className="flex items-center gap-2 font-semibold text-slate-900">
+                      <span className="flex items-start justify-between gap-4">
+                        <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                           {n.title}
-                          {!n.read && <span className="h-2 w-2 rounded-full bg-blue-600" />}
+                          {!n.read && <span className="h-2 w-2 shrink-0 rounded-full bg-blue-600" />}
                         </span>
                         <span className="whitespace-nowrap text-xs text-slate-400">{timeAgo(n.createdAt)}</span>
                       </span>
-                      <span className="mt-1.5 block text-sm leading-6 text-slate-500">{n.message}</span>
+                      <span className="mt-1 block text-sm leading-6 text-slate-500">{n.message}</span>
                     </span>
                   </button>
                 </li>
@@ -141,7 +146,7 @@ const MentorNotifications = () => {
             })}
           </ul>
         )}
-      </div>
+      </main>
     </div>
   );
 };

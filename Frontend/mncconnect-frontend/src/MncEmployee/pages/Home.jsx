@@ -14,7 +14,6 @@ import {
   CheckCircle2,
   ChevronDown,
   Clock3,
-  Inbox,
   IndianRupee,
   Loader2,
   Star,
@@ -50,13 +49,6 @@ const CLAIM_WINDOW_MS = CLAIM_WINDOW_SECONDS * 1000;
 const JOIN_READY_MS = 2 * 60 * 1000;
 
 // ============ CONSTANTS ============
-
-const QUICK_LINKS = [
-  { to: "/mentor/requests", label: "Requests", icon: Inbox },
-  { to: "/mentor/sessions", label: "Sessions", icon: CalendarDays },
-  { to: "/mentor/earnings", label: "Earnings", icon: Wallet },
-  { to: "/mentor/reviews", label: "Reviews", icon: Star },
-];
 
 const mentorShare = (amount) => Math.round(amount * (1 - PLATFORM_FEE));
 
@@ -492,29 +484,6 @@ const Home = () => {
             </Link>
           </div>
         </header>
-
-        {/* quick links */}
-        <nav
-          className="mc-fade-up mt-6 flex gap-2 overflow-x-auto pb-1"
-          style={{ animationDelay: "60ms" }}
-          aria-label="Shortcuts"
-        >
-          {QUICK_LINKS.map(({ to, label, icon: Icon }) => (
-            <Link
-              key={to}
-              to={to}
-              className="group relative inline-flex shrink-0 items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition hover:-translate-y-0.5 hover:border-blue-300 hover:text-blue-600 hover:shadow-sm active:scale-95"
-            >
-              <Icon size={15} className="transition group-hover:scale-110" />
-              {label}
-              {label === "Requests" && requests.length > 0 && (
-                <span className="ml-0.5 rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
-                  {requests.length}
-                </span>
-              )}
-            </Link>
-          ))}
-        </nav>
 
         {walletError && (
           <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">

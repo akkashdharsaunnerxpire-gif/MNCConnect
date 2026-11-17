@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import {
-  ArrowLeft,
   Bell,
   Lock,
   ShieldCheck,
@@ -383,34 +382,23 @@ const MentorSettings = () => {
 
   /* ---------- render ---------- */
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800">
-      {/* Header */}
-      <header className="sticky top-0 z-30 border-b border-slate-100 bg-white/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-3.5 sm:px-6">
-          <div className="flex min-w-0 items-center gap-3">
-            <Link
-              to="/mentor/profile"
-              aria-label="Back to profile"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50"
-            >
-              <ArrowLeft size={19} />
-            </Link>
-            <div className="min-w-0">
-              <h1 className="truncate text-lg font-semibold text-slate-900 sm:text-xl">
-                Settings
-              </h1>
-              <p className="hidden text-xs text-slate-400 sm:block">
-                Notifications, privacy and security
-              </p>
-            </div>
+    <div className="min-h-screen bg-white text-slate-900">
+      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        {/* Header */}
+        <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
+            <p className="mt-1 text-sm text-slate-500">
+              Notifications, privacy and security.
+            </p>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex items-center gap-2">
             {dirty && !savingPrefs && (
               <button
                 type="button"
                 onClick={handleDiscard}
-                className="hidden rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 sm:block"
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 active:scale-95"
               >
                 Discard
               </button>
@@ -419,7 +407,7 @@ const MentorSettings = () => {
               type="button"
               onClick={handleSavePrefs}
               disabled={!dirty || savingPrefs || loading}
-              className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {savingPrefs ? (
                 <Loader2 size={16} className="animate-spin" />
@@ -429,307 +417,323 @@ const MentorSettings = () => {
               {savingPrefs ? "Saving…" : dirty ? "Save changes" : "Saved"}
             </button>
           </div>
-        </div>
-      </header>
+        </header>
 
-      <main className="mx-auto max-w-3xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
-        {/* Availability */}
-        <Card
-          icon={<CalendarCheck size={19} className="text-violet-600" />}
-          tone="bg-violet-50"
-          title="Availability"
-          subtitle="Pause bookings without hiding your profile."
-        >
-          <SettingToggle
-            icon={<UserPlus size={18} />}
-            title="Accept new bookings"
-            description="Turn off to stop new session requests while you are busy or away."
-            enabled={prefs.acceptNewBookings}
-            onChange={setPref("acceptNewBookings")}
-            disabled={loading}
-          />
-        </Card>
-
-        {/* Notifications */}
-        <Card
-          icon={<Bell size={19} className="text-blue-600" />}
-          tone="bg-blue-50"
-          title="Notifications"
-          subtitle="Choose how you want to receive updates."
-        >
-          <div className="divide-y divide-slate-100">
-            <SettingToggle
-              icon={<Mail size={18} />}
-              title="Email notifications"
-              description="Important account updates by email."
-              enabled={prefs.emailNotifications}
-              onChange={setPref("emailNotifications")}
-              disabled={loading}
-            />
-            <SettingToggle
-              icon={<Smartphone size={18} />}
-              title="Push notifications"
-              description="Instant alerts on this device."
-              enabled={prefs.pushNotifications}
-              onChange={setPref("pushNotifications")}
-              disabled={loading}
-            />
-            <SettingToggle
-              icon={<UserPlus size={18} />}
-              title="New session requests"
-              description="Get notified when a fresher requests a session with you."
-              enabled={prefs.newRequestAlerts}
-              onChange={setPref("newRequestAlerts")}
-              disabled={loading}
-            />
-            <SettingToggle
-              icon={<MessageSquare size={18} />}
-              title="New messages"
-              description="Alerts when a fresher sends you a message."
-              enabled={prefs.messageAlerts}
-              onChange={setPref("messageAlerts")}
-              disabled={loading}
-            />
-            <SettingToggle
-              icon={<Clock size={18} />}
-              title="Session reminders"
-              description="A reminder before each scheduled session."
-              enabled={prefs.sessionReminders}
-              onChange={setPref("sessionReminders")}
-              disabled={loading}
-            />
-            <SettingToggle
-              icon={<FileText size={18} />}
-              title="Weekly summary"
-              description="One email each week with your sessions and earnings."
-              enabled={prefs.weeklySummary}
-              onChange={setPref("weeklySummary")}
-              disabled={loading}
-            />
-          </div>
-        </Card>
-
-        {/* Privacy */}
-        <Card
-          icon={<Eye size={19} className="text-emerald-600" />}
-          tone="bg-emerald-50"
-          title="Privacy"
-          subtitle="Control how freshers can find and see you."
-        >
-          <div className="divide-y divide-slate-100">
-            <SettingToggle
-              icon={<Eye size={18} />}
-              title="Profile visibility"
-              description="Let freshers find your mentor profile in search."
-              enabled={prefs.profileVisibility}
-              onChange={setPref("profileVisibility")}
-              disabled={loading}
-            />
-            <SettingToggle
-              icon={<Wifi size={18} />}
-              title="Show online status"
-              description="Let freshers see when you are online."
-              enabled={prefs.showOnlineStatus}
-              onChange={setPref("showOnlineStatus")}
-              disabled={loading}
-            />
-          </div>
-        </Card>
-
-        {/* Security */}
-        <Card
-          icon={<ShieldCheck size={19} className="text-amber-600" />}
-          tone="bg-amber-50"
-          title="Change password"
-          subtitle="Use a password you do not use anywhere else."
-        >
-          {/* Password last updated */}
-          <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
-            <div className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 p-3.5">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-100 bg-white text-amber-600">
-                <KeyRound size={18} />
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-slate-900">
-                  Password last updated
-                </p>
-                <p className="mt-0.5 text-xs text-slate-500" aria-live="polite">
-                  {loading
-                    ? "Checking…"
-                    : passwordChangedAt
-                      ? `${formatDateTime(passwordChangedAt)} (${timeAgo(
-                          passwordChangedAt,
-                          now,
-                        )})`
-                      : "You have not changed your password yet."}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <form
-            onSubmit={handlePasswordChange}
-            noValidate
-            className="space-y-5 p-5 sm:p-6"
-          >
-            <PasswordField
-              label="Current password"
-              value={pw.current}
-              onChange={setPwField("current")}
-              show={pwShow.current}
-              onToggle={togglePw("current")}
-              placeholder="Enter current password"
-              autoComplete="current-password"
-              error={pwErrors.current}
-            />
-
-            <div>
-              <PasswordField
-                label="New password"
-                value={pw.next}
-                onChange={setPwField("next")}
-                show={pwShow.next}
-                onToggle={togglePw("next")}
-                placeholder="At least 8 characters"
-                autoComplete="new-password"
-                error={pwErrors.next}
+        <div className="grid items-start gap-6 lg:grid-cols-2">
+          {/* ---------- LEFT COLUMN ---------- */}
+          <div className="space-y-6">
+            {/* Availability */}
+            <Card
+              icon={<CalendarCheck size={19} className="text-violet-600" />}
+              tone="bg-violet-50"
+              title="Availability"
+              subtitle="Pause bookings without hiding your profile."
+            >
+              <SettingToggle
+                icon={<UserPlus size={18} />}
+                title="Accept new bookings"
+                description="Turn off to stop new session requests while you are busy or away."
+                enabled={prefs.acceptNewBookings}
+                onChange={setPref("acceptNewBookings")}
+                disabled={loading}
               />
-              {pw.next && (
-                <div className="mt-2.5" aria-live="polite">
-                  <div className="flex gap-1.5">
-                    {[1, 2, 3, 4].map((i) => (
-                      <span
-                        key={i}
-                        className={`h-1.5 flex-1 rounded-full transition-colors ${
-                          i <= strength.score ? strength.bar : "bg-slate-200"
-                        }`}
-                      />
-                    ))}
-                  </div>
-                  <p className="mt-1.5 text-xs text-slate-500">
-                    Strength: {strength.label}. Mix upper and lower case,
-                    numbers and symbols.
-                  </p>
-                </div>
-              )}
-            </div>
+            </Card>
 
-            <PasswordField
-              label="Confirm new password"
-              value={pw.confirm}
-              onChange={setPwField("confirm")}
-              show={pwShow.confirm}
-              onToggle={togglePw("confirm")}
-              placeholder="Re-enter new password"
-              autoComplete="new-password"
-              error={pwErrors.confirm}
-            />
-
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={changingPw}
-                className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
-              >
-                {changingPw ? (
-                  <Loader2 size={16} className="animate-spin" />
-                ) : (
-                  <Lock size={16} />
-                )}
-                {changingPw ? "Updating…" : "Update password"}
-              </button>
-            </div>
-          </form>
-        </Card>
-
-        {/* Account */}
-        <Card
-          icon={<LogOut size={18} className="text-slate-500" />}
-          tone="bg-slate-100"
-          title="Account"
-          subtitle="Sign out or remove your account."
-        >
-          <div className="space-y-3 p-5 sm:p-6">
-            <button
-              type="button"
-              onClick={handleLogout}
-              disabled={loggingOut || loggingOutAll}
-              className="flex w-full items-center justify-between rounded-xl border border-slate-100 bg-slate-50 p-4 text-left transition hover:bg-slate-100 disabled:opacity-60"
+            {/* Notifications */}
+            <Card
+              icon={<Bell size={19} className="text-blue-600" />}
+              tone="bg-blue-50"
+              title="Notifications"
+              subtitle="Choose how you want to receive updates."
             >
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-100 bg-white">
-                  {loggingOut ? (
-                    <Loader2
-                      size={18}
-                      className="animate-spin text-orange-500"
-                    />
-                  ) : (
-                    <LogOut size={18} className="text-orange-500" />
-                  )}
-                </div>
-                <div>
-                  <h4 className="text-sm font-semibold text-slate-900">
-                    {loggingOut ? "Logging out…" : "Log out"}
-                  </h4>
-                  <p className="mt-0.5 text-xs text-slate-400">
-                    Sign out of your mentor account on this device.
-                  </p>
-                </div>
+              <div className="divide-y divide-slate-100">
+                <SettingToggle
+                  icon={<Mail size={18} />}
+                  title="Email notifications"
+                  description="Important account updates by email."
+                  enabled={prefs.emailNotifications}
+                  onChange={setPref("emailNotifications")}
+                  disabled={loading}
+                />
+                <SettingToggle
+                  icon={<Smartphone size={18} />}
+                  title="Push notifications"
+                  description="Instant alerts on this device."
+                  enabled={prefs.pushNotifications}
+                  onChange={setPref("pushNotifications")}
+                  disabled={loading}
+                />
+                <SettingToggle
+                  icon={<UserPlus size={18} />}
+                  title="New session requests"
+                  description="Get notified when a fresher requests a session with you."
+                  enabled={prefs.newRequestAlerts}
+                  onChange={setPref("newRequestAlerts")}
+                  disabled={loading}
+                />
+                <SettingToggle
+                  icon={<MessageSquare size={18} />}
+                  title="New messages"
+                  description="Alerts when a fresher sends you a message."
+                  enabled={prefs.messageAlerts}
+                  onChange={setPref("messageAlerts")}
+                  disabled={loading}
+                />
+                <SettingToggle
+                  icon={<Clock size={18} />}
+                  title="Session reminders"
+                  description="A reminder before each scheduled session."
+                  enabled={prefs.sessionReminders}
+                  onChange={setPref("sessionReminders")}
+                  disabled={loading}
+                />
+                <SettingToggle
+                  icon={<FileText size={18} />}
+                  title="Weekly summary"
+                  description="One email each week with your sessions and earnings."
+                  enabled={prefs.weeklySummary}
+                  onChange={setPref("weeklySummary")}
+                  disabled={loading}
+                />
               </div>
-              <ChevronRight size={18} className="text-slate-400" />
-            </button>
+            </Card>
 
-            <button
-              type="button"
-              onClick={handleLogoutAll}
-              disabled={loggingOut || loggingOutAll}
-              className="flex w-full items-center justify-between rounded-xl border border-slate-100 bg-slate-50 p-4 text-left transition hover:bg-slate-100 disabled:opacity-60"
+            {/* Privacy */}
+            <Card
+              icon={<Eye size={19} className="text-emerald-600" />}
+              tone="bg-emerald-50"
+              title="Privacy"
+              subtitle="Control how freshers can find and see you."
             >
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-100 bg-white">
-                  {loggingOutAll ? (
-                    <Loader2
-                      size={18}
-                      className="animate-spin text-slate-500"
-                    />
-                  ) : (
-                    <MonitorSmartphone size={18} className="text-slate-500" />
-                  )}
-                </div>
-                <div>
-                  <h4 className="text-sm font-semibold text-slate-900">
-                    {loggingOutAll ? "Logging out…" : "Log out of all devices"}
-                  </h4>
-                  <p className="mt-0.5 text-xs text-slate-400">
-                    Use this if you think someone else has your password.
-                  </p>
-                </div>
+              <div className="divide-y divide-slate-100">
+                <SettingToggle
+                  icon={<Eye size={18} />}
+                  title="Profile visibility"
+                  description="Let freshers find your mentor profile in search."
+                  enabled={prefs.profileVisibility}
+                  onChange={setPref("profileVisibility")}
+                  disabled={loading}
+                />
+                <SettingToggle
+                  icon={<Wifi size={18} />}
+                  title="Show online status"
+                  description="Let freshers see when you are online."
+                  enabled={prefs.showOnlineStatus}
+                  onChange={setPref("showOnlineStatus")}
+                  disabled={loading}
+                />
               </div>
-              <ChevronRight size={18} className="text-slate-400" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setDeleteOpen(true)}
-              className="flex w-full items-center justify-between rounded-xl border border-rose-100 bg-rose-50 p-4 text-left transition hover:bg-rose-100"
-            >
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-rose-100 bg-white">
-                  <Trash2 size={18} className="text-rose-600" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-semibold text-rose-600">
-                    Delete account
-                  </h4>
-                  <p className="mt-0.5 text-xs text-slate-400">
-                    Permanently remove your account and data.
-                  </p>
-                </div>
-              </div>
-              <ChevronRight size={18} className="text-slate-400" />
-            </button>
+            </Card>
           </div>
-        </Card>
+
+          {/* ---------- RIGHT COLUMN ---------- */}
+          <div className="space-y-6">
+            {/* Security */}
+            <Card
+              icon={<ShieldCheck size={19} className="text-amber-600" />}
+              tone="bg-amber-50"
+              title="Change password"
+              subtitle="Use a password you do not use anywhere else."
+            >
+              {/* Password last updated */}
+              <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
+                <div className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 p-3.5">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-100 bg-white text-amber-600">
+                    <KeyRound size={18} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">
+                      Password last updated
+                    </p>
+                    <p
+                      className="mt-0.5 text-xs text-slate-500"
+                      aria-live="polite"
+                    >
+                      {loading
+                        ? "Checking…"
+                        : passwordChangedAt
+                          ? `${formatDateTime(passwordChangedAt)} (${timeAgo(
+                              passwordChangedAt,
+                              now,
+                            )})`
+                          : "You have not changed your password yet."}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <form
+                onSubmit={handlePasswordChange}
+                noValidate
+                className="space-y-5 p-5 sm:p-6"
+              >
+                <PasswordField
+                  label="Current password"
+                  value={pw.current}
+                  onChange={setPwField("current")}
+                  show={pwShow.current}
+                  onToggle={togglePw("current")}
+                  placeholder="Enter current password"
+                  autoComplete="current-password"
+                  error={pwErrors.current}
+                />
+
+                <div>
+                  <PasswordField
+                    label="New password"
+                    value={pw.next}
+                    onChange={setPwField("next")}
+                    show={pwShow.next}
+                    onToggle={togglePw("next")}
+                    placeholder="At least 8 characters"
+                    autoComplete="new-password"
+                    error={pwErrors.next}
+                  />
+                  {pw.next && (
+                    <div className="mt-2.5" aria-live="polite">
+                      <div className="flex gap-1.5">
+                        {[1, 2, 3, 4].map((i) => (
+                          <span
+                            key={i}
+                            className={`h-1.5 flex-1 rounded-full transition-colors ${
+                              i <= strength.score
+                                ? strength.bar
+                                : "bg-slate-200"
+                            }`}
+                          />
+                        ))}
+                      </div>
+                      <p className="mt-1.5 text-xs text-slate-500">
+                        Strength: {strength.label}. Mix upper and lower case,
+                        numbers and symbols.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <PasswordField
+                  label="Confirm new password"
+                  value={pw.confirm}
+                  onChange={setPwField("confirm")}
+                  show={pwShow.confirm}
+                  onToggle={togglePw("confirm")}
+                  placeholder="Re-enter new password"
+                  autoComplete="new-password"
+                  error={pwErrors.confirm}
+                />
+
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={changingPw}
+                    className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 active:scale-95 disabled:opacity-60"
+                  >
+                    {changingPw ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <Lock size={16} />
+                    )}
+                    {changingPw ? "Updating…" : "Update password"}
+                  </button>
+                </div>
+              </form>
+            </Card>
+
+            {/* Account */}
+            <Card
+              icon={<LogOut size={18} className="text-slate-500" />}
+              tone="bg-slate-100"
+              title="Account"
+              subtitle="Sign out or remove your account."
+            >
+              <div className="space-y-3 p-5 sm:p-6">
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  disabled={loggingOut || loggingOutAll}
+                  className="flex w-full items-center justify-between rounded-xl border border-slate-100 bg-slate-50 p-4 text-left transition hover:bg-slate-100 disabled:opacity-60"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-100 bg-white">
+                      {loggingOut ? (
+                        <Loader2
+                          size={18}
+                          className="animate-spin text-orange-500"
+                        />
+                      ) : (
+                        <LogOut size={18} className="text-orange-500" />
+                      )}
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-semibold text-slate-900">
+                        {loggingOut ? "Logging out…" : "Log out"}
+                      </h4>
+                      <p className="mt-0.5 text-xs text-slate-400">
+                        Sign out of your mentor account on this device.
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} className="text-slate-400" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleLogoutAll}
+                  disabled={loggingOut || loggingOutAll}
+                  className="flex w-full items-center justify-between rounded-xl border border-slate-100 bg-slate-50 p-4 text-left transition hover:bg-slate-100 disabled:opacity-60"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-100 bg-white">
+                      {loggingOutAll ? (
+                        <Loader2
+                          size={18}
+                          className="animate-spin text-slate-500"
+                        />
+                      ) : (
+                        <MonitorSmartphone
+                          size={18}
+                          className="text-slate-500"
+                        />
+                      )}
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-semibold text-slate-900">
+                        {loggingOutAll
+                          ? "Logging out…"
+                          : "Log out of all devices"}
+                      </h4>
+                      <p className="mt-0.5 text-xs text-slate-400">
+                        Use this if you think someone else has your password.
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} className="text-slate-400" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDeleteOpen(true)}
+                  className="flex w-full items-center justify-between rounded-xl border border-rose-100 bg-rose-50 p-4 text-left transition hover:bg-rose-100"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-rose-100 bg-white">
+                      <Trash2 size={18} className="text-rose-600" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-semibold text-rose-600">
+                        Delete account
+                      </h4>
+                      <p className="mt-0.5 text-xs text-slate-400">
+                        Permanently remove your account and data.
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} className="text-slate-400" />
+                </button>
+              </div>
+            </Card>
+          </div>
+        </div>
       </main>
 
       {/* Delete confirmation */}
@@ -851,7 +855,7 @@ const MentorSettings = () => {
 ========================================================================= */
 
 const Card = ({ icon, tone, title, subtitle, children }) => (
-  <section className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
+  <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
     <div className="flex items-center gap-3 border-b border-slate-100 p-5 sm:p-6">
       <div
         className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${tone}`}

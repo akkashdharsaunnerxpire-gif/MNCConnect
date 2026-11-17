@@ -497,7 +497,7 @@ const GroupDetailsModal = ({ bookingId, onClose }) => {
 
   const current = people?.[selected] || null;
 
-  return createPortal( 
+  return createPortal(
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 px-4"
       onClick={onClose}
@@ -565,7 +565,8 @@ const GroupDetailsModal = ({ bookingId, onClose }) => {
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 
@@ -944,10 +945,26 @@ const MentorSessions = () => {
     navigate(`/mentor/meeting/${encodeURIComponent(session.id)}`);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-white via-sky-50 to-blue-100 text-slate-800">
-      <main className="mx-auto max-w-7xl px-5 py-8">
+    <div className="min-h-screen bg-white text-slate-900">
+      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        {/* header */}
+        <header className="mb-6">
+          <p className="text-sm font-medium text-blue-600">Mentor workspace</p>
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight">
+            Your Sessions
+          </h1>
+          <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+            Join, chat and track every session in one place.
+            <span
+              className={`inline-flex items-center gap-1 text-xs font-medium ${connected ? "text-emerald-600" : "text-amber-600"}`}
+            >
+              <Radio size={12} /> {connected ? "Live" : "Reconnecting…"}
+            </span>
+          </p>
+        </header>
+
         <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex w-fit gap-2 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+          <div className="flex w-fit max-w-full gap-2 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
             {TABS.map((tab) => {
               const active = activeTab === tab;
               return (
@@ -972,25 +989,18 @@ const MentorSessions = () => {
             })}
           </div>
 
-          <div className="flex items-center gap-3">
-            <span
-              className={`inline-flex items-center gap-1 text-xs font-medium ${connected ? "text-emerald-600" : "text-amber-600"}`}
-            >
-              <Radio size={12} /> {connected ? "Live" : "Reconnecting…"}
-            </span>
-            <div className="relative w-full lg:w-80">
-              <Search
-                size={17}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-              />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search sessions..."
-                className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm outline-none focus:border-blue-400"
-              />
-            </div>
+          <div className="relative w-full lg:w-80">
+            <Search
+              size={17}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+            />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search sessions..."
+              className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm outline-none focus:border-blue-400"
+            />
           </div>
         </div>
 
@@ -1470,7 +1480,7 @@ const SessionInfo = ({ icon, label, value }) => (
 );
 
 const EmptyState = ({ title, description }) => (
-  <div className="rounded-2xl border border-slate-200 bg-white py-20 text-center shadow-sm">
+  <div className="rounded-2xl border border-dashed border-slate-300 bg-white py-20 text-center">
     <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50">
       <CalendarDays size={25} className="text-blue-500" />
     </div>

@@ -76,25 +76,25 @@ const MentorReviews = () => {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+      <div className="flex min-h-screen items-center justify-center bg-white">
         <Loader2 className="animate-spin text-blue-600" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-white via-sky-50 to-blue-100 text-slate-800">
-      <main className="relative z-10 mx-auto max-w-7xl px-5 py-8">
-        <div className="mb-8">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-blue-600">Mentor Workspace</p>
-          <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Your Reviews</h2>
-          <p className="mt-2 flex items-center gap-2 text-sm text-slate-500">
+    <div className="min-h-screen bg-white text-slate-900">
+      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        <header className="mb-8">
+          <p className="text-sm font-medium text-blue-600">Mentor workspace</p>
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Your Reviews</h1>
+          <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
             New reviews appear the moment a fresher posts them.
             <span className={`inline-flex items-center gap-1 text-xs font-medium ${connected ? "text-emerald-600" : "text-amber-600"}`}>
               <Radio size={12} /> {connected ? "Live" : "Reconnecting…"}
             </span>
           </p>
-        </div>
+        </header>
 
         {error && (
           <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
