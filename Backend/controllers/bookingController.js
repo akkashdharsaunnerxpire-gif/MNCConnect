@@ -528,6 +528,73 @@ const isWalletPayment = (p) =>
   (p.method === "wallet" ||
     String(p.razorpayPaymentId || "").startsWith("wallet_pay_"));
 
+
+// Wallet refund = "mark payment refunded" + "credit the wallet" in ONE transaction.
+// Crash in between -> everything rolls back, the scheduler retries. No lost money.
+const refundToWalletAtomic = async (fresh, amount) => {
+  const session = await mongoose.startSession();
+  let result = "failed";
+
+  try {
+    await session.withTransaction(async () => {
+      result = "failed"; // the driver can retry this callback
+
+      const before = await Payment.findOneAndUpdate(
+        { _id: fresh._id, status: "paid" },
+        {
+          $set: {
+            status: "refunded",
+            sessionStatus: "cancelled",
+            refundMethod: "wallet",
+            refundedAt: new Date(),
+            refundAmount: amount,
+            convenienceFeeRefunded: 0,
+            refundError: "",
+          },
+        },
+        { returnDocument: "before", session },
+      );
+
+      if (!before) {
+        const cur = await Payment.findById(fresh._id).select("status").session(session).lean();
+        result = cur?.status === "refunded" ? "refunded" : "failed";
+        return;
+      }
+
+      // wallet-paid -> back to the SAME buckets, Razorpay-paid -> refundable cash
+      const wb = before.walletBreakdown || {};
+      const hasBreakdown =
+        isWalletPayment(before) &&
+        (Number(wb.bonus) > 0 || Number(wb.referral) > 0 || Number(wb.refundable) > 0);
+
+      const credit = hasBreakdown
+        ? { bonus: wb.bonus, referral: wb.referral, refundable: wb.refundable }
+        : { refundable: amount };
+
+      await creditWallet(before.fresher, credit, session);
+
+      if (Number(credit.refundable) > 0) {
+        await Fresher.updateOne(
+          { _id: before.fresher },
+          { $inc: { totalRefunds: Number(credit.refundable) } },
+          { session },
+        );
+      }
+      result = "refunded";
+    });
+  } catch (e) {
+    console.error("refundToWalletAtomic failed:", fresh._id, e.message);
+    result = "failed";
+  } finally {
+    session.endSession();
+  }
+
+  if (result === "refunded" && fresh.fresher) {
+    emitToUser(String(fresh.fresher), "wallet:updated", { amount });
+  }
+  return result;
+};
+
 // returns "refunded" | "failed"
 // RULE: only the SESSION PRICE is ever refunded.
 // The convenience fee (what the customer paid to cover Razorpay's cost) is NEVER refunded,
@@ -1571,6 +1638,8 @@ exports.respondToRequest = exports.updateRequest;
 
 /* ============================ READ ============================ */
 
+// REPLACE the whole existing exports.getRequestStatus
+// FIX: only the people of this booking (or a mentor it was sent to) may read it
 exports.getRequestStatus = async (req, res) => {
   try {
     const b = await Booking.findOne({
@@ -1579,16 +1648,23 @@ exports.getRequestStatus = async (req, res) => {
       .populate("mentor", POPULATE_MENTOR)
       .populate("preferredMentor", POPULATE_MENTOR);
     if (!b) return fail(res, 404, "Not found");
-    return res.json({
-      success: true,
-      request: toClient(b),
-      booking: toClient(b),
-    });
+
+    const me = String(req.user?.id || "");
+    const isMember = participantUserIds(b).includes(me);
+    const isMentor =
+      req.user?.role === "mentor" &&
+      [
+        b.mentor && String(b.mentor._id || b.mentor),
+        b.preferredMentor && String(b.preferredMentor._id || b.preferredMentor),
+        ...(b.notified || []).map(String),
+      ].includes(me);
+    if (!isMember && !isMentor) return fail(res, 403, "Access denied");
+
+    return res.json({ success: true, request: toClient(b), booking: toClient(b) });
   } catch (error) {
     return fail(res, 500, "Failed to load request");
   }
 };
-
 // SECURITY FIX: this used to read ?email= from the URL, so anybody could type
 // any email and read that person's bookings. It now uses the logged-in user.
 // The route must be behind the fresher auth middleware.
@@ -1628,16 +1704,33 @@ exports.myBookings = async (req, res) => {
   }
 };
 
+// REPLACE the whole existing exports.needsReview
+// FIX: group friends can be asked to review too (the old code looked at the host only)
 exports.needsReview = async (req, res) => {
   try {
-    const b = await Booking.findOne({
-      fresher: req.user.id,
+    const uid = String(req.user.id);
+    const list = await Booking.find({
       status: "completed",
-      reviewed: false,
+      mentor: { $ne: null },
+      completedAt: { $gte: new Date(Date.now() - 14 * 86400000) }, // do not nag about old sessions
+      $or: [{ fresher: uid }, { "participants.fresher": uid }],
     })
       .populate("mentor", POPULATE_MENTOR)
-      .sort({ completedAt: 1 });
-    return res.json({ success: true, booking: b ? toClient(b) : null });
+      .sort({ completedAt: 1 })
+      .limit(20);
+
+    if (!list.length) return res.json({ success: true, booking: null });
+
+    const done = await Review.find({
+      fresher: uid,
+      sessionKey: { $in: list.map((x) => x.requestGroupId) },
+    })
+      .select("sessionKey")
+      .lean();
+    const reviewed = new Set(done.map((r) => r.sessionKey));
+
+    const next = list.find((x) => !reviewed.has(x.requestGroupId));
+    return res.json({ success: true, booking: next ? toClient(next) : null });
   } catch (error) {
     return fail(res, 500, "Failed to check reviews");
   }

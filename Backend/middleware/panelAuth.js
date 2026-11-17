@@ -1,7 +1,8 @@
 // middleware/panelAuth.js
-// Verifies the same JWT that authController.generateToken() creates
-// ({ id, role }). Reads the HttpOnly cookie first, Bearer header as fallback.
+// Verifies the same JWT that authController.generateToken() creates ({ id, role }).
+// Reads the HttpOnly cookie first, Bearer header as fallback.
 // Use:  requireAuth("mentor")  /  requireAuth("fresher")
+//       requireActiveMentor    -> after requireAuth("mentor"): blocks pending / rejected / suspended mentors
 
 const jwt = require("jsonwebtoken");
 
@@ -19,10 +20,9 @@ const decode = (req) => {
   const token = readToken(req);
   if (!token || !process.env.JWT_SECRET) return null;
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
-    return payload && payload.id
-      ? { id: String(payload.id), role: payload.role }
-      : null;
+    // lock the algorithm (jsonwebtoken signs with HS256 by default)
+    const payload = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ["HS256"] });
+    return payload && payload.id ? { id: String(payload.id), role: payload.role } : null;
   } catch (_) {
     return null;
   }
@@ -34,14 +34,10 @@ const requireAuth =
     const user = decode(req);
 
     if (!user) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Please log in to continue." });
+      return res.status(401).json({ success: false, message: "Please log in to continue." });
     }
     if (roles.length && !roles.includes(user.role)) {
-      return res
-        .status(403)
-        .json({ success: false, message: "You do not have access to this." });
+      return res.status(403).json({ success: false, message: "You do not have access to this." });
     }
 
     req.user = user;
@@ -55,4 +51,20 @@ const optionalAuth = (req, res, next) => {
   next();
 };
 
-module.exports = { requireAuth, optionalAuth };
+// A JWT stays valid after the admin suspends a mentor. This checks the DATABASE.
+const requireActiveMentor = async (req, res, next) => {
+  try {
+    const Mentor = require("../models/Mentor");
+    const m = await Mentor.findById(req.user.id).select("accountStatus verificationStatus").lean();
+    if (!m || m.accountStatus !== "active" || m.verificationStatus !== "approved") {
+      return res
+        .status(403)
+        .json({ success: false, message: "Your mentor account is not active." });
+    }
+    next();
+  } catch (e) {
+    next(e);
+  }
+};
+
+module.exports = { requireAuth, optionalAuth, requireActiveMentor };

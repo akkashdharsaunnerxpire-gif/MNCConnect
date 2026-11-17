@@ -137,52 +137,19 @@ const MentorProfile = () => {
     fetchMentorProfile();
   }, []);
 
-  const apiUpdateMentor = async (email, formValues) => {
-    const {
-      offerLetterFile,
-      employeeIdProofFile,
-      additionalProofFile,
-      avatarFile,
-      removeAvatar,
-      // current document urls are never sent back (server keeps them)
-      offerLetter,
-      employeeIdProof,
-      additionalProof,
-      skills,
-      languages,
-      ...rest
-    } = formValues;
-    const hasFiles =
-      offerLetterFile || employeeIdProofFile || additionalProofFile;
+ const apiUpdateMentor = async (email, formValues) => {
+  const {
+    name, mobile, officeLocation, yearsOfExperience,
+    linkedinProfile, bio, skills, languages,
+  } = formValues;
 
-    let body;
-    // do NOT set Content-Type for FormData: axios adds the boundary itself
-    const config = { withCredentials: true };
-
-    if (hasFiles) {
-      body = new FormData();
-      Object.entries(rest).forEach(([key, value]) =>
-        body.append(key, value ?? ""),
-      );
-      // comma separated, also when empty, so a list can be cleared
-      body.append("skills", (skills || []).join(","));
-      body.append("languages", (languages || []).join(","));
-      if (offerLetterFile) body.append("offerLetter", offerLetterFile);
-      if (employeeIdProofFile)
-        body.append("employeeIdProof", employeeIdProofFile);
-      if (additionalProofFile)
-        body.append("additionalProof", additionalProofFile);
-    } else {
-      body = { ...rest, skills, languages };
-    }
-
-    const res = await axios.put(
-      `${API_URL}/mentor/${encodeURIComponent(email)}`,
-      body,
-      config,
-    );
-    return res.data;
-  };
+  const res = await axios.put(
+    `${API_URL}/mentor/${encodeURIComponent(email)}`,
+    { name, mobile, officeLocation, yearsOfExperience, linkedinProfile, bio, skills, languages },
+    { withCredentials: true },
+  );
+  return res.data;
+};
 
   const handleSaveProfile = async (formValues) => {
     setSaving(true);
@@ -627,12 +594,7 @@ const MentorProfile = () => {
 const EDITABLE_FIELDS = [
   { key: "name", label: "Full Name", required: true },
   { key: "mobile", label: "Phone", placeholder: "+91 1234567890" },
-  { key: "currentCompany", label: "Company" },
-  { key: "designation", label: "Designation" },
-  { key: "department", label: "Department" },
-  { key: "employeeId", label: "Employee ID" },
   { key: "officeLocation", label: "Office Location" },
-  { key: "workEmail", label: "Work Email" },
   { key: "yearsOfExperience", label: "Years of Experience", type: "number" },
   {
     key: "linkedinProfile",

@@ -18,7 +18,7 @@ const mentorPanelRoutes = require("./routes/mentorPanelRoutes");
 const fresherBookingRoutes = require("./routes/fresherBookingRoutes");
 const instructionRoutes = require("./routes/instructionRoutes");
 const chatRoutes = require("./routes/chatRoutes");
-const assistantRoutes = require("./routes/assistantRoute");   // ← singular (route)
+const assistantRoutes = require("./routes/assistantRoute"); // ← singular (route)
 const whatsappWebhook = require("./routes/whatsappWebhook");
 
 const {
@@ -44,6 +44,7 @@ app.use(
 );
 
 // ================= CORS =================
+// ================= CORS =================
 
 const allowedOrigins = [
   ...new Set(
@@ -62,17 +63,22 @@ console.log("Allowed CORS origins:", allowedOrigins);
 
 app.use(
   cors((req, callback) => {
-    const origin = req.header("Origin");
+    const origin = req.get("Origin");
+
+    // Admin login: no cross-origin access is granted.
+    // The admin CSRF middleware validates the actual request.
+    // Server-rendered admin pages do not need cross-origin CORS.
+    // Let adminSecurity.js validate CSRF and admin sessions.
+    if (req.path === "/admin" || req.path.startsWith("/admin/")) {
+      return callback(null, { origin: false });
+    }
     const sameOrigin = origin === `${req.protocol}://${req.get("host")}`;
 
-    const allowed =
-      !origin ||
-      origin === "null" ||
-      sameOrigin ||
-      allowedOrigins.includes(origin);
+    const allowed = !origin || sameOrigin || allowedOrigins.includes(origin);
 
     if (!allowed) {
       console.log("CORS blocked origin:", origin);
+
       const err = new Error(`CORS blocked for origin: ${origin}`);
       err.status = 403;
       return callback(err);
@@ -155,10 +161,31 @@ app.get("/health", (req, res) => {
 
 // ================= ROUTES =================
 // ORDER MATTERS.
+const rateLimit = require("express-rate-limit");
+const limiter = (max) =>
+  rateLimit({
+    windowMs: 60 * 1000,
+    max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => req.method === "GET" || req.method === "OPTIONS",
+    message: {
+      success: false,
+      message: "Too many requests. Please wait a minute and try again.",
+    },
+  });
+
+app.use("/api/auth", limiter(30));
+app.use("/api/payments", limiter(40));
+app.use("/api/auth/fresher/send-otp", limiter(5));
+app.use("/api/auth/fresher/verify-otp", limiter(10));
+app.use("/api/auth/fresher/register", limiter(10));
+app.use("/api/auth/fresher/login", limiter(15));
+app.use("/api/auth/mentor/login", limiter(15));
 
 app.use("/api/auth", authRoutes);
 app.use("/api/chat", chatRoutes);
-app.use("/api/assistant", assistantRoutes);   
+app.use("/api/assistant", assistantRoutes);
 
 // Booking router FIRST so it owns PATCH /api/session/session-requests/:id
 app.use("/api", fresherBookingRoutes);

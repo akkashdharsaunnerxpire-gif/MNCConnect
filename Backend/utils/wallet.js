@@ -5,6 +5,8 @@ const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 const isReleased = (payment) => payment.sessionStatus === "completed";
 
+const istMonth = (d) =>
+  new Date(d.getTime() + 330 * 60 * 1000).toISOString().slice(0, 7);
 const computeWallet = (payments, reserved = 0, now = new Date()) => {
   const weekAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
 
@@ -38,12 +40,7 @@ const computeWallet = (payments, reserved = 0, now = new Date()) => {
     wallet.completedCount += 1;
 
     if (releasedAt.getTime() >= weekAgo) wallet.week += earning;
-    if (
-      releasedAt.getFullYear() === now.getFullYear() &&
-      releasedAt.getMonth() === now.getMonth()
-    ) {
-      wallet.month += earning;
-    }
+    if (istMonth(releasedAt) === istMonth(now)) wallet.month += earning;
   }
 
   wallet.lifetime = round2(wallet.lifetime);

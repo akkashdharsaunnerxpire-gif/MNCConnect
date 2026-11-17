@@ -91,8 +91,6 @@ const isSameOrigin = (req) => {
   //    when Referrer-Policy is "no-referrer" (which makes Origin = "null").
   const fetchSite = String(req.get("sec-fetch-site") || "").toLowerCase();
   if (fetchSite === "same-origin") return true;
-  // "none" = user typed the URL / bookmark (not applicable to POST, but harmless)
-  if (fetchSite === "none") return true;
 
   // 2) Fallback: compare Origin (or Referer) with the Host the request came to
   const forwarded = String(req.get("x-forwarded-host") || "").split(",")[0].trim();

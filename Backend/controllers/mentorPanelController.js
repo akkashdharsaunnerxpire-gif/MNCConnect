@@ -16,9 +16,12 @@ const MIN_WITHDRAWAL = 500;
 const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 const fail = (res, status, message) => res.status(status).json({ success: false, message });
 
+const PRIVATE_PAYMENT_FIELDS =
+  "-payerEmail -payerContact -fresherEmail -method -razorpayOrderId -razorpayPaymentId -walletBreakdown";
+
 const loadWallet = async (mentorId) => {
   const payments = await Payment.find({ mentor: mentorId, status: "paid" })
-    .select("-payerEmail -payerContact -fresherEmail -method -razorpayOrderId -razorpayPaymentId")
+    .select(PRIVATE_PAYMENT_FIELDS)
     .sort({ paidAt: -1 })
     .lean();
 
@@ -39,26 +42,18 @@ const loadWallet = async (mentorId) => {
     },
     { $group: { _id: null, total: { $sum: "$amount" } } },
   ]);
-
   const reserved = agg[0]?.total || 0;
 
-  // ---- list for the "My Sessions" page ----
-  // FIX: refunded payments (missed / cancelled sessions) are included too, so the mentor
-  // sees them in the "Cancelled" tab. Their earning is 0 (money went back to the fresher).
-  // After the booking is deleted (24h), the row disappears automatically
-  // because we only keep payments that still have a booking.
-  // The wallet balance above is NOT affected (it still uses only "paid" payments).
+  // refunded rows (missed / cancelled sessions) are shown in the "Cancelled" tab with earning 0.
+  // The wallet balance is NOT affected (it uses only "paid" payments).
   const refundedRows = await Payment.find({ mentor: mentorId, status: "refunded" })
-    .select("-payerEmail -payerContact -fresherEmail -method -razorpayOrderId -razorpayPaymentId")
+    .select(PRIVATE_PAYMENT_FIELDS)
     .sort({ paidAt: -1 })
     .limit(100)
     .lean();
 
   const allRows = [...payments, ...refundedRows];
-
-  const requestIds = [
-    ...new Set(allRows.map((p) => p.requestGroupId).filter(Boolean)),
-  ];
+  const requestIds = [...new Set(allRows.map((p) => p.requestGroupId).filter(Boolean))];
   const bookings = requestIds.length
     ? await Booking.find({ requestGroupId: { $in: requestIds } })
         .select("requestGroupId status")
@@ -113,13 +108,13 @@ exports.requestWithdrawal = async (req, res) => {
       return fail(res, 400, "Enter a valid UPI ID.");
     }
 
-    // only an active, approved mentor can withdraw
-    const mentor = await Mentor.findById(req.user.id).select("accountStatus verificationStatus").lean();
+    const mentor = await Mentor.findById(req.user.id)
+      .select("accountStatus verificationStatus")
+      .lean();
     if (!mentor || mentor.accountStatus !== "active" || mentor.verificationStatus !== "approved") {
       return fail(res, 403, "Your account is not active for withdrawals.");
     }
 
-    // one pending request at a time (the unique index in Withdrawal.js is the final guard)
     const pending = await Withdrawal.exists({ mentor: req.user.id, status: "requested" });
     if (pending) {
       return fail(res, 409, "You already have a withdrawal request being processed.");
@@ -132,6 +127,7 @@ exports.requestWithdrawal = async (req, res) => {
 
     let withdrawal;
     try {
+      // the unique partial index in Withdrawal.js is the final guard against double requests
       withdrawal = await Withdrawal.create({ mentor: req.user.id, amount, upiId });
     } catch (e) {
       if (e.code === 11000) {
@@ -160,8 +156,7 @@ exports.requestWithdrawal = async (req, res) => {
   }
 };
 
-// NOTE: admin "mark paid / reject" now lives in controllers/adminWithdrawalController.js
-// (the admin panel uses a session login, not the mentor/fresher JWT).
+// NOTE: admin "mark paid / reject" lives in controllers/adminWithdrawalController.js
 
 /* ============================================================
    REVIEWS
@@ -188,7 +183,7 @@ exports.replyToReview = async (req, res) => {
     const review = await Review.findOneAndUpdate(
       { _id: req.params.id, mentor: req.user.id },
       { $set: { reply: { text, repliedAt: new Date() } } },
-      { returnDocument: "after" }
+      { returnDocument: "after" },
     );
     if (!review) return fail(res, 404, "Review not found.");
 
@@ -200,7 +195,7 @@ exports.replyToReview = async (req, res) => {
   }
 };
 
-// POST /api/reviews   { requestGroupId, rating, comment }   (fresher)
+// POST /api/reviews   { requestGroupId, rating, comment }   (fresher: host OR group friend)
 exports.createReview = async (req, res) => {
   try {
     const requestGroupId = String(req.body?.requestGroupId || "").trim();
@@ -213,7 +208,11 @@ exports.createReview = async (req, res) => {
     }
     if (comment.length < 3) return fail(res, 400, "Please write your feedback.");
 
-    const booking = await Booking.findOne({ requestGroupId, fresher: req.user.id });
+    // FIX: host OR a friend who paid and joined the group
+    const booking = await Booking.findOne({
+      requestGroupId,
+      $or: [{ fresher: req.user.id }, { "participants.fresher": req.user.id }],
+    });
     if (!booking || !booking.mentor) return fail(res, 404, "Session not found.");
     if (!["in_progress", "awaiting_confirmation", "completed"].includes(booking.status)) {
       return fail(res, 400, "You can review once the session has started.");
@@ -237,10 +236,16 @@ exports.createReview = async (req, res) => {
     } catch (e) {
       if (e.code !== 11000) throw e;
       created = false; // already reviewed -> treat as success
-      review = await Review.findOne({ mentor: mentorId, fresher: req.user.id, sessionKey: requestGroupId });
+      review = await Review.findOne({
+        mentor: mentorId,
+        fresher: req.user.id,
+        sessionKey: requestGroupId,
+      });
     }
 
-    await Booking.updateOne({ _id: booking._id }, { $set: { reviewed: true } });
+    if (String(booking.fresher) === String(req.user.id)) {
+      await Booking.updateOne({ _id: booking._id }, { $set: { reviewed: true } });
+    }
 
     if (created) {
       const agg = await Review.aggregate([
@@ -250,7 +255,7 @@ exports.createReview = async (req, res) => {
       if (agg[0]) {
         await Mentor.updateOne(
           { _id: mentorId },
-          { $set: { rating: Math.round(agg[0].avg * 10) / 10, totalReviews: agg[0].count } }
+          { $set: { rating: Math.round(agg[0].avg * 10) / 10, totalReviews: agg[0].count } },
         );
       }
       notify({
@@ -303,7 +308,7 @@ exports.markNotificationRead = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) return fail(res, 400, "Invalid id.");
     await Notification.updateOne(
       { _id: req.params.id, user: req.user.id },
-      { $set: { read: true, readAt: new Date() } }
+      { $set: { read: true, readAt: new Date() } },
     );
     return res.json({ success: true });
   } catch (error) {
@@ -316,7 +321,7 @@ exports.markAllNotificationsRead = async (req, res) => {
   try {
     await Notification.updateMany(
       { user: req.user.id, role: "mentor", read: false },
-      { $set: { read: true, readAt: new Date() } }
+      { $set: { read: true, readAt: new Date() } },
     );
     return res.json({ success: true });
   } catch (error) {
@@ -328,50 +333,37 @@ exports.markAllNotificationsRead = async (req, res) => {
 // MENTOR STATS (dashboard counters)
 // ============================================================
 
+// FIX: used to count status "accepted" only, so the total DROPPED when a session completed.
+const COUNTED = ["accepted", "in_progress", "awaiting_confirmation", "completed"];
+
 exports.getMentorStats = async (req, res) => {
   try {
     const now = new Date();
     const weekAgo = new Date(now.getTime() - 7 * 86400000);
     const monthAgo = new Date(now.getTime() - 30 * 86400000);
+    const base = { mentor: req.user.id, status: { $in: COUNTED } };
 
     const [total, week, month, completed] = await Promise.all([
-      Booking.countDocuments({ mentor: req.user.id, status: "accepted" }),
-      Booking.countDocuments({
-        mentor: req.user.id,
-        status: "accepted",
-        startsAt: { $gte: weekAgo },
-      }),
-      Booking.countDocuments({
-        mentor: req.user.id,
-        status: "accepted",
-        startsAt: { $gte: monthAgo },
-      }),
+      Booking.countDocuments(base),
+      Booking.countDocuments({ ...base, startsAt: { $gte: weekAgo } }),
+      Booking.countDocuments({ ...base, startsAt: { $gte: monthAgo } }),
       Booking.countDocuments({ mentor: req.user.id, status: "completed" }),
     ]);
 
-    return res.json({
-      success: true,
-      stats: { total, week, month, completed },
-    });
+    return res.json({ success: true, stats: { total, week, month, completed } });
   } catch (error) {
     console.error("getMentorStats error:", error.message);
     return fail(res, 500, "Unable to load stats.");
   }
 };
 
-// ============================================================
-// GET /api/mentor/profile/stats (Real-time Stats for Profile)
-// ============================================================
-
+// GET /api/mentor/profile/stats
 exports.getProfileStats = async (req, res) => {
   try {
-    const mentorId = req.user.id;
-
-    const mentor = await Mentor.findById(mentorId).select("rating totalReviews totalSessions").lean();
-
-    if (!mentor) {
-      return fail(res, 404, "Mentor not found.");
-    }
+    const mentor = await Mentor.findById(req.user.id)
+      .select("rating totalReviews totalSessions")
+      .lean();
+    if (!mentor) return fail(res, 404, "Mentor not found.");
 
     return res.json({
       success: true,
@@ -384,41 +376,7 @@ exports.getProfileStats = async (req, res) => {
     return fail(res, 500, "Unable to load stats.");
   }
 };
-// ---------- ASSIGN PAYMENT TO LOGGED-IN MENTOR ----------
-exports.assignToMe = async (req, res) => {
-  try {
-    const {
-      requestGroupId,
-      razorpayPaymentId,
-      paymentId,
-    } = req.body || {};
 
-    const result = await require("../controllers/paymentController")
-      .assignMentorToRequest({
-        requestGroupId,
-        razorpayPaymentId: razorpayPaymentId || paymentId,
-        mentorId: req.user.id,
-      });
-
-    if (!result || result.matchedCount === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No eligible paid payment found",
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: "Payment assigned successfully",
-      modifiedCount: result.modifiedCount,
-    });
-
-  } catch (error) {
-    console.error("Assign payment error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Unable to assign payment",
-    });
-  }
-};
+// REMOVED: assignToMe. The server already assigns the mentor to every payment
+// when he accepts (bookingController.updateRequest -> assignMentorToAll).
+// The old endpoint let ANY mentor take another mentor's payments.

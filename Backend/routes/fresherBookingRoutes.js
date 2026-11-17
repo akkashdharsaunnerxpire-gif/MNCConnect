@@ -1,80 +1,46 @@
 // routes/fresherBookingRoutes.js
-// Mounted in app.js:  app.use("/api", fresherBookingRoutes);
-
+// app.js:  app.use("/api", require("./routes/fresherBookingRoutes"));
+//
+// ORDER MATTERS: fixed paths (/me, /needs-review, /invite/:code, /join, /mentor/pending)
+// must come BEFORE "/bookings/:id".
+//
+// NOTE: if your real file already has the confirm / counterpart / join / livekit lines,
+// keep your paths. Only the AUTH rules matter.
 const express = require("express");
-const { requireAuth } = require("../middleware/panelAuth");
+const { requireAuth, requireActiveMentor } = require("../middleware/panelAuth");
 const b = require("../controllers/bookingController");
 
 const router = express.Router();
 
-const need = (name) => {
-  if (typeof b[name] !== "function") {
-    throw new Error(
-      `bookingController.${name} is not exported - add it before starting the server`,
-    );
-  }
-  return b[name];
-};
+// ---------- fresher ----------
+router.post("/bookings", requireAuth("fresher"), b.createRequest);
+router.get("/bookings/me", requireAuth("fresher"), b.myBookings);
+router.get("/bookings/needs-review", requireAuth("fresher"), b.needsReview);
+router.get("/bookings/invite/:code", requireAuth("fresher"), b.joinPreview);
+router.post("/bookings/join", requireAuth("fresher"), b.joinGroup);
 
-// ---------- Mentor accepts / rejects request ----------
-const respond = b.updateRequest || b.respondToRequest;
-if (typeof respond === "function") {
-  router.patch(
-    "/session/session-requests/:requestGroupId",
-    requireAuth("mentor"),
-    respond,
-  );
-} else {
-  console.warn("[fresherBookingRoutes] bookingController.updateRequest is missing");
-}
+// ---------- mentor ----------
+router.get("/bookings/mentor/pending", requireAuth("mentor"), b.mentorPending);
 
-// ---------- Fresher bookings ----------
-router.post("/bookings", requireAuth("fresher"), need("createRequest"));
+// ---------- both sides ----------
+router.get("/bookings/:id/counterpart", requireAuth("fresher", "mentor"), b.getCounterpart);
+router.post("/bookings/:id/livekit-token", requireAuth("fresher", "mentor"), b.livekitToken);
+router.post("/bookings/:requestGroupId/confirm", requireAuth("fresher"), b.confirmCompletion);
+router.get("/bookings/:id", requireAuth("fresher", "mentor"), b.getBooking);
+
+// ---------- mentor accept / reject + status (app.js comment: this router owns these) ----------
 router.patch(
-  "/bookings/:requestGroupId/confirm",
-  requireAuth("fresher"),
-  need("confirmCompletion"),
+  "/session/session-requests/:requestGroupId",
+  requireAuth("mentor"),
+  requireActiveMentor,
+  b.updateRequest,
 );
-router.get("/bookings/me", requireAuth("fresher"), need("myBookings"));
-router.get("/bookings/needs-review", requireAuth("fresher"), need("needsReview"));
-router.get("/bookings/mentor/pending", requireAuth("mentor"), need("mentorPending"));
+router.get("/session/session-requests/:requestGroupId", requireAuth("fresher", "mentor"), b.getRequestStatus);
+router.get("/session/accepted-bookings", requireAuth("fresher"), b.getAcceptedBookings);
 
-// ---------- GROUP sessions (must be BEFORE "/bookings/:id") ----------
-router.get("/bookings/invite/:code", requireAuth("fresher"), need("joinPreview"));
-router.post("/bookings/join", requireAuth("fresher"), need("joinGroup"));
-
-// ---------- GROUP video token (LiveKit) ----------
-router.post(
-  "/bookings/:id/livekit-token",
-  requireAuth("fresher", "mentor"),
-  need("livekitToken"),
-);
-
-// ---------- Counterpart details ----------
-router.get(
-  "/bookings/:id/counterpart",
-  requireAuth("fresher", "mentor"),
-  need("getCounterpart"),
-);
-
-// ---------- Single booking ----------
-router.get("/bookings/:id", requireAuth("fresher", "mentor"), need("getBooking"));
-
-// ---------- Fresher notifications ----------
-router.get(
-  "/fresher/notifications",
-  requireAuth("fresher"),
-  need("getFresherNotifications"),
-);
-router.patch(
-  "/fresher/notifications/read-all",
-  requireAuth("fresher"),
-  need("markAllFresherNotificationsRead"),
-);
-router.patch(
-  "/fresher/notifications/:id/read",
-  requireAuth("fresher"),
-  need("markFresherNotificationRead"),
-);
+// ---------- fresher notifications ----------
+router.get("/fresher/notifications", requireAuth("fresher"), b.getFresherNotifications);
+router.patch("/fresher/notifications/read-all", requireAuth("fresher"), b.markAllFresherNotificationsRead);
+router.patch("/fresher/notifications/:id/read", requireAuth("fresher"), b.markFresherNotificationRead);
 
 module.exports = router;

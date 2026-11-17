@@ -2,26 +2,16 @@ const mongoose = require("mongoose");
 
 const fresherSchema = new mongoose.Schema(
   {
-    name: {
-      type: String,
-      required: true,
-      trim: true,
-      minlength: 2,
-      maxlength: 100,
-    },
+    name: { type: String, required: true, trim: true, minlength: 2, maxlength: 100 },
 
-    email: {
-      type: String,
-      required: true,
-      unique: true,
-      lowercase: true,
-      trim: true,
-      index: true,
-    },
+    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     isEmailVerified: { type: Boolean, default: false },
+    // sha256 HMAC of the code (never the plain OTP)
     emailOtp: { type: String, default: null },
     emailOtpExpiresAt: { type: Date, default: null },
+    emailOtpAttempts: { type: Number, default: 0 },
 
+    // stored as "+919876543210" (see utils/phone.js)
     mobile: { type: String, required: true, trim: true },
     countryCode: { type: String, default: "+91", trim: true },
 
@@ -34,24 +24,22 @@ const fresherSchema = new mongoose.Schema(
 
     // ================= WALLET (3 separate buckets) =================
     // refundableBalance : real cash returned from cancelled/missed/disputed sessions (we OWE this)
-    // bonusBalance      : promo credit (welcome bonus ...)            -> not cash
-    // referralBalance   : referral credit                             -> not cash
-    // `walletBalance` below is a VIRTUAL (sum of the 3). It is NOT stored anymore.
+    // bonusBalance      : promo credit (welcome bonus ...)  -> not cash
+    // referralBalance   : referral credit                   -> not cash
+    // `walletBalance` below is a VIRTUAL (sum of the 3). NEVER $inc it.
     refundableBalance: { type: Number, default: 0, min: 0 },
     bonusBalance: { type: Number, default: 0, min: 0 },
     referralBalance: { type: Number, default: 0, min: 0 },
 
-    // lifetime statistics only (never used as spendable money)
+    // lifetime statistics only (never spendable)
     totalRefunds: { type: Number, default: 0 },
     referralEarnings: { type: Number, default: 0 },
 
     referralCode: { type: String, unique: true, sparse: true },
-    referredBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Fresher",
-      default: null,
-    },
+    referredBy: { type: mongoose.Schema.Types.ObjectId, ref: "Fresher", default: null },
     hasUsedReferral: { type: Boolean, default: false },
+    // code typed at sign-up. The reward is paid only AFTER the email is verified.
+    pendingReferralCode: { type: String, default: "" },
 
     welcomeBonusClaimed: { type: Boolean, default: false },
     welcomeBonusSeen: { type: Boolean, default: false },
@@ -71,17 +59,10 @@ const fresherSchema = new mongoose.Schema(
     career: { type: [mongoose.Schema.Types.Mixed], default: [] },
     skills: { type: [String], default: [] },
     interests: { type: [String], default: [] },
-    chatPrivacyAcceptedAt: {
-      type: Date,
-      default: null,
-    },
 
-    chatPrivacyVersion: {
-      type: String,
-      default: "",
-    },
+    chatPrivacyAcceptedAt: { type: Date, default: null },
+    chatPrivacyVersion: { type: String, default: "" },
   },
-
   {
     timestamps: true,
     toJSON: { virtuals: true },
@@ -89,11 +70,22 @@ const fresherSchema = new mongoose.Schema(
   },
 );
 
+// one phone number = one fresher account (the code also checks, this stops the race)
+fresherSchema.index({ mobile: 1 }, { unique: true });
+
+// "Temp" placeholders (created by send-otp) delete themselves after 24h.
+// When the user finishes sign-up the name changes, so the account no longer matches.
+fresherSchema.index(
+  { createdAt: 1 },
+  { expireAfterSeconds: 24 * 60 * 60, partialFilterExpression: { name: "Temp" } },
+);
+
 fresherSchema.virtual("fullMobile").get(function () {
-  return this.countryCode + this.mobile;
+  const m = String(this.mobile || "");
+  return m.startsWith("+") ? m : `${this.countryCode || ""}${m}`;
 });
 
-// total spendable credit (read-only). NEVER do $inc on walletBalance any more.
+// total spendable credit (read-only)
 fresherSchema.virtual("walletBalance").get(function () {
   const r = (n) => Math.round((Number(n) || 0) * 100) / 100;
   return r(

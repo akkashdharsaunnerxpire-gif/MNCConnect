@@ -1,145 +1,60 @@
 const Mentor = require("../models/Mentor");
 const Fresher = require("../models/Fresher");
-const Booking = require("../models/Booking");
-
+const { parsePhone } = require("../utils/phone");
 // ============================================================================
 // HELPERS
 // ============================================================================
 
-const normalize = (value) => {
-  return String(value || "")
+const normalize = (value) =>
+  String(value || "")
     .trim()
     .toLowerCase();
-};
 
 const normalizeArray = (value) => {
-  if (Array.isArray(value)) {
-    return value.map((item) => normalize(item)).filter(Boolean);
-  }
-
+  if (Array.isArray(value))
+    return value.map((i) => normalize(i)).filter(Boolean);
   if (typeof value === "string") {
     return value
       .split(",")
-      .map((item) => normalize(item))
+      .map((i) => normalize(i))
       .filter(Boolean);
   }
-
   return [];
 };
 
-// Keeps original casing (for storing skills / languages)
-const toCleanArray = (value) => {
-  if (Array.isArray(value)) {
-    return value.map((item) => String(item || "").trim()).filter(Boolean);
+// Keeps original casing (for storing skills / languages). Capped so nobody stores 10 000 tags.
+const toCleanArray = (value, maxItems = 30, maxLen = 40) => {
+  const list = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(",")
+      : [];
+  const seen = new Set();
+  const out = [];
+  for (const item of list) {
+    const s = String(item || "")
+      .trim()
+      .slice(0, maxLen);
+    const key = s.toLowerCase();
+    if (!s || seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+    if (out.length >= maxItems) break;
   }
-
-  if (typeof value === "string") {
-    return value
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-  }
-
-  return [];
+  return out;
 };
 
 const valuesMatch = (value1, value2) => {
   const first = normalize(value1);
   const second = normalize(value2);
-
-  if (!first || !second) {
-    return false;
-  }
-
+  if (!first || !second) return false;
   return first === second || first.includes(second) || second.includes(first);
 };
 
-const arrayContainsMatch = (array, value) => {
-  const target = normalize(value);
-
-  if (!target) {
-    return false;
-  }
-
-  return array.some((item) => {
-    const normalizedItem = normalize(item);
-
-    return (
-      normalizedItem === target ||
-      normalizedItem.includes(target) ||
-      target.includes(normalizedItem)
-    );
-  });
-};
-
-const roleMatches = (mentor, requestedRole, otherRole) => {
-  const role = normalize(requestedRole);
-
-  if (!role || role === "any" || role === "no preference") {
-    return true;
-  }
-
-  const mentorValues = [
-    mentor.designation,
-    mentor.department,
-    mentor.bio,
-    ...(Array.isArray(mentor.skills) ? mentor.skills : []),
-  ];
-
-  if (role === "other") {
-    if (!otherRole) {
-      return true;
-    }
-
-    return mentorValues.some((value) => valuesMatch(value, otherRole));
-  }
-
-  return mentorValues.some((value) => valuesMatch(value, requestedRole));
-};
-
-const genderMatches = (mentor, requestedGender) => {
-  const gender = normalize(requestedGender);
-
-  if (
-    !gender ||
-    gender === "no preference" ||
-    gender === "any" ||
-    gender === "none"
-  ) {
-    return true;
-  }
-
-  if (!mentor.gender) {
-    return false;
-  }
-
-  return valuesMatch(mentor.gender, requestedGender);
-};
-
-const languageMatches = (mentor, requestedLanguage) => {
-  const language = normalize(requestedLanguage);
-
-  if (!language || language === "no preference" || language === "any") {
-    return true;
-  }
-
-  const mentorLanguages = normalizeArray(mentor.languages);
-
-  return arrayContainsMatch(mentorLanguages, requestedLanguage);
-};
-
-const companyMatches = (mentor, companyName) => {
-  if (!companyName) {
-    return true;
-  }
-
-  return valuesMatch(mentor.currentCompany, companyName);
-};
+const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const getMentorSocketIds = (onlineMentors, mentor) => {
-  if (!onlineMentors || !mentor) {
-    return [];
-  }
+  if (!onlineMentors || !mentor) return [];
 
   const possibleIds = [
     mentor._id?.toString(),
@@ -149,12 +64,8 @@ const getMentorSocketIds = (onlineMentors, mentor) => {
 
   for (const id of possibleIds) {
     const sockets = onlineMentors.get(String(id));
-
-    if (sockets && sockets.size > 0) {
-      return Array.from(sockets);
-    }
+    if (sockets && sockets.size > 0) return Array.from(sockets);
   }
-
   return [];
 };
 
@@ -165,33 +76,29 @@ const isOwner = (req, mentorId) =>
 
 // ============================================================================
 // GET MENTOR PROFILE
-// Owner  -> full profile (without private documents)
-// Others -> PUBLIC fields only (no email / mobile / linkedin / employee id)
+// Owner  -> full profile (own documents included, internal ids / secrets removed)
+// Others -> PUBLIC fields only (no email / mobile / linkedin / employee id / documents)
 // ============================================================================
 
 const getMentorProfile = async (req, res) => {
   try {
     const email = normalize(req.params.mentoremail);
-
     if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: "Mentor email is required",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "Mentor email is required" });
     }
 
-    // Private verification documents and reset tokens are never returned here.
     const mentor = await Mentor.findOne({ email })
       .select(
-        "-password -passwordResetToken -passwordResetExpires -offerLetter -employeeIdProof -additionalProof -offerLetterPublicId -employeeIdProofPublicId -additionalProofPublicId",
+        "-password -passwordResetToken -passwordResetExpires -offerLetterPublicId -employeeIdProofPublicId -additionalProofPublicId",
       )
       .lean();
 
     if (!mentor) {
-      return res.status(404).json({
-        success: false,
-        message: "Mentor not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Mentor not found" });
     }
 
     if (!isOwner(req, mentor._id)) {
@@ -201,6 +108,7 @@ const getMentorProfile = async (req, res) => {
           _id: mentor._id,
           name: mentor.name,
           profilePic: mentor.profilePic,
+          mentorCode: mentor.mentorCode,
           currentCompany: mentor.currentCompany,
           designation: mentor.designation,
           department: mentor.department,
@@ -210,21 +118,19 @@ const getMentorProfile = async (req, res) => {
           skills: mentor.skills,
           bio: mentor.bio,
           isVerified: mentor.isVerified,
+          rating: mentor.rating || 0,
+          totalReviews: mentor.totalReviews || 0,
+          totalSessions: mentor.totalSessions || 0,
         },
       });
     }
 
-    return res.status(200).json({
-      success: true,
-      mentor,
-    });
+    return res.status(200).json({ success: true, mentor });
   } catch (error) {
     console.error("getMentorProfile error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch mentor profile",
-    });
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch mentor profile" });
   }
 };
 
@@ -241,27 +147,20 @@ const getMentorsByCompany = async (req, res) => {
       accountStatus: "active",
     })
       .select(
-        "name email profilePic employeeId currentCompany designation department officeLocation yearsOfExperience languages skills gender bio linkedinProfile isVerified",
+        "name email profilePic employeeId mentorCode currentCompany designation department officeLocation yearsOfExperience languages skills gender bio linkedinProfile isVerified rating totalReviews totalSessions",
       )
-      .sort({
-        currentCompany: 1,
-        name: 1,
-      })
+      .sort({ currentCompany: 1, name: 1 })
+      .limit(1000) // raise / paginate when you have more mentors than this
       .lean();
 
     const onlineMentors = req.app.get("onlineMentors");
-
     const companiesMap = new Map();
 
     for (const mentor of allMentors) {
       const companyName = mentor.currentCompany?.trim();
+      if (!companyName) continue;
 
-      if (!companyName) {
-        continue;
-      }
-
-      const socketIds = getMentorSocketIds(onlineMentors, mentor);
-      const isOnline = socketIds.length > 0;
+      const isOnline = getMentorSocketIds(onlineMentors, mentor).length > 0;
 
       if (!companiesMap.has(companyName)) {
         companiesMap.set(companyName, {
@@ -273,88 +172,71 @@ const getMentorsByCompany = async (req, res) => {
       }
 
       const company = companiesMap.get(companyName);
-
       company.employeeCount += 1;
-
-      if (isOnline) {
-        company.onlineCount += 1;
-      }
+      if (isOnline) company.onlineCount += 1;
 
       // strip contact details before sending to the fresher
       // eslint-disable-next-line no-unused-vars
       const { email, employeeId, linkedinProfile, ...safeMentor } = mentor;
-
-      company.mentors.push({
-        ...safeMentor,
-        isOnline,
-      });
+      company.mentors.push({ ...safeMentor, isOnline });
     }
 
     const companies = Array.from(companiesMap.values());
-
-    return res.status(200).json({
-      success: true,
-      count: companies.length,
-      companies,
-    });
+    return res
+      .status(200)
+      .json({ success: true, count: companies.length, companies });
   } catch (error) {
     console.error("getMentorsByCompany error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch mentors",
-    });
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch mentors" });
   }
 };
 
 // ============================================================================
 // UPDATE MENTOR PROFILE (only the mentor himself)
+//
+// EDITABLE : contact + about fields.
+// LOCKED   : currentCompany, designation, department, employeeId, workEmail, gender,
+//            documents, profilePic (photo has its own endpoint /auth/avatar).
+//            They were verified by the admin, so a mentor must not change them here.
+//            (change them through support / an admin re-verification)
 // ============================================================================
 
-// Only fields that really exist in the Mentor schema.
 const ALLOWED_UPDATE_FIELDS = [
   "name",
   "countryCode",
   "mobile",
-  "currentCompany",
-  "designation",
-  "department",
   "officeLocation",
   "yearsOfExperience",
   "languages",
   "skills",
   "bio",
   "linkedinProfile",
-  "gender",
-  "profilePic",
 ];
+
+const LINKEDIN_RE = /^https:\/\/([a-z]{2,3}\.)?linkedin\.com\/[^\s]+$/i;
 
 const UpdateMentorProfile = async (req, res) => {
   try {
     const mentoremail = normalize(req.params.mentoremail);
-
     if (!mentoremail) {
-      return res.status(400).json({
-        success: false,
-        message: "Mentor email is required",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "Mentor email is required" });
     }
 
     // ---- ownership: nobody can edit another mentor's profile ----
-    const owner = await Mentor.findOne({ email: mentoremail }).select("_id");
-
-    if (!owner) {
-      return res.status(404).json({
-        success: false,
-        message: "Mentor not found",
-      });
+    const current = await Mentor.findOne({ email: mentoremail }).select(
+      "_id countryCode mobile",
+    );
+    if (!current) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Mentor not found" });
     }
-
-    if (!isOwner(req, owner._id)) {
-      return res.status(403).json({
-        success: false,
-        message: "Not allowed",
-      });
+    if (!isOwner(req, current._id)) {
+      return res.status(403).json({ success: false, message: "Not allowed" });
     }
 
     const body = req.body || {};
@@ -368,69 +250,44 @@ const UpdateMentorProfile = async (req, res) => {
 
     // ---- sanitize / normalize ------------------------------------------------
 
+    if ("name" in updateData) {
+      updateData.name = String(updateData.name || "")
+        .trim()
+        .replace(/\s+/g, " ");
+    }
+
+    if ("officeLocation" in updateData) {
+      updateData.officeLocation = String(updateData.officeLocation || "")
+        .trim()
+        .slice(0, 120);
+    }
+
+    if ("linkedinProfile" in updateData) {
+      const url = String(updateData.linkedinProfile || "").trim();
+      if (url && !LINKEDIN_RE.test(url)) {
+        return res.status(400).json({
+          success: false,
+          message: "Enter a valid LinkedIn URL (https://linkedin.com/in/...)",
+        });
+      }
+      updateData.linkedinProfile = url;
+    }
+
     if ("countryCode" in updateData || "mobile" in updateData) {
-      const current = await Mentor.findOne({ email: mentoremail }).select(
-        "countryCode mobile",
-      );
-
-      if (!current) {
-        return res.status(404).json({
-          success: false,
-          message: "Mentor not found",
-        });
-      }
-
-      const oldCode = current.countryCode || "+91";
-
-      let code =
+      const phone = parsePhone(
         "countryCode" in updateData
-          ? String(updateData.countryCode || "").trim()
-          : oldCode;
-      if (code && !code.startsWith("+")) code = `+${code}`;
-
-      if (!/^\+\d{1,4}$/.test(code)) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid country code",
-        });
+          ? updateData.countryCode
+          : current.countryCode,
+        "mobile" in updateData ? updateData.mobile : current.mobile,
+      );
+      if (phone.error) {
+        return res.status(400).json({ success: false, message: phone.error });
       }
-
-      // national digits: from the request, or from the stored number
-      let national;
-      if ("mobile" in updateData) {
-        const raw = String(updateData.mobile || "").replace(/[\s\-()]/g, "");
-        national = raw.startsWith(code) ? raw.slice(code.length) : raw;
-      } else {
-        const stored = String(current.mobile || "");
-        national = stored.startsWith(oldCode)
-          ? stored.slice(oldCode.length)
-          : stored;
-      }
-      national = national.replace(/\D/g, "");
-
-      const totalDigits = code.length - 1 + national.length;
-      const invalid =
-        code === "+91"
-          ? national.length !== 10
-          : national.length < 6 || totalDigits > 15;
-
-      if (invalid) {
-        return res.status(400).json({
-          success: false,
-          message:
-            code === "+91"
-              ? "Indian mobile number must be exactly 10 digits"
-              : "Enter a valid mobile number for the selected country",
-        });
-      }
-
-      const fullMobile = `${code}${national}`;
 
       const [mentorClash, fresherClash] = await Promise.all([
-        Mentor.exists({ mobile: fullMobile, email: { $ne: mentoremail } }),
-        Fresher.exists({ mobile: fullMobile }),
+        Mentor.exists({ _id: { $ne: current._id }, mobile: phone.full }),
+        Fresher.exists({ mobile: phone.full }),
       ]);
-
       if (mentorClash || fresherClash) {
         return res.status(409).json({
           success: false,
@@ -438,49 +295,40 @@ const UpdateMentorProfile = async (req, res) => {
         });
       }
 
-      updateData.countryCode = code;
-      updateData.mobile = fullMobile;
+      updateData.countryCode = phone.code;
+      updateData.mobile = phone.full;
     }
 
-    if ("gender" in updateData) {
-      updateData.gender = normalize(updateData.gender);
-    }
-
-    if ("languages" in updateData) {
+    if ("languages" in updateData)
       updateData.languages = toCleanArray(updateData.languages);
-    }
-
-    if ("skills" in updateData) {
+    if ("skills" in updateData)
       updateData.skills = toCleanArray(updateData.skills);
-    }
 
     if ("yearsOfExperience" in updateData) {
-      updateData.yearsOfExperience = Number(updateData.yearsOfExperience) || 0;
+      const years = Number(updateData.yearsOfExperience);
+      updateData.yearsOfExperience = Number.isFinite(years)
+        ? Math.min(Math.max(years, 0), 60)
+        : 0;
     }
 
     if (Object.keys(updateData).length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "No valid fields to update",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "No valid fields to update" });
     }
 
     const mentor = await Mentor.findOneAndUpdate(
-      { email: mentoremail },
+      { _id: current._id },
       { $set: updateData },
-      {
-        returnDocument: "after",
-        runValidators: true,
-      },
+      { returnDocument: "after", runValidators: true },
     ).select(
-      "name email countryCode mobile gender skills profilePic employeeId workEmail linkedinProfile yearsOfExperience currentCompany designation department officeLocation languages  bio isVerified verificationStatus verificationMethod accountStatus lastLoginAt",
+      "name email countryCode mobile gender skills profilePic employeeId workEmail linkedinProfile yearsOfExperience currentCompany designation department officeLocation languages bio isVerified verificationStatus verificationMethod accountStatus lastLoginAt mentorCode rating totalReviews totalSessions",
     );
 
     if (!mentor) {
-      return res.status(404).json({
-        success: false,
-        message: "Mentor not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Mentor not found" });
     }
 
     return res.status(200).json({
@@ -491,6 +339,13 @@ const UpdateMentorProfile = async (req, res) => {
   } catch (error) {
     console.error("UpdateMentorProfile error:", error);
 
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "This mobile number is already registered",
+      });
+    }
+
     if (error.name === "ValidationError") {
       return res.status(400).json({
         success: false,
@@ -500,38 +355,38 @@ const UpdateMentorProfile = async (req, res) => {
       });
     }
 
-    return res.status(500).json({
-      success: false,
-      message: "Failed to update mentor profile",
-    });
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to update mentor profile" });
   }
 };
 
 // ============================================================================
-// DEPARTMENTS OF A COMPANY (used by the booking form)
-// GET /api/mentor/company-departments/:companyName
+// DEPARTMENTS / ROLES OF A COMPANY (used by the booking form)
+// GET /api/mentor/company-departments/:companyName   (fresher login)
 // ============================================================================
 
 const getCompanyDepartments = async (req, res) => {
   try {
     const company = normalize(req.params.companyName);
-
     if (!company) {
       return res
         .status(400)
         .json({ success: false, message: "Company name is required" });
     }
 
+    // narrow in the DATABASE first (contains, case-insensitive), then the same loose rule
+    // the matching code uses -> no more loading every mentor into memory
     const mentors = await Mentor.find({
       verificationStatus: "approved",
       accountStatus: "active",
+      currentCompany: new RegExp(escapeRegex(company), "i"),
     })
       .select("currentCompany designation")
       .lean();
 
     // normalized designation -> first spelling seen
     const seen = new Map();
-
     for (const m of mentors) {
       if (!valuesMatch(m.currentCompany, company)) continue;
 
@@ -539,7 +394,6 @@ const getCompanyDepartments = async (req, res) => {
         .trim()
         .replace(/\s+/g, " ");
       const key = normalize(role);
-
       if (key && !seen.has(key)) seen.set(key, role);
     }
 
@@ -556,20 +410,21 @@ const getCompanyDepartments = async (req, res) => {
 };
 
 // ============================================================================
-// SEARCH ONE EMPLOYEE OF A COMPANY (name or employee ID) -> direct booking
+// SEARCH ONE EMPLOYEE OF A COMPANY (name or public mentor code) -> direct booking
 // GET /api/mentor/company-search/:companyName?q=...   (fresher login)
-// Returns NO contact details (no email / mobile / linkedin).
+// Returns NO contact details (no email / mobile / linkedin / employee id).
+// The company's private employeeId is NOT searchable (it would let a fresher guess IDs).
 // ============================================================================
-
-const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const searchCompanyMentors = async (req, res) => {
   try {
     const company = String(req.params.companyName || "").trim();
-    const q = String(req.query.q || "").trim().slice(0, 40);
+    const q = String(req.query.q || "")
+      .trim()
+      .slice(0, 40);
     const LIMIT = 10;
     const SELECT =
-      "name designation department profilePic mentorCode currentCompany yearsOfExperience languages skills rating avgRating ratingCount reviewsCount";
+      "name designation department profilePic mentorCode currentCompany yearsOfExperience languages skills rating totalReviews totalSessions";
 
     if (!company) {
       return res
@@ -589,11 +444,9 @@ const searchCompanyMentors = async (req, res) => {
       filter.$or = [
         { name: new RegExp(safe, "i") }, // name: partial match
         { mentorCode: new RegExp(`^${safe}`, "i") }, // ARUN#4356356: full or starting part
-        { employeeId: new RegExp(`^${safe}$`, "i") }, // company employee ID: exact only
       ];
     }
 
-    // real total of this company / this search
     const total = await Mentor.countDocuments(filter);
 
     const online = req.app.get("onlineMentors");
@@ -630,26 +483,6 @@ const searchCompanyMentors = async (req, res) => {
       list = [...list, ...rest];
     }
 
-    // completed sessions per mentor (one query for the whole list)
-    // NOTE: change "completed" if your Booking uses another final status
-    let sessionsBy = new Map();
-    if (list.length) {
-      try {
-        const agg = await Booking.aggregate([
-          {
-            $match: {
-              mentor: { $in: list.map((m) => m._id) },
-              status: "completed",
-            },
-          },
-          { $group: { _id: "$mentor", n: { $sum: 1 } } },
-        ]);
-        sessionsBy = new Map(agg.map((r) => [String(r._id), r.n]));
-      } catch (e) {
-        console.error("sessions count failed:", e.message);
-      }
-    }
-
     const mentors = list.map((m) => ({
       id: String(m._id),
       name: m.name,
@@ -661,9 +494,10 @@ const searchCompanyMentors = async (req, res) => {
       yearsOfExperience: m.yearsOfExperience || 0,
       languages: m.languages || [],
       skills: m.skills || [],
-      rating: Number(m.rating ?? m.avgRating) || 0,
-      reviewsCount: Number(m.ratingCount ?? m.reviewsCount) || 0,
-      sessionsCompleted: sessionsBy.get(String(m._id)) || 0,
+      // counters are kept on the Mentor document (createReview / settleCompleted)
+      rating: Number(m.rating) || 0,
+      reviewsCount: Number(m.totalReviews) || 0,
+      sessionsCompleted: Number(m.totalSessions) || 0,
       isOnline: isOnlineId(m._id),
     }));
 

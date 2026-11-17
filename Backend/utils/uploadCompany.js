@@ -1,20 +1,36 @@
-// utils/uploadCompany.js
+
 const multer = require("multer");
 
-// file stays in memory, then goes straight to Cloudinary
 const storage = multer.memoryStorage();
 
-// SVG intentionally not allowed (can carry scripts)
+const ALLOWED_MIME_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/avif",
+]);
+
 const fileFilter = (req, file, cb) => {
-  if (/^image\/(png|jpe?g|webp|avif)$/.test(file.mimetype)) return cb(null, true);
-  cb(new Error("Only PNG, JPG, WEBP or AVIF images are allowed"));
+  if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
+    return cb(
+      new Error("Only PNG, JPG, WEBP or AVIF images are allowed")
+    );
+  }
+
+  cb(null, true);
 };
 
-module.exports = multer({
+const uploadCompany = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 3 * 1024 * 1024 }, // 3 MB per image
+  limits: {
+    fileSize: 3 * 1024 * 1024,
+    files: 2,
+    fields: 10,
+  },
 }).fields([
   { name: "logo", maxCount: 1 },
   { name: "coverImage", maxCount: 1 },
 ]);
+
+module.exports = uploadCompany;

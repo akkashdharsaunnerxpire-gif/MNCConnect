@@ -52,7 +52,9 @@ const safeEqual = (a, b) => {
 // Returns the fresher or sends 401 and returns null.
 const requireFresher = async (req, res) => {
   if (!req.user || req.user.role !== "fresher" || !req.user.id) {
-    res.status(401).json({ success: false, message: "Please login to continue." });
+    res
+      .status(401)
+      .json({ success: false, message: "Please login to continue." });
     return null;
   }
   const f = await Fresher.findById(req.user.id).select("name email").lean();
@@ -92,34 +94,40 @@ const orConditionFor = (paymentId) => ({
 //   friend joining a group : { inviteCode }                 -> price comes from the booking
 //   everything else        : { duration (minutes), mode }   -> price comes from env rates
 const resolveSessionAmount = async (body) => {
-  const code = String(body.inviteCode || "").trim().toUpperCase();
+  const code = String(body.inviteCode || "")
+    .trim()
+    .toUpperCase();
   if (code) {
     const b = await Booking.findOne({ inviteCode: code, sessionMode: "group" })
-      .select("perPersonAmount amount")
+      .select(
+        "perPersonAmount amount status startsAt maxMembers participants.fresher",
+      )
       .lean();
     if (!b) return { error: "This invite link is not valid." };
+    if (
+      !["pending", "accepted"].includes(b.status) ||
+      new Date(b.startsAt).getTime() < Date.now() + PAYMENT_GRACE_MS
+    )
+      return { error: "This group is closed." };
+    const members = b.participants || [];
+    if (members.length >= b.maxMembers) return { error: "This group is full." };
+    if (userId && members.some((p) => String(p.fresher) === String(userId)))
+      return { error: "You already joined this group." };
+
     const amount = round2(Number(b.perPersonAmount || b.amount));
     if (!(amount > 0)) return { error: "Invalid group price." };
     return { amount, mode: "group" };
   }
 
-  const minutes = Number(body.duration);
-  if (!validDuration(minutes)) return { error: "Invalid duration" };
-  const mode = body.mode === "group" ? "group" : "single";
-  const amount = round2(expectedPrice(minutes, mode));
-  if (!(amount > 0)) return { error: "Invalid amount" };
-  return { amount, mode, minutes };
+  const sessionFieldsOf = (body) =>
+    body.requestGroupId
+      ? buildSessionFields({
+          date: body.date,
+          time: body.time,
+          duration: body.duration,
+        })
+      : {};
 };
-
-const sessionFieldsOf = (body) =>
-  body.requestGroupId
-    ? buildSessionFields({
-        date: body.date,
-        time: body.time,
-        duration: body.duration,
-      })
-    : {};
-
 // ============================================================
 // FEE QUOTE   GET /api/payments/fee-quote?duration=60&mode=single  (or ?inviteCode=XXXX)
 // display only; the real price is recalculated in createOrder
@@ -127,7 +135,8 @@ const sessionFieldsOf = (body) =>
 
 exports.quoteFee = async (req, res) => {
   const r = await resolveSessionAmount(req.query || {});
-  if (r.error) return res.status(400).json({ success: false, message: r.error });
+  if (r.error)
+    return res.status(400).json({ success: false, message: r.error });
   return res.json({
     success: true,
     sessionAmount: r.amount,
@@ -283,7 +292,10 @@ const rejectMismatch = async (payment, rzPayment, reason) => {
         { _id: payment._id },
         {
           $set: {
-            refundError: String(e?.error?.description || e.message).slice(0, 300),
+            refundError: String(e?.error?.description || e.message).slice(
+              0,
+              300,
+            ),
             refundFailedAt: new Date(),
           },
         },
@@ -330,15 +342,27 @@ const settleGatewayPayment = async ({
     }
   }
   if (!rzPayment) {
-    return { ok: false, pending: true, reason: "Unable to fetch Razorpay payment" };
+    return {
+      ok: false,
+      pending: true,
+      reason: "Unable to fetch Razorpay payment",
+    };
   }
 
   if (rzPayment.status !== "captured") {
-    return { ok: false, pending: true, reason: `Payment is ${rzPayment.status}` };
+    return {
+      ok: false,
+      pending: true,
+      reason: `Payment is ${rzPayment.status}`,
+    };
   }
 
   if (!order) {
-    return { ok: false, pending: true, reason: "Unable to fetch Razorpay order" };
+    return {
+      ok: false,
+      pending: true,
+      reason: "Unable to fetch Razorpay order",
+    };
   }
 
   const stored = payment.toObject ? payment.toObject() : payment;
@@ -469,7 +493,12 @@ exports.verifyPayment = async (req, res) => {
         status: "created",
         fresher: fresher._id,
       },
-      { $set: { status: "failed", failureReason: "Invalid payment signature" } },
+      {
+        $set: {
+          status: "failed",
+          failureReason: "Invalid payment signature",
+        },
+      },
     ).catch(() => {});
     return res
       .status(400)
@@ -493,9 +522,10 @@ exports.verifyPayment = async (req, res) => {
 
     // OWNERSHIP: this order must belong to the logged-in fresher
     if (!payment.fresher || String(payment.fresher) !== String(fresher._id)) {
-      return res
-        .status(403)
-        .json({ success: false, message: "This payment belongs to another account." });
+      return res.status(403).json({
+        success: false,
+        message: "This payment belongs to another account.",
+      });
     }
 
     if (payment.status === "paid") {
@@ -624,7 +654,9 @@ const walletSuccess = async (payment, fresherId, duplicate = false) => {
     .lean();
   const walletBalance = f
     ? round2(
-        (f.refundableBalance || 0) + (f.bonusBalance || 0) + (f.referralBalance || 0),
+        (f.refundableBalance || 0) +
+          (f.bonusBalance || 0) +
+          (f.referralBalance || 0),
       )
     : 0;
   return {
@@ -650,7 +682,9 @@ exports.payWithWallet = async (req, res) => {
       req.get("Idempotency-Key") ||
         body.idempotencyKey ||
         body.requestGroupId ||
-        (body.inviteCode ? `join:${String(body.inviteCode).toUpperCase()}` : ""),
+        (body.inviteCode
+          ? `join:${String(body.inviteCode).toUpperCase()}`
+          : ""),
     ).trim();
     if (!clientKey || clientKey.length > 100) {
       return res
@@ -665,9 +699,10 @@ exports.payWithWallet = async (req, res) => {
       if (already.status === "paid" || already.status === "refunded") {
         return res.json(await walletSuccess(already, fresherId, true));
       }
-      return res
-        .status(409)
-        .json({ success: false, message: "Payment is already being processed." });
+      return res.status(409).json({
+        success: false,
+        message: "Payment is already being processed.",
+      });
     }
 
     const priced = await resolveSessionAmount(body);
@@ -723,7 +758,9 @@ exports.payWithWallet = async (req, res) => {
               fresherName: fresher.name || "",
               fresherEmail: fresher.email || "",
               topic: body.topic ? String(body.topic).slice(0, 120) : "",
-              requestGroupId: body.requestGroupId ? String(body.requestGroupId) : "",
+              requestGroupId: body.requestGroupId
+                ? String(body.requestGroupId)
+                : "",
               ...sessionFieldsOf(body),
             },
           ],
@@ -738,9 +775,10 @@ exports.payWithWallet = async (req, res) => {
         if (first && (first.status === "paid" || first.status === "refunded")) {
           return res.json(await walletSuccess(first, fresherId, true));
         }
-        return res
-          .status(409)
-          .json({ success: false, message: "Payment is already being processed." });
+        return res.status(409).json({
+          success: false,
+          message: "Payment is already being processed.",
+        });
       }
       throw e;
     }
@@ -788,7 +826,11 @@ exports.linkPaymentToRequest = async (a, b) => {
     try {
       Object.assign(
         set,
-        buildSessionFields({ date: o.date, time: o.time, duration: o.duration }),
+        buildSessionFields({
+          date: o.date,
+          time: o.time,
+          duration: o.duration,
+        }),
       );
     } catch (_) {
       /* ignore unreadable date */
@@ -872,7 +914,10 @@ exports.razorpayWebhook = async (req, res) => {
       ? req.body
       : Buffer.from(JSON.stringify(req.body || {}));
 
-    const expected = crypto.createHmac("sha256", secret).update(body).digest("hex");
+    const expected = crypto
+      .createHmac("sha256", secret)
+      .update(body)
+      .digest("hex");
     if (!safeEqual(expected, signature)) {
       return res
         .status(400)
@@ -905,7 +950,11 @@ exports.razorpayWebhook = async (req, res) => {
       const payment = await Payment.findOne({
         razorpayOrderId: paymentEntity.order_id,
       });
-      if (payment && payment.status !== "paid" && payment.status !== "refunded") {
+      if (
+        payment &&
+        payment.status !== "paid" &&
+        payment.status !== "refunded"
+      ) {
         const order = await getRazorpay().orders.fetch(paymentEntity.order_id);
         await settleGatewayPayment({
           payment,
@@ -980,13 +1029,18 @@ exports.reconcileStaleOrders = async () => {
       }
     }
 
-    return { success: true, checked: stalePayments.length, processed, pending, failed };
+    return {
+      success: true,
+      checked: stalePayments.length,
+      processed,
+      pending,
+      failed,
+    };
   } catch (error) {
     console.error("reconcileStaleOrders error:", error);
     return { success: false, message: error.message };
   }
 };
-
 exports.getRazorpay = getRazorpay;
 exports.settleGatewayPayment = settleGatewayPayment;
 exports.rejectMismatch = rejectMismatch;

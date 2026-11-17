@@ -2,7 +2,6 @@
 const express = require("express");
 const { requireAuth } = require("../middleware/panelAuth");
 const panel = require("../controllers/mentorPanelController");
-const payments = require("../controllers/paymentController");
 
 const router = express.Router();
 
@@ -27,11 +26,6 @@ router.patch("/notifications/:id/read", requireAuth("mentor"), panel.markNotific
 // ---------- dashboard stats ----------
 router.get("/mentor/stats", requireAuth("mentor"), panel.getMentorStats);
 
-// ---------- payment <-> mentor link ----------
-router.post(
-  "/payments/assign-to-me",
-  requireAuth("mentor"),
-  panel.assignToMe
-);
+// /payments/assign-to-me REMOVED (security hole, the server assigns on accept)
 
 module.exports = router;
