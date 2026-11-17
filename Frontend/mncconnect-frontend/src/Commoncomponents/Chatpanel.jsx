@@ -12,16 +12,22 @@ import {
   ArrowDown,
   Check,
   CheckCheck,
+  Flag,
+  KeyRound,
   Loader2,
   MessageSquare,
+  PhoneOff,
   Reply,
   Send,
+  ShieldCheck,
   Smile,
   X,
 } from "lucide-react";
 import { socket } from "../utils/socket";
 import EmojiPicker from "./EmojiPicker";
 import { setChatOpen } from "../utils/chatOpenRegistry";
+import { detectContact } from "../utils/contactFilter";
+import { createPortal } from "react-dom";
 import {
   playSendSound,
   playReceiveSound,
@@ -42,6 +48,42 @@ const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 const MAX_LEN = 1000;
 const PAGE_SIZE = 50;
 const SEEN_SHOWN = 6; // max avatars under one message
+const RECENT_WINDOW_MS = 10 * 60 * 1000; // split-number check looks back 10 min
+const RECENT_MAX = 8; // ...and at most 8 of my own messages
+const PRIVACY_VERSION = "1.0";
+
+// Once the server says "accepted", remember it for this page session so
+// re-opening a chat does not flash the "Checking..." screen again.
+let privacyAcceptedCache = false;
+
+const PRIVACY_SECTIONS = [
+  {
+    icon: PhoneOff,
+    title: "Keep contact details private",
+    items: [
+      "Phone numbers and personal email addresses",
+      "Social IDs: Instagram, Facebook, Telegram, Snapchat, WhatsApp",
+      "Profile, website or any external links",
+    ],
+  },
+  {
+    icon: KeyRound,
+    title: "Protect sensitive information",
+    items: [
+      "Passwords, OTPs, bank or payment details",
+      "Home address and identity documents",
+    ],
+  },
+  {
+    icon: Flag,
+    title: "Stay on MNCConnect",
+    items: [
+      "Don't ask anyone to move the conversation elsewhere",
+      "Be respectful and professional",
+      "Report anyone who asks for personal information",
+    ],
+  },
+];
 
 /* ---------------- helpers ---------------- */
 const fmtTime = (d) =>
@@ -533,6 +575,9 @@ const DayDivider = memo(function DayDivider({ label }) {
  *                      and uses it as a fallback if the prop url is broken)
  * images           -> group chat: { userId: photoUrl }
  *                     (optional: if missing, ChatPanel loads them itself)
+ *
+ * PRIVACY GATE: until the user accepts the chat instructions, no history is
+ * fetched and the socket room is not joined.
  */
 export default function ChatPanel({
   bookingId,
@@ -605,6 +650,36 @@ export default function ChatPanel({
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [joined, setJoined] = useState(false);
+
+  /* ---------------- privacy state ---------------- */
+  const [privacyChecking, setPrivacyChecking] = useState(
+    !privacyAcceptedCache,
+  );
+  const [privacyAccepted, setPrivacyAccepted] = useState(
+    privacyAcceptedCache,
+  );
+  const [privacySaving, setPrivacySaving] = useState(false);
+  const [privacyChecked, setPrivacyChecked] = useState(false);
+  const [privacyError, setPrivacyError] = useState("");
+  const [privacyOpen, setPrivacyOpen] = useState(false); // instructions popup
+
+  // my own recent messages (last 10 min): lets the filter catch a phone
+  // number that is sent in pieces ("80158" then "74936")
+  const recentMine = useMemo(() => {
+    const cutoff = Date.now() - RECENT_WINDOW_MS;
+    return messages
+      .filter(
+        (m) =>
+          isMine(m) && new Date(m.createdAt).getTime() >= cutoff && m.text,
+      )
+      .slice(-RECENT_MAX)
+      .map((m) => m.text);
+  }, [messages, isMine]);
+
+  const contactHit = useMemo(
+    () => detectContact(text, recentMine),
+    [text, recentMine],
+  );
   const [peerOnline, setPeerOnline] = useState(false);
   const [peerLastSeen, setPeerLastSeen] = useState(null);
   const [visible, setVisible] = useState(
@@ -730,9 +805,98 @@ export default function ChatPanel({
     };
   }, [bookingId, open]);
 
-  /* ---------------- data + socket ---------------- */
+  /* ---------------- CHAT PRIVACY CHECK ---------------- */
   useEffect(() => {
     if (!bookingId) return undefined;
+
+    // already accepted earlier in this session -> no extra request
+    if (privacyAcceptedCache) {
+      setPrivacyAccepted(true);
+      setPrivacyChecking(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    setPrivacyChecking(true);
+    setPrivacyAccepted(false);
+    setPrivacyChecked(false);
+    setPrivacyError("");
+
+    fetch(`${API_URL}/chat/privacy`, {
+      method: "GET",
+      credentials: "include",
+    })
+      .then(async (response) => {
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          throw new Error(data.message || "Unable to check privacy status.");
+        }
+
+        return data;
+      })
+      .then((data) => {
+        if (cancelled) return;
+        const accepted = Boolean(data.accepted);
+        if (accepted) privacyAcceptedCache = true;
+        setPrivacyAccepted(accepted);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setPrivacyError(error.message || "Unable to verify privacy status.");
+      })
+      .finally(() => {
+        if (!cancelled) setPrivacyChecking(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bookingId]);
+
+  const acceptChatPrivacy = async () => {
+    if (!privacyChecked || privacySaving) return;
+
+    setPrivacySaving(true);
+    setPrivacyError("");
+
+    try {
+      const response = await fetch(`${API_URL}/chat/privacy/accept`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          version: PRIVACY_VERSION,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || "Could not save your acceptance.");
+      }
+
+      privacyAcceptedCache = true;
+      setPrivacyAccepted(true);
+      setPrivacyOpen(false);
+    } catch (error) {
+      setPrivacyError(error.message || "Something went wrong. Try again.");
+    } finally {
+      setPrivacySaving(false);
+    }
+  };
+
+  /* ---------------- data + socket (starts ONLY after privacy accepted) ---------------- */
+  useEffect(() => {
+    if (!bookingId || privacyAccepted !== true) {
+      setJoined(false);
+      setLoading(false);
+      return undefined;
+    }
+
     let cancelled = false;
 
     setJoined(false);
@@ -864,7 +1028,7 @@ export default function ChatPanel({
       socket.off("disconnect", onDisconnect);
       socket.emit("chat:leave", { bookingId });
     };
-  }, [bookingId, role, peerRole, addMessage]);
+  }, [bookingId, role, peerRole, addMessage, privacyAccepted]);
 
   /* ---------------- load older messages (scroll to top) ---------------- */
   const loadOlder = useCallback(() => {
@@ -1017,6 +1181,38 @@ export default function ChatPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [variant, onClose]);
 
+  /* ---------------- lock page scroll behind the chat / popup ---------------- */
+  const lockScroll = (variant === "modal" && open) || privacyOpen;
+  useEffect(() => {
+    if (!lockScroll) return undefined;
+    const body = document.body;
+    const prevOverflow = body.style.overflow;
+    const prevPadding = body.style.paddingRight;
+    const scrollbar =
+      window.innerWidth - document.documentElement.clientWidth;
+
+    body.style.overflow = "hidden";
+    if (scrollbar > 0) body.style.paddingRight = `${scrollbar}px`;
+
+    return () => {
+      body.style.overflow = prevOverflow;
+      body.style.paddingRight = prevPadding;
+    };
+  }, [lockScroll]);
+
+  /* ---------------- instructions popup: Esc closes only the popup ---------------- */
+  useEffect(() => {
+    if (!privacyOpen) return undefined;
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setPrivacyOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [privacyOpen]);
+
   /* ---------------- emoji picker ---------------- */
   useEffect(() => {
     if (!showEmoji) return undefined;
@@ -1085,7 +1281,14 @@ export default function ChatPanel({
   const send = () => {
     const t = text.trim();
 
-    if (!t || sendingRef.current || !socket.connected) return;
+    if (!t || sendingRef.current || !socket.connected || !privacyAccepted)
+      return;
+
+    const hit = detectContact(t, recentMine);
+    if (hit) {
+      setErr(hit.message);
+      return;
+    }
 
     unlockAudio();
 
@@ -1204,7 +1407,9 @@ export default function ChatPanel({
   ]);
 
   /* ---------------- UI ---------------- */
-  const statusText = !joined
+  const statusText = !privacyAccepted
+    ? "Read the chat rules to start"
+    : !joined
     ? "Connecting…"
     : group
       ? "Group chat · everyone in this session"
@@ -1216,7 +1421,117 @@ export default function ChatPanel({
   const headerImage = group ? "" : peerImage;
   const headerFallback = group ? "" : peerImageFallback;
 
-  const body = (
+  /* ---------------- Important Instructions modal ---------------- */
+  const privacyPopup = (
+    <div
+      className="absolute inset-0 z-[120] flex items-center justify-center bg-slate-900/50 p-4"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) setPrivacyOpen(false);
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Chat rules"
+    >
+      <div className="flex max-h-full w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex shrink-0 items-start gap-3 px-5 pb-3 pt-5">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+            <ShieldCheck size={22} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-base font-semibold leading-tight text-slate-900">
+              Chat rules
+            </h2>
+            <p className="text-[13px] text-slate-500">
+              Read these before you start chatting.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setPrivacyOpen(false)}
+            aria-label="Close rules"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+          >
+            <X size={17} />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-5 pb-4">
+          {PRIVACY_SECTIONS.map(({ icon: Icon, title: heading, items }) => (
+            <section key={heading} className="flex gap-3">
+              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+                <Icon size={16} />
+              </span>
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-slate-900">
+                  {heading}
+                </h3>
+                <ul className="mt-1 space-y-0.5">
+                  {items.map((item) => (
+                    <li
+                      key={item}
+                      className="text-[13px] leading-5 text-slate-600"
+                    >
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </section>
+          ))}
+
+          <p className="border-l-4 border-amber-400 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+            Sharing contact details or bypassing these rules can lead to chat
+            restrictions or account suspension.
+          </p>
+        </div>
+
+        <div className="shrink-0 border-t border-slate-200 px-5 pb-4 pt-3">
+          <label className="flex cursor-pointer items-start gap-2.5">
+            <input
+              type="checkbox"
+              checked={privacyChecked}
+              onChange={(e) => setPrivacyChecked(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
+            />
+            <span className="text-[13px] leading-5 text-slate-700">
+              I have read these rules and agree to follow them.
+            </span>
+          </label>
+
+          {privacyError && (
+            <p className="mt-2 text-xs text-red-600" role="alert">
+              {privacyError}
+            </p>
+          )}
+
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={() => setPrivacyOpen(false)}
+              className="rounded-xl px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100"
+            >
+              Not now
+            </button>
+            <button
+              type="button"
+              onClick={acceptChatPrivacy}
+              disabled={!privacyChecked || privacySaving}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {privacySaving ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <Check size={16} />
+              )}
+              {privacySaving ? "Saving..." : "Agree and start chat"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const chatContent = (
     <>
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
@@ -1255,7 +1570,9 @@ export default function ChatPanel({
               }`}
               aria-live="polite"
             >
-              {!joined && <Loader2 size={10} className="animate-spin" />}
+              {privacyAccepted && !joined && (
+                <Loader2 size={10} className="animate-spin" />
+              )}
               {statusText}
             </p>
           </div>
@@ -1281,7 +1598,26 @@ export default function ChatPanel({
           className="h-full overflow-y-auto bg-[#efeae2] px-4 py-4"
           style={{ overscrollBehavior: "contain" }}
         >
-          {loading ? (
+          {!privacyAccepted ? (
+            <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white/80">
+                <ShieldCheck size={26} className="text-blue-600" />
+              </div>
+              <p className="mt-3 text-sm font-semibold text-slate-800">
+                Read the chat rules first
+              </p>
+              <p className="mt-1 max-w-[240px] text-xs leading-5 text-slate-600">
+                Agree to the rules once, then you can send and read messages.
+              </p>
+              <button
+                type="button"
+                onClick={() => setPrivacyOpen(true)}
+                className="mt-4 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+              >
+                Read chat rules
+              </button>
+            </div>
+          ) : loading ? (
             <div className="flex h-full items-center justify-center text-slate-400">
               <Loader2 className="animate-spin" size={20} />
             </div>
@@ -1344,14 +1680,21 @@ export default function ChatPanel({
         )}
       </div>
 
-      {err && (
-        <p className="shrink-0 border-t border-red-100 bg-red-50 px-4 py-2 text-xs text-red-600">
-          {err}
-        </p>
-      )}
-
       {/* Composer */}
       <div className="shrink-0 border-t border-slate-200 bg-white">
+        {!privacyAccepted ? (
+          <div className="p-3">
+            <button
+              type="button"
+              onClick={() => setPrivacyOpen(true)}
+              className="flex min-h-[42px] w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-500 transition hover:bg-slate-100"
+            >
+              <ShieldCheck size={16} className="text-blue-600" />
+              Read the rules and agree to start chatting
+            </button>
+          </div>
+        ) : (
+          <>
         {replyTo && (
           <div className="px-3 pt-3">
             <div
@@ -1424,7 +1767,7 @@ export default function ChatPanel({
           <button
             type="button"
             onClick={send}
-            disabled={!text.trim() || sending}
+            disabled={!text.trim() || sending || Boolean(contactHit)}
             aria-label="Send"
             className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-full bg-blue-600 text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
           >
@@ -1435,7 +1778,31 @@ export default function ChatPanel({
             )}
           </button>
         </div>
+          </>
+        )}
       </div>
+
+      {/* one warning only: contact-filter message first, else server/network error */}
+      {(contactHit || err) && (
+        <p className="shrink-0 border-t border-red-100 bg-red-50 px-4 py-2 text-xs text-red-600">
+          {contactHit?.message || err}
+        </p>
+      )}
+    </>
+  );
+
+  // checking -> chat (locked until the rules are accepted) + rules popup on demand
+  const body = privacyChecking ? (
+    <div className="flex min-h-[300px] flex-1 items-center justify-center bg-white">
+      <Loader2 className="animate-spin text-blue-600" size={30} />
+      <span className="ml-3 text-sm text-slate-500">
+        Checking chat privacy...
+      </span>
+    </div>
+  ) : (
+    <>
+      {chatContent}
+      {privacyOpen && !privacyAccepted && privacyPopup}
     </>
   );
 
@@ -1451,16 +1818,17 @@ export default function ChatPanel({
     );
   }
 
-  return (
+    return createPortal(
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 p-4"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose?.();
       }}
     >
-      <div className="flex h-[75vh] max-h-[640px] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5">
+      <div className="relative flex h-[75vh] max-h-[640px] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5">
         {body}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

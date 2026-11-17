@@ -2,7 +2,13 @@ const mongoose = require("mongoose");
 
 const fresherSchema = new mongoose.Schema(
   {
-    name: { type: String, required: true, trim: true, minlength: 2, maxlength: 100 },
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+      minlength: 2,
+      maxlength: 100,
+    },
 
     email: {
       type: String,
@@ -40,7 +46,11 @@ const fresherSchema = new mongoose.Schema(
     referralEarnings: { type: Number, default: 0 },
 
     referralCode: { type: String, unique: true, sparse: true },
-    referredBy: { type: mongoose.Schema.Types.ObjectId, ref: "Fresher", default: null },
+    referredBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Fresher",
+      default: null,
+    },
     hasUsedReferral: { type: Boolean, default: false },
 
     welcomeBonusClaimed: { type: Boolean, default: false },
@@ -61,7 +71,17 @@ const fresherSchema = new mongoose.Schema(
     career: { type: [mongoose.Schema.Types.Mixed], default: [] },
     skills: { type: [String], default: [] },
     interests: { type: [String], default: [] },
+    chatPrivacyAcceptedAt: {
+      type: Date,
+      default: null,
+    },
+
+    chatPrivacyVersion: {
+      type: String,
+      default: "",
+    },
   },
+
   {
     timestamps: true,
     toJSON: { virtuals: true },

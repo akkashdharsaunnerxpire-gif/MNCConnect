@@ -19,7 +19,6 @@ const mentorSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Dial code only, e.g. "+91", "+1", "+971"
     countryCode: {
       type: String,
       trim: true,
@@ -27,15 +26,11 @@ const mentorSchema = new mongoose.Schema(
       match: [/^\+\d{1,4}$/, "Invalid country code"],
     },
 
-    // Full number stored as countryCode + national digits, e.g. "+919876543210"
     mobile: {
       type: String,
       required: true,
       trim: true,
-      match: [
-        /^\+\d{7,18}$/,
-        "Mobile must include country code, e.g. +919876543210",
-      ],
+      match: [/^\d{7,18}$/, "Enter a valid mobile number without country code"],
     },
 
     password: {
@@ -218,6 +213,15 @@ const mentorSchema = new mongoose.Schema(
       type: String,
       default: "",
       select: false,
+    },
+    chatPrivacyAcceptedAt: {
+      type: Date,
+      default: null,
+    },
+
+    chatPrivacyVersion: {
+      type: String,
+      default: "",
     },
   },
   {

@@ -3,6 +3,12 @@
 //   single : 1 fresher pays RATE_PER_HOUR
 //   group  : host creates the booking (pays own share), friends join with an invite code
 //            and EACH pays GROUP_RATE_PER_HOUR (per person). Refunds / earnings are per payment.
+//
+// SECURITY (contact leak fix):
+//   - email / phone / linkedin of one side is NEVER sent to the other side.
+//   - POPULATE_MENTOR, MENTOR_PUBLIC_FIELDS, mentorCard, toMentorPayload, getCounterpart: email removed.
+//   - getAcceptedBookings now uses the logged-in user (no more ?email=).
+//   - Email / WhatsApp are still sent SERVER-SIDE only (emailBookingParties) and never returned in an API.
 const crypto = require("crypto");
 const mongoose = require("mongoose");
 const Razorpay = require("razorpay");
@@ -45,8 +51,10 @@ const {
 } = require("../utils/pricing");
 
 /* ============================ CONFIG ============================ */
+
+// What a fresher may see about a mentor. NO email, NO phone, NO linkedin.
 const MENTOR_PUBLIC_FIELDS =
-  "name email profilePic currentCompany designation department officeLocation yearsOfExperience languages skills bio linkedinProfile gender rating totalReviews totalSessions isVerified";
+  "name profilePic currentCompany designation department officeLocation yearsOfExperience languages skills bio gender isVerified";
 
 const PAYMENT_GRACE_MS = (Number(process.env.PAYMENT_GRACE_SEC) || 60) * 1000;
 
@@ -108,9 +116,13 @@ const loose = (a, b) => {
   return Boolean(x && y) && (x === y || x.includes(y) || y.includes(x));
 };
 
+// used for matching on the SERVER only (never sent to the client as is)
 const MENTOR_FIELDS =
   "name email profilePic currentCompany designation department gender languages spokenLanguages skills expertise";
-const POPULATE_MENTOR = "name email profilePic currentCompany designation";
+
+// SECURITY: email removed. This is what gets populated into booking.mentor
+// and therefore what reaches the fresher in every booking API / socket event.
+const POPULATE_MENTOR = "name profilePic currentCompany designation";
 
 const SPOKEN_LANGS = new Set([
   "english",
@@ -237,8 +249,10 @@ const emitBooking = (b) => {
 };
 
 /* ---------- email + WhatsApp to the people in a booking ---------- */
+// NOTE: these are sent SERVER-SIDE. Contact details are read here, used to send
+// the message, and are never returned to any client.
 
-// FIX 1: the phone number can be saved under many different field names.
+// the phone number can be saved under many different field names.
 // We select all of them and pick the first one that has a value.
 const CONTACT_FIELDS =
   "name email phone mobile phoneNumber whatsappNumber whatsapp mobileNumber contactNumber contact";
@@ -400,6 +414,7 @@ const assignMentorToAll = async (b, mentorId) => {
   ).catch((e) => console.error("assignMentorToAll:", e.message));
 };
 
+// what the MENTOR sees about a request. SECURITY: no fresher email.
 const toMentorPayload = (b) => ({
   id: b.requestGroupId,
   requestGroupId: b.requestGroupId,
@@ -407,7 +422,6 @@ const toMentorPayload = (b) => ({
   avatar: b.fresherImage || "",
   requester: {
     fullName: b.fresherName,
-    email: b.fresherEmail,
     image: b.fresherImage,
   },
   role:
@@ -433,6 +447,7 @@ const toMentorPayload = (b) => ({
   direct: Boolean(b.preferredMentor),
 });
 
+// what the FRESHER sees about a mentor. SECURITY: no email.
 const mentorCard = (m) =>
   m && typeof m === "object" && m.name
     ? {
@@ -441,7 +456,6 @@ const mentorCard = (m) =>
         designation: m.designation || "",
         company: m.currentCompany || "",
         image: m.profilePic || "",
-        email: m.email || "",
       }
     : null;
 
@@ -598,7 +612,9 @@ const refundPayment = async (payment, reason = "", options = {}) => {
       ? { bonus: wb.bonus, referral: wb.referral, refundable: wb.refundable }
       : { refundable: amount };
 
-    await creditWalletNow(before.fresher, credit);
+    // FIX: this used to call creditWalletNow() itself (infinite recursion).
+    // It must call the imported ledger function `creditWallet`.
+    await creditWallet(before.fresher, credit);
 
     // totalRefunds = lifetime stat of CASH refunded only
     if (Number(credit.refundable) > 0) {
@@ -643,7 +659,13 @@ const refundPayment = async (payment, reason = "", options = {}) => {
       Number(error?.statusCode) >= 400 && Number(error?.statusCode) < 500;
     if (!toWallet && definiteNo && before.fresher) {
       try {
-        await creditWallet();
+        // FIX: arguments were missing here. Check the signature in utils/walletLedger.js
+        await creditWallet(before.fresher, { refundable: amount });
+        await Fresher.updateOne(
+          { _id: before.fresher },
+          { $inc: { totalRefunds: Number(amount) } },
+        ).catch(() => {});
+        emitToUser(String(before.fresher), "wallet:updated", { amount });
         await Payment.updateOne(
           { _id: before._id },
           {
@@ -1153,6 +1175,7 @@ exports.createRequest = async (req, res) => {
       requestGroupId,
       fresher: fresherId || null,
       fresherName: hostName,
+      // stored for server-side use only. It is never returned to the mentor.
       fresherEmail: fresherDoc?.email || body.requester?.email || "",
       fresherImage: String(body.requester?.image || ""),
 
@@ -1423,7 +1446,7 @@ exports.joinGroup = async (req, res) => {
     }
     emitBooking(updated);
 
-    // FIX 3: mentor already accepted -> the new friend also gets the
+    // mentor already accepted -> the new friend also gets the
     // "join 5 minutes early" email + WhatsApp (req.user.id is available HERE)
     if (updated.mentor) {
       emailBookingParties(updated, "booked", {
@@ -1566,12 +1589,15 @@ exports.getRequestStatus = async (req, res) => {
   }
 };
 
+// SECURITY FIX: this used to read ?email= from the URL, so anybody could type
+// any email and read that person's bookings. It now uses the logged-in user.
+// The route must be behind the fresher auth middleware.
 exports.getAcceptedBookings = async (req, res) => {
   try {
-    const email = norm(req.query.email);
-    if (!email) return fail(res, 400, "Email is required");
+    if (!req.user?.id) return fail(res, 401, "Please login.");
+
     const list = await Booking.find({
-      fresherEmail: email,
+      $or: [{ fresher: req.user.id }, { "participants.fresher": req.user.id }],
       status: { $in: ["accepted", "in_progress", "completed"] },
     })
       .populate("mentor", POPULATE_MENTOR)
@@ -1663,6 +1689,7 @@ exports.getCounterpart = async (req, res) => {
       if (!b.mentor)
         return fail(res, 404, "No employee has accepted this booking yet.");
 
+      // MENTOR_PUBLIC_FIELDS has no email / phone / linkedin
       const m = await Mentor.findById(b.mentor)
         .select(MENTOR_PUBLIC_FIELDS)
         .lean();
@@ -1703,7 +1730,6 @@ exports.getCounterpart = async (req, res) => {
         person: {
           id: String(m._id),
           name: m.name || "",
-          email: m.email || "",
           image: m.profilePic || "",
           gender: m.gender || "",
           company: m.currentCompany || "",
@@ -1714,8 +1740,8 @@ exports.getCounterpart = async (req, res) => {
           languages: m.languages || [],
           skills: m.skills || [],
           bio: m.bio || "",
-          linkedinProfile: m.linkedinProfile || "",
           isVerified: Boolean(m.isVerified),
+          // SECURITY: no email, no linkedinProfile, no phone here
 
           rating,
           reviewCount,
@@ -1738,9 +1764,10 @@ exports.getCounterpart = async (req, res) => {
     }
 
     // mentor side: host + (group) every other fresher
+    // SECURITY: no email of any fresher is selected or returned
     const ids = participantUserIds(b);
     const freshers = await Fresher.find({ _id: { $in: ids } })
-      .select("name email gender profilePic")
+      .select("name gender profilePic")
       .lean();
 
     const people = ids
@@ -1752,7 +1779,6 @@ exports.getCounterpart = async (req, res) => {
         return {
           id,
           name: f?.name || part?.name || "Fresher",
-          email: f?.email || "",
           image: f?.profilePic || "",
           gender: f?.gender || "",
           isHost: String(b.fresher) === id,
@@ -1768,7 +1794,6 @@ exports.getCounterpart = async (req, res) => {
       person: {
         id: host.id || "",
         name: host.name || b.fresherName || "Fresher",
-        email: host.email || b.fresherEmail || "",
         image: host.image || b.fresherImage || "",
         gender: host.gender || b.gender || "",
       },
@@ -1926,9 +1951,8 @@ const settleCompleted = async (booking, { auto = false } = {}) => {
 
   emitBooking(updated);
 
-  // FIX 2: the old "emailBookingParties(... req.user.id ...)" block was removed from here.
-  // `req` does not exist in this function -> it threw ReferenceError and crashed completion.
-  // That logic now lives in joinGroup(), where `req` is available.
+  // NOTE: the old "emailBookingParties(... req.user.id ...)" block was removed from here.
+  // `req` does not exist in this function. That logic lives in joinGroup().
 
   pushTimerOff(updated);
   return updated;

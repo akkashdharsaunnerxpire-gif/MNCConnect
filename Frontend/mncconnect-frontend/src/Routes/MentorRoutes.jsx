@@ -11,7 +11,7 @@ import MentorSessions from "../MncEmployee/pages/MentorSessions";
 import MentorEarnings from "../MncEmployee/pages/MentorEarnings";
 import MentorReviews from "../MncEmployee/pages/MentorReviews";
 import MentorSettings from "../MncEmployee/pages/MentorSettings";
-import MentorHeader from "../MncEmployee/Components/MentorHeader";
+import MentorSidebar from "../MncEmployee/Components/MentorSidebar";
 import ResetPassword from "../Authpage/MncEmployeeAuth/ResetPassword";
 import MeetingRoom from "../Commoncomponents/Meetingroom";
 import SuspenseLoader from "../Commoncomponents/SuspenseLoader";
@@ -39,14 +39,26 @@ const MentorFallback = () => {
   );
 };
 
+/*
+  Sidebar layout
+  - desktop (lg+): fixed 17rem sidebar on the left, content has lg:pl-[17rem]
+  - mobile: 56px top bar (pt-14) + slide-in drawer
+*/
 const MentorLayout = () => (
-  <div className="min-h-screen bg-[#080612] text-white">
-    <MentorHeader />
+  <div className="min-h-screen bg-slate-50 text-slate-900">
+    {/* hide the page scrollbar on every mentor page (scrolling still works) */}
+    <style>{`
+      html { scrollbar-width: none; -ms-overflow-style: none; }
+      html::-webkit-scrollbar { display: none; width: 0; height: 0; }
+    `}</style>
+    <MentorSidebar />
     {/* new-message alert on every mentor page (not inside the meeting room) */}
     <ChatAlertHost role="mentor" />
-    <main className="min-h-[calc(100vh-64px)]">
-      <Outlet />
-    </main>
+    <div className="lg:pl-[17rem]">
+      <main className="min-h-screen pt-14 lg:pt-0">
+        <Outlet />
+      </main>
+    </div>
   </div>
 );
 
@@ -61,8 +73,15 @@ const MentorRoutes = () => {
 
       {/* private */}
       <Route element={<MentorProtectedRoute />}>
-        {/* Full-screen meeting room (no header, no chat alert) */}
-        <Route path="meeting/:bookingId" element={<LaptopOnlyGuard><MeetingRoom /></LaptopOnlyGuard>} />
+        {/* Full-screen meeting room (no sidebar, no chat alert) */}
+        <Route
+          path="meeting/:bookingId"
+          element={
+            <LaptopOnlyGuard>
+              <MeetingRoom />
+            </LaptopOnlyGuard>
+          }
+        />
 
         <Route element={<MentorLayout />}>
           <Route index element={<Navigate to="/mentor/home" replace />} />

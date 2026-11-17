@@ -2,92 +2,186 @@
 // Socket side of the chat: chat:join / chat:leave / chat:send / chat:read
 // group chat -> every paid member (host + friends) and the mentor can chat.
 // PRIVACY: "read" receipts (who read) go ONLY to the person who wrote the message.
-const jwt = require("jsonwebtoken");
+
 const ChatMessage = require("../models/ChatMessage");
 const Mentor = require("../models/Mentor");
 const Fresher = require("../models/Fresher");
+
+// Server-side contact filter
+const { detectContact } = require("./contactFilter");
 
 const { chatAccess } = ChatMessage;
 
 const MAX_LEN = 1000;
 const BLOCKED = ["pending", "expired", "missed", "cancelled"];
 
+// Contact-filter settings
+const RECENT_WINDOW_MS = 10 * 60 * 1000;
+const RECENT_MAX = 8;
+
 const room = (id) => `chat:${id}`;
 const idOf = (v) => String(v?._id || v || "");
 
-// bookingId -> { mentor: Date, fresher: Date }   (for "last seen")
+// bookingId -> { mentor: Date, fresher: Date } (for "last seen")
 const lastSeen = new Map();
 const nameCache = new Map();
 
-const verify = (token) => {
-  try {
-    const p = jwt.verify(String(token || ""), process.env.JWT_SECRET);
-    return p && p.id ? { id: String(p.id), role: p.role } : null;
-  } catch (_) {
-    return null;
-  }
-};
-
-const identify = (socket, payload = {}) => {
+// Identity must come from the server-side Socket.IO authentication
+// middleware (socket.data.user). Never trust a token supplied in an event.
+const identify = (socket) => {
   const u = socket.data?.user || socket.user;
-  if (u && (u.id || u._id) && u.role) {
-    return { id: String(u.id || u._id), role: u.role };
-  }
-  return verify(payload.token);
+
+  if (!u || !(u.id || u._id)) return null;
+  if (!["fresher", "mentor"].includes(String(u.role))) return null;
+
+  return {
+    id: String(u.id || u._id),
+    role: String(u.role),
+  };
 };
 
-const modelOf = (user) => (user.role === "mentor" ? Mentor : Fresher);
+const modelOf = (user) =>
+  user.role === "mentor" ? Mentor : Fresher;
 
 const nameOf = async (user) => {
   const key = `${user.role}:${user.id}`;
-  if (nameCache.has(key)) return nameCache.get(key);
-  const doc = await modelOf(user).findById(user.id).select("name").lean().catch(() => null);
-  const name = doc?.name || (user.role === "mentor" ? "Employee" : "Fresher");
+
+  if (nameCache.has(key)) {
+    return nameCache.get(key);
+  }
+
+  const doc = await modelOf(user)
+    .findById(user.id)
+    .select("name")
+    .lean()
+    .catch(() => null);
+
+  const name =
+    doc?.name ||
+    (user.role === "mentor" ? "Employee" : "Fresher");
+
   nameCache.set(key, name);
+
   return name;
 };
 
-// name + profile photo of the person who read a message
+// ------------------------------------------------------------
+// CHAT PRIVACY ACCEPTANCE
+// ------------------------------------------------------------
+
+const CHAT_PRIVACY_VERSION = "1.0";
+
+const hasAcceptedChatPrivacy = async (user) => {
+  if (!user || !["fresher", "mentor"].includes(user.role)) {
+    return false;
+  }
+
+  const doc = await modelOf(user)
+    .findById(user.id)
+    .select("chatPrivacyAcceptedAt chatPrivacyVersion")
+    .lean();
+
+  return Boolean(
+    doc &&
+      doc.chatPrivacyAcceptedAt &&
+      doc.chatPrivacyVersion === CHAT_PRIVACY_VERSION
+  );
+};
+
+const requireChatPrivacy = async (user, ack) => {
+  const accepted = await hasAcceptedChatPrivacy(user);
+
+  if (accepted) return true;
+
+  ack({
+    ok: false,
+    code: "CHAT_PRIVACY_REQUIRED",
+    message: "Please accept the chat privacy policy before using chat.",
+  });
+
+  return false;
+};
+
+// ------------------------------------------------------------
+// READER DETAILS
+// ------------------------------------------------------------
+
+// Name + profile photo of the person who read a message
 const readerOf = async (user) => {
   const doc = await modelOf(user)
     .findById(user.id)
     .select("name profilePic")
     .lean()
     .catch(() => null);
+
   return {
     id: user.id,
     role: user.role,
-    name: doc?.name || (user.role === "mentor" ? "Employee" : "Fresher"),
+    name:
+      doc?.name ||
+      (user.role === "mentor" ? "Employee" : "Fresher"),
     image: doc?.profilePic || "",
     at: new Date(),
   };
 };
 
-// send an event to EVERY online socket of one user
-const emitToUserSockets = (io, userId, event, payload, skipSocketId) => {
+// ------------------------------------------------------------
+// SOCKET HELPERS
+// ------------------------------------------------------------
+
+// Send an event to EVERY online socket of one user
+const emitToUserSockets = (
+  io,
+  userId,
+  event,
+  payload,
+  skipSocketId,
+) => {
   for (const s of io.sockets.sockets.values()) {
     if (s.id === skipSocketId) continue;
-    if (String(s.data?.user?.id || "") !== String(userId)) continue;
+
+    if (
+      String(s.data?.user?.id || "") !== String(userId)
+    ) {
+      continue;
+    }
+
     s.emit(event, payload);
   }
 };
 
-// who is inside this chat room right now
+// Who is inside this chat room right now
 const insideOf = async (io, bookingId) => {
-  const sockets = await io.in(room(bookingId)).fetchSockets();
+  const sockets = await io
+    .in(room(bookingId))
+    .fetchSockets();
+
   const users = new Set();
-  const online = { mentor: false, fresher: false };
+
+  const online = {
+    mentor: false,
+    fresher: false,
+  };
+
   sockets.forEach((s) => {
     const c = s.data?.chat;
+
     if (!c) return;
+
     users.add(c.userId);
     online[c.role] = true;
   });
-  return { sockets, users, online };
+
+  return {
+    sockets,
+    users,
+    online,
+  };
 };
 
 const emitPresence = async (io, bookingId) => {
   const { online } = await insideOf(io, bookingId);
+
   io.to(room(bookingId)).emit("chat:presence", {
     bookingId,
     requestGroupId: bookingId,
@@ -98,271 +192,643 @@ const emitPresence = async (io, bookingId) => {
 
 const leaveRoom = async (io, socket, bookingId) => {
   const c = socket.data.chat;
+
   if (!socket.rooms.has(room(bookingId))) return;
 
   socket.leave(room(bookingId));
+
   socket.data.chatRooms?.delete(bookingId);
 
   const { online } = await insideOf(io, bookingId);
+
   if (c && !online[c.role]) {
     const cur = lastSeen.get(bookingId) || {};
+
     cur[c.role] = new Date();
+
     lastSeen.set(bookingId, cur);
   }
+
   emitPresence(io, bookingId).catch(() => {});
 };
 
+// ------------------------------------------------------------
+// SERVER-SIDE CONTACT FILTER
+// ------------------------------------------------------------
+
+const checkContactMessage = async ({
+  bookingId,
+  user,
+  role,
+  text,
+}) => {
+  const since = new Date(
+    Date.now() - RECENT_WINDOW_MS,
+  );
+
+  // Only fetch this user's own recent messages
+  // from this particular booking/group.
+  const recentMessages = await ChatMessage.find({
+    bookingId,
+    senderId: String(user.id),
+    senderRole: role,
+    createdAt: {
+      $gte: since,
+    },
+  })
+    .sort({ createdAt: -1 })
+    .limit(RECENT_MAX)
+    .select("text")
+    .lean();
+
+  // detectContact expects recent messages in chronological order.
+  const recentOwnTexts = recentMessages
+    .reverse()
+    .map((message) => String(message.text || ""));
+
+  // Check current message together with recent messages.
+  return detectContact(text, recentOwnTexts);
+};
+
+// ------------------------------------------------------------
+// INITIALIZE CHAT
+// ------------------------------------------------------------
+
+// Requires the Socket.IO connection middleware to set socket.data.user
+// to { id, role } after verifying the HttpOnly mnc_token cookie.
 exports.initChat = (io) => {
   io.on("connection", (socket) => {
     socket.data.chatRooms = new Set();
 
     /* ---------------- JOIN ---------------- */
-    socket.on("chat:join", async (payload = {}, ack = () => {}) => {
-      try {
-        const user = identify(socket, payload);
-        if (!user) return ack({ ok: false, message: "Log in again." });
 
-        const bookingId = String(payload.bookingId || "").trim();
-        const access = await chatAccess(bookingId, user);
-        if (!access.ok) return ack({ ok: false, message: access.message });
+    socket.on(
+      "chat:join",
+      async (payload = {}, ack = () => {}) => {
+        try {
+          const user = identify(socket);
 
-        socket.data.chat = { userId: user.id, role: access.role };
-        socket.data.chatRooms.add(bookingId);
-        socket.join(room(bookingId));
+          if (!user) {
+            return ack({
+              ok: false,
+              message: "Log in again.",
+            });
+          }
 
-        // everything sent by others is now "delivered"
-        const now = new Date();
-        const pending = await ChatMessage.find({
-          bookingId,
-          senderId: { $ne: user.id },
-          deliveredAt: null,
-        })
-          .select("_id")
-          .lean();
+          const bookingId = String(
+            payload.bookingId || "",
+          ).trim();
 
-        if (pending.length) {
-          await ChatMessage.updateMany(
-            { _id: { $in: pending.map((p) => p._id) } },
-            { $set: { deliveredAt: now } },
-          );
-          socket.to(room(bookingId)).emit("chat:receipt", {
+          const access = await chatAccess(
             bookingId,
-            messageIds: pending.map((p) => String(p._id)),
-            status: "delivered",
-            deliveredAt: now,
+            user,
+          );
+
+          if (!access.ok) {
+            return ack({
+              ok: false,
+              message: access.message,
+            });
+          }
+
+          // Privacy acceptance required before joining.
+          if (!(await requireChatPrivacy(user, ack))) return;
+
+          socket.data.chat = {
+            userId: user.id,
+            role: access.role,
+          };
+
+          socket.data.chatRooms.add(bookingId);
+
+          socket.join(room(bookingId));
+
+          // Everything sent by others is now "delivered"
+          const now = new Date();
+
+          const pending = await ChatMessage.find({
+            bookingId,
+            senderId: {
+              $ne: user.id,
+            },
+            deliveredAt: null,
+          })
+            .select("_id")
+            .lean();
+
+          if (pending.length) {
+            await ChatMessage.updateMany(
+              {
+                _id: {
+                  $in: pending.map((p) => p._id),
+                },
+              },
+              {
+                $set: {
+                  deliveredAt: now,
+                },
+              },
+            );
+
+            socket
+              .to(room(bookingId))
+              .emit("chat:receipt", {
+                bookingId,
+                messageIds: pending.map((p) =>
+                  String(p._id),
+                ),
+                status: "delivered",
+                deliveredAt: now,
+              });
+          }
+
+          const { online } = await insideOf(
+            io,
+            bookingId,
+          );
+
+          const seen = lastSeen.get(bookingId) || {};
+
+          const peerRole =
+            access.role === "mentor"
+              ? "fresher"
+              : "mentor";
+
+          emitPresence(io, bookingId).catch(() => {});
+
+          return ack({
+            ok: true,
+            role: access.role,
+            userId: user.id,
+            online,
+            lastSeen: seen[peerRole] || null,
+          });
+        } catch (error) {
+          console.error(
+            "chat:join error:",
+            error.message,
+          );
+
+          return ack({
+            ok: false,
+            message: "Chat unavailable.",
           });
         }
+      },
+    );
 
-        const { online } = await insideOf(io, bookingId);
-        const seen = lastSeen.get(bookingId) || {};
-        const peerRole = access.role === "mentor" ? "fresher" : "mentor";
-
-        emitPresence(io, bookingId).catch(() => {});
-
-        return ack({
-          ok: true,
-          role: access.role,
-          userId: user.id, // the client uses this to know "which one is me"
-          online,
-          lastSeen: seen[peerRole] || null,
-        });
-      } catch (error) {
-        console.error("chat:join error:", error.message);
-        return ack({ ok: false, message: "Chat unavailable." });
-      }
-    });
+    /* ---------------- LEAVE ---------------- */
 
     socket.on("chat:leave", (payload = {}) => {
-      const bookingId = String(payload.bookingId || "").trim();
-      if (bookingId) leaveRoom(io, socket, bookingId).catch(() => {});
+      const bookingId = String(
+        payload.bookingId || "",
+      ).trim();
+
+      if (bookingId) {
+        leaveRoom(io, socket, bookingId).catch(
+          () => {},
+        );
+      }
     });
 
     /* ---------------- SEND ---------------- */
-    socket.on("chat:send", async (payload = {}, ack = () => {}) => {
-      try {
-        const user = identify(socket, payload);
-        if (!user) return ack({ ok: false, message: "Log in again." });
 
-        const bookingId = String(payload.bookingId || "").trim();
-        const text = String(payload.text || "").trim().slice(0, MAX_LEN);
-        if (!text) return ack({ ok: false, message: "Message is empty." });
+    socket.on(
+      "chat:send",
+      async (payload = {}, ack = () => {}) => {
+        try {
+          // Always identify the sender using authenticated socket data.
+          const user = identify(socket);
 
-        const access = await chatAccess(bookingId, user);
-        if (!access.ok) return ack({ ok: false, message: access.message });
-
-        const b = access.booking;
-        if (BLOCKED.includes(b.status))
-          return ack({ ok: false, message: "Chat is closed for this session." });
-
-        // reply snapshot
-        let replyTo = null;
-        if (payload.replyToId && /^[a-f\d]{24}$/i.test(String(payload.replyToId))) {
-          const orig = await ChatMessage.findOne({
-            _id: payload.replyToId,
-            bookingId,
-          }).lean();
-          if (orig) {
-            replyTo = {
-              messageId: String(orig._id),
-              text: String(orig.text || "").slice(0, 200),
-              senderId: orig.senderId || "",
-              senderRole: orig.senderRole,
-              senderName: orig.senderName || "",
-            };
+          if (!user) {
+            return ack({
+              ok: false,
+              message: "Log in again.",
+            });
           }
-        }
 
-        const senderName = await nameOf(user);
-        const { users: inside } = await insideOf(io, bookingId);
-        const someoneElseInside = Array.from(inside).some((u) => u !== user.id);
+          const bookingId = String(
+            payload.bookingId || "",
+          ).trim();
 
-        const doc = await ChatMessage.create({
-          bookingId,
-          senderId: user.id,
-          senderRole: access.role,
-          senderName,
-          text,
-          replyTo,
-          readBy: [user.id],
-          readers: [],
-          deliveredAt: someoneElseInside ? new Date() : null,
-        });
+          const text = String(
+            payload.text || "",
+          )
+            .trim()
+            .slice(0, MAX_LEN);
 
-        // what other people receive: no readBy (nobody must see who read what)
-        const base = doc.toObject();
-        delete base.readBy;
-        const message = {
-          ...base,
-          _id: String(doc._id),
-          readers: [],
-          readByMe: false,
-          requestGroupId: bookingId,
-        };
+          if (!bookingId) {
+            return ack({
+              ok: false,
+              message: "Invalid chat.",
+            });
+          }
 
-        // 1) sockets that are inside the chat room (not me)
-        socket.to(room(bookingId)).emit("chat:message", message);
+          if (!text) {
+            return ack({
+              ok: false,
+              message: "Message is empty.",
+            });
+          }
 
-        // 2) every other member of the booking who is NOT inside the chat room:
-        //    send to ALL their online sockets (unread badge + sound)
-        const recipients = new Set(
-          [
-            idOf(b.fresher),
-            idOf(b.mentor),
-            ...(b.participants || []).map((p) => idOf(p.fresher)),
-          ].filter(Boolean),
-        );
-        recipients.delete(user.id);
-
-        for (const s of io.sockets.sockets.values()) {
-          if (s.id === socket.id) continue;
-          const uid = s.data?.user?.id;
-          if (!uid || !recipients.has(String(uid))) continue;
-          if (s.rooms.has(room(bookingId))) continue; // already got it from the room
-          s.emit("chat:message", message);
-        }
-
-        if (someoneElseInside) {
-          socket.to(room(bookingId)).emit("chat:receipt", {
+          // Verify booking/group access first.
+          const access = await chatAccess(
             bookingId,
-            messageIds: [String(doc._id)],
-            status: "delivered",
-            deliveredAt: message.deliveredAt,
+            user,
+          );
+
+          if (!access.ok) {
+            return ack({
+              ok: false,
+              message: access.message,
+            });
+          }
+
+          // Privacy acceptance required before sending.
+          if (!(await requireChatPrivacy(user, ack))) return;
+
+          const b = access.booking;
+
+          if (BLOCKED.includes(b.status)) {
+            return ack({
+              ok: false,
+              message:
+                "Chat is closed for this session.",
+            });
+          }
+
+          // --------------------------------------------------
+          // CONTACT FILTER CHECK
+          // --------------------------------------------------
+
+          let contactHit = null;
+
+          try {
+            contactHit = await checkContactMessage({
+              bookingId,
+              user,
+              role: access.role,
+              text,
+            });
+          } catch (filterError) {
+            // Fail closed: if the contact filter fails,
+            // do not silently allow a message through.
+            console.error(
+              "Contact filter error:",
+              filterError.message,
+            );
+
+            return ack({
+              ok: false,
+              code: "CONTACT_FILTER_UNAVAILABLE",
+              message:
+                "Message could not be checked. Please try again.",
+            });
+          }
+
+          if (contactHit) {
+            return ack({
+              ok: false,
+              code: "CONTACT_INFO_BLOCKED",
+              message:
+                contactHit.message ||
+                "Sharing contact details is not allowed in chat.",
+            });
+          }
+
+          // --------------------------------------------------
+          // REPLY SNAPSHOT
+          // --------------------------------------------------
+
+          let replyTo = null;
+
+          if (
+            payload.replyToId &&
+            /^[a-f\d]{24}$/i.test(
+              String(payload.replyToId),
+            )
+          ) {
+            const orig = await ChatMessage.findOne({
+              _id: payload.replyToId,
+              bookingId,
+            }).lean();
+
+            if (orig) {
+              replyTo = {
+                messageId: String(orig._id),
+                text: String(orig.text || "").slice(
+                  0,
+                  200,
+                ),
+                senderId: orig.senderId || "",
+                senderRole: orig.senderRole,
+                senderName: orig.senderName || "",
+              };
+            }
+          }
+
+          const senderName = await nameOf(user);
+
+          const { users: inside } = await insideOf(
+            io,
+            bookingId,
+          );
+
+          const someoneElseInside = Array.from(
+            inside,
+          ).some((u) => u !== user.id);
+
+          // Save message only after contact filter passes.
+          const doc = await ChatMessage.create({
+            bookingId,
+            senderId: user.id,
+            senderRole: access.role,
+            senderName,
+            text,
+            replyTo,
+            readBy: [user.id],
+            readers: [],
+            deliveredAt: someoneElseInside
+              ? new Date()
+              : null,
+          });
+
+          // What other people receive:
+          // no readBy (nobody must see who read what).
+          const base = doc.toObject();
+
+          delete base.readBy;
+
+          const message = {
+            ...base,
+            _id: String(doc._id),
+            readers: [],
+            readByMe: false,
+            requestGroupId: bookingId,
+          };
+
+          // 1) Sockets inside the chat room (not me).
+          socket
+            .to(room(bookingId))
+            .emit("chat:message", message);
+
+          // 2) Every other member of the booking who is NOT
+          // inside the chat room:
+          // send to ALL their online sockets (unread badge + sound).
+          const recipients = new Set(
+            [
+              idOf(b.fresher),
+              idOf(b.mentor),
+              ...(b.participants || []).map((p) =>
+                idOf(p.fresher),
+              ),
+            ].filter(Boolean),
+          );
+
+          recipients.delete(user.id);
+
+          for (const s of io.sockets.sockets.values()) {
+            if (s.id === socket.id) continue;
+
+            const uid = s.data?.user?.id;
+
+            if (!uid || !recipients.has(String(uid))) {
+              continue;
+            }
+
+            if (s.rooms.has(room(bookingId))) {
+              continue;
+            }
+
+            s.emit("chat:message", message);
+          }
+
+          if (someoneElseInside) {
+            socket
+              .to(room(bookingId))
+              .emit("chat:receipt", {
+                bookingId,
+                messageIds: [String(doc._id)],
+                status: "delivered",
+                deliveredAt: message.deliveredAt,
+              });
+          }
+
+          return ack({
+            ok: true,
+            message,
+          });
+        } catch (error) {
+          console.error(
+            "chat:send error:",
+            error.message,
+          );
+
+          return ack({
+            ok: false,
+            message: "Could not send. Try again.",
           });
         }
-
-        return ack({ ok: true, message });
-      } catch (error) {
-        console.error("chat:send error:", error.message);
-        return ack({ ok: false, message: "Could not send. Try again." });
-      }
-    });
+      },
+    );
 
     /* ---------------- READ ----------------
        PRIVACY: the "read" receipt (with the reader's name + photo)
-       goes ONLY to the person who wrote that message. */
-    socket.on("chat:read", async (payload = {}, ack = () => {}) => {
-      try {
-        const user = identify(socket, payload);
-        if (!user) return ack({ ok: false });
+       goes ONLY to the person who wrote that message.
+    */
 
-        const bookingId = String(payload.bookingId || "").trim();
-        const access = await chatAccess(bookingId, user);
-        if (!access.ok) return ack({ ok: false, message: access.message });
+    socket.on(
+      "chat:read",
+      async (payload = {}, ack = () => {}) => {
+        try {
+          const user = identify(socket);
 
-        const ids = (Array.isArray(payload.messageIds) ? payload.messageIds : [])
-          .map(String)
-          .filter((x) => /^[a-f\d]{24}$/i.test(x))
-          .slice(0, 200);
-        if (!ids.length) return ack({ ok: true });
+          if (!user) {
+            return ack({
+              ok: false,
+            });
+          }
 
-        // only messages from others that I have not read yet
-        const fresh = await ChatMessage.find({
-          _id: { $in: ids },
-          bookingId,
-          senderId: { $ne: user.id },
-          readBy: { $ne: user.id },
-        })
-          .select("_id senderId")
-          .lean();
+          const bookingId = String(
+            payload.bookingId || "",
+          ).trim();
 
-        if (!fresh.length) return ack({ ok: true });
-
-        const freshIds = fresh.map((m) => m._id);
-        const now = new Date();
-        const reader = await readerOf(user);
-
-        await ChatMessage.updateMany(
-          { _id: { $in: freshIds }, readBy: { $ne: user.id } },
-          { $addToSet: { readBy: user.id }, $push: { readers: reader } },
-        );
-        await ChatMessage.updateMany(
-          { _id: { $in: freshIds }, readAt: null },
-          { $set: { readAt: now } },
-        );
-        await ChatMessage.updateMany(
-          { _id: { $in: freshIds }, deliveredAt: null },
-          { $set: { deliveredAt: now } },
-        );
-
-        // group the messages by their writer, tell ONLY that writer
-        const bySender = new Map();
-        fresh.forEach((m) => {
-          const key = String(m.senderId || "");
-          if (!key) return;
-          if (!bySender.has(key)) bySender.set(key, []);
-          bySender.get(key).push(String(m._id));
-        });
-
-        bySender.forEach((messageIds, senderId) => {
-          emitToUserSockets(io, senderId, "chat:receipt", {
+          const access = await chatAccess(
             bookingId,
-            messageIds,
-            status: "read",
-            readAt: now,
-            deliveredAt: now,
-            reader,
-          });
-        });
+            user,
+          );
 
-        return ack({ ok: true });
-      } catch (error) {
-        console.error("chat:read error:", error.message);
-        return ack({ ok: false });
-      }
-    });
+          if (!access.ok) {
+            return ack({
+              ok: false,
+              message: access.message,
+            });
+          }
+
+          // Privacy acceptance required before read receipts.
+          if (!(await requireChatPrivacy(user, ack))) return;
+
+          const ids = (
+            Array.isArray(payload.messageIds)
+              ? payload.messageIds
+              : []
+          )
+            .map(String)
+            .filter((x) => /^[a-f\d]{24}$/i.test(x))
+            .slice(0, 200);
+
+          if (!ids.length) {
+            return ack({
+              ok: true,
+            });
+          }
+
+          // Only messages from others that I have not read yet.
+          const fresh = await ChatMessage.find({
+            _id: {
+              $in: ids,
+            },
+            bookingId,
+            senderId: {
+              $ne: user.id,
+            },
+            readBy: {
+              $ne: user.id,
+            },
+          })
+            .select("_id senderId")
+            .lean();
+
+          if (!fresh.length) {
+            return ack({
+              ok: true,
+            });
+          }
+
+          const freshIds = fresh.map((m) => m._id);
+
+          const now = new Date();
+
+          const reader = await readerOf(user);
+
+          await ChatMessage.updateMany(
+            {
+              _id: {
+                $in: freshIds,
+              },
+              readBy: {
+                $ne: user.id,
+              },
+            },
+            {
+              $addToSet: {
+                readBy: user.id,
+              },
+              $push: {
+                readers: reader,
+              },
+            },
+          );
+
+          await ChatMessage.updateMany(
+            {
+              _id: {
+                $in: freshIds,
+              },
+              readAt: null,
+            },
+            {
+              $set: {
+                readAt: now,
+              },
+            },
+          );
+
+          await ChatMessage.updateMany(
+            {
+              _id: {
+                $in: freshIds,
+              },
+              deliveredAt: null,
+            },
+            {
+              $set: {
+                deliveredAt: now,
+              },
+            },
+          );
+
+          // Group the messages by their writer.
+          // Tell ONLY that writer.
+          const bySender = new Map();
+
+          fresh.forEach((m) => {
+            const key = String(m.senderId || "");
+
+            if (!key) return;
+
+            if (!bySender.has(key)) {
+              bySender.set(key, []);
+            }
+
+            bySender.get(key).push(
+              String(m._id),
+            );
+          });
+
+          bySender.forEach((messageIds, senderId) => {
+            emitToUserSockets(
+              io,
+              senderId,
+              "chat:receipt",
+              {
+                bookingId,
+                messageIds,
+                status: "read",
+                readAt: now,
+                deliveredAt: now,
+                reader,
+              },
+            );
+          });
+
+          return ack({
+            ok: true,
+          });
+        } catch (error) {
+          console.error(
+            "chat:read error:",
+            error.message,
+          );
+
+          return ack({
+            ok: false,
+          });
+        }
+      },
+    );
 
     /* ---------------- DISCONNECT ---------------- */
+
     socket.on("disconnect", () => {
-      const ids = Array.from(socket.data.chatRooms || []);
+      const ids = Array.from(
+        socket.data.chatRooms || [],
+      );
+
       ids.forEach((bookingId) => {
         const c = socket.data.chat;
+
         insideOf(io, bookingId)
           .then(({ online }) => {
             if (c && !online[c.role]) {
-              const cur = lastSeen.get(bookingId) || {};
+              const cur =
+                lastSeen.get(bookingId) || {};
+
               cur[c.role] = new Date();
+
               lastSeen.set(bookingId, cur);
             }
+
             return emitPresence(io, bookingId);
           })
           .catch(() => {});

@@ -286,7 +286,7 @@ export default function MncLoginRegister() {
   const [profile, setProfile] = useState(initialProfile);
   const [files, setFiles] = useState(emptyFiles);
   const [isSubmitting, setIsSubmitting] = useState(false);
-    useGlobalLoading(isSubmitting);   // register submit
+  useGlobalLoading(isSubmitting); // register submit
   const [preview, setPreview] = useState(null);
 
   // --- Validation state -----------------------------------------------------
@@ -1340,6 +1340,7 @@ function MentorLogin({ showToast }) {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  useGlobalLoading(isSubmitting);
   const [error, setError] = useState("");
 
   // Green notice is ONLY for a successful registration.
@@ -1537,6 +1538,7 @@ function MentorForgotPassword({ showToast }) {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  useGlobalLoading(isSubmitting);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 

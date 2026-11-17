@@ -20,6 +20,7 @@ const instructionRoutes = require("./routes/instructionRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const assistantRoutes = require("./routes/assistantRoute");   // ← singular (route)
 const whatsappWebhook = require("./routes/whatsappWebhook");
+
 const {
   adminRouter: adminCompanyRoutes,
   publicRouter: publicCompanyRoutes,

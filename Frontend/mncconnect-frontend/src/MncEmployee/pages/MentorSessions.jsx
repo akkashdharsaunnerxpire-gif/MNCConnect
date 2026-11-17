@@ -11,6 +11,7 @@ import Box from "@mui/material/Box";
 import CircularProgress from "@mui/material/CircularProgress";
 import Typography from "@mui/material/Typography";
 import useChatNotificationSound from "../../hooks/useChatNotificationSound";
+import { createPortal } from "react-dom";
 import {
   JOIN_OPEN_MS,
   FINAL_WARNING_MS,
@@ -496,7 +497,7 @@ const GroupDetailsModal = ({ bookingId, onClose }) => {
 
   const current = people?.[selected] || null;
 
-  return (
+  return createPortal( 
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 px-4"
       onClick={onClose}
@@ -944,7 +945,7 @@ const MentorSessions = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-white via-sky-50 to-blue-100 text-slate-800">
-      <main className="relative z-10 mx-auto max-w-7xl px-5 py-8">
+      <main className="mx-auto max-w-7xl px-5 py-8">
         <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex w-fit gap-2 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
             {TABS.map((tab) => {

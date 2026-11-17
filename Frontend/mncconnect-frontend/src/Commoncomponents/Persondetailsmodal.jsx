@@ -5,6 +5,10 @@
 // The data comes from GET <booking>/counterpart (see bookingController.getCounterpart)
 // Props are unchanged: { title, fetcher, onClose }
 //
+// SECURITY: this modal NEVER shows email / phone / LinkedIn of the other person.
+// Contact details are stripped here (scrub) even if the backend sends them by mistake.
+// Reason: contact sharing lets people book outside the platform (commission bypass).
+//
 // Mentor reviews are read from:  data.person.reviews  (or data.reviews)
 //   review = { id, name, role, rating, comment, session, reply, createdAt }
 // Rating / count are read from:  person.rating, person.reviewCount
@@ -13,13 +17,10 @@ import React, { memo, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   X,
-  Mail,
-  Phone,
   Building2,
   Briefcase,
   MapPin,
   Languages,
-  ExternalLink,
   Star,
   UserRound,
   CalendarDays,
@@ -30,8 +31,6 @@ import {
   BookOpen,
   Target,
   Award,
-  Copy,
-  Check,
   Video,
   RefreshCw,
   AlertCircle,
@@ -95,30 +94,27 @@ const hd = (url, width = 256) => {
   return url;
 };
 
-/* Brand icons were removed from newer lucide-react versions, so we draw our own */
-const GithubIcon = ({ size = 16 }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="currentColor"
-    aria-hidden="true"
-  >
-    <path d="M12 .5A11.5 11.5 0 0 0 .5 12c0 5.08 3.29 9.38 7.86 10.9.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.74.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5Z" />
-  </svg>
-);
+/* Contact details are never shown. Even if the backend sends them, drop them here. */
+const CONTACT_KEYS = [
+  "email",
+  "phone",
+  "mobile",
+  "phoneNumber",
+  "whatsapp",
+  "whatsappNumber",
+  "mobileNumber",
+  "contactNumber",
+  "contact",
+  "linkedinProfile",
+  "linkedin",
+  "linkedinUrl",
+];
 
-const LinkedinIcon = ({ size = 16 }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="currentColor"
-    aria-hidden="true"
-  >
-    <path d="M20.45 20.45h-3.56v-5.57c0-1.33-.03-3.04-1.85-3.04-1.86 0-2.14 1.45-2.14 2.94v5.67H9.34V9h3.42v1.56h.05a3.75 3.75 0 0 1 3.37-1.85c3.6 0 4.27 2.37 4.27 5.46v6.28ZM5.34 7.43a2.07 2.07 0 1 1 0-4.14 2.07 2.07 0 0 1 0 4.14ZM7.12 20.45H3.56V9h3.56v11.45ZM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0Z" />
-  </svg>
-);
+const scrub = (p) => {
+  const o = { ...(p || {}) };
+  CONTACT_KEYS.forEach((k) => delete o[k]);
+  return o;
+};
 
 /* ---------------------------- small parts ---------------------------- */
 
@@ -199,19 +195,6 @@ const Block = ({ title, icon, children }) => (
     </h4>
     {children}
   </section>
-);
-
-const LinkBtn = ({ href, icon, children }) => (
-  <a
-    href={href}
-    target="_blank"
-    rel="noopener noreferrer"
-    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
-  >
-    {icon}
-    {children}
-    <ExternalLink size={13} className="opacity-50" />
-  </a>
 );
 
 /* Row of 5 stars (filled up to `value`) */
@@ -325,7 +308,6 @@ Avatar.displayName = "Avatar";
 
 const PersonDetailsModal = ({ title, fetcher, onClose }) => {
   const [state, setState] = useState({ loading: true, error: "", data: null });
-  const [copied, setCopied] = useState(false);
   const [zoom, setZoom] = useState(false);
   const [showAllReviews, setShowAllReviews] = useState(false);
 
@@ -349,7 +331,16 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
           });
           return;
         }
-        setState({ loading: false, error: "", data: d });
+        // SECURITY: contact details are removed before anything is rendered
+        setState({
+          loading: false,
+          error: "",
+          data: {
+            ...d,
+            person: scrub(d.person),
+            people: Array.isArray(d.people) ? d.people.map(scrub) : [],
+          },
+        });
       })
       .catch((e) => {
         if (cancelled) return;
@@ -394,7 +385,6 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
 
   /* ---- values (several possible field names, so it works with your schema) ---- */
   const image = pick(p, ["image", "profilePic", "avatar", "photo"]);
-  const phone = pick(p, ["phone", "mobile", "phoneNumber", "mobileNumber"]);
   const company = pick(p, ["company", "currentCompany"]);
   const location = isMentor
     ? pick(p, ["officeLocation", "location"])
@@ -424,8 +414,6 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
     "careerGoal",
   ]);
   const bio = pick(p, ["bio", "about", "summary", "headline"]);
-  const linkedin = fullUrl(pick(p, ["linkedinProfile", "linkedin"]));
-  const github = fullUrl(pick(p, ["githubProfile", "github"]));
   const resume = fullUrl(pick(p, ["resume", "resumeUrl", "resumeLink"]));
   const skills = toList(p.skills);
   const languages = toList(p.languages);
@@ -479,11 +467,10 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
       (s.role ? `Fresher · Looking for ${s.role}` : "Fresher");
 
   const hasEducation = !!(college || degree || branch || gradYear || cgpa);
-  const hasLinks = !!(linkedin || github || resume);
+  const hasLinks = !!resume;
   const fresherHasExtras =
     hasEducation ||
     !!(
-      phone ||
       location ||
       targetRole ||
       bio ||
@@ -492,21 +479,11 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
       hasLinks
     );
 
-  const copyEmail = async () => {
-    try {
-      await navigator.clipboard.writeText(p.email);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
-    } catch {
-      /* clipboard blocked: ignore */
-    }
-  };
-
   const wide = !loading && !error && !!data && !isMentor;
 
   /* =====================================================================
      FRESHER VIEW (what the mentor sees): two-pane "candidate card"
-       left  = identity + actions + quick contact   (light grey panel)
+       left  = identity + actions + quick info   (light grey panel)
        right = session request + profile sections   (white)
      ===================================================================== */
   const renderFresher = () => {
@@ -521,8 +498,6 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
       "flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";
 
     const sideInfo = [
-      { icon: <Mail size={15} />, text: p.email },
-      { icon: <Phone size={15} />, text: phone },
       { icon: <MapPin size={15} />, text: location },
       { icon: <UserRound size={15} />, text: cap(p.gender) },
     ].filter((x) => x.text);
@@ -551,43 +526,6 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
           </div>
 
           <div className="relative mt-6 space-y-2">
-            {p.email && (
-              <button
-                type="button"
-                onClick={copyEmail}
-                className={`${sideBtn} bg-slate-800 text-white hover:bg-slate-700`}
-              >
-                {copied ? (
-                  <>
-                    <Check size={15} className="text-emerald-300" /> Copied
-                  </>
-                ) : (
-                  <>
-                    <Copy size={15} /> Copy email
-                  </>
-                )}
-              </button>
-            )}
-            {linkedin && (
-              <a
-                href={linkedin}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`${sideBtn} bg-blue-600 text-white hover:bg-blue-700`}
-              >
-                <LinkedinIcon size={15} /> LinkedIn
-              </a>
-            )}
-            {github && (
-              <a
-                href={github}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`${sideBtn} border border-slate-200 bg-white text-slate-700 hover:bg-slate-100`}
-              >
-                <GithubIcon size={15} /> GitHub
-              </a>
-            )}
             {resume && (
               <a
                 href={resume}
@@ -731,7 +669,7 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
 
   /* =====================================================================
      MENTOR VIEW (what the fresher sees): ONE profile page with
-     rating + reviews included. No tabs, no booking section.
+     rating + reviews included. No tabs, no booking section, NO contact info.
      ===================================================================== */
   const renderMentor = () => (
     <>
@@ -743,42 +681,9 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
       </div>
 
       <div className="relative z-10 px-5 pb-6 sm:px-6">
-        {/* avatar half overlaps the banner; actions on the right */}
+        {/* avatar half overlaps the banner */}
         <div className="-mt-12 flex items-end justify-between gap-3">
           <Avatar src={image} name={p.name} onZoom={openZoom} />
-
-          <div className="mb-1 flex flex-wrap items-center justify-end gap-2">
-            {p.email && (
-              <button
-                type="button"
-                onClick={copyEmail}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50"
-              >
-                {copied ? (
-                  <>
-                    <Check size={14} className="text-emerald-600" />
-                    Copied
-                  </>
-                ) : (
-                  <>
-                    <Copy size={14} />
-                    Copy email
-                  </>
-                )}
-              </button>
-            )}
-            {linkedin && (
-              <a
-                href={linkedin}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-700"
-              >
-                <LinkedinIcon size={14} />
-                LinkedIn
-              </a>
-            )}
-          </div>
         </div>
 
         {/* name + role */}
@@ -830,12 +735,6 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
 
         <Block title="Details">
           <div className="grid gap-2 sm:grid-cols-2">
-            <InfoRow icon={<Mail size={16} />} label="Email">
-              {p.email}
-            </InfoRow>
-            <InfoRow icon={<Phone size={16} />} label="Phone">
-              {phone}
-            </InfoRow>
             <InfoRow icon={<Building2 size={16} />} label="Company">
               {company}
             </InfoRow>
@@ -863,23 +762,6 @@ const PersonDetailsModal = ({ title, fetcher, onClose }) => {
         {languages.length > 0 && (
           <Block title="Languages" icon={<Languages size={15} />}>
             <Chips items={languages} tone="slate" />
-          </Block>
-        )}
-
-        {(github || resume) && (
-          <Block title="Links">
-            <div className="flex flex-wrap gap-2">
-              {github && (
-                <LinkBtn href={github} icon={<GithubIcon size={15} />}>
-                  GitHub
-                </LinkBtn>
-              )}
-              {resume && (
-                <LinkBtn href={resume} icon={<FileText size={15} />}>
-                  Resume
-                </LinkBtn>
-              )}
-            </div>
           </Block>
         )}
 

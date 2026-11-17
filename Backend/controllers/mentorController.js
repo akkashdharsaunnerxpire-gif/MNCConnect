@@ -1,5 +1,6 @@
 const Mentor = require("../models/Mentor");
 const Fresher = require("../models/Fresher");
+const Booking = require("../models/Booking");
 
 // ============================================================================
 // HELPERS
@@ -157,8 +158,15 @@ const getMentorSocketIds = (onlineMentors, mentor) => {
   return [];
 };
 
+// true only when the logged-in user IS this mentor
+const isOwner = (req, mentorId) =>
+  req.user?.role === "mentor" &&
+  String(req.user.id || req.user._id || "") === String(mentorId);
+
 // ============================================================================
 // GET MENTOR PROFILE
+// Owner  -> full profile (without private documents)
+// Others -> PUBLIC fields only (no email / mobile / linkedin / employee id)
 // ============================================================================
 
 const getMentorProfile = async (req, res) => {
@@ -186,6 +194,26 @@ const getMentorProfile = async (req, res) => {
       });
     }
 
+    if (!isOwner(req, mentor._id)) {
+      return res.status(200).json({
+        success: true,
+        mentor: {
+          _id: mentor._id,
+          name: mentor.name,
+          profilePic: mentor.profilePic,
+          currentCompany: mentor.currentCompany,
+          designation: mentor.designation,
+          department: mentor.department,
+          officeLocation: mentor.officeLocation,
+          yearsOfExperience: mentor.yearsOfExperience,
+          languages: mentor.languages,
+          skills: mentor.skills,
+          bio: mentor.bio,
+          isVerified: mentor.isVerified,
+        },
+      });
+    }
+
     return res.status(200).json({
       success: true,
       mentor,
@@ -206,6 +234,8 @@ const getMentorProfile = async (req, res) => {
 
 const getMentorsByCompany = async (req, res) => {
   try {
+    // email / employeeId are selected ONLY to check the online status.
+    // They are removed before the response is sent.
     const allMentors = await Mentor.find({
       verificationStatus: "approved",
       accountStatus: "active",
@@ -250,8 +280,12 @@ const getMentorsByCompany = async (req, res) => {
         company.onlineCount += 1;
       }
 
+      // strip contact details before sending to the fresher
+      // eslint-disable-next-line no-unused-vars
+      const { email, employeeId, linkedinProfile, ...safeMentor } = mentor;
+
       company.mentors.push({
-        ...mentor,
+        ...safeMentor,
         isOnline,
       });
     }
@@ -274,12 +308,10 @@ const getMentorsByCompany = async (req, res) => {
 };
 
 // ============================================================================
-// UPDATE MENTOR PROFILE
+// UPDATE MENTOR PROFILE (only the mentor himself)
 // ============================================================================
 
 // Only fields that really exist in the Mentor schema.
-// (phone, githubProfile, education, dob, city ... were removed because
-// mongoose silently drops fields that are not in the schema.)
 const ALLOWED_UPDATE_FIELDS = [
   "name",
   "countryCode",
@@ -305,6 +337,23 @@ const UpdateMentorProfile = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Mentor email is required",
+      });
+    }
+
+    // ---- ownership: nobody can edit another mentor's profile ----
+    const owner = await Mentor.findOne({ email: mentoremail }).select("_id");
+
+    if (!owner) {
+      return res.status(404).json({
+        success: false,
+        message: "Mentor not found",
+      });
+    }
+
+    if (!isOwner(req, owner._id)) {
+      return res.status(403).json({
+        success: false,
+        message: "Not allowed",
       });
     }
 
@@ -481,7 +530,6 @@ const getCompanyDepartments = async (req, res) => {
       .lean();
 
     // normalized designation -> first spelling seen
-    // ("software engineer" and "Software Engineer" become ONE entry)
     const seen = new Map();
 
     for (const m of mentors) {
@@ -506,9 +554,11 @@ const getCompanyDepartments = async (req, res) => {
       .json({ success: false, message: "Failed to load roles" });
   }
 };
+
 // ============================================================================
 // SEARCH ONE EMPLOYEE OF A COMPANY (name or employee ID) -> direct booking
 // GET /api/mentor/company-search/:companyName?q=...   (fresher login)
+// Returns NO contact details (no email / mobile / linkedin).
 // ============================================================================
 
 const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -519,7 +569,7 @@ const searchCompanyMentors = async (req, res) => {
     const q = String(req.query.q || "").trim().slice(0, 40);
     const LIMIT = 10;
     const SELECT =
-      "name designation department profilePic mentorCode currentCompany yearsOfExperience languages";
+      "name designation department profilePic mentorCode currentCompany yearsOfExperience languages skills rating avgRating ratingCount reviewsCount";
 
     if (!company) {
       return res
@@ -580,6 +630,26 @@ const searchCompanyMentors = async (req, res) => {
       list = [...list, ...rest];
     }
 
+    // completed sessions per mentor (one query for the whole list)
+    // NOTE: change "completed" if your Booking uses another final status
+    let sessionsBy = new Map();
+    if (list.length) {
+      try {
+        const agg = await Booking.aggregate([
+          {
+            $match: {
+              mentor: { $in: list.map((m) => m._id) },
+              status: "completed",
+            },
+          },
+          { $group: { _id: "$mentor", n: { $sum: 1 } } },
+        ]);
+        sessionsBy = new Map(agg.map((r) => [String(r._id), r.n]));
+      } catch (e) {
+        console.error("sessions count failed:", e.message);
+      }
+    }
+
     const mentors = list.map((m) => ({
       id: String(m._id),
       name: m.name,
@@ -590,6 +660,10 @@ const searchCompanyMentors = async (req, res) => {
       code: m.mentorCode || "",
       yearsOfExperience: m.yearsOfExperience || 0,
       languages: m.languages || [],
+      skills: m.skills || [],
+      rating: Number(m.rating ?? m.avgRating) || 0,
+      reviewsCount: Number(m.ratingCount ?? m.reviewsCount) || 0,
+      sessionsCompleted: sessionsBy.get(String(m._id)) || 0,
       isOnline: isOnlineId(m._id),
     }));
 

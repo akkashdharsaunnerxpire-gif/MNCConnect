@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowRight,
@@ -7,6 +7,8 @@ import {
   Loader2,
   RotateCcw,
   Search,
+  Star,
+  Users,
   X,
 } from "lucide-react";
 import { api } from "../../services/fresherApi";
@@ -15,7 +17,18 @@ import { socket } from "../../utils/socket";
 const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const norm = (s) => String(s || "").trim().toLowerCase();
 
-/* highlight the part that matches what was typed */
+/* ---- tolerant field readers (backend names may differ) ---- */
+const priceOf = (m) =>
+  Number(m.price ?? m.sessionPrice ?? m.fee ?? m.ratePerSession ?? 0) || 0;
+const ratingOf = (m) => Number(m.rating ?? m.avgRating ?? m.averageRating ?? 0) || 0;
+const reviewsOf = (m) => Number(m.reviewsCount ?? m.totalReviews ?? m.ratingCount ?? 0) || 0;
+const sessionsOf = (m) =>
+  Number(m.sessionsCompleted ?? m.totalSessions ?? m.sessionsCount ?? 0) || 0;
+const skillsOf = (m) =>
+  (Array.isArray(m.skills) ? m.skills : [])
+    .map((s) => (typeof s === "string" ? s : s?.name))
+    .filter(Boolean);
+
 const Highlight = ({ text = "", query = "" }) => {
   const q = query.trim();
   if (!q) return <>{text}</>;
@@ -53,15 +66,15 @@ const Avatar = ({ m }) => {
           src={m.image}
           alt={m.name}
           onError={() => setFailed(true)}
-          className="h-10 w-10 rounded-full object-cover ring-1 ring-neutral-200"
+          className="h-12 w-12 rounded-full object-cover ring-1 ring-neutral-200"
         />
       ) : (
-        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-900 text-xs font-bold text-white">
+        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-neutral-900 text-sm font-bold text-white">
           {initials}
         </span>
       )}
       {m.isOnline && (
-        <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white bg-emerald-500" />
+        <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-white bg-emerald-500" />
       )}
     </span>
   );
@@ -69,41 +82,48 @@ const Avatar = ({ m }) => {
 
 const SkeletonRow = () => (
   <div
-    className="flex animate-pulse items-center gap-3 rounded-xl px-3 py-3"
+    className="flex animate-pulse items-center gap-3 rounded-xl px-3 py-4"
     aria-hidden="true"
   >
-    <div className="h-10 w-10 rounded-full bg-neutral-200" />
+    <div className="h-12 w-12 rounded-full bg-neutral-200" />
     <div className="flex-1 space-y-2">
       <div className="h-3.5 w-1/3 rounded bg-neutral-200" />
       <div className="h-3 w-1/2 rounded bg-neutral-100" />
     </div>
-    <div className="h-8 w-20 rounded-lg bg-neutral-100" />
+    <div className="h-9 w-20 rounded-lg bg-neutral-100" />
   </div>
 );
 
 /**
- * Popup to find ONE employee of ONE company (name / mentor ID like ARUN#4356356).
- * Shows only a few employees + the total count. The rest are found by searching.
+ * Find ONE employee of ONE company.
  * Props:
  *   companyName : only this company's employees are shown
- *   onPick(m)   : called when an employee is selected
- *   onClose()   : close the popup
+ *   onPick(m)   : employee selected ("Book")
+ *   onClose()   : close / skip
+ *   variant     : "modal" (popup, default) | "page" (full page)
  */
-export default function FindEmployeeModal({ companyName, onPick, onClose }) {
+export default function FindEmployeeModal({
+  companyName,
+  onPick,
+  onClose,
+  variant = "modal",
+}) {
+  const isPage = variant === "page";
+
   const [q, setQ] = useState("");
   const [list, setList] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activeIdx, setActiveIdx] = useState(-1);
+  const [onlyOnline, setOnlyOnline] = useState(false);
 
   const inputRef = useRef(null);
   const listRef = useRef(null);
   const qRef = useRef("");
-  const reqRef = useRef(0); // ignore answers of old requests
+  const reqRef = useRef(0);
   qRef.current = q.trim();
 
-  // SAFETY: even if the server sends someone from another company, hide them.
   const onlyThisCompany = useCallback(
     (arr) =>
       arr.filter((m) => {
@@ -144,8 +164,6 @@ export default function FindEmployeeModal({ companyName, onPick, onClose }) {
     [companyName, onlyThisCompany],
   );
 
-  // autosearch: first load instant, typing debounced.
-  // "Searching" state starts IMMEDIATELY when the person types.
   const firstLoad = useRef(true);
   useEffect(() => {
     setActiveIdx(-1);
@@ -159,26 +177,28 @@ export default function FindEmployeeModal({ companyName, onPick, onClose }) {
     return () => clearTimeout(t);
   }, [q, load]);
 
-  // focus input + lock background scroll
+  // modal only: focus + lock scroll
   useEffect(() => {
     inputRef.current?.focus();
+    if (isPage) return undefined;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = prev;
     };
-  }, []);
+  }, [isPage]);
 
-  // Esc closes the popup from anywhere
+  // modal only: Esc closes
   useEffect(() => {
+    if (isPage || !onClose) return undefined;
     const onEsc = (e) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onEsc);
     return () => window.removeEventListener("keydown", onEsc);
-  }, [onClose]);
+  }, [isPage, onClose]);
 
-  // keep the green "online" dots live
+  // live online dots
   useEffect(() => {
     let timer;
     const refresh = () => {
@@ -195,7 +215,11 @@ export default function FindEmployeeModal({ companyName, onPick, onClose }) {
     };
   }, [load]);
 
-  // keep the arrow-key selection visible
+  const shown = useMemo(
+    () => (onlyOnline ? list.filter((m) => m.isOnline) : list),
+    [list, onlyOnline],
+  );
+
   useEffect(() => {
     if (activeIdx < 0) return;
     listRef.current
@@ -206,16 +230,16 @@ export default function FindEmployeeModal({ companyName, onPick, onClose }) {
   const keyword = q.trim();
 
   const onKeyDown = (e) => {
-    if (e.key === "ArrowDown" && list.length) {
+    if (e.key === "ArrowDown" && shown.length) {
       e.preventDefault();
-      setActiveIdx((i) => (i + 1) % list.length);
-    } else if (e.key === "ArrowUp" && list.length) {
+      setActiveIdx((i) => (i + 1) % shown.length);
+    } else if (e.key === "ArrowUp" && shown.length) {
       e.preventDefault();
-      setActiveIdx((i) => (i <= 0 ? list.length - 1 : i - 1));
+      setActiveIdx((i) => (i <= 0 ? shown.length - 1 : i - 1));
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (loading) return;
-      const target = list[activeIdx] || (list.length === 1 ? list[0] : null);
+      const target = shown[activeIdx] || (shown.length === 1 ? shown[0] : null);
       if (target) onPick(target);
     } else if (e.key === "Escape") {
       if (q) {
@@ -225,32 +249,30 @@ export default function FindEmployeeModal({ companyName, onPick, onClose }) {
     }
   };
 
-  const refreshing = loading && list.length > 0; // old list stays, dimmed
+  const refreshing = loading && list.length > 0;
   const hiddenCount = Math.max(0, total - list.length);
 
-  return createPortal(
+  const card = (
     <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 p-3 backdrop-blur-[3px] sm:p-6"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Find a ${companyName} employee`}
+      className={`relative flex w-full flex-col overflow-hidden bg-white ring-1 ring-black/10 ${
+        isPage
+          ? "mx-auto min-h-[70vh] max-w-5xl rounded-2xl shadow-sm"
+          : "h-[min(680px,90vh)] max-w-3xl rounded-2xl shadow-[0_24px_80px_-12px_rgba(0,0,0,0.45)]"
+      }`}
     >
       <style>{`@keyframes fe-slide{0%{transform:translateX(-100%)}100%{transform:translateX(350%)}}`}</style>
 
-      <div className="relative flex h-[min(680px,90vh)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-[0_24px_80px_-12px_rgba(0,0,0,0.45)] ring-1 ring-black/10">
-        {/* ---------- header ---------- */}
-        <div className="flex items-center justify-between px-6 pb-3 pt-5">
-          <div>
-            <h2 className="text-lg font-bold tracking-tight text-black">
-              Find a {companyName} employee
-            </h2>
-            <p className="mt-0.5 text-sm text-neutral-500">
-              Search by name or employee ID, then select to book.
-            </p>
-          </div>
+      {/* header */}
+      <div className="flex items-center justify-between px-6 pb-3 pt-5">
+        <div>
+          <h2 className="text-lg font-bold tracking-tight text-black">
+            Find a {companyName} employee
+          </h2>
+          <p className="mt-0.5 text-sm text-neutral-500">
+            Compare price, rating and skills, then book.
+          </p>
+        </div>
+        {(!isPage || onClose) && (
           <button
             type="button"
             onClick={onClose}
@@ -259,135 +281,156 @@ export default function FindEmployeeModal({ companyName, onPick, onClose }) {
           >
             <X size={20} />
           </button>
-        </div>
+        )}
+      </div>
 
-        {/* ---------- search ---------- */}
-        <div className="px-6">
-          <label
-            htmlFor="employee-search"
-            className="flex items-center gap-3 rounded-xl border border-neutral-300 bg-white px-4 py-3 transition focus-within:border-black focus-within:ring-4 focus-within:ring-black/10"
-          >
-            {loading ? (
-              <Loader2 size={18} className="shrink-0 animate-spin text-black" />
-            ) : (
-              <Search size={18} className="shrink-0 text-neutral-400" />
-            )}
-            <input
-              id="employee-search"
-              ref={inputRef}
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder="Search by name or ID (e.g. ARUN#4356356)"
-              autoComplete="off"
-              className="min-w-0 flex-1 bg-transparent text-[15px] text-black outline-none placeholder:text-neutral-400"
-            />
-            {loading && (
-              <span className="hidden shrink-0 text-xs font-medium text-neutral-500 sm:inline">
-                Searching…
-              </span>
-            )}
-            {q && (
-              <button
-                type="button"
-                onClick={() => {
-                  setQ("");
-                  inputRef.current?.focus();
-                }}
-                aria-label="Clear search"
-                className="rounded-full p-1 text-neutral-400 transition hover:bg-neutral-100 hover:text-black"
-              >
-                <X size={15} />
-              </button>
-            )}
-          </label>
-        </div>
-
-        {/* ---------- count + progress line ---------- */}
-        <div className="relative mt-4 px-6">
-          <div className="flex items-center justify-between pb-2">
-            <p
-              className="text-xs font-semibold uppercase tracking-wider text-neutral-400"
-              aria-live="polite"
+      {/* search + online filter */}
+      <div className="flex flex-col gap-3 px-6 sm:flex-row sm:items-center">
+        <label
+          htmlFor="employee-search"
+          className="flex flex-1 items-center gap-3 rounded-xl border border-neutral-300 bg-white px-4 py-3 transition focus-within:border-black focus-within:ring-4 focus-within:ring-black/10"
+        >
+          {loading ? (
+            <Loader2 size={18} className="shrink-0 animate-spin text-black" />
+          ) : (
+            <Search size={18} className="shrink-0 text-neutral-400" />
+          )}
+          <input
+            id="employee-search"
+            ref={inputRef}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder="Search by name or ID (e.g. ARUN#4356356)"
+            autoComplete="off"
+            className="min-w-0 flex-1 bg-transparent text-[15px] text-black outline-none placeholder:text-neutral-400"
+          />
+          {q && (
+            <button
+              type="button"
+              onClick={() => {
+                setQ("");
+                inputRef.current?.focus();
+              }}
+              aria-label="Clear search"
+              className="rounded-full p-1 text-neutral-400 transition hover:bg-neutral-100 hover:text-black"
             >
-              {loading
-                ? "Searching…"
-                : keyword
-                  ? `${total} ${total === 1 ? "result" : "results"} for “${keyword}”`
-                  : `${total} ${total === 1 ? "employee" : "employees"} at ${companyName}`}
-            </p>
-          </div>
-          <div className="relative h-px w-full overflow-hidden bg-neutral-200">
-            {loading && (
-              <span
-                className="absolute inset-y-0 left-0 w-1/3 bg-black"
-                style={{ animation: "fe-slide 1s ease-in-out infinite" }}
-              />
-            )}
-          </div>
-        </div>
+              <X size={15} />
+            </button>
+          )}
+        </label>
 
-        {/* ---------- results (only this part scrolls) ---------- */}
-        <div
-          ref={listRef}
-          className={`flex-1 overflow-y-auto px-3 py-2 transition-opacity duration-150 sm:px-4 [scrollbar-width:thin] ${
-            refreshing ? "opacity-40" : "opacity-100"
+        <button
+          type="button"
+          onClick={() => setOnlyOnline((v) => !v)}
+          aria-pressed={onlyOnline}
+          className={`inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold transition ${
+            onlyOnline
+              ? "border-black bg-black text-white"
+              : "border-neutral-300 bg-white text-black hover:border-black"
           }`}
         >
-          {loading && list.length === 0 ? (
-            <div className="space-y-1">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <SkeletonRow key={i} />
-              ))}
-            </div>
-          ) : error ? (
-            <div className="mx-2 mt-2 rounded-xl border border-neutral-200 bg-neutral-50 p-8 text-center">
-              <p className="text-sm font-semibold text-black">{error}</p>
-              <button
-                type="button"
-                onClick={() => load()}
-                className="mt-4 inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white transition hover:bg-neutral-800"
-              >
-                <RotateCcw size={14} /> Try again
-              </button>
-            </div>
-          ) : list.length === 0 ? (
-            <div className="mx-2 mt-2 rounded-xl border border-dashed border-neutral-300 px-6 py-14 text-center">
-              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-neutral-100 text-neutral-500">
-                <Search size={22} />
-              </div>
-              <h3 className="mt-3 text-base font-semibold text-black">
-                No {companyName} employee found
-              </h3>
-              <p className="mt-1 text-sm text-neutral-500">
-                Check the spelling, or search by the exact ID like
-                ARUN#4356356.
-              </p>
-            </div>
-          ) : (
-            <>
-              <ul className="space-y-0.5">
-                {list.map((m, i) => {
-                  const role = [m.designation, m.department]
-                    .filter(Boolean)
-                    .join(" · ");
-                  const active = i === activeIdx;
+          <span className="h-2 w-2 rounded-full bg-emerald-500" />
+          Online only
+        </button>
+      </div>
 
-                  return (
-                    <li key={m.id}>
-                      <button
-                        type="button"
-                        data-idx={i}
-                        onClick={() => onPick(m)}
-                        onMouseEnter={() => setActiveIdx(i)}
-                        className={`group flex w-full items-center gap-3.5 rounded-xl px-3 py-3 text-left transition ${
-                          active ? "bg-neutral-100" : "hover:bg-neutral-50"
-                        }`}
-                      >
+      {/* count + progress */}
+      <div className="relative mt-4 px-6">
+        <div className="pb-2">
+          <p
+            className="text-xs font-semibold uppercase tracking-wider text-neutral-400"
+            aria-live="polite"
+          >
+            {loading
+              ? "Searching…"
+              : keyword
+                ? `${total} ${total === 1 ? "result" : "results"} for “${keyword}”`
+                : `${total} ${total === 1 ? "employee" : "employees"} at ${companyName}`}
+          </p>
+        </div>
+        <div className="relative h-px w-full overflow-hidden bg-neutral-200">
+          {loading && (
+            <span
+              className="absolute inset-y-0 left-0 w-1/3 bg-black"
+              style={{ animation: "fe-slide 1s ease-in-out infinite" }}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* results */}
+      <div
+        ref={listRef}
+        className={`flex-1 px-3 py-2 transition-opacity duration-150 sm:px-4 [scrollbar-width:thin] ${
+          isPage ? "" : "overflow-y-auto"
+        } ${refreshing ? "opacity-40" : "opacity-100"}`}
+      >
+        {loading && list.length === 0 ? (
+          <div className="space-y-1">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <SkeletonRow key={i} />
+            ))}
+          </div>
+        ) : error ? (
+          <div className="mx-2 mt-2 rounded-xl border border-neutral-200 bg-neutral-50 p-8 text-center">
+            <p className="text-sm font-semibold text-black">{error}</p>
+            <button
+              type="button"
+              onClick={() => load()}
+              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white transition hover:bg-neutral-800"
+            >
+              <RotateCcw size={14} /> Try again
+            </button>
+          </div>
+        ) : shown.length === 0 ? (
+          <div className="mx-2 mt-2 rounded-xl border border-dashed border-neutral-300 px-6 py-14 text-center">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-neutral-100 text-neutral-500">
+              <Search size={22} />
+            </div>
+            <h3 className="mt-3 text-base font-semibold text-black">
+              {onlyOnline && list.length > 0
+                ? "No one is online right now"
+                : `No ${companyName} employee found`}
+            </h3>
+            <p className="mt-1 text-sm text-neutral-500">
+              {onlyOnline && list.length > 0
+                ? "Turn off “Online only” to see everyone."
+                : "Check the spelling, or search by the exact ID like ARUN#4356356."}
+            </p>
+          </div>
+        ) : (
+          <>
+            <ul
+              className={`gap-2 ${isPage ? "grid grid-cols-1 lg:grid-cols-2" : "space-y-1"}`}
+            >
+              {shown.map((m, i) => {
+                const role = [m.designation, m.department]
+                  .filter(Boolean)
+                  .join(" · ");
+                const active = i === activeIdx;
+                const price = priceOf(m);
+                const rating = ratingOf(m);
+                const reviews = reviewsOf(m);
+                const sessions = sessionsOf(m);
+                const skills = skillsOf(m);
+
+                return (
+                  <li key={m.id}>
+                    <div
+                      data-idx={i}
+                      onMouseEnter={() => setActiveIdx(i)}
+                      className={`flex h-full flex-col gap-3 rounded-xl border px-4 py-4 transition ${
+                        active
+                          ? "border-neutral-300 bg-neutral-50"
+                          : "border-transparent hover:bg-neutral-50"
+                      } ${isPage ? "border-neutral-200" : ""}`}
+                    >
+                      <div className="flex items-start gap-3.5">
                         <Avatar m={m} />
 
-                        <span className="min-w-0 flex-1">
-                          <span className="flex items-center gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-x-2">
                             <span className="truncate text-[15px] font-semibold text-black">
                               <Highlight text={m.name} query={keyword} />
                             </span>
@@ -397,90 +440,137 @@ export default function FindEmployeeModal({ companyName, onPick, onClose }) {
                                 Online
                               </span>
                             )}
-                          </span>
-
-                          <span className="mt-0.5 block truncate text-sm text-neutral-500">
+                          </div>
+                          <p className="mt-0.5 truncate text-sm text-neutral-500">
                             {role || "Employee"}
-                          </span>
-
-                          {/* mentor ID: visible on every screen size */}
+                          </p>
                           {m.code && (
                             <span className="mt-1 inline-block rounded-md border border-neutral-300 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-neutral-700">
                               <Highlight text={m.code} query={keyword} />
                             </span>
                           )}
-                        </span>
+                        </div>
 
-                        {/* right side meta (big screens) */}
-                        <span className="hidden shrink-0 items-center gap-2 md:flex">
-                          {m.yearsOfExperience > 0 && (
-                            <span className="rounded-md bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-600">
-                              {m.yearsOfExperience}{" "}
-                              {m.yearsOfExperience === 1 ? "yr" : "yrs"}
+                        {price > 0 && (
+                          <div className="shrink-0 text-right">
+                            <p className="text-base font-bold text-black">
+                              ₹{price.toLocaleString("en-IN")}
+                            </p>
+                            <p className="text-[11px] text-neutral-500">per session</p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* stats */}
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium text-neutral-600">
+                        <span className="inline-flex items-center gap-1 rounded-md bg-neutral-100 px-2 py-0.5">
+                          <Star
+                            size={11}
+                            className={
+                              rating > 0
+                                ? "fill-amber-400 text-amber-400"
+                                : "text-neutral-400"
+                            }
+                          />
+                          {rating > 0
+                            ? `${rating.toFixed(1)}${reviews ? ` (${reviews})` : ""}`
+                            : "New"}
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-md bg-neutral-100 px-2 py-0.5">
+                          <Users size={11} />
+                          {sessions} {sessions === 1 ? "session" : "sessions"}
+                        </span>
+                        {m.yearsOfExperience > 0 && (
+                          <span className="rounded-md bg-neutral-100 px-2 py-0.5">
+                            {m.yearsOfExperience}{" "}
+                            {m.yearsOfExperience === 1 ? "yr" : "yrs"} exp
+                          </span>
+                        )}
+                        {m.languages?.length > 0 && (
+                          <span className="inline-flex items-center gap-1 rounded-md bg-neutral-100 px-2 py-0.5">
+                            <Languages size={11} />
+                            {m.languages.slice(0, 2).join(", ")}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* skills */}
+                      {skills.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {skills.slice(0, 5).map((s) => (
+                            <span
+                              key={s}
+                              className="rounded-full border border-neutral-200 bg-white px-2.5 py-0.5 text-[11px] text-neutral-700"
+                            >
+                              {s}
+                            </span>
+                          ))}
+                          {skills.length > 5 && (
+                            <span className="px-1 text-[11px] text-neutral-500">
+                              +{skills.length - 5}
                             </span>
                           )}
-                          {m.languages?.length > 0 && (
-                            <span className="inline-flex items-center gap-1 rounded-md bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-600">
-                              <Languages size={11} />
-                              {m.languages.slice(0, 2).join(", ")}
-                            </span>
-                          )}
-                        </span>
+                        </div>
+                      )}
 
-                        <span
-                          className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-semibold transition ${
-                            active
-                              ? "bg-black text-white"
-                              : "border border-neutral-300 bg-white text-black group-hover:border-black group-hover:bg-black group-hover:text-white"
-                          }`}
-                        >
-                          Select
-                          <ArrowRight size={14} />
-                        </span>
+                      <button
+                        type="button"
+                        onClick={() => onPick(m)}
+                        className={`mt-auto inline-flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                          active
+                            ? "bg-black text-white"
+                            : "border border-neutral-300 bg-white text-black hover:border-black hover:bg-black hover:text-white"
+                        }`}
+                      >
+                        Book
+                        <ArrowRight size={14} />
                       </button>
-                    </li>
-                  );
-                })}
-              </ul>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
 
-              {/* the rest are found by searching */}
-              {hiddenCount > 0 && (
-                <div className="mx-2 my-3 rounded-xl border border-dashed border-neutral-300 bg-neutral-50 px-4 py-4 text-center">
-                  <p className="text-sm font-semibold text-black">
-                    Showing {list.length} of {total}
-                  </p>
-                  <p className="mt-0.5 text-xs text-neutral-500">
-                    Type a name or ID in the search box to find the other{" "}
-                    {hiddenCount} {hiddenCount === 1 ? "employee" : "employees"}.
-                  </p>
-                </div>
-              )}
-            </>
-          )}
-        </div>
+            {hiddenCount > 0 && (
+              <div className="mx-2 my-3 rounded-xl border border-dashed border-neutral-300 bg-neutral-50 px-4 py-4 text-center">
+                <p className="text-sm font-semibold text-black">
+                  Showing {list.length} of {total}
+                </p>
+                <p className="mt-0.5 text-xs text-neutral-500">
+                  Type a name or ID in the search box to find the other{" "}
+                  {hiddenCount} {hiddenCount === 1 ? "employee" : "employees"}.
+                </p>
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
-        {/* ---------- footer ---------- */}
-        <div className="flex items-center justify-between gap-3 border-t border-neutral-200 bg-neutral-50 px-6 py-3">
-          <div className="hidden items-center gap-4 text-xs text-neutral-500 sm:flex">
-            <span className="inline-flex items-center gap-1.5">
-              <kbd className="rounded border border-neutral-300 bg-white px-1.5 py-0.5 font-sans text-[11px] text-neutral-600">
-                ↑↓
-              </kbd>
-              Move
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <kbd className="inline-flex items-center rounded border border-neutral-300 bg-white px-1.5 py-0.5 text-neutral-600">
-                <CornerDownLeft size={11} />
-              </kbd>
-              Select
-            </span>
+      {/* footer */}
+      <div className="flex items-center justify-between gap-3 border-t border-neutral-200 bg-neutral-50 px-6 py-3">
+        <div className="hidden items-center gap-4 text-xs text-neutral-500 sm:flex">
+          <span className="inline-flex items-center gap-1.5">
+            <kbd className="rounded border border-neutral-300 bg-white px-1.5 py-0.5 font-sans text-[11px] text-neutral-600">
+              ↑↓
+            </kbd>
+            Move
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <kbd className="inline-flex items-center rounded border border-neutral-300 bg-white px-1.5 py-0.5 text-neutral-600">
+              <CornerDownLeft size={11} />
+            </kbd>
+            Book
+          </span>
+          {!isPage && (
             <span className="inline-flex items-center gap-1.5">
               <kbd className="rounded border border-neutral-300 bg-white px-1.5 py-0.5 font-sans text-[11px] text-neutral-600">
                 Esc
               </kbd>
               Close
             </span>
-          </div>
+          )}
+        </div>
+        {onClose && (
           <button
             type="button"
             onClick={onClose}
@@ -488,8 +578,26 @@ export default function FindEmployeeModal({ companyName, onPick, onClose }) {
           >
             Skip, match me with any {companyName} employee
           </button>
-        </div>
+        )}
       </div>
+    </div>
+  );
+
+  if (isPage) {
+    return <div className="w-full px-3 py-6 sm:px-6">{card}</div>;
+  }
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 p-3 backdrop-blur-[3px] sm:p-6"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose?.();
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Find a ${companyName} employee`}
+    >
+      {card}
     </div>,
     document.body,
   );
