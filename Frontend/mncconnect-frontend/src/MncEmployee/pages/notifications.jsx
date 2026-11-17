@@ -1,8 +1,23 @@
 import React, { useMemo, useState } from "react";
-import { Bell, CheckCircle2, Info, IndianRupee, Star, CalendarDays, AlertTriangle, Loader2, Radio } from "lucide-react";
+import {
+  Bell,
+  CheckCircle2,
+  Info,
+  IndianRupee,
+  Star,
+  CalendarDays,
+  AlertTriangle,
+  Radio,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import useLive from "../../hooks/useLive";
-import { api, ENDPOINTS, EVENTS, NOTIFICATIONS_CHANGED, timeAgo } from "../../services/mentorApi";
+import {
+  api,
+  ENDPOINTS,
+  EVENTS,
+  NOTIFICATIONS_CHANGED,
+  timeAgo,
+} from "../../services/mentorApi";
 
 const STYLE = {
   success: { icon: CheckCircle2, cls: "bg-emerald-50 text-emerald-600" },
@@ -17,6 +32,39 @@ const STYLE = {
 // Only follow in-app links. A link coming from the server must never send the mentor to another site.
 const isInternalLink = (link) =>
   typeof link === "string" && link.startsWith("/") && !link.startsWith("//");
+
+/* ------------------------------------------------------------------ */
+/* SKELETON: same row layout as the real list, first load only        */
+/* ------------------------------------------------------------------ */
+const Bone = ({ className = "" }) => (
+  <div className={`rounded-md bg-slate-200 ${className}`} />
+);
+
+const NotificationsSkeleton = () => (
+  <ul
+    className="animate-pulse overflow-hidden rounded-2xl border border-slate-200 bg-white"
+    role="status"
+    aria-label="Loading notifications"
+  >
+    {[0, 1, 2, 3, 4, 5].map((i) => (
+      <li
+        key={i}
+        aria-hidden="true"
+        className="flex items-start gap-4 border-b border-slate-100 p-4 last:border-b-0 sm:p-5"
+      >
+        <Bone className="h-11 w-11 shrink-0 !rounded-xl" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-4">
+            <Bone className="h-4 w-48 max-w-[60%]" />
+            <Bone className="h-3 w-14" />
+          </div>
+          <Bone className="mt-3 h-3.5 w-full max-w-lg" />
+          <Bone className="mt-2 h-3.5 w-2/3 max-w-sm" />
+        </div>
+      </li>
+    ))}
+  </ul>
+);
 
 const MentorNotifications = () => {
   const navigate = useNavigate();
@@ -38,13 +86,19 @@ const MentorNotifications = () => {
         read: Boolean(n.read),
         createdAt: n.createdAt,
       })),
-    [data]
+    [data],
   );
 
   const unread = items.filter((n) => !n.read).length;
 
+  // first load only -> skeleton. Background reloads keep the old list.
+  const initialLoading = loading && !data;
+
   const patchLocal = (fn) =>
-    setData((d) => ({ ...(d || {}), notifications: (d?.notifications || []).map(fn) }));
+    setData((d) => ({
+      ...(d || {}),
+      notifications: (d?.notifications || []).map(fn),
+    }));
 
   const openNotification = async (n) => {
     if (!n.read) {
@@ -82,10 +136,14 @@ const MentorNotifications = () => {
               <Bell size={22} />
             </div>
             <div>
-              <h1 className="text-3xl font-semibold tracking-tight">Notifications</h1>
+              <h1 className="text-3xl font-semibold tracking-tight">
+                Notifications
+              </h1>
               <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
                 Updates about your requests, sessions and payouts.
-                <span className={`inline-flex items-center gap-1 text-xs font-medium ${connected ? "text-emerald-600" : "text-amber-600"}`}>
+                <span
+                  className={`inline-flex items-center gap-1 text-xs font-medium ${connected ? "text-emerald-600" : "text-amber-600"}`}
+                >
                   <Radio size={12} /> {connected ? "Live" : "Reconnecting…"}
                 </span>
               </p>
@@ -105,17 +163,24 @@ const MentorNotifications = () => {
 
         {error && (
           <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            {error} <button onClick={reload} className="ml-2 font-semibold underline">Retry</button>
+            {error}{" "}
+            <button onClick={reload} className="ml-2 font-semibold underline">
+              Retry
+            </button>
           </div>
         )}
 
-        {loading ? (
-          <div className="flex justify-center py-20"><Loader2 className="animate-spin text-blue-600" /></div>
+        {initialLoading ? (
+          <NotificationsSkeleton />
         ) : items.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-slate-300 px-6 py-16 text-center">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400"><Bell size={22} /></div>
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+              <Bell size={22} />
+            </div>
             <h3 className="mt-4 font-semibold">You're all caught up</h3>
-            <p className="mt-1 text-sm text-slate-500">New session bookings, payments and reviews show up here instantly.</p>
+            <p className="mt-1 text-sm text-slate-500">
+              New session bookings, payments and reviews show up here instantly.
+            </p>
           </div>
         ) : (
           <ul className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
@@ -129,16 +194,26 @@ const MentorNotifications = () => {
                     onClick={() => openNotification(n)}
                     className={`flex w-full items-start gap-4 border-b border-slate-100 p-4 text-left transition last:border-b-0 hover:bg-slate-50 sm:p-5 ${n.read ? "" : "bg-blue-50/50"}`}
                   >
-                    <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${cls}`}><Icon size={20} /></span>
+                    <span
+                      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${cls}`}
+                    >
+                      <Icon size={20} />
+                    </span>
                     <span className="block min-w-0 flex-1">
                       <span className="flex items-start justify-between gap-4">
                         <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                           {n.title}
-                          {!n.read && <span className="h-2 w-2 shrink-0 rounded-full bg-blue-600" />}
+                          {!n.read && (
+                            <span className="h-2 w-2 shrink-0 rounded-full bg-blue-600" />
+                          )}
                         </span>
-                        <span className="whitespace-nowrap text-xs text-slate-400">{timeAgo(n.createdAt)}</span>
+                        <span className="whitespace-nowrap text-xs text-slate-400">
+                          {timeAgo(n.createdAt)}
+                        </span>
                       </span>
-                      <span className="mt-1 block text-sm leading-6 text-slate-500">{n.message}</span>
+                      <span className="mt-1 block text-sm leading-6 text-slate-500">
+                        {n.message}
+                      </span>
                     </span>
                   </button>
                 </li>
