@@ -1,3 +1,4 @@
+
 const supported =
   typeof window !== "undefined" &&
   "speechSynthesis" in window &&
@@ -5,7 +6,6 @@ const supported =
 
 export const isSpeechSupported = () => supported;
 
-// Male voices (Windows / Edge / macOS / Chrome). Indian English ones win.
 const MALE_HINTS = [
   "prabhat", "ravi", "rishi", "hemant", "valluvar",
   "david", "mark", "george", "james", "guy",
@@ -22,8 +22,9 @@ const FEMALE_HINTS = [
 ];
 
 let cachedVoice = null;
-let runId = 0;
 let current = null;
+let runId = 0;
+let resumeTimer = null;
 
 const getVoices = () => {
   if (!supported) return [];
@@ -31,25 +32,29 @@ const getVoices = () => {
 };
 
 const scoreVoice = (voice) => {
-  const name = voice.name.toLowerCase();
+  const name = (voice.name || "").toLowerCase();
   let score = 0;
 
-  // "female" contains "male", so these two are matched as whole words
   const saysFemale = /\bfemale\b/.test(name);
   const saysMale = /\bmale\b/.test(name) && !saysFemale;
 
-  if (saysMale || MALE_HINTS.some((hint) => name.includes(hint))) {
+  if (
+    saysMale ||
+    MALE_HINTS.some((hint) => name.includes(hint))
+  ) {
     score += 40;
   }
 
-  if (saysFemale || FEMALE_HINTS.some((hint) => name.includes(hint))) {
+  if (
+    saysFemale ||
+    FEMALE_HINTS.some((hint) => name.includes(hint))
+  ) {
     score -= 50;
   }
 
   if (/en[-_]in/i.test(voice.lang)) score += 12;
   if (/en[-_]gb/i.test(voice.lang)) score += 5;
   if (/en[-_]us/i.test(voice.lang)) score += 4;
-
   if (/natural|online/i.test(name)) score += 6;
 
   return score;
@@ -65,36 +70,47 @@ export function pickMaleVoice() {
     cachedVoice &&
     voices.some(
       (voice) =>
-        voice.name === cachedVoice.name && voice.lang === cachedVoice.lang,
+        voice.name === cachedVoice.name &&
+        voice.lang === cachedVoice.lang
     )
   ) {
     return cachedVoice;
   }
 
-  const englishVoices = voices.filter((voice) => /^en/i.test(voice.lang));
-  const pool = englishVoices.length ? englishVoices : voices;
+  const englishVoices = voices.filter((voice) =>
+    /^en/i.test(voice.lang)
+  );
+
+  const pool = englishVoices.length
+    ? englishVoices
+    : voices;
 
   cachedVoice =
-    [...pool].sort((a, b) => scoreVoice(b) - scoreVoice(a))[0] || null;
+    [...pool].sort(
+      (a, b) => scoreVoice(b) - scoreVoice(a)
+    )[0] || null;
 
   return cachedVoice;
 }
 
-// old name kept so other files that import it do not break
 export const pickFemaleVoice = pickMaleVoice;
 
-// Load voices when browser makes them available.
 if (supported) {
   getVoices();
 
-  window.speechSynthesis.addEventListener?.("voiceschanged", () => {
-    cachedVoice = null;
-    pickMaleVoice();
-  });
+  window.speechSynthesis.addEventListener?.(
+    "voiceschanged",
+    () => {
+      cachedVoice = null;
+      pickMaleVoice();
+    }
+  );
 }
 
 const makeUtterance = (text) => {
-  const utterance = new SpeechSynthesisUtterance(String(text));
+  const utterance = new SpeechSynthesisUtterance(
+    String(text)
+  );
 
   const voice = pickMaleVoice();
 
@@ -105,141 +121,284 @@ const makeUtterance = (text) => {
     utterance.lang = "en-IN";
   }
 
-  utterance.volume = 1.0;
-
-  // calm, clear presenter pace
-  utterance.rate = 1.0;
-
-  // a little lower = more masculine, also helps when the voice is not male
+  utterance.volume = 1;
+  utterance.rate = 0.95;
   utterance.pitch = 0.9;
 
   return utterance;
 };
 
-const finishCurrent = (id) => {
-  if (!current || current.id !== id) return;
-
-  const callback = current.onEnd;
-  current = null;
-
-  callback?.();
+const clearResumeTimer = () => {
+  if (resumeTimer !== null) {
+    clearInterval(resumeTimer);
+    resumeTimer = null;
+  }
 };
 
-// Stop current speech immediately.
+const clearRunTimers = (run) => {
+  if (!run) return;
+
+  if (run.safetyTimer !== null) {
+    clearTimeout(run.safetyTimer);
+    run.safetyTimer = null;
+  }
+};
+
 export function stopSpeaking() {
-  if (!supported) return;
+  runId += 1;
 
-  runId++;
+  if (current) {
+    clearRunTimers(current);
+  }
 
-  const old = current;
   current = null;
+  clearResumeTimer();
 
-  window.speechSynthesis.cancel();
-
-  old?.onEnd?.();
+  if (supported) {
+    window.speechSynthesis.cancel();
+  }
 }
 
-// Split long text into manageable sentences.
-const splitText = (lines) => {
-  return (lines || [])
-    .filter(Boolean)
-    .flatMap((line) => {
-      const text = String(line).trim();
+const finishRun = (id, error = null) => {
+  if (!current || current.id !== id) return;
 
-      if (!text) return [];
+  const run = current;
 
-      return text
-        .split(/(?<=[.!?])\s+/)
-        .map((part) => part.trim())
-        .filter(Boolean);
-    });
+  clearRunTimers(run);
+  current = null;
+  clearResumeTimer();
+
+  if (error) {
+    run.callbacks.onError?.(error);
+  }
+
+  run.callbacks.onEnd?.();
 };
 
-// Speak one sentence at a time.
-export function speakSequence(lines, { onStart, onEnd, onError } = {}) {
+const startResumeMonitor = (id) => {
+  clearResumeTimer();
+
+  resumeTimer = setInterval(() => {
+    if (!current || current.id !== id) return;
+
+    const synth = window.speechSynthesis;
+
+    if (synth.paused) {
+      synth.resume();
+    }
+  }, 3000);
+};
+
+/*
+ * Speak the complete text using ONE utterance.
+ * This avoids artificial gaps caused by splitting sentences.
+ */
+const startSingleUtterance = (id) => {
+  if (!current || current.id !== id) return;
+
+  const run = current;
+  const text = run.text.trim();
+
+  if (!text) {
+    finishRun(id);
+    return;
+  }
+
+  const utterance = makeUtterance(text);
+
+  run.utterance = utterance;
+
+  utterance.onstart = () => {
+    if (!current || current.id !== id) return;
+
+    run.started = true;
+    run.callbacks.onStart?.();
+  };
+
+  // Reveal cloud words as browser speaks.
+  utterance.onboundary = (event) => {
+    if (!current || current.id !== id) return;
+
+    if (event.name && event.name !== "word") return;
+
+    run.callbacks.onBoundary?.(
+      event,
+      text,
+      0
+    );
+  };
+
+  utterance.onend = () => {
+    if (!current || current.id !== id) return;
+
+    finishRun(id);
+  };
+
+  utterance.onerror = (event) => {
+    if (!current || current.id !== id) return;
+
+    if (
+      event.error === "canceled" ||
+      event.error === "interrupted"
+    ) {
+      finishRun(id);
+      return;
+    }
+
+    finishRun(
+      id,
+      event.error || "Speech playback failed."
+    );
+  };
+
+  // Safety timeout.
+  run.safetyTimer = setTimeout(() => {
+    if (!current || current.id !== id) return;
+
+    window.speechSynthesis.cancel();
+
+    finishRun(
+      id,
+      "Speech playback timed out."
+    );
+  }, Math.max(45000, text.length * 180));
+
+  try {
+    window.speechSynthesis.speak(utterance);
+  } catch (error) {
+    finishRun(
+      id,
+      error?.message || "Unable to start speech."
+    );
+  }
+};
+
+/**
+ * Start a speech stream.
+ * Text is buffered until finishSpeechStream().
+ */
+export function startSpeechStream({
+  onStart,
+  onBoundary,
+  onEnd,
+  onError,
+} = {}) {
+  if (!supported) {
+    onError?.("Speech synthesis is not supported.");
+    onEnd?.();
+    return false;
+  }
+
+  stopSpeaking();
+
+  const id = ++runId;
+
+  current = {
+    id,
+    text: "",
+    finished: false,
+    started: false,
+    utterance: null,
+    safetyTimer: null,
+
+    callbacks: {
+      onStart,
+      onBoundary,
+      onEnd,
+      onError,
+    },
+  };
+
+  startResumeMonitor(id);
+
+  return true;
+}
+
+/**
+ * Add narration text.
+ * All text is combined into one utterance.
+ */
+export function addSpeechSentence(sentence) {
+  if (!supported || !current) return false;
+
+  if (current.finished) return false;
+
+  const text = String(sentence || "").trim();
+
+  if (!text) return true;
+
+  current.text += current.text
+    ? ` ${text}`
+    : text;
+
+  return true;
+}
+
+/**
+ * Finish adding text and start speaking.
+ */
+export function finishSpeechStream() {
+  if (!current || current.finished) return;
+
+  current.finished = true;
+
+  startSingleUtterance(current.id);
+}
+
+/**
+ * Backward-compatible speakSequence().
+ */
+export function speakSequence(
+  lines,
+  {
+    onStart,
+    onBoundary,
+    onEnd,
+    onError,
+  } = {}
+) {
   if (!supported) {
     onError?.("Speech synthesis is not supported.");
     onEnd?.();
     return;
   }
 
-  const queue = splitText(lines);
+  const text = (lines || [])
+    .map((line) => String(line || "").trim())
+    .filter(Boolean)
+    .join(" ");
 
-  if (!queue.length) {
-    onEnd?.();
-    return;
-  }
-
-  // Cancel previous speech.
-  const old = current;
-  current = null;
-
-  window.speechSynthesis.cancel();
-  old?.onEnd?.();
+  stopSpeaking();
 
   const id = ++runId;
 
   current = {
     id,
-    onEnd,
+    text,
+    finished: true,
+    started: false,
+    utterance: null,
+    safetyTimer: null,
+
+    callbacks: {
+      onStart,
+      onBoundary,
+      onEnd,
+      onError,
+    },
   };
 
-  let index = 0;
-  let started = false;
+  startResumeMonitor(id);
 
-  const speakNext = () => {
-    if (id !== runId || !current || current.id !== id) {
-      return;
-    }
-
-    if (index >= queue.length) {
-      finishCurrent(id);
-      return;
-    }
-
-    const utterance = makeUtterance(queue[index]);
-
-    utterance.onstart = () => {
-      if (id !== runId) return;
-
-      if (!started) {
-        started = true;
-        onStart?.();
-      }
-    };
-
-    utterance.onend = () => {
-      if (id !== runId) return;
-
-      index++;
-      speakNext();
-    };
-
-    utterance.onerror = (event) => {
-      if (id !== runId) return;
-
-      // Ignore cancellation caused by a new speech request.
-      if (event.error === "canceled" || event.error === "interrupted") {
-        return;
-      }
-
-      onError?.(event.error || "Speech playback failed.");
-      finishCurrent(id);
-    };
-
-    window.speechSynthesis.speak(utterance);
-  };
-
-  // Resume if the browser speech engine is paused.
-  window.speechSynthesis.resume();
-
-  speakNext();
+  startSingleUtterance(id);
 }
 
+// Speak a single text.
 export const speak = (text, options = {}) => {
   speakSequence([text], options);
 };
 
+// Existing helper.
 export const speakGoingTo = (sectionName) => {
   speak(String(sectionName));
 };

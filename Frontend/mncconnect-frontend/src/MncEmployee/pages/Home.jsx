@@ -5,8 +5,10 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { speakSequence, stopSpeaking, isSpeechSupported } from "../../utils/speak";
+import { stopSpeaking } from "../../utils/speak";
+import VoiceTour from "./VoiceTour";
 import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "../../context/AuthContext";
 import {
   ArrowDownToLine,
   ArrowRight,
@@ -15,13 +17,11 @@ import {
   CheckCircle2,
   ChevronDown,
   Clock3,
-  Inbox,
   IndianRupee,
   Loader2,
   Star,
   Video,
   Volume2,
-  VolumeX,
   Wallet,
   X,
   Briefcase,
@@ -52,13 +52,6 @@ const JOIN_READY_MS = 2 * 60 * 1000;
 
 // ============ CONSTANTS ============
 
-const QUICK_LINKS = [
-  { to: "/mentor/requests", label: "Requests", icon: Inbox },
-  { to: "/mentor/sessions", label: "Sessions", icon: CalendarDays },
-  { to: "/mentor/earnings", label: "Earnings", icon: Wallet },
-  { to: "/mentor/reviews", label: "Reviews", icon: Star },
-];
-
 const mentorShare = (amount) => Math.round(amount * (1 - PLATFORM_FEE));
 
 const countdown = (ms) => {
@@ -82,25 +75,56 @@ const greetingFor = (date) => {
   return "Good night";
 };
 
+// one shared AudioContext, unlocked by the first user click/tap/key
+let sharedCtx = null;
+const getCtx = () => {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  if (!sharedCtx || sharedCtx.state === "closed") sharedCtx = new Ctx();
+  return sharedCtx;
+};
+
+const unlockAudio = async () => {
+  try {
+    const ctx = getCtx();
+    if (!ctx) return false;
+    if (ctx.state === "suspended") await ctx.resume();
+    return ctx.state === "running";
+  } catch {
+    return false;
+  }
+};
+
 const playChime = () => {
   try {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    const t = ctx.currentTime;
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(880, t);
-    osc.frequency.setValueAtTime(1175, t + 0.13);
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.15, t + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.38);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(t);
-    osc.stop(t + 0.4);
-    setTimeout(() => ctx.close().catch(() => { }), 600);
+    const ctx = getCtx();
+    if (!ctx) return;
+
+    const run = () => {
+      const t0 = ctx.currentTime;
+      // 3-note "ding-ding-ding", louder than before
+      [
+        [880, 0],
+        [1175, 0.18],
+        [1568, 0.36],
+      ].forEach(([freq, delay]) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const t = t0 + delay;
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, t);
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(0.4, t + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.5);
+      });
+    };
+
+    if (ctx.state === "suspended") ctx.resume().then(run).catch(() => {});
+    else run();
   } catch {
     /* sound is optional */
   }
@@ -142,7 +166,8 @@ const useCountUp = (target, duration = 700) => {
 
 const Home = () => {
   const navigate = useNavigate();
-  const [mentorName, setMentorName] = useState("Mentor");
+  // empty until /auth/me answers -> the title shows a skeleton, not "Mentor"
+  const [mentorName, setMentorName] = useState("");
   const [connected, setConnected] = useState(socket.connected);
   const [requests, setRequests] = useState([]);
   const [now, setNow] = useState(Date.now());
@@ -152,8 +177,13 @@ const Home = () => {
   // sound preference lives in memory only (nothing in localStorage)
   const [soundOn, setSoundOn] = useState(true);
   const [speaking, setSpeaking] = useState(false);
-const [showVoiceHint, setShowVoiceHint] = useState(false);
-const [mentorKey, setMentorKey] = useState("");
+  const [showVoiceHint, setShowVoiceHint] = useState(false);
+  const [mentorKey, setMentorKey] = useState("");
+  const [tourStage, setTourStage] = useState(null);
+  const [tourSteps, setTourSteps] = useState([]);
+  // becomes true after the FIRST sessions/wallet response
+  const [loadedOnce, setLoadedOnce] = useState(false);
+
   // Confirm modal state
   const [confirmRequest, setConfirmRequest] = useState(null);
 
@@ -165,35 +195,82 @@ const [mentorKey, setMentorKey] = useState("");
   const seenIds = useRef(new Set()); // chime only for requests not seen before
   const scanBoostTimer = useRef(null);
 
+  /* ---------- first-time login: blur the page + point at the speaker ---------- */
+  const { user } = useAuth();
+  const introChecked = useRef(false);
+
+  const checkIntro = useCallback((u) => {
+    if (!u || introChecked.current) return;
+    introChecked.current = true;
+
+    const key = `mnc_voice_intro_seen_${u._id || u.id || u.email || u.name}`;
+    setMentorKey(key);
+
+    let seen = false;
+    try {
+      seen = Boolean(localStorage.getItem(key));
+    } catch {
+      /* ignore */
+    }
+
+    // add ?tour=1 to the URL to force the hint while testing
+    const force =
+      new URLSearchParams(window.location.search).get("tour") === "1";
+
+    if (force || !seen) {
+      setShowVoiceHint(true);
+      setTourStage("hint");
+    }
+  }, []);
+
+  // instant: AuthContext already has the user, so there is no blur delay
+  useEffect(() => {
+    if (user) checkIntro(user);
+  }, [user, checkIntro]);
+
   useEffect(() => {
     soundRef.current = soundOn;
   }, [soundOn]);
 
+  // browsers block audio until the user interacts once: unlock on first click/tap/key
+  const [audioReady, setAudioReady] = useState(false);
+
   useEffect(() => {
-  let alive = true;
-  fetch(`${import.meta.env.VITE_API_URL}/auth/me`, { credentials: "include" })
-    .then((r) => (r.ok ? r.json() : null))
-    .then((d) => {
-      if (!alive || !d?.user) return;
-      if (d.user.name) setMentorName(d.user.name);
-
-      // first time this employee opens Home -> show "tap the speaker" hint
-      const key = `mnc_voice_intro_seen_${d.user._id || d.user.id || d.user.email || d.user.name}`;
-      setMentorKey(key);
-      try {
-        if (!localStorage.getItem(key)) setShowVoiceHint(true);
-      } catch {
-        setShowVoiceHint(true);
+    const events = ["pointerdown", "keydown", "touchstart"];
+    let done = false;
+    const unlock = async () => {
+      if (done) return;
+      const ok = await unlockAudio();
+      if (ok) {
+        done = true;
+        setAudioReady(true);
+        events.forEach((ev) => window.removeEventListener(ev, unlock));
       }
-    })
-    .catch(() => {});
-  return () => {
-    alive = false;
-  };
-}, []);
+    };
+    events.forEach((ev) => window.addEventListener(ev, unlock));
+    unlock(); // works directly if the browser already allows audio
+    return () => {
+      done = true;
+      events.forEach((ev) => window.removeEventListener(ev, unlock));
+    };
+  }, []);
 
-// stop talking when leaving the page
-useEffect(() => () => stopSpeaking(), []);
+  useEffect(() => {
+    let alive = true;
+    fetch(`${import.meta.env.VITE_API_URL}/auth/me`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!alive) return;
+        setMentorName(d?.user?.name || "Mentor");
+        checkIntro(d?.user); // fallback if AuthContext was not ready yet
+      })
+      .catch(() => {
+        if (alive) setMentorName("Mentor");
+      });
+    return () => {
+      alive = false;
+    };
+  }, [checkIntro]);
 
   /* ---------- live server data ---------- */
   const {
@@ -204,15 +281,24 @@ useEffect(() => () => stopSpeaking(), []);
     reload: reloadWallet,
   } = useMentorSessions();
 
-  const { data: notifData } = useLive({
+  const { data: notifData, loading: notifLoading } = useLive({
     fetcher: () => api(`${ENDPOINTS.notifications}?limit=5`),
     events: [EVENTS.notification],
   });
 
-  const { data: reviewData } = useLive({
+  const { data: reviewData, loading: reviewsLoading } = useLive({
     fetcher: () => api(ENDPOINTS.reviews),
     events: [EVENTS.reviewNew, EVENTS.reviewUpdated],
   });
+
+  // skeleton only until the FIRST response (background reloads keep old data)
+  useEffect(() => {
+    if (!sessionsLoading) setLoadedOnce(true);
+  }, [sessionsLoading]);
+
+  const initialLoading = !loadedOnce;
+  const reviewsInitial = reviewsLoading && !reviewData;
+  const notifInitial = notifLoading && !notifData;
 
   const rating = useMemo(() => {
     const list = reviewData?.reviews || [];
@@ -426,32 +512,82 @@ useEffect(() => () => stopSpeaking(), []);
 
   const msToNext = nextSession?.startsAt ? nextSession.startsAt - now : null;
 
-  const buildIntro = () => {
-  const n = requests.length;
-  const lines = [
-    `Welcome back, ${mentorName}.`,
-    "This is M N C Connect, your mentor portal.",
-    "Here, freshers send live session requests. The first mentor to accept gets the session, and you have two minutes to respond to each request.",
-    `You keep ${Math.round((1 - PLATFORM_FEE) * 100)} percent of every session. Earnings are released when a session ends, and you can withdraw anytime above 500 rupees.`,
-    "Use Requests, Sessions, Earnings and Reviews to move around.",
-    n > 0
-      ? `You have ${n} live request${n > 1 ? "s" : ""} waiting right now.`
-      : "There are no live requests right now. Keep this page open, and you will get an alert when one arrives.",
-  ];
-  if (nextSession) {
-    lines.push(`Your next session is with ${nextSession.name} at ${nextSession.time}.`);
-  }
-  return lines;
-};
+  // Stop voice playback when the Home page unmounts.
+  useEffect(() => () => stopSpeaking(), []);
 
-const handleVoiceClick = () => {
-  if (!isSpeechSupported()) {
-    showToast("error", "Voice is not supported in this browser.");
-    return;
-  }
+  /* ---------- guided tour: home sections first, then the whole sidebar ---------- */
+  const buildTour = () => {
+    const n = requests.length;
+    const share = Math.round((1 - PLATFORM_FEE) * 100);
 
-  // first tap: remove the hint and remember it for this employee
-  if (showVoiceHint) {
+    const steps = [
+      {
+        text: `Welcome back, ${mentorName}! I'm your guide to MNCConnect. Let me quickly show you around.`,
+        speak: `Welcome back, ${mentorName}. I'm your guide to M N C Connect. Let me quickly show you around.`,
+        target: null,
+      },
+      {
+        text: "These are your live requests. Freshers send them here. The first mentor to accept gets the session, and you have 2 minutes per request.",
+        target: '[data-tour="requests"]',
+      },
+      {
+        text:
+          n > 0
+            ? `You have ${n} live request${n > 1 ? "s" : ""} waiting right now. Tap Review and accept.`
+            : "No live requests right now. Keep this page open and you'll hear an alert when one arrives.",
+        target: '[data-tour="requests"]',
+      },
+      {
+        text: `Here are your earnings. You keep ${share}% of every session. Earnings are released when a session ends, and you can withdraw above ₹500.`,
+        speak: `Here are your earnings. You keep ${share} percent of every session. Earnings are released when a session ends, and you can withdraw above 500 rupees.`,
+        target: '[data-tour="earnings"]',
+      },
+    ];
+
+    if (nextSession) {
+      steps.push({
+        text: `Your next session is with ${nextSession.name} at ${nextSession.time}.`,
+        target: '[data-tour="next"]',
+      });
+    }
+
+    steps.push(
+      {
+        text: "Now let's look at the sidebar. You can reach every part of MNCConnect from here. Home is where you are now. It shows live requests, earnings and upcoming sessions.",
+        speak:
+          "Now let's look at the sidebar. You can reach every part of M N C Connect from here. Home is where you are now. It shows live requests, earnings and upcoming sessions.",
+        target: '[data-tour="nav-home"]',
+      },
+      {
+        text: "Requests shows the session requests sent by freshers. You can review each one and accept or skip it. The number badge shows how many are waiting.",
+        target: '[data-tour="nav-requests"]',
+      },
+      {
+        text: "Sessions shows the sessions you have accepted or booked. Open it to see dates, times and to join your video call.",
+        target: '[data-tour="nav-sessions"]',
+      },
+      {
+        text: "Earnings shows your available balance, pending payments, this week's earnings and lifetime earnings. You can also withdraw from here.",
+        target: '[data-tour="nav-earnings"]',
+      },
+      {
+        text: "Reviews shows the feedback and ratings freshers have given you after sessions.",
+        target: '[data-tour="nav-reviews"]',
+      },
+      {
+        text: "Tap your name to view or edit your profile. The button next to it logs you out.",
+        target: '[data-tour="nav-profile"]',
+      },
+      {
+        text: "That's the full tour! Tap the speaker any time to hear it again. Happy mentoring!",
+        target: null,
+      },
+    );
+
+    return steps;
+  };
+
+  const markVoiceSeen = () => {
     setShowVoiceHint(false);
     if (mentorKey) {
       try {
@@ -460,22 +596,26 @@ const handleVoiceClick = () => {
         /* ignore */
       }
     }
-  }
+  };
 
-  // tap while speaking = stop + mute alerts
-  if (speaking) {
+  const closeTour = () => {
     stopSpeaking();
+    setTourStage(null);
     setSpeaking(false);
-    setSoundOn(false);
-    return;
-  }
+  };
 
-  setSoundOn(true);
-  speakSequence(buildIntro(), {
-    onStart: () => setSpeaking(true),
-    onEnd: () => setSpeaking(false),
-  });
-};
+  const handleVoiceClick = () => {
+    // tapping the speaker while the guide is talking stops the tour
+    if (tourStage === "talk") {
+      closeTour();
+      return;
+    }
+    markVoiceSeen();
+    setSoundOn(true);
+    setTourSteps(buildTour());
+    setTourStage("talk");
+  };
+
   return (
     <div
       className="min-h-screen bg-white text-slate-900"
@@ -488,10 +628,26 @@ const handleVoiceClick = () => {
         @keyframes mc-fade-up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
         @keyframes mc-slide-in { from { opacity: 0; transform: translateX(-14px) scale(.98); } to { opacity: 1; transform: none; } }
         @keyframes mc-modal-in { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: scale(1); } }
+        @keyframes mc-profile-pop {
+          0%   { opacity: 0; transform: translate(-50%, -50%) scale(.3); }
+          12%  { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
+          22%  { transform: translate(-50%, -50%) scale(1); }
+          80%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+          100% { opacity: 0; transform: translate(-50%, -50%) scale(.6); }
+        }
+        @keyframes mc-profile-ring {
+          0%   { opacity: .6; transform: scale(1); }
+          100% { opacity: 0; transform: scale(2.2); }
+        }
         .mc-fade-up { animation: mc-fade-up .5s cubic-bezier(.2,.7,.2,1) both; }
         .mc-slide-in { animation: mc-slide-in .45s cubic-bezier(.2,.7,.2,1) both; }
         .mc-modal-in { animation: mc-modal-in .28s cubic-bezier(.2,.7,.2,1) both; }
-        @media (prefers-reduced-motion: reduce) { .mc-fade-up, .mc-slide-in, .mc-modal-in { animation: none; } }
+        .mc-profile-pop { animation: mc-profile-pop 3s ease-in-out both; }
+        .mc-profile-ring { animation: mc-profile-ring 1s ease-out both; }
+        @media (prefers-reduced-motion: reduce) {
+          .mc-fade-up, .mc-slide-in, .mc-modal-in, .mc-profile-pop, .mc-profile-ring { animation: none; }
+          .mc-profile-pop { opacity: 1; transform: translate(-50%, -50%); }
+        }
       `}</style>
 
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -502,7 +658,14 @@ const handleVoiceClick = () => {
               {greetingFor(new Date(now))}
             </p>
             <h1 className="mt-1 text-3xl font-semibold tracking-tight">
-              Welcome back, {mentorName}
+              {mentorName ? (
+                `Welcome back, ${mentorName}`
+              ) : (
+                <span
+                  className="inline-block h-8 w-64 max-w-full animate-pulse rounded-md bg-slate-200 align-middle"
+                  aria-label="Loading"
+                />
+              )}
             </h1>
             <p className="mt-1 text-sm text-slate-500">
               Requests, earnings and reviews update the moment they happen.
@@ -511,10 +674,11 @@ const handleVoiceClick = () => {
 
           <div className="flex flex-wrap items-center gap-3">
             <span
-              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium ${connected
+              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium ${
+                connected
                   ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                   : "border-amber-200 bg-amber-50 text-amber-700"
-                }`}
+              }`}
             >
               <span className="relative flex h-2 w-2">
                 {connected && (
@@ -527,80 +691,51 @@ const handleVoiceClick = () => {
               {connected ? "You're live" : "Reconnecting…"}
             </span>
 
-            <div className="relative">
-              <button
-                type="button"
-                onClick={handleVoiceClick}
-                aria-pressed={speaking}
-                title={speaking ? "Stop voice" : "Hear a quick intro"}
-                className={`relative inline-flex h-9 w-9 items-center justify-center rounded-full border transition active:scale-90 ${speaking
-                    ? "border-blue-600 bg-blue-600 text-white"
-                    : soundOn
-                      ? "border-blue-200 bg-blue-50 text-blue-600"
-                      : "border-slate-200 text-slate-400 hover:bg-slate-50"
-                  }`}
-              >
-                {showVoiceHint && (
-                  <span
-                    aria-hidden="true"
-                    className="absolute inset-0 rounded-full bg-blue-400 opacity-60 motion-safe:animate-ping"
-                  />
-                )}
-                <span className="relative">
-                  {soundOn ? <Volume2 size={16} /> : <VolumeX size={16} />}
-                </span>
-                <span className="sr-only">{speaking ? "Stop voice" : "Play intro"}</span>
-              </button>
-
-              {showVoiceHint && (
-                <div
-                  role="status"
-                  className="absolute right-0 top-full z-20 mt-3 w-52 rounded-xl bg-slate-900 px-3 py-2 text-xs font-medium text-white shadow-lg"
-                >
-                  <span className="absolute -top-1 right-3 h-2 w-2 rotate-45 bg-slate-900" />
-                  New here? Tap the speaker to hear a quick intro.
-                </div>
-              )}
-            </div>
-
-            <Link
-              to="/mentor/reviews"
-              className="group flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 transition hover:-translate-y-0.5 hover:border-yellow-300 hover:shadow-md"
+            <button
+              type="button"
+              data-tour="speaker"
+              onClick={handleVoiceClick}
+              aria-pressed={speaking}
+              title={speaking ? "Stop voice tour" : "Hear a quick tour"}
+              className={`relative inline-flex h-9 w-9 items-center justify-center rounded-full border transition active:scale-90 ${
+                speaking
+                  ? "border-blue-600 bg-blue-600 text-white"
+                  : "border-blue-200 bg-blue-50 text-blue-600"
+              }`}
             >
-              <Star
-                size={16}
-                className="fill-yellow-400 text-yellow-400 transition group-hover:rotate-12 group-hover:scale-110"
+              {showVoiceHint && (
+                <span
+                  aria-hidden="true"
+                  className="absolute inset-0 rounded-full bg-blue-400 opacity-60 motion-safe:animate-ping"
+                />
+              )}
+              <Volume2 size={16} />
+              <span className="sr-only">Play voice tour</span>
+            </button>
+
+            {reviewsInitial ? (
+              <div
+                className="h-[46px] w-36 animate-pulse rounded-2xl border border-slate-200 bg-slate-100"
+                aria-hidden="true"
               />
-              <span className="text-lg font-semibold">{rating.avg}</span>
-              <span className="text-xs text-slate-500">
-                {rating.count} review{rating.count !== 1 ? "s" : ""}
-              </span>
-            </Link>
+            ) : (
+              <Link
+                to="/mentor/reviews"
+                data-tour="rating"
+                className="group flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 transition hover:-translate-y-0.5 hover:border-yellow-300 hover:shadow-md"
+              >
+                <Star
+                  size={16}
+                  className="fill-yellow-400 text-yellow-400 transition group-hover:rotate-12 group-hover:scale-110"
+                />
+                <span className="text-lg font-semibold">{rating.avg}</span>
+                <span className="text-xs text-slate-500">
+                  {rating.count} review{rating.count !== 1 ? "s" : ""}
+                </span>
+              </Link>
+            )}
           </div>
         </header>
-
-        {/* quick links */}
-        <nav
-          className="mc-fade-up mt-6 flex gap-2 overflow-x-auto pb-1"
-          style={{ animationDelay: "60ms" }}
-          aria-label="Shortcuts"
-        >
-          {QUICK_LINKS.map(({ to, label, icon: Icon }) => (
-            <Link
-              key={to}
-              to={to}
-              className="group relative inline-flex shrink-0 items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition hover:-translate-y-0.5 hover:border-blue-300 hover:text-blue-600 hover:shadow-sm active:scale-95"
-            >
-              <Icon size={15} className="transition group-hover:scale-110" />
-              {label}
-              {label === "Requests" && requests.length > 0 && (
-                <span className="ml-0.5 rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
-                  {requests.length}
-                </span>
-              )}
-            </Link>
-          ))}
-        </nav>
 
         {walletError && (
           <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -615,10 +750,12 @@ const handleVoiceClick = () => {
         {nextSession && msToNext !== null && (
           <Link
             to="/mentor/sessions"
-            className={`mc-fade-up group mt-6 flex items-center justify-between gap-4 rounded-2xl border px-5 py-4 transition hover:-translate-y-0.5 hover:shadow-md ${msToNext <= JOIN_READY_MS
+            data-tour="next"
+            className={`mc-fade-up group mt-6 flex items-center justify-between gap-4 rounded-2xl border px-5 py-4 transition hover:-translate-y-0.5 hover:shadow-md ${
+              msToNext <= JOIN_READY_MS
                 ? "border-green-200 bg-green-50"
                 : "border-blue-100 bg-blue-50/60"
-              }`}
+            }`}
             style={{ animationDelay: "100ms" }}
           >
             <div className="flex min-w-0 items-center gap-3">
@@ -648,6 +785,7 @@ const handleVoiceClick = () => {
 
         {/* earnings */}
         <section
+          data-tour="earnings"
           onMouseMove={(e) => {
             const el = e.currentTarget;
             const r = el.getBoundingClientRect();
@@ -673,21 +811,25 @@ const handleVoiceClick = () => {
               amount={wallet.available}
               icon={Wallet}
               strong
+              loading={initialLoading}
             />
             <Stat
               label="Clearing after sessions"
               amount={wallet.pending}
               icon={Clock3}
+              loading={initialLoading}
             />
             <Stat
               label="Earned this week"
               amount={wallet.week}
               icon={IndianRupee}
+              loading={initialLoading}
             />
             <Stat
               label="Lifetime earnings"
               amount={wallet.lifetime}
               icon={Star}
+              loading={initialLoading}
             />
           </div>
           <div className="flex flex-col gap-3 border-t border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -700,14 +842,14 @@ const handleVoiceClick = () => {
               to="/mentor/earnings"
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
             >
-              <ArrowDownToLine size={16} /> Earnings
+              <ArrowDownToLine size={16} /> Withdraw
             </Link>
           </div>
         </section>
 
         {/* requests + side panel */}
         <div className="mt-8 grid gap-8 lg:grid-cols-[1.5fr_1fr]">
-          <section aria-live="polite">
+          <section data-tour="requests" aria-live="polite">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="flex items-center gap-2 text-lg font-semibold">
                 Live requests
@@ -754,9 +896,13 @@ const handleVoiceClick = () => {
                 {
                   id: "upcoming",
                   label: "Upcoming",
-                  count: upcomingSessions.length,
+                  count: initialLoading ? 0 : upcomingSessions.length,
                 },
-                { id: "activity", label: "Activity", count: unreadActivity },
+                {
+                  id: "activity",
+                  label: "Activity",
+                  count: notifInitial ? 0 : unreadActivity,
+                },
               ].map((t) => (
                 <button
                   key={t.id}
@@ -764,18 +910,20 @@ const handleVoiceClick = () => {
                   role="tab"
                   aria-selected={tab === t.id}
                   onClick={() => setTab(t.id)}
-                  className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition active:scale-95 ${tab === t.id
+                  className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition active:scale-95 ${
+                    tab === t.id
                       ? "bg-white text-slate-900 shadow-sm"
                       : "text-slate-500 hover:text-slate-800"
-                    }`}
+                  }`}
                 >
                   {t.label}
                   {t.count > 0 && (
                     <span
-                      className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${tab === t.id
+                      className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
+                        tab === t.id
                           ? "bg-blue-600 text-white"
                           : "bg-slate-200 text-slate-600"
-                        }`}
+                      }`}
                     >
                       {t.count}
                     </span>
@@ -786,7 +934,7 @@ const handleVoiceClick = () => {
 
             <div key={tab} className="mc-fade-up">
               {tab === "upcoming" ? (
-                sessionsLoading ? (
+                initialLoading ? (
                   <SkeletonList />
                 ) : upcomingSessions.length === 0 ? (
                   <Empty
@@ -841,6 +989,8 @@ const handleVoiceClick = () => {
                     </Link>
                   </>
                 )
+              ) : notifInitial ? (
+                <SkeletonList />
               ) : activity.length === 0 ? (
                 <Empty
                   icon={Bell}
@@ -895,15 +1045,29 @@ const handleVoiceClick = () => {
         />
       )}
 
+      {/* GUIDED VOICE TOUR */}
+      <VoiceTour
+        stage={tourStage}
+        steps={tourSteps}
+        onTalkingChange={setSpeaking}
+        onDone={closeTour}
+        onStop={closeTour}
+        onHintSkip={() => {
+          markVoiceSeen();
+          setTourStage(null);
+        }}
+      />
+
       {toast && (
         <div
           role="status"
-          className={`mc-fade-up fixed bottom-6 right-6 z-50 flex max-w-sm items-center gap-3 rounded-xl border bg-white px-4 py-3 text-sm shadow-lg ${toast.type === "error"
+          className={`mc-fade-up fixed bottom-6 right-6 z-50 flex max-w-sm items-center gap-3 rounded-xl border bg-white px-4 py-3 text-sm shadow-lg ${
+            toast.type === "error"
               ? "border-red-200 text-red-700"
               : toast.type === "info"
                 ? "border-blue-200 text-blue-700"
                 : "border-emerald-200 text-emerald-700"
-            }`}
+          }`}
         >
           {toast.type === "error" ? (
             <X size={16} className="shrink-0" />
@@ -1043,8 +1207,9 @@ const ConfirmAcceptModal = ({ req, busy, onCancel, onConfirm }) => {
                     <span className="text-xs font-medium">{r.label}</span>
                   </div>
                   <span
-                    className={`text-right text-sm ${r.strong ? "font-bold" : "font-medium"
-                      } ${r.green ? "text-emerald-600" : "text-slate-900"}`}
+                    className={`text-right text-sm ${
+                      r.strong ? "font-bold" : "font-medium"
+                    } ${r.green ? "text-emerald-600" : "text-slate-900"}`}
                   >
                     {r.value}
                   </span>
@@ -1118,8 +1283,27 @@ const ConfirmAcceptModal = ({ req, busy, onCancel, onConfirm }) => {
 
 /* ---------- pieces ---------- */
 
-const Stat = ({ label, amount, icon: Icon, strong }) => {
-  const shown = useCountUp(amount);
+const Stat = ({ label, amount, icon: Icon, strong, loading }) => {
+  // hook runs every render (rules of hooks); 0 while loading, so the first
+  // real value counts up from 0 when the data arrives
+  const shown = useCountUp(loading ? 0 : amount);
+
+  if (loading) {
+    return (
+      <div className="animate-pulse bg-white p-5" aria-hidden="true">
+        <div className="flex items-center gap-2">
+          <div className="h-4 w-4 rounded bg-slate-200" />
+          <div className="h-3 w-28 rounded bg-slate-200" />
+        </div>
+        <div
+          className={`mt-3 rounded-md bg-slate-200 ${
+            strong ? "h-9 w-32" : "h-8 w-24"
+          }`}
+        />
+      </div>
+    );
+  }
+
   return (
     <Link
       to="/mentor/earnings"
@@ -1188,53 +1372,176 @@ const SkeletonList = () => (
   </ul>
 );
 
-const Scanning = ({ connected, boost }) => (
-  <div className="flex flex-col items-center rounded-2xl border border-slate-200 bg-white px-6 py-12 text-center">
-    <div
-      className={`relative flex h-40 w-40 items-center justify-center ${boost ? "scale-105" : ""
-        } transition-transform duration-300`}
-      aria-hidden="true"
-    >
-      {[0, 1, 2].map((i) => (
-        <span
-          key={i}
-          className="absolute inset-0 rounded-full border border-blue-300 motion-safe:animate-ping motion-reduce:opacity-30"
-          style={{
-            animationDuration: boost ? "1.2s" : "3s",
-            animationDelay: `${i}s`,
-            opacity: 0.5,
-          }}
-        />
-      ))}
-      <span className="absolute inset-4 rounded-full border border-slate-200" />
-      <span className="absolute inset-10 rounded-full border border-slate-200" />
-      <span
-        className="absolute inset-0 rounded-full motion-safe:animate-spin"
-        style={{
-          animationDuration: boost ? "1s" : "2.8s",
-          background:
-            "conic-gradient(from 0deg, rgba(37,99,235,0) 0deg, rgba(37,99,235,0) 270deg, rgba(37,99,235,0.28) 360deg)",
-        }}
-      />
-      <span className="relative flex h-3 w-3">
-        <span className="absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-40 motion-safe:animate-ping" />
-        <span className="relative inline-flex h-3 w-3 rounded-full bg-blue-600" />
-      </span>
+/* ---------- scanning radar with popping fresher profile circles ---------- */
+
+// positions (in %) around the radar where profile circles can pop up
+const SCAN_SLOTS = [
+  { x: 50, y: 4 },
+  { x: 82, y: 16 },
+  { x: 95, y: 48 },
+  { x: 82, y: 82 },
+  { x: 50, y: 96 },
+  { x: 18, y: 82 },
+  { x: 5, y: 48 },
+  { x: 18, y: 16 },
+  { x: 68, y: 30 },
+  { x: 32, y: 68 },
+];
+const SCAN_INITIALS = [
+  "AR",
+  "KS",
+  "MP",
+  "SV",
+  "DN",
+  "RK",
+  "PJ",
+  "LT",
+  "NG",
+  "HB",
+  "SM",
+  "VK",
+];
+const SCAN_COLORS = [
+  "bg-blue-100 text-blue-700",
+  "bg-emerald-100 text-emerald-700",
+  "bg-amber-100 text-amber-700",
+  "bg-rose-100 text-rose-700",
+  "bg-violet-100 text-violet-700",
+  "bg-cyan-100 text-cyan-700",
+];
+const SCAN_MAX_BUBBLES = 5;
+const SCAN_BUBBLE_MS = 3000;
+
+const Scanning = ({ connected, boost }) => {
+  const [bubbles, setBubbles] = useState([]);
+  const bubblesRef = useRef([]); // source of truth, so timers never live inside setState
+  const timersRef = useRef(new Set());
+  const counter = useRef(0);
+
+  const spawn = useCallback(() => {
+    const prev = bubblesRef.current;
+    if (prev.length >= SCAN_MAX_BUBBLES) return;
+
+    const used = new Set(prev.map((b) => b.slot));
+    const free = SCAN_SLOTS.map((_, i) => i).filter((i) => !used.has(i));
+    if (!free.length) return;
+
+    const id = ++counter.current;
+    const bubble = {
+      id,
+      slot: free[Math.floor(Math.random() * free.length)],
+      initials:
+        SCAN_INITIALS[Math.floor(Math.random() * SCAN_INITIALS.length)],
+      color: SCAN_COLORS[Math.floor(Math.random() * SCAN_COLORS.length)],
+    };
+
+    bubblesRef.current = [...prev, bubble];
+    setBubbles(bubblesRef.current);
+
+    const t = setTimeout(() => {
+      timersRef.current.delete(t);
+      bubblesRef.current = bubblesRef.current.filter((b) => b.id !== id);
+      setBubbles(bubblesRef.current);
+    }, SCAN_BUBBLE_MS);
+    timersRef.current.add(t);
+  }, []);
+
+  // spawn loop: faster right after a skip (boost)
+  useEffect(() => {
+    if (!connected) return undefined;
+    spawn();
+    const iv = setInterval(spawn, boost ? 350 : 800);
+    return () => clearInterval(iv);
+  }, [connected, boost, spawn]);
+
+  // when disconnected or unmounted: clear every bubble + pending timer
+  useEffect(() => {
+    if (connected) return undefined;
+    bubblesRef.current = [];
+    setBubbles([]);
+    return undefined;
+  }, [connected]);
+
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => {
+      timers.forEach(clearTimeout);
+      timers.clear();
+    };
+  }, []);
+
+  return (
+    <div className="flex flex-col items-center rounded-2xl border border-slate-200 bg-white px-6 py-12 text-center">
+      <div
+        className={`relative h-64 w-64 transition-transform duration-300 ${
+          boost ? "scale-105" : ""
+        }`}
+        aria-hidden="true"
+      >
+        {/* radar */}
+        <div className="absolute inset-8 flex items-center justify-center">
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="absolute inset-0 rounded-full border border-blue-300 motion-safe:animate-ping motion-reduce:opacity-30"
+              style={{
+                animationDuration: boost ? "1.2s" : "3s",
+                animationDelay: `${i}s`,
+                opacity: 0.5,
+              }}
+            />
+          ))}
+          <span className="absolute inset-4 rounded-full border border-slate-200" />
+          <span className="absolute inset-10 rounded-full border border-slate-200" />
+          <span
+            className="absolute inset-0 rounded-full motion-safe:animate-spin"
+            style={{
+              animationDuration: boost ? "1s" : "2.8s",
+              background:
+                "conic-gradient(from 0deg, rgba(37,99,235,0) 0deg, rgba(37,99,235,0) 270deg, rgba(37,99,235,0.28) 360deg)",
+            }}
+          />
+          <span className="relative flex h-3 w-3">
+            <span className="absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-40 motion-safe:animate-ping" />
+            <span className="relative inline-flex h-3 w-3 rounded-full bg-blue-600" />
+          </span>
+        </div>
+
+        {/* fresher profile circles popping around the radar */}
+        {bubbles.map((b) => (
+          <span
+            key={b.id}
+            className="mc-profile-pop absolute h-9 w-9"
+            style={{
+              left: `${SCAN_SLOTS[b.slot].x}%`,
+              top: `${SCAN_SLOTS[b.slot].y}%`,
+            }}
+          >
+            <span className="mc-profile-ring absolute inset-0 rounded-full border border-blue-400" />
+            <span
+              className={`relative flex h-9 w-9 items-center justify-center rounded-full border-2 border-white text-[11px] font-semibold shadow-md ${b.color}`}
+            >
+              {b.initials}
+            </span>
+          </span>
+        ))}
+      </div>
+
+      <h3 className="mt-6 font-semibold text-slate-900">
+        {!connected
+          ? "Reconnecting…"
+          : boost
+            ? "Restarting scan…"
+            : "Scanning for freshers"}
+      </h3>
+      <p className="mx-auto mt-1 max-w-xs text-sm text-slate-500">
+        {connected
+          ? "Keep this page open. The first mentor to accept gets the session."
+          : "Check your internet connection. We'll resume scanning automatically."}
+      </p>
     </div>
-    <h3 className="mt-6 font-semibold text-slate-900">
-      {!connected
-        ? "Reconnecting…"
-        : boost
-          ? "Restarting scan…"
-          : "Scanning for requests"}
-    </h3>
-    <p className="mx-auto mt-1 max-w-xs text-sm text-slate-500">
-      {connected
-        ? "Keep this page open. The first mentor to accept gets the session."
-        : "Check your internet connection. We'll resume scanning automatically."}
-    </p>
-  </div>
-);
+  );
+};
 
 const Ring = ({ pct, urgent, label, seconds }) => {
   const radius = 18;
@@ -1291,8 +1598,9 @@ const RequestCard = ({ req, now, busy, disabled, onClaim, onSkip }) => {
 
   return (
     <article
-      className={`mc-slide-in overflow-hidden rounded-2xl border bg-white transition duration-200 hover:-translate-y-0.5 hover:shadow-lg ${urgent ? "border-red-200" : "border-slate-200 hover:border-blue-300"
-        }`}
+      className={`mc-slide-in overflow-hidden rounded-2xl border bg-white transition duration-200 hover:-translate-y-0.5 hover:shadow-lg ${
+        urgent ? "border-red-200" : "border-slate-200 hover:border-blue-300"
+      }`}
     >
       <div className="p-5">
         <div className="flex items-start justify-between gap-4">

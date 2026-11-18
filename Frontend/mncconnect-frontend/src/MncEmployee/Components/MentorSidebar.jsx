@@ -52,6 +52,12 @@ const PENDING_SYNC_MS = 10000;
 const SESSIONS_SYNC_MS = 8000;
 const CLOCK_TICK_MS = 5000;
 
+/* Voice tour can open / close the mobile drawer with these window events:
+   window.dispatchEvent(new Event("sidebar:open"))
+   window.dispatchEvent(new Event("sidebar:close")) */
+const SIDEBAR_OPEN_EVENT = "sidebar:open";
+const SIDEBAR_CLOSE_EVENT = "sidebar:close";
+
 const NOT_PENDING = [
   "accepted",
   "cancelled",
@@ -123,6 +129,32 @@ const CountBadge = ({ count, active, label }) =>
     </span>
   ) : null;
 
+const linkClass = (active) =>
+  `group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+    active
+      ? "bg-blue-50 text-blue-700"
+      : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+  }`;
+
+/* Defined OUTSIDE MentorSidebar so it is not re-created (remounted) on every
+   render / clock tick. data-tour = nav-home, nav-requests, nav-sessions,
+   nav-earnings, nav-reviews, nav-notifications, nav-settings */
+const NavLink = ({ name, path, icon: Icon, active, count, label }) => (
+  <Link
+    to={path}
+    data-tour={`nav-${path.split("/").pop()}`}
+    aria-current={active ? "page" : undefined}
+    className={linkClass(active)}
+  >
+    {active && (
+      <span className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-blue-600" />
+    )}
+    <Icon size={18} />
+    <span>{name}</span>
+    <CountBadge count={count} active={active} label={label} />
+  </Link>
+);
+
 const MentorSidebar = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -143,6 +175,18 @@ const MentorSidebar = () => {
   useEffect(() => {
     setOpen(false); // close after every navigation
   }, [location.pathname]);
+
+  // let the voice tour open / close the drawer on mobile
+  useEffect(() => {
+    const openDrawer = () => setOpen(true);
+    const closeDrawer = () => setOpen(false);
+    window.addEventListener(SIDEBAR_OPEN_EVENT, openDrawer);
+    window.addEventListener(SIDEBAR_CLOSE_EVENT, closeDrawer);
+    return () => {
+      window.removeEventListener(SIDEBAR_OPEN_EVENT, openDrawer);
+      window.removeEventListener(SIDEBAR_CLOSE_EVENT, closeDrawer);
+    };
+  }, []);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -425,32 +469,6 @@ const MentorSidebar = () => {
     navigate("/", { replace: true });
   };
 
-  const linkClass = (active) =>
-    `group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
-      active
-        ? "bg-blue-50 text-blue-700"
-        : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-    }`;
-
-  const NavLink = ({ name, path, icon: Icon }) => {
-    const active = isActive(path);
-    const { count, label } = badgeFor(path);
-    return (
-      <Link
-        to={path}
-        aria-current={active ? "page" : undefined}
-        className={linkClass(active)}
-      >
-        {active && (
-          <span className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-blue-600" />
-        )}
-        <Icon size={18} />
-        <span>{name}</span>
-        <CountBadge count={count} active={active} label={label} />
-      </Link>
-    );
-  };
-
   const totalAlerts = pendingCount + unread;
 
   return (
@@ -559,7 +577,12 @@ const MentorSidebar = () => {
           </p>
           <div className="space-y-2">
             {navItems.map((item) => (
-              <NavLink key={item.path} {...item} />
+              <NavLink
+                key={item.path}
+                {...item}
+                active={isActive(item.path)}
+                {...badgeFor(item.path)}
+              />
             ))}
           </div>
 
@@ -568,7 +591,12 @@ const MentorSidebar = () => {
           </p>
           <div className="space-y-2">
             {accountItems.map((item) => (
-              <NavLink key={item.path} {...item} />
+              <NavLink
+                key={item.path}
+                {...item}
+                active={isActive(item.path)}
+                {...badgeFor(item.path)}
+              />
             ))}
           </div>
         </nav>
@@ -578,6 +606,7 @@ const MentorSidebar = () => {
           <div className="flex items-center gap-2">
             <Link
               to="/mentor/profile"
+              data-tour="nav-profile"
               aria-current={isActive("/mentor/profile") ? "page" : undefined}
               className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-xl p-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                 isActive("/mentor/profile")
@@ -602,6 +631,7 @@ const MentorSidebar = () => {
               type="button"
               onClick={handleLogout}
               disabled={loggingOut}
+              data-tour="nav-logout"
               aria-label="Logout"
               title="Logout"
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-500 transition hover:bg-red-50 hover:text-red-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:cursor-not-allowed disabled:opacity-60"
