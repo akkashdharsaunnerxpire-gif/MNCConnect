@@ -574,10 +574,18 @@ const Home = () => {
         @keyframes mc-fade-up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
         @keyframes mc-slide-in { from { opacity: 0; transform: translateX(-14px) scale(.98); } to { opacity: 1; transform: none; } }
         @keyframes mc-modal-in { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: scale(1); } }
+        @keyframes mc-blip {
+          0%   { opacity: 0; transform: scale(.3); }
+          15%  { opacity: 1; transform: scale(1.15); }
+          25%  { transform: scale(1); }
+          75%  { opacity: 1; transform: scale(1); }
+          100% { opacity: 0; transform: scale(.6); }
+        }
         .mc-fade-up { animation: mc-fade-up .5s cubic-bezier(.2,.7,.2,1) both; }
         .mc-slide-in { animation: mc-slide-in .45s cubic-bezier(.2,.7,.2,1) both; }
         .mc-modal-in { animation: mc-modal-in .28s cubic-bezier(.2,.7,.2,1) both; }
-        @media (prefers-reduced-motion: reduce) { .mc-fade-up, .mc-slide-in, .mc-modal-in { animation: none; } }
+        .mc-blip { animation: mc-blip 2.4s ease-in-out both; }
+        @media (prefers-reduced-motion: reduce) { .mc-fade-up, .mc-slide-in, .mc-modal-in, .mc-blip { animation: none; } }
       `}</style>
 
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -1302,54 +1310,134 @@ const SkeletonList = () => (
   </ul>
 );
 
-const Scanning = ({ connected, boost }) => (
-  <div className="flex flex-col items-center rounded-2xl border border-slate-200 bg-white px-6 py-12 text-center">
-    <div
-      className={`relative flex h-40 w-40 items-center justify-center ${
-        boost ? "scale-105" : ""
-      } transition-transform duration-300`}
-      aria-hidden="true"
-    >
-      {[0, 1, 2].map((i) => (
+const BLIP_COLORS = [
+  "bg-blue-100 text-blue-700 border-blue-200",
+  "bg-emerald-100 text-emerald-700 border-emerald-200",
+  "bg-amber-100 text-amber-700 border-amber-200",
+  "bg-violet-100 text-violet-700 border-violet-200",
+  "bg-rose-100 text-rose-700 border-rose-200",
+  "bg-cyan-100 text-cyan-700 border-cyan-200",
+];
+const BLIP_INITIALS = [
+  "AK",
+  "SR",
+  "MP",
+  "DV",
+  "KS",
+  "RJ",
+  "NP",
+  "TS",
+  "HG",
+  "LM",
+];
+
+const Scanning = ({ connected, boost }) => {
+  const [blips, setBlips] = useState([]);
+  const idRef = useRef(0);
+
+  // small profile bubbles pop up around the radar so the user can see scanning is alive
+  useEffect(() => {
+    const reduce = window.matchMedia?.(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    if (!connected || reduce) {
+      setBlips([]);
+      return undefined;
+    }
+
+    const spawn = () => {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 30 + Math.random() * 16; // % from centre
+      const blip = {
+        id: ++idRef.current,
+        left: 50 + dist * Math.cos(angle),
+        top: 50 + dist * Math.sin(angle),
+        initials:
+          BLIP_INITIALS[Math.floor(Math.random() * BLIP_INITIALS.length)],
+        color: BLIP_COLORS[Math.floor(Math.random() * BLIP_COLORS.length)],
+      };
+      // max 4 at a time
+      setBlips((prev) => [...prev.slice(-3), blip]);
+    };
+
+    spawn();
+    const t = setInterval(spawn, boost ? 600 : 1300);
+    return () => clearInterval(t);
+  }, [connected, boost]);
+
+  const removeBlip = (id) =>
+    setBlips((prev) => prev.filter((b) => b.id !== id));
+
+  return (
+    <div className="flex flex-col items-center rounded-2xl border border-slate-200 bg-white px-6 py-12 text-center">
+      <div
+        className={`relative flex h-56 w-56 items-center justify-center ${
+          boost ? "scale-105" : ""
+        } transition-transform duration-300`}
+        aria-hidden="true"
+      >
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="absolute inset-0 rounded-full border border-blue-300 motion-safe:animate-ping motion-reduce:opacity-30"
+            style={{
+              animationDuration: boost ? "1.2s" : "3s",
+              animationDelay: `${i}s`,
+              opacity: 0.5,
+            }}
+          />
+        ))}
+        <span className="absolute inset-6 rounded-full border border-slate-200" />
+        <span className="absolute inset-14 rounded-full border border-slate-200" />
         <span
-          key={i}
-          className="absolute inset-0 rounded-full border border-blue-300 motion-safe:animate-ping motion-reduce:opacity-30"
+          className="absolute inset-0 rounded-full motion-safe:animate-spin"
           style={{
-            animationDuration: boost ? "1.2s" : "3s",
-            animationDelay: `${i}s`,
-            opacity: 0.5,
+            animationDuration: boost ? "1s" : "2.8s",
+            background:
+              "conic-gradient(from 0deg, rgba(37,99,235,0) 0deg, rgba(37,99,235,0) 270deg, rgba(37,99,235,0.28) 360deg)",
           }}
         />
-      ))}
-      <span className="absolute inset-4 rounded-full border border-slate-200" />
-      <span className="absolute inset-10 rounded-full border border-slate-200" />
-      <span
-        className="absolute inset-0 rounded-full motion-safe:animate-spin"
-        style={{
-          animationDuration: boost ? "1s" : "2.8s",
-          background:
-            "conic-gradient(from 0deg, rgba(37,99,235,0) 0deg, rgba(37,99,235,0) 270deg, rgba(37,99,235,0.28) 360deg)",
-        }}
-      />
-      <span className="relative flex h-3 w-3">
-        <span className="absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-40 motion-safe:animate-ping" />
-        <span className="relative inline-flex h-3 w-3 rounded-full bg-blue-600" />
-      </span>
+
+        {/* popping profiles */}
+        {blips.map((b) => (
+          <span
+            key={b.id}
+            className="absolute"
+            style={{
+              left: `${b.left}%`,
+              top: `${b.top}%`,
+              transform: "translate(-50%, -50%)",
+            }}
+          >
+            <span
+              onAnimationEnd={() => removeBlip(b.id)}
+              className={`mc-blip flex h-8 w-8 items-center justify-center rounded-full border text-[10px] font-semibold shadow-sm ${b.color}`}
+            >
+              {b.initials}
+            </span>
+          </span>
+        ))}
+
+        <span className="relative flex h-3 w-3">
+          <span className="absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-40 motion-safe:animate-ping" />
+          <span className="relative inline-flex h-3 w-3 rounded-full bg-blue-600" />
+        </span>
+      </div>
+      <h3 className="mt-6 font-semibold text-slate-900">
+        {!connected
+          ? "Reconnecting…"
+          : boost
+            ? "Restarting scan…"
+            : "Scanning for requests"}
+      </h3>
+      <p className="mx-auto mt-1 max-w-xs text-sm text-slate-500">
+        {connected
+          ? "Keep this page open. The first mentor to accept gets the session."
+          : "Check your internet connection. We'll resume scanning automatically."}
+      </p>
     </div>
-    <h3 className="mt-6 font-semibold text-slate-900">
-      {!connected
-        ? "Reconnecting…"
-        : boost
-          ? "Restarting scan…"
-          : "Scanning for requests"}
-    </h3>
-    <p className="mx-auto mt-1 max-w-xs text-sm text-slate-500">
-      {connected
-        ? "Keep this page open. The first mentor to accept gets the session."
-        : "Check your internet connection. We'll resume scanning automatically."}
-    </p>
-  </div>
-);
+  );
+};
 
 const Ring = ({ pct, urgent, label, seconds }) => {
   const radius = 18;
