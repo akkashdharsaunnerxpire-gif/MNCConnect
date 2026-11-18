@@ -470,7 +470,7 @@ export default function SessionBoard() {
     return () => {
       cancelled = true;
     };
-  }, [price]);
+  }, [f.minutes, f.mode]);
 
   const convenienceFee = payWallet ? 0 : Number(quote?.convenienceFee) || 0;
   const bearerManaged = !payWallet && Boolean(quote?.bearerManaged);
@@ -733,9 +733,18 @@ export default function SessionBoard() {
     if (payWallet) {
       setStage("sending");
       try {
+        // the SERVER calculates the price from duration + mode (client amount is never trusted)
+        // requestGroupId is also the idempotency key (same key twice = no 2nd debit)
         const paid = await api(WALLET_PAY_ENDPOINT, {
           method: "POST",
-          body: { amount: price, topic: companyName },
+          body: {
+            duration: f.minutes,
+            mode: f.mode,
+            topic: companyName,
+            requestGroupId: reqIdRef.current,
+            date: toApiDate(f.date),
+            time: toApiTime(f.time),
+          },
         });
         paymentIdRef.current = paid.paymentId;
         paidByWalletRef.current = true;
@@ -769,6 +778,9 @@ export default function SessionBoard() {
           duration: f.minutes,
           mode: f.mode,
           topic: companyName,
+          requestGroupId: reqIdRef.current,
+          date: toApiDate(f.date),
+          time: toApiTime(f.time),
         },
       });
 

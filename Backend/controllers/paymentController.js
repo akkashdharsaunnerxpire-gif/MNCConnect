@@ -21,6 +21,9 @@ const {
 
 const PLATFORM_FEE_PERCENT = Number(process.env.PLATFORM_FEE_PERCENT || 25);
 
+// a group closes this long before it starts (no new friends can pay after that)
+const PAYMENT_GRACE_MS = Number(process.env.PAYMENT_GRACE_MS || 10 * 60 * 1000);
+
 // ============================================================
 // HELPERS
 // ============================================================
@@ -93,10 +96,13 @@ const orConditionFor = (paymentId) => ({
 // SERVER decides the price. The client never sends an amount we trust.
 //   friend joining a group : { inviteCode }                 -> price comes from the booking
 //   everything else        : { duration (minutes), mode }   -> price comes from env rates
-const resolveSessionAmount = async (body) => {
+// Always returns { amount, mode } or { error }.  Never returns undefined.
+const resolveSessionAmount = async (body = {}, userId = null) => {
   const code = String(body.inviteCode || "")
     .trim()
     .toUpperCase();
+
+  // ---- friend joining a group ----
   if (code) {
     const b = await Booking.findOne({ inviteCode: code, sessionMode: "group" })
       .select(
@@ -109,6 +115,7 @@ const resolveSessionAmount = async (body) => {
       new Date(b.startsAt).getTime() < Date.now() + PAYMENT_GRACE_MS
     )
       return { error: "This group is closed." };
+
     const members = b.participants || [];
     if (members.length >= b.maxMembers) return { error: "This group is full." };
     if (userId && members.some((p) => String(p.fresher) === String(userId)))
@@ -119,30 +126,47 @@ const resolveSessionAmount = async (body) => {
     return { amount, mode: "group" };
   }
 
-  const sessionFieldsOf = (body) =>
-    body.requestGroupId
-      ? buildSessionFields({
-          date: body.date,
-          time: body.time,
-          duration: body.duration,
-        })
-      : {};
+  // ---- normal booking (single or group host) ----
+  const mode = body.mode === "group" ? "group" : "single";
+  const duration = Number(body.duration);
+  if (!validDuration(duration)) return { error: "Invalid session duration." };
+
+  const amount = round2(Number(expectedPrice(duration, mode)));
+  if (!(amount > 0)) return { error: "Invalid session price." };
+  return { amount, mode };
 };
+
+const sessionFieldsOf = (body = {}) =>
+  body.requestGroupId
+    ? buildSessionFields({
+        date: body.date,
+        time: body.time,
+        duration: body.duration,
+      })
+    : {};
+
 // ============================================================
 // FEE QUOTE   GET /api/payments/fee-quote?duration=60&mode=single  (or ?inviteCode=XXXX)
 // display only; the real price is recalculated in createOrder
 // ============================================================
 
 exports.quoteFee = async (req, res) => {
-  const r = await resolveSessionAmount(req.query || {});
-  if (r.error)
-    return res.status(400).json({ success: false, message: r.error });
-  return res.json({
-    success: true,
-    sessionAmount: r.amount,
-    ...calcConvenienceFee({ amount: r.amount, channel: "razorpay" }),
-    walletFee: 0,
-  });
+  try {
+    const r = await resolveSessionAmount(req.query || {}, req.user?.id);
+    if (r.error)
+      return res.status(400).json({ success: false, message: r.error });
+    return res.json({
+      success: true,
+      sessionAmount: r.amount,
+      ...calcConvenienceFee({ amount: r.amount, channel: "razorpay" }),
+      walletFee: 0,
+    });
+  } catch (error) {
+    console.error("Fee quote error:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Unable to calculate the fee" });
+  }
 };
 
 // ============================================================
@@ -157,7 +181,7 @@ exports.createOrder = async (req, res) => {
     if (!fresher) return;
 
     const body = req.body || {};
-    const priced = await resolveSessionAmount(body);
+    const priced = await resolveSessionAmount(body, fresher._id);
     if (priced.error) {
       return res.status(400).json({ success: false, message: priced.error });
     }
@@ -705,7 +729,7 @@ exports.payWithWallet = async (req, res) => {
       });
     }
 
-    const priced = await resolveSessionAmount(body);
+    const priced = await resolveSessionAmount(body, fresherId);
     if (priced.error) {
       return res.status(400).json({ success: false, message: priced.error });
     }
