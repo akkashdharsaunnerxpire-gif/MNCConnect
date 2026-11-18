@@ -22,7 +22,7 @@ const {
 const PLATFORM_FEE_PERCENT = Number(process.env.PLATFORM_FEE_PERCENT || 25);
 
 // a group closes this long before it starts (no new friends can pay after that)
-const PAYMENT_GRACE_MS = Number(process.env.PAYMENT_GRACE_MS || 10 * 60 * 1000);
+const PAYMENT_GRACE_MS = (Number(process.env.PAYMENT_GRACE_SEC) || 60) * 1000;
 
 // ============================================================
 // HELPERS

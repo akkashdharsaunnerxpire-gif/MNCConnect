@@ -528,7 +528,6 @@ const isWalletPayment = (p) =>
   (p.method === "wallet" ||
     String(p.razorpayPaymentId || "").startsWith("wallet_pay_"));
 
-
 // Wallet refund = "mark payment refunded" + "credit the wallet" in ONE transaction.
 // Crash in between -> everything rolls back, the scheduler retries. No lost money.
 const refundToWalletAtomic = async (fresh, amount) => {
@@ -556,7 +555,10 @@ const refundToWalletAtomic = async (fresh, amount) => {
       );
 
       if (!before) {
-        const cur = await Payment.findById(fresh._id).select("status").session(session).lean();
+        const cur = await Payment.findById(fresh._id)
+          .select("status")
+          .session(session)
+          .lean();
         result = cur?.status === "refunded" ? "refunded" : "failed";
         return;
       }
@@ -565,7 +567,9 @@ const refundToWalletAtomic = async (fresh, amount) => {
       const wb = before.walletBreakdown || {};
       const hasBreakdown =
         isWalletPayment(before) &&
-        (Number(wb.bonus) > 0 || Number(wb.referral) > 0 || Number(wb.refundable) > 0);
+        (Number(wb.bonus) > 0 ||
+          Number(wb.referral) > 0 ||
+          Number(wb.refundable) > 0);
 
       const credit = hasBreakdown
         ? { bonus: wb.bonus, referral: wb.referral, refundable: wb.refundable }
@@ -627,6 +631,8 @@ const refundPayment = async (payment, reason = "", options = {}) => {
   const amount = round2(Math.min(sessionAmount, checkoutOf(fresh)));
   if (!(amount > 0)) return "failed";
   const feePart = 0; // convenience fee is never refunded
+  // wallet refunds are atomic (payment status + wallet credit together)
+  if (toWallet) return refundToWalletAtomic(fresh, amount);
 
   // ATOMIC lock. Refund amounts are written here, so the books are right even if something fails later.
   const before = await Payment.findOneAndUpdate(
@@ -1660,7 +1666,11 @@ exports.getRequestStatus = async (req, res) => {
       ].includes(me);
     if (!isMember && !isMentor) return fail(res, 403, "Access denied");
 
-    return res.json({ success: true, request: toClient(b), booking: toClient(b) });
+    return res.json({
+      success: true,
+      request: toClient(b),
+      booking: toClient(b),
+    });
   } catch (error) {
     return fail(res, 500, "Failed to load request");
   }
@@ -2570,9 +2580,9 @@ exports.livekitToken = async (req, res) => {
     at.addGrant({
       roomJoin: true,
       room: b.requestGroupId,
-      canPublish: true,
+      canPublish: true, // camera + mic + screen share (no source restriction)
       canSubscribe: true,
-      canPublishData: false,
+      canPublishData: true, // raise hand + reactions
     });
 
     const token = await at.toJwt();
