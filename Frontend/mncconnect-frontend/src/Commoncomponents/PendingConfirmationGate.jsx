@@ -4,15 +4,25 @@
 //   2. Yes -> review popup (stars + feedback)      <- review only after YES
 //      No  -> review is NOT asked
 // INSIDE the meeting room this gate shows nothing (the meeting handles everything).
+//
+// FIXES
+//   - checks every 15s + on focus + the moment the server sends booking:updated
+//   - uses requestGroupId (falls back to _id) for the confirm call
+//   - group: only the HOST is asked (friends are skipped)
 import React, { useCallback, useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { Star } from "lucide-react";
-import { API_URL } from "../services/fresherApi";
+import { API_URL, getUserId } from "../services/fresherApi";
+import { socket } from "../utils/socket";
 import SessionConfirmModal, { confirmSessionApi } from "./SessionConfirmModal";
 
 // true  = stars + 10 chars feedback compulsory
 // false = stars compulsory, feedback optional, and a "Skip" link is shown
 const REVIEW_REQUIRED = false;
+
+const POLL_MS = 15 * 1000;
+
+const keyOf = (b) => String(b?.requestGroupId || b?._id || b?.id || "");
 
 /* ---------- review popup (shown only after the fresher clicked YES) ---------- */
 const ReviewModal = ({ booking, onDone }) => {
@@ -35,7 +45,7 @@ const ReviewModal = ({ booking, onDone }) => {
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          requestGroupId: booking.requestGroupId,
+          requestGroupId: keyOf(booking),
           rating,
           comment: comment.trim(),
         }),
@@ -128,7 +138,7 @@ const PendingConfirmationGate = () => {
   const { pathname } = useLocation();
   const [list, setList] = useState([]);
   // booking that was just confirmed with YES and now needs its review.
-  // kept in its own state so the 60s refresh can't remove the popup.
+  // kept in its own state so the refresh can't remove the popup.
   const [reviewing, setReviewing] = useState(null);
 
   const load = useCallback(async () => {
@@ -145,11 +155,20 @@ const PendingConfirmationGate = () => {
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 60 * 1000);
-    window.addEventListener("focus", load);
+    const t = setInterval(load, POLL_MS);
+    const onFocus = () => load();
+    // the server tells us the moment a session moves to awaiting_confirmation
+    const onBooking = (b) => {
+      if (!b || b.status === "awaiting_confirmation" || b.refundStatus) load();
+    };
+    window.addEventListener("focus", onFocus);
+    socket.on("booking:updated", onBooking);
+    socket.on("meeting:ended", load);
     return () => {
       clearInterval(t);
-      window.removeEventListener("focus", load);
+      window.removeEventListener("focus", onFocus);
+      socket.off("booking:updated", onBooking);
+      socket.off("meeting:ended", load);
     };
   }, [load]);
 
@@ -160,30 +179,33 @@ const PendingConfirmationGate = () => {
   if (reviewing) {
     return (
       <ReviewModal
-        key={`review-${reviewing._id}`}
+        key={`review-${keyOf(reviewing)}`}
         booking={reviewing}
         onDone={() => setReviewing(null)}
       />
     );
   }
 
-  // step 1: confirm
-  const current = list.find((b) => b._id !== reviewing?._id);
+  // step 1: confirm.  group: only the HOST confirms (friends are skipped)
+  const myId = String(getUserId?.() || "");
+  const current = list.find(
+    (b) => !(b.hostId && myId && String(b.hostId) !== myId),
+  );
   if (!current) return null;
 
-  const removeCurrent = () =>
-    setList((l) => l.filter((b) => b._id !== current._id));
+  const currentKey = keyOf(current);
+  const removeCurrent = () => setList((l) => l.filter((b) => keyOf(b) !== currentKey));
 
   return (
     <SessionConfirmModal
-      key={current._id}
+      key={currentKey}
       zIndex="z-[100]"
       title="Was your session successful?"
       subtitle={`Your session${
         current.mentor?.name ? ` with ${current.mentor.name}` : ""
-      }${current.companyName ? ` (${current.companyName})` : ""} has finished. Please confirm.`}
+      }${current.companyName ? ` (${current.companyName})` : ""} has finished. You did not confirm it yet. Please confirm.`}
       onYes={async () => {
-        await confirmSessionApi(current._id, true);
+        await confirmSessionApi(currentKey, true);
         removeCurrent();
         // already reviewed inside the meeting -> do not ask again
         if (!current.reviewed && !current.myReviewed) {
@@ -191,7 +213,7 @@ const PendingConfirmationGate = () => {
         }
       }}
       onNo={async (reason) => {
-        await confirmSessionApi(current._id, false, reason);
+        await confirmSessionApi(currentKey, false, reason);
         removeCurrent(); // NO -> no review
       }}
     />

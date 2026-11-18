@@ -3,25 +3,20 @@
 //   SINGLE meeting : 2 people (employee + fresher), big remote video + small self preview
 //   GROUP meeting  : 2 to 60 people
 //
-// Backend: POST /bookings/:id/livekit-token must now work for BOTH modes
-//   (single = max 2 participants). Identity: mentor => "mentor:<id>", fresher => "fresher:<id>".
+// Backend: POST /bookings/:id/livekit-token must work for BOTH modes.
+//   Identity: mentor => "mentor:<id>", fresher => "fresher:<id>".
 //
-// GROUP layout (Zoom style)
-//   - Employee (mentor) sees the freshers BIG in a gallery grid (auto columns, pages of 12)
-//   - Fresher sees the employee BIG, and everybody else in a centered strip
-//   - Active speaker gets a green ring, double-click / pin icon pins anybody to the big stage
-//   - Screen share (employee / host) takes the big stage automatically
-//   - Full-screen button (meeting only), grid / speaker view toggle
-//   - Chat opens on the right and the video stage SHIFTS left (nothing is hidden)
-// CHAT
-//   - single : employee <-> fresher (1 to 1, no names)
-//   - group  : EVERYBODY (employee, host, friends) can chat, every message shows the sender's name
-// POPUPS
-//   - "Did the session go well?" (last 3 minutes)   -> only the single fresher / group HOST
+// POPUPS (FIXED)
+//   - Mentor: "Meeting Success" button appears in the last 3 minutes (always visible, no stale state)
+//   - Fresher (single) / group HOST: "Did the session go well?" appears ONLY after the mentor clicked
 //        Yes -> confirmed
-//        No  -> valid reason -> "Are you sure?" (OK / Cancel) -> declined
+//        No  -> valid reason -> "Are you sure?" (OK / Cancel) -> declined (mentor can ask again)
+//        (set AUTO_ASK_FRESHER = true to ALSO ask automatically in the last 3 minutes)
 //   - Review (stars + feedback, last 1 minute)      -> EVERY fresher (host and friends)
-//   - Meeting finished and not confirmed            -> the confirm popup again (after the meeting)
+//   - Meeting finished and NOT confirmed            -> confirm popup is shown again:
+//        * if the fresher is still on the page  -> meeting:ended event
+//        * if the fresher re-opens the meeting link -> booking status is checked
+//        * if the fresher is on another page    -> PendingConfirmationGate shows it
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
@@ -69,6 +64,10 @@ const REVIEW_AT_MS = ONE_MIN;
 const OPEN_BEFORE_MIN = 5;
 const CONFIRMED_BANNER_MS = 20 * 1000;
 const ENTRY_BEFORE_MS = 20 * 1000;
+
+// false = fresher is asked "did it go well?" ONLY after the mentor clicks "Meeting Success"
+// true  = ALSO asked automatically in the last 3 minutes
+const AUTO_ASK_FRESHER = false;
 
 // group: students join with mic + camera OFF when the group is bigger than this
 const AUTO_MEDIA_MAX = 6;
@@ -330,8 +329,9 @@ export default function MeetingRoom() {
   const [mediaNote, setMediaNote] = useState("");
   const [booking, setBooking] = useState(null);
   const [reviewDone, setReviewDone] = useState(false);
-  const [showSuccessBtn, setShowSuccessBtn] = useState(false);
   const [confirmedBanner, setConfirmedBanner] = useState(false);
+  // fresher already answered the CURRENT "did it go well?" request (reset when the mentor asks again)
+  const [answered, setAnswered] = useState(false);
 
   // MY OWN acceptance of the instructions (a friend's acceptance is separate from the host's)
   const [myAcc, setMyAcc] = useState(false);
@@ -375,8 +375,11 @@ export default function MeetingRoom() {
   const joined = useRef(false);
   const retryTimer = useRef(null);
 
-  const isGroup = clock.mode === "group";
-  const isHost = !isMentor && myUserId && String(clock.hostId) === myUserId;
+  // FIX: when the join was refused (meeting already ENDED) the socket clock is empty,
+  // so fall back to the booking for mode + host.
+  const isGroup = clock.mode === "group" || booking?.mode === "group";
+  const hostIdEff = String(clock.hostId || booking?.hostId || "");
+  const isHost = !isMentor && Boolean(myUserId) && hostIdEff === myUserId;
   // single meeting fresher OR the group host: confirms "did it go well?"
   const isHostFresher = !isMentor && (!isGroup || isHost);
   // every fresher (host AND friends) writes a review
@@ -395,6 +398,8 @@ export default function MeetingRoom() {
             Math.min(Math.max(res.opensAt - Date.now(), 1000), 30000),
           );
         } else if (res?.code === "ENDED") {
+          // the booking status decides (see the booking effect): confirmed -> "ended",
+          // not confirmed -> "awaiting_confirmation"
           setPhase("ended");
         } else {
           setMessage(res?.message || "Could not join.");
@@ -554,7 +559,8 @@ export default function MeetingRoom() {
         setNeedAudio(!room.canPlaybackAudio);
 
         // big groups: students join muted (their choice to unmute). single: always on.
-        const big = group && (clockRef.current.maxMembers || 1) > AUTO_MEDIA_MAX;
+        const big =
+          group && (clockRef.current.maxMembers || 1) > AUTO_MEDIA_MAX;
         const startMuted = big && !isMentor;
         if (startMuted) {
           setMicOn(false);
@@ -580,8 +586,7 @@ export default function MeetingRoom() {
         bump();
       } catch (e) {
         console.error("livekit error", e);
-        if (!cancelled)
-          setMediaNote(e.message || "Could not start the video.");
+        if (!cancelled) setMediaNote(e.message || "Could not start the video.");
       }
     })();
 
@@ -601,12 +606,23 @@ export default function MeetingRoom() {
   }, []);
 
   useEffect(() => {
+    let alive = true;
     fetch(`${API_URL}${ENDPOINTS.booking(bookingId)}`, {
       credentials: "include",
     })
       .then((r) => r.json())
-      .then((d) => d.booking && setBooking(d.booking))
+      .then((d) => {
+        if (!alive || !d.booking) return;
+        setBooking(d.booking);
+        // FIX: the meeting is over but nobody confirmed -> show the confirm screen
+        // (before this the page said "Session completed / confirmed" for everybody)
+        if (phase === "ended" && d.booking.status === "awaiting_confirmation")
+          setPhase("awaiting_confirmation");
+      })
       .catch(() => {});
+    return () => {
+      alive = false;
+    };
   }, [bookingId, phase]);
 
   const currentRemaining = clock.running
@@ -620,9 +636,13 @@ export default function MeetingRoom() {
   const inLast1 =
     clock.running && currentRemaining > 0 && currentRemaining <= REVIEW_AT_MS;
 
+  // FIX: derived value (no state + effect) so the mentor button can never get stuck hidden
+  const showSuccessBtn = isMentor && phase === "in" && inLast3;
+
+  // a new request from the mentor -> the fresher may answer again
   useEffect(() => {
-    setShowSuccessBtn(isMentor && phase === "in" && inLast3);
-  }, [inLast3, phase, isMentor]);
+    if (!clock.successRequested) setAnswered(false);
+  }, [clock.successRequested]);
 
   useEffect(() => {
     if (!isMentor || !clock.fresherConfirmed) {
@@ -664,8 +684,6 @@ export default function MeetingRoom() {
     });
 
   // REVIEW  -> every fresher (single fresher, group host AND group friends)
-  //   host / single : booking.reviewed
-  //   friend        : booking.myReviewed (if the backend sends it) or the local reviewDone
   const alreadyReviewed =
     reviewDone ||
     Boolean(booking?.myReviewed) ||
@@ -678,14 +696,25 @@ export default function MeetingRoom() {
     !alreadyReviewed;
 
   // "Did the session go well?" -> ONLY single fresher / group HOST
-  //   - automatically in the last 3 minutes (until the fresher answers No)
-  //   - or any time the employee clicks "Meeting Success"
+  //   - when the employee clicked "Meeting Success"
+  //   - (optional) automatically in the last 3 minutes when AUTO_ASK_FRESHER = true
   const showSuccessConfirm =
     isHostFresher &&
     phase === "in" &&
     !clock.fresherConfirmed &&
+    !answered &&
     !showReviewGate &&
-    (clock.successRequested || (inLast3 && !clock.fresherDeclined));
+    (clock.successRequested ||
+      (AUTO_ASK_FRESHER && inLast3 && !clock.fresherDeclined));
+
+  // mentor side: waiting for the answer / may ask (again)
+  const mentorWaiting =
+    isMentor &&
+    clock.successRequested &&
+    !clock.fresherConfirmed &&
+    !clock.fresherDeclined;
+  const mentorCanAsk =
+    showSuccessBtn && !clock.fresherConfirmed && !mentorWaiting;
 
   // mic / camera (same for single and group)
   const toggle = async (kind) => {
@@ -710,7 +739,7 @@ export default function MeetingRoom() {
     }
   };
 
-  // GROUP: screen share (employee + host)
+  // screen share (employee + host)
   const toggleShare = async () => {
     const lp = lkRoomRef.current?.localParticipant;
     if (!lp) return;
@@ -781,6 +810,17 @@ export default function MeetingRoom() {
     );
   }
 
+  // after YES on the finished screen: ask the review (if not reviewed yet)
+  if (phase === "post_review") {
+    return (
+      <Center>
+        <CheckCircle size={44} className="text-emerald-400" />
+        <h2 className="mt-4 text-2xl font-bold">Session confirmed</h2>
+        <ReviewGate booking={booking} onDone={leaveRoom} />
+      </Center>
+    );
+  }
+
   if (phase === "awaiting_confirmation") {
     return (
       <Center>
@@ -817,14 +857,16 @@ export default function MeetingRoom() {
           <>
             <h2 className="text-2xl font-bold">Session finished</h2>
             <p className="mt-2 text-sm text-slate-400">
-              You did not confirm during the meeting. Please confirm now.
+              You attended the meeting but did not confirm it. Please confirm
+              now.
             </p>
             <SessionConfirmModal
               title="Was your session successful?"
-              subtitle="The session time is over. Please confirm."
+              subtitle="The session time is over. You did not confirm it yet. Please confirm."
               onYes={async () => {
                 await confirmSessionApi(bookingId, true);
-                leaveRoom();
+                if (!alreadyReviewed && booking) setPhase("post_review");
+                else leaveRoom();
               }}
               onNo={async (reason) => {
                 await confirmSessionApi(bookingId, false, reason);
@@ -965,7 +1007,8 @@ export default function MeetingRoom() {
 
   // CHAT: single = employee <-> fresher.  group = EVERYBODY.
   const canChat = true;
-  const canShare = isGroup && (isMentor || isHost);
+  // single: employee AND fresher can share.  group: employee + host only.
+  const canShare = isGroup ? isMentor || isHost : true;
   // the stage moves left while the chat panel is open (nothing is hidden behind it)
   const shiftForChat = canChat && chatOpen;
 
@@ -1024,7 +1067,16 @@ export default function MeetingRoom() {
           {!isGroup ? (
             /* ================= SINGLE STAGE (LiveKit, 2 people) ================= */
             <div className="relative h-full w-full overflow-hidden rounded-2xl bg-black">
-              {otherP ? (
+              {sharer ? (
+                /* someone is sharing the screen -> it takes the big stage */
+                <Tile
+                  participant={sharer}
+                  version={lkVersion}
+                  big
+                  size="xl"
+                  source={Track.Source.ScreenShare}
+                />
+              ) : otherP ? (
                 <Tile
                   participant={otherP}
                   version={lkVersion}
@@ -1037,15 +1089,39 @@ export default function MeetingRoom() {
                 />
               )}
 
-              {/* my own small preview */}
-              {lkRoom && (
-                <div className="absolute bottom-4 right-4 z-20 aspect-video w-32 sm:w-52">
-                  <Tile
-                    participant={lkRoom.localParticipant}
-                    version={lkVersion}
-                    size="sm"
-                  />
+              {sharer ? (
+                /* while sharing: both cameras become small tiles */
+                <div className="absolute bottom-4 right-4 z-20 flex flex-col gap-2">
+                  {otherP && (
+                    <div className="aspect-video w-32 sm:w-52">
+                      <Tile
+                        participant={otherP}
+                        version={lkVersion}
+                        size="sm"
+                      />
+                    </div>
+                  )}
+                  {lkRoom && (
+                    <div className="aspect-video w-32 sm:w-52">
+                      <Tile
+                        participant={lkRoom.localParticipant}
+                        version={lkVersion}
+                        size="sm"
+                      />
+                    </div>
+                  )}
                 </div>
+              ) : (
+                /* my own small preview */
+                lkRoom && (
+                  <div className="absolute bottom-4 right-4 z-20 aspect-video w-32 sm:w-52">
+                    <Tile
+                      participant={lkRoom.localParticipant}
+                      version={lkVersion}
+                      size="sm"
+                    />
+                  </div>
+                )
               )}
             </div>
           ) : (
@@ -1208,7 +1284,7 @@ export default function MeetingRoom() {
           )}
           {isMentor &&
             clock.fresherDeclined &&
-            !clock.successRequested &&
+            !mentorWaiting &&
             !clock.fresherConfirmed && (
               <div className="absolute left-1/2 top-4 z-30 -translate-x-1/2 rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-xl">
                 The {isGroup ? "host" : "fresher"} said the session is not
@@ -1218,18 +1294,15 @@ export default function MeetingRoom() {
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center justify-center gap-3 pb-2">
-          {isMentor &&
-            showSuccessBtn &&
-            !clock.successRequested &&
-            !clock.fresherConfirmed && (
-              <button
-                onClick={sendSuccessRequest}
-                className="flex h-12 animate-pulse items-center gap-2 rounded-full bg-emerald-600 px-6 text-sm font-bold hover:bg-emerald-700"
-              >
-                <CheckCircle size={18} /> Meeting Success
-              </button>
-            )}
-          {isMentor && clock.successRequested && !clock.fresherConfirmed && (
+          {mentorCanAsk && (
+            <button
+              onClick={sendSuccessRequest}
+              className="flex h-12 animate-pulse items-center gap-2 rounded-full bg-emerald-600 px-6 text-sm font-bold hover:bg-emerald-700"
+            >
+              <CheckCircle size={18} /> Meeting Success
+            </button>
+          )}
+          {mentorWaiting && (
             <span className="flex h-12 items-center gap-2 rounded-full bg-slate-800 px-5 text-xs font-semibold text-amber-300">
               <Loader2 size={14} className="animate-spin" /> Waiting for the{" "}
               {isGroup ? "host" : "fresher"} to confirm…
@@ -1404,14 +1477,17 @@ export default function MeetingRoom() {
         <ReviewGate booking={booking} onDone={() => setReviewDone(true)} />
       )}
 
-      {/* "did it go well?" (last 3 minutes): ONLY the single fresher / group host
-          No -> reason -> "Are you sure?" (OK / Cancel) */}
+      {/* "did it go well?": ONLY the single fresher / group host, after the employee clicked
+          "Meeting Success". No -> reason -> "Are you sure?" (OK / Cancel) */}
       {showSuccessConfirm && (
         <SessionConfirmModal
           title="Did the session go well?"
-          subtitle="Please confirm your session. The meeting continues until the timer ends."
+          subtitle="The employee asked you to confirm the session. The meeting continues until the timer ends."
           onYes={() => answerSuccess(true)}
-          onNo={(reason) => answerSuccess(false, reason)}
+          onNo={async (reason) => {
+            await answerSuccess(false, reason);
+            setAnswered(true);
+          }}
         />
       )}
     </>
