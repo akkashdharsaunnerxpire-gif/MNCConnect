@@ -75,56 +75,25 @@ const greetingFor = (date) => {
   return "Good night";
 };
 
-// one shared AudioContext, unlocked by the first user click/tap/key
-let sharedCtx = null;
-const getCtx = () => {
-  const Ctx = window.AudioContext || window.webkitAudioContext;
-  if (!Ctx) return null;
-  if (!sharedCtx || sharedCtx.state === "closed") sharedCtx = new Ctx();
-  return sharedCtx;
-};
-
-const unlockAudio = async () => {
-  try {
-    const ctx = getCtx();
-    if (!ctx) return false;
-    if (ctx.state === "suspended") await ctx.resume();
-    return ctx.state === "running";
-  } catch {
-    return false;
-  }
-};
-
 const playChime = () => {
   try {
-    const ctx = getCtx();
-    if (!ctx) return;
-
-    const run = () => {
-      const t0 = ctx.currentTime;
-      // 3-note "ding-ding-ding", louder than before
-      [
-        [880, 0],
-        [1175, 0.18],
-        [1568, 0.36],
-      ].forEach(([freq, delay]) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        const t = t0 + delay;
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(freq, t);
-        gain.gain.setValueAtTime(0.0001, t);
-        gain.gain.exponentialRampToValueAtTime(0.4, t + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(t);
-        osc.stop(t + 0.5);
-      });
-    };
-
-    if (ctx.state === "suspended") ctx.resume().then(run).catch(() => {});
-    else run();
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const t = ctx.currentTime;
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(880, t);
+    osc.frequency.setValueAtTime(1175, t + 0.13);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.15, t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.38);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.4);
+    setTimeout(() => ctx.close().catch(() => {}), 600);
   } catch {
     /* sound is optional */
   }
@@ -231,29 +200,6 @@ const Home = () => {
   useEffect(() => {
     soundRef.current = soundOn;
   }, [soundOn]);
-
-  // browsers block audio until the user interacts once: unlock on first click/tap/key
-  const [audioReady, setAudioReady] = useState(false);
-
-  useEffect(() => {
-    const events = ["pointerdown", "keydown", "touchstart"];
-    let done = false;
-    const unlock = async () => {
-      if (done) return;
-      const ok = await unlockAudio();
-      if (ok) {
-        done = true;
-        setAudioReady(true);
-        events.forEach((ev) => window.removeEventListener(ev, unlock));
-      }
-    };
-    events.forEach((ev) => window.addEventListener(ev, unlock));
-    unlock(); // works directly if the browser already allows audio
-    return () => {
-      done = true;
-      events.forEach((ev) => window.removeEventListener(ev, unlock));
-    };
-  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -628,26 +574,10 @@ const Home = () => {
         @keyframes mc-fade-up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
         @keyframes mc-slide-in { from { opacity: 0; transform: translateX(-14px) scale(.98); } to { opacity: 1; transform: none; } }
         @keyframes mc-modal-in { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: scale(1); } }
-        @keyframes mc-profile-pop {
-          0%   { opacity: 0; transform: translate(-50%, -50%) scale(.3); }
-          12%  { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
-          22%  { transform: translate(-50%, -50%) scale(1); }
-          80%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-          100% { opacity: 0; transform: translate(-50%, -50%) scale(.6); }
-        }
-        @keyframes mc-profile-ring {
-          0%   { opacity: .6; transform: scale(1); }
-          100% { opacity: 0; transform: scale(2.2); }
-        }
         .mc-fade-up { animation: mc-fade-up .5s cubic-bezier(.2,.7,.2,1) both; }
         .mc-slide-in { animation: mc-slide-in .45s cubic-bezier(.2,.7,.2,1) both; }
         .mc-modal-in { animation: mc-modal-in .28s cubic-bezier(.2,.7,.2,1) both; }
-        .mc-profile-pop { animation: mc-profile-pop 3s ease-in-out both; }
-        .mc-profile-ring { animation: mc-profile-ring 1s ease-out both; }
-        @media (prefers-reduced-motion: reduce) {
-          .mc-fade-up, .mc-slide-in, .mc-modal-in, .mc-profile-pop, .mc-profile-ring { animation: none; }
-          .mc-profile-pop { opacity: 1; transform: translate(-50%, -50%); }
-        }
+        @media (prefers-reduced-motion: reduce) { .mc-fade-up, .mc-slide-in, .mc-modal-in { animation: none; } }
       `}</style>
 
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -1372,176 +1302,54 @@ const SkeletonList = () => (
   </ul>
 );
 
-/* ---------- scanning radar with popping fresher profile circles ---------- */
-
-// positions (in %) around the radar where profile circles can pop up
-const SCAN_SLOTS = [
-  { x: 50, y: 4 },
-  { x: 82, y: 16 },
-  { x: 95, y: 48 },
-  { x: 82, y: 82 },
-  { x: 50, y: 96 },
-  { x: 18, y: 82 },
-  { x: 5, y: 48 },
-  { x: 18, y: 16 },
-  { x: 68, y: 30 },
-  { x: 32, y: 68 },
-];
-const SCAN_INITIALS = [
-  "AR",
-  "KS",
-  "MP",
-  "SV",
-  "DN",
-  "RK",
-  "PJ",
-  "LT",
-  "NG",
-  "HB",
-  "SM",
-  "VK",
-];
-const SCAN_COLORS = [
-  "bg-blue-100 text-blue-700",
-  "bg-emerald-100 text-emerald-700",
-  "bg-amber-100 text-amber-700",
-  "bg-rose-100 text-rose-700",
-  "bg-violet-100 text-violet-700",
-  "bg-cyan-100 text-cyan-700",
-];
-const SCAN_MAX_BUBBLES = 5;
-const SCAN_BUBBLE_MS = 3000;
-
-const Scanning = ({ connected, boost }) => {
-  const [bubbles, setBubbles] = useState([]);
-  const bubblesRef = useRef([]); // source of truth, so timers never live inside setState
-  const timersRef = useRef(new Set());
-  const counter = useRef(0);
-
-  const spawn = useCallback(() => {
-    const prev = bubblesRef.current;
-    if (prev.length >= SCAN_MAX_BUBBLES) return;
-
-    const used = new Set(prev.map((b) => b.slot));
-    const free = SCAN_SLOTS.map((_, i) => i).filter((i) => !used.has(i));
-    if (!free.length) return;
-
-    const id = ++counter.current;
-    const bubble = {
-      id,
-      slot: free[Math.floor(Math.random() * free.length)],
-      initials:
-        SCAN_INITIALS[Math.floor(Math.random() * SCAN_INITIALS.length)],
-      color: SCAN_COLORS[Math.floor(Math.random() * SCAN_COLORS.length)],
-    };
-
-    bubblesRef.current = [...prev, bubble];
-    setBubbles(bubblesRef.current);
-
-    const t = setTimeout(() => {
-      timersRef.current.delete(t);
-      bubblesRef.current = bubblesRef.current.filter((b) => b.id !== id);
-      setBubbles(bubblesRef.current);
-    }, SCAN_BUBBLE_MS);
-    timersRef.current.add(t);
-  }, []);
-
-  // spawn loop: faster right after a skip (boost)
-  useEffect(() => {
-    if (!connected) return undefined;
-    spawn();
-    const iv = setInterval(spawn, boost ? 350 : 800);
-    return () => clearInterval(iv);
-  }, [connected, boost, spawn]);
-
-  // when disconnected or unmounted: clear every bubble + pending timer
-  useEffect(() => {
-    if (connected) return undefined;
-    bubblesRef.current = [];
-    setBubbles([]);
-    return undefined;
-  }, [connected]);
-
-  useEffect(() => {
-    const timers = timersRef.current;
-    return () => {
-      timers.forEach(clearTimeout);
-      timers.clear();
-    };
-  }, []);
-
-  return (
-    <div className="flex flex-col items-center rounded-2xl border border-slate-200 bg-white px-6 py-12 text-center">
-      <div
-        className={`relative h-64 w-64 transition-transform duration-300 ${
-          boost ? "scale-105" : ""
-        }`}
-        aria-hidden="true"
-      >
-        {/* radar */}
-        <div className="absolute inset-8 flex items-center justify-center">
-          {[0, 1, 2].map((i) => (
-            <span
-              key={i}
-              className="absolute inset-0 rounded-full border border-blue-300 motion-safe:animate-ping motion-reduce:opacity-30"
-              style={{
-                animationDuration: boost ? "1.2s" : "3s",
-                animationDelay: `${i}s`,
-                opacity: 0.5,
-              }}
-            />
-          ))}
-          <span className="absolute inset-4 rounded-full border border-slate-200" />
-          <span className="absolute inset-10 rounded-full border border-slate-200" />
-          <span
-            className="absolute inset-0 rounded-full motion-safe:animate-spin"
-            style={{
-              animationDuration: boost ? "1s" : "2.8s",
-              background:
-                "conic-gradient(from 0deg, rgba(37,99,235,0) 0deg, rgba(37,99,235,0) 270deg, rgba(37,99,235,0.28) 360deg)",
-            }}
-          />
-          <span className="relative flex h-3 w-3">
-            <span className="absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-40 motion-safe:animate-ping" />
-            <span className="relative inline-flex h-3 w-3 rounded-full bg-blue-600" />
-          </span>
-        </div>
-
-        {/* fresher profile circles popping around the radar */}
-        {bubbles.map((b) => (
-          <span
-            key={b.id}
-            className="mc-profile-pop absolute h-9 w-9"
-            style={{
-              left: `${SCAN_SLOTS[b.slot].x}%`,
-              top: `${SCAN_SLOTS[b.slot].y}%`,
-            }}
-          >
-            <span className="mc-profile-ring absolute inset-0 rounded-full border border-blue-400" />
-            <span
-              className={`relative flex h-9 w-9 items-center justify-center rounded-full border-2 border-white text-[11px] font-semibold shadow-md ${b.color}`}
-            >
-              {b.initials}
-            </span>
-          </span>
-        ))}
-      </div>
-
-      <h3 className="mt-6 font-semibold text-slate-900">
-        {!connected
-          ? "Reconnecting…"
-          : boost
-            ? "Restarting scan…"
-            : "Scanning for freshers"}
-      </h3>
-      <p className="mx-auto mt-1 max-w-xs text-sm text-slate-500">
-        {connected
-          ? "Keep this page open. The first mentor to accept gets the session."
-          : "Check your internet connection. We'll resume scanning automatically."}
-      </p>
+const Scanning = ({ connected, boost }) => (
+  <div className="flex flex-col items-center rounded-2xl border border-slate-200 bg-white px-6 py-12 text-center">
+    <div
+      className={`relative flex h-40 w-40 items-center justify-center ${
+        boost ? "scale-105" : ""
+      } transition-transform duration-300`}
+      aria-hidden="true"
+    >
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="absolute inset-0 rounded-full border border-blue-300 motion-safe:animate-ping motion-reduce:opacity-30"
+          style={{
+            animationDuration: boost ? "1.2s" : "3s",
+            animationDelay: `${i}s`,
+            opacity: 0.5,
+          }}
+        />
+      ))}
+      <span className="absolute inset-4 rounded-full border border-slate-200" />
+      <span className="absolute inset-10 rounded-full border border-slate-200" />
+      <span
+        className="absolute inset-0 rounded-full motion-safe:animate-spin"
+        style={{
+          animationDuration: boost ? "1s" : "2.8s",
+          background:
+            "conic-gradient(from 0deg, rgba(37,99,235,0) 0deg, rgba(37,99,235,0) 270deg, rgba(37,99,235,0.28) 360deg)",
+        }}
+      />
+      <span className="relative flex h-3 w-3">
+        <span className="absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-40 motion-safe:animate-ping" />
+        <span className="relative inline-flex h-3 w-3 rounded-full bg-blue-600" />
+      </span>
     </div>
-  );
-};
+    <h3 className="mt-6 font-semibold text-slate-900">
+      {!connected
+        ? "Reconnecting…"
+        : boost
+          ? "Restarting scan…"
+          : "Scanning for requests"}
+    </h3>
+    <p className="mx-auto mt-1 max-w-xs text-sm text-slate-500">
+      {connected
+        ? "Keep this page open. The first mentor to accept gets the session."
+        : "Check your internet connection. We'll resume scanning automatically."}
+    </p>
+  </div>
+);
 
 const Ring = ({ pct, urgent, label, seconds }) => {
   const radius = 18;
