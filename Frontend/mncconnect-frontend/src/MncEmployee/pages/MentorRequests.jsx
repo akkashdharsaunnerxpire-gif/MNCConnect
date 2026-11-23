@@ -56,7 +56,8 @@ const CLOCK_TICK_MS = 5000; // hide requests that expired meanwhile
 
 // "Video Call" AND "Group Video Call" (same rule as the header badge)
 const isVideoCall = (r) => /video call/i.test(String(r?.type || ""));
-const isGroupCall = (r) => /group/i.test(String(r?.type || ""));
+const isGroupCall = (r) =>
+  /group/i.test(String(r?.type || "")) || r?.mode === "group";
 
 // a pending request that already expired is dead -> do not show / count it
 const isAlive = (r, clock) => {
@@ -84,6 +85,10 @@ const buildRequest = (raw) => {
   return {
     ...base,
     avatar,
+    // group / single info straight from the server (so it is never lost)
+    type: raw?.type ?? base?.type,
+    mode: raw?.mode ?? base?.mode,
+    maxMembers: raw?.maxMembers ?? base?.maxMembers,
     expiresAt: raw?.expiresAt || null,
     status: "Pending",
   };
@@ -119,6 +124,20 @@ const Avatar = ({
     </div>
   );
 };
+
+/* ---------- session type badge (Group / 1:1) ---------- */
+
+const SessionBadge = ({ request }) =>
+  isGroupCall(request) ? (
+    <span className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white">
+      <Users size={12} /> Group session
+      {Number(request.maxMembers) > 1 ? ` · up to ${request.maxMembers}` : ""}
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 rounded-lg bg-sky-100 px-2.5 py-1 text-[11px] font-semibold text-sky-700">
+      <Video size={12} /> 1:1 Session
+    </span>
+  );
 
 /* ---------- filter helpers ---------- */
 
@@ -656,11 +675,22 @@ const ConfirmRequestModal = ({
   onConfirm,
 }) => {
   const isAccept = actionType === "accept";
+  const group = isGroupCall(request);
 
   // lives only while the modal is mounted, so it resets for every request
   const [ackMatch, setAckMatch] = useState(false);
 
+  const sessionTypeText = group
+    ? `Group session${Number(request.maxMembers) > 1 ? ` (up to ${request.maxMembers})` : ""}`
+    : "1:1 Session";
+
   const rows = [
+    {
+      icon: Users,
+      label: "Session type",
+      value: sessionTypeText,
+      strong: true,
+    },
     {
       icon: CalendarDays,
       label: "Date",
@@ -699,7 +729,7 @@ const ConfirmRequestModal = ({
     },
     {
       icon: IndianRupee,
-      label: "You will earn",
+      label: group ? "You earn (per person)" : "You will earn",
       value: inr(mentorShare(request.amount)),
       strong: true,
       green: true,
@@ -770,6 +800,9 @@ const ConfirmRequestModal = ({
                 {request.topic || request.role || "Mentoring session"}
                 {request.company ? ` · ${request.company}` : ""}
               </p>
+              <div className="mt-1.5">
+                <SessionBadge request={request} />
+              </div>
             </div>
           </div>
 
@@ -863,6 +896,7 @@ const ConfirmRequestModal = ({
             </>
           ) : (
             <div className="mt-4 grid grid-cols-2 gap-4 rounded-xl bg-slate-50 p-4">
+              <Detail label="Session type" value={sessionTypeText} />
               <Detail label="Date" value={request.date || "Not specified"} />
               <Detail label="Time" value={request.time || "Not specified"} />
               <Detail
@@ -870,7 +904,7 @@ const ConfirmRequestModal = ({
                 value={formatDuration(request.duration)}
               />
               <Detail
-                label="You earn"
+                label={group ? "You earn (per person)" : "You earn"}
                 value={inr(mentorShare(request.amount))}
               />
             </div>
@@ -983,19 +1017,12 @@ const RequestCard = ({ request, onAccept, onReject }) => {
               {request.name}
             </h3>
             <div className="mt-2 flex flex-wrap gap-2">
-              {group && (
-                <span className="rounded-lg bg-indigo-50 px-2.5 py-1 text-[11px] font-medium text-indigo-700">
-                  Group
-                </span>
-              )}
+              <SessionBadge request={request} />
               {request.topic && (
                 <span className="rounded-lg bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-600">
                   {request.topic}
                 </span>
               )}
-              <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-500">
-                {group ? "Group Video Call" : "Video Call"}
-              </span>
             </div>
           </div>
         </div>
@@ -1018,7 +1045,7 @@ const RequestCard = ({ request, onAccept, onReject }) => {
           />
           <RequestInfo
             icon={<Star size={15} />}
-            label="You earn"
+            label={group ? "You earn (per person)" : "You earn"}
             value={inr(mentorShare(request.amount))}
           />
         </div>

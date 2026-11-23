@@ -54,6 +54,10 @@ const JOIN_READY_MS = 2 * 60 * 1000;
 
 const mentorShare = (amount) => Math.round(amount * (1 - PLATFORM_FEE));
 
+// group or single? (backend sends type "Group Video Call" / "Video Call" and mode "group" / "single")
+const isGroupReq = (r) =>
+  /group/i.test(String(r?.type || "")) || r?.mode === "group";
+
 const countdown = (ms) => {
   const s = Math.max(0, Math.floor(ms / 1000));
   const d = Math.floor(s / 86400);
@@ -310,8 +314,13 @@ const Home = () => {
     const onDisconnect = () => setConnected(false);
 
     const onRequest = (incoming) => {
+      const base = normalizeSessionRequest(incoming);
       const req = {
-        ...normalizeSessionRequest(incoming),
+        ...base,
+        // group / single info straight from the server (so it is never lost)
+        type: incoming?.type ?? base?.type,
+        mode: incoming?.mode ?? base?.mode,
+        maxMembers: incoming?.maxMembers ?? base?.maxMembers,
         receivedAt: Date.now(),
       };
       if (!req.id) return;
@@ -1022,11 +1031,28 @@ const Home = () => {
 };
 
 /* ============================================================
+   SESSION TYPE BADGE (Group / 1:1)
+============================================================ */
+
+const SessionBadge = ({ req }) =>
+  isGroupReq(req) ? (
+    <span className="inline-flex items-center gap-1 rounded-full bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white">
+      <Users size={12} /> Group session
+      {Number(req.maxMembers) > 1 ? ` · up to ${req.maxMembers}` : ""}
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold text-sky-700">
+      <Video size={12} /> 1:1 Session
+    </span>
+  );
+
+/* ============================================================
    CONFIRM ACCEPT MODAL
 ============================================================ */
 
 const ConfirmAcceptModal = ({ req, busy, onCancel, onConfirm }) => {
   const [ackMatch, setAckMatch] = useState(false);
+  const group = isGroupReq(req);
 
   const safeCancel = () => {
     if (!busy) onCancel();
@@ -1041,6 +1067,14 @@ const ConfirmAcceptModal = ({ req, busy, onCancel, onConfirm }) => {
   }, [busy, onCancel]);
 
   const rows = [
+    {
+      icon: Users,
+      label: "Session type",
+      value: group
+        ? `Group session${Number(req.maxMembers) > 1 ? ` (up to ${req.maxMembers})` : ""}`
+        : "1:1 Session",
+      strong: true,
+    },
     {
       icon: CalendarDays,
       label: "Date",
@@ -1079,7 +1113,7 @@ const ConfirmAcceptModal = ({ req, busy, onCancel, onConfirm }) => {
     },
     {
       icon: IndianRupee,
-      label: "You will earn",
+      label: group ? "You earn (per person)" : "You will earn",
       value: inr(mentorShare(req.amount)),
       strong: true,
       green: true,
@@ -1129,6 +1163,9 @@ const ConfirmAcceptModal = ({ req, busy, onCancel, onConfirm }) => {
                 {req.topic || "Mentoring session"}
                 {req.company ? ` · ${req.company}` : ""}
               </p>
+              <div className="mt-1.5">
+                <SessionBadge req={req} />
+              </div>
             </div>
           </div>
 
@@ -1484,6 +1521,7 @@ const Ring = ({ pct, urgent, label, seconds }) => {
 
 const RequestCard = ({ req, now, busy, disabled, onClaim, onSkip }) => {
   const [open, setOpen] = useState(false);
+  const group = isGroupReq(req);
   const left = Math.max(
     0,
     CLAIM_WINDOW_SECONDS - Math.floor((now - req.receivedAt) / 1000),
@@ -1507,6 +1545,9 @@ const RequestCard = ({ req, now, busy, disabled, onClaim, onSkip }) => {
               <p className="truncate text-xs text-slate-500">
                 {req.role} · {req.topic}
               </p>
+              <div className="mt-1.5">
+                <SessionBadge req={req} />
+              </div>
             </div>
           </div>
           <Ring
@@ -1551,12 +1592,16 @@ const RequestCard = ({ req, now, busy, disabled, onClaim, onSkip }) => {
 
         <div className="mt-4 flex items-end justify-between">
           <div>
-            <p className="text-xs text-slate-400">You earn</p>
+            <p className="text-xs text-slate-400">
+              {group ? "You earn (per person)" : "You earn"}
+            </p>
             <p className="text-2xl font-semibold tracking-tight">
               {inr(mentorShare(req.amount))}
             </p>
           </div>
-          <p className="text-xs text-slate-400">of {inr(req.amount)} total</p>
+          <p className="text-xs text-slate-400">
+            {group ? "per person · " : ""}of {inr(req.amount)} total
+          </p>
         </div>
 
         <div className="mt-4 flex items-center gap-3">

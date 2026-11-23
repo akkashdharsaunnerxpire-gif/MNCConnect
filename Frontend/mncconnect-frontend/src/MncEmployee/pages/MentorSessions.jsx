@@ -73,6 +73,12 @@ const mapBookingStatus = (status) => {
   }
 };
 
+// group or single? (several freshers, mode "group", or type "Group Video Call")
+const isGroupSession = (s) =>
+  (Number(s?.members) || 1) > 1 ||
+  s?.mode === "group" ||
+  /group/i.test(String(s?.type || ""));
+
 const imageOfPerson = (p) => findImage(p);
 
 const photoCache = new Map(); // sessionId -> Promise<string>
@@ -85,7 +91,12 @@ const loadPersonImage = (id) => {
       .then((d) => {
         // Try every possible structure the backend might return
         return imageOfPerson(
-          d?.person || d?.fresher || d?.user || d?.counterpart || d?.people?.[0] || d
+          d?.person ||
+            d?.fresher ||
+            d?.user ||
+            d?.counterpart ||
+            d?.people?.[0] ||
+            d,
         );
       })
       .catch(() => {
@@ -268,16 +279,6 @@ const fmtClock = (ms) => {
   return `${pad(m)}:${pad(sec)}`;
 };
 
-const countdownParts = (ms) => {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  return {
-    days: Math.floor(s / 86400),
-    hours: Math.floor((s % 86400) / 3600),
-    minutes: Math.floor((s % 3600) / 60),
-    seconds: s % 60,
-  };
-};
-
 const getJoinStatus = (session, nowMs) => {
   if (!session.startsAt || !session.endsAt) {
     return {
@@ -320,10 +321,7 @@ const Avatar = ({
   className = "",
 }) => {
   const [failed, setFailed] = useState(false);
-  const src =
-    fixUrl(p.image) ||
-    fixUrl(p.avatar) ||
-    findImage(p);
+  const src = fixUrl(p.image) || fixUrl(p.avatar) || findImage(p);
 
   useEffect(() => {
     setFailed(false);
@@ -346,15 +344,34 @@ const Avatar = ({
   );
 };
 
+/* ---------- session type badge (Group / 1:1) ---------- */
+
+const SessionBadge = ({ group, members, maxMembers }) =>
+  group ? (
+    <span className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white">
+      <Users size={12} /> Group session
+      {maxMembers
+        ? ` · ${members}/${maxMembers} joined`
+        : members > 1
+          ? ` · ${members} joined`
+          : ""}
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 rounded-lg bg-sky-100 px-2.5 py-1 text-[11px] font-semibold text-sky-700">
+      <Video size={12} /> 1:1 Session
+    </span>
+  );
+
 const Chips = ({ items, tone = "blue" }) => (
   <div className="flex flex-wrap gap-1.5">
     {items.map((x) => (
       <span
         key={x}
-        className={`rounded-lg px-2.5 py-1 text-[11px] font-medium ${tone === "blue"
+        className={`rounded-lg px-2.5 py-1 text-[11px] font-medium ${
+          tone === "blue"
             ? "bg-blue-50 text-blue-700"
             : "bg-indigo-50 text-indigo-700"
-          }`}
+        }`}
       >
         {x}
       </span>
@@ -511,10 +528,11 @@ const GroupDetailsModal = ({ bookingId, onClose }) => {
                   <button
                     type="button"
                     onClick={() => setSelected(i)}
-                    className={`flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition ${i === selected
+                    className={`flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition ${
+                      i === selected
                         ? "bg-blue-50 ring-1 ring-blue-200"
                         : "hover:bg-slate-50"
-                      }`}
+                    }`}
                   >
                     <Avatar p={p} size="h-9 w-9" text="text-xs" />
                     <span className="min-w-0 flex-1">
@@ -639,7 +657,7 @@ const MentorSessions = () => {
       .then((d) => {
         if (!cancelled && d?.counts) setUnreadCounts(d.counts);
       })
-      .catch(() => { });
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -912,10 +930,11 @@ const MentorSessions = () => {
                   key={tab}
                   type="button"
                   onClick={() => setActiveTab(tab)}
-                  className={`flex items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2.5 text-sm font-medium transition ${active
+                  className={`flex items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2.5 text-sm font-medium transition ${
+                    active
                       ? "bg-blue-600 text-white shadow-sm"
                       : "text-slate-500 hover:bg-blue-50 hover:text-blue-600"
-                    }`}
+                  }`}
                 >
                   {tab}
                   <span
@@ -1042,7 +1061,7 @@ const SessionCard = ({
   const isCancelled = session.status === "Cancelled";
 
   const memberCount = session.members || 1;
-  const isGroup = memberCount > 1 || session.mode === "group";
+  const isGroup = isGroupSession(session);
   const names =
     session.memberNames && session.memberNames.length
       ? session.memberNames
@@ -1054,15 +1073,9 @@ const SessionCard = ({
 
   // Ensure we find an image in the session object, or fallback to the dedicated endpoint
   const initialImage =
-    fixUrl(session.avatar) ||
-    fixUrl(session.image) ||
-    findImage(session);
+    fixUrl(session.avatar) || fixUrl(session.image) || findImage(session);
 
-  const fresherPhoto = usePersonImage(
-    session.id,
-    initialImage,
-    true
-  );
+  const fresherPhoto = usePersonImage(session.id, initialImage, true);
 
   const base = getJoinStatus(session, nowMs);
 
@@ -1157,24 +1170,20 @@ const SessionCard = ({
               </h3>
               <p className="mt-0.5 text-xs text-slate-500">
                 {isGroup
-                  ? `Group session · ${memberCount} freshers joined`
+                  ? `${memberCount}${session.maxMembers ? `/${session.maxMembers}` : ""} freshers joined`
                   : session.role}
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
-                {isGroup && (
-                  <span className="rounded-lg bg-indigo-50 px-2.5 py-1 text-[10px] font-semibold text-indigo-700">
-                    Group · {memberCount}
-                    {session.maxMembers ? `/${session.maxMembers}` : ""} members
-                  </span>
-                )}
+                <SessionBadge
+                  group={isGroup}
+                  members={memberCount}
+                  maxMembers={session.maxMembers}
+                />
                 {session.topic && (
-                  <span className="rounded-lg bg-blue-50 px-2.5 py-1 text-[10px] font-medium text-blue-600">
+                  <span className="rounded-lg bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-600">
                     {session.topic}
                   </span>
                 )}
-                <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-[10px] font-medium text-slate-500">
-                  {isGroup ? "Group Video Call" : session.type}
-                </span>
               </div>
             </div>
           </div>
@@ -1195,23 +1204,28 @@ const SessionCard = ({
               label="Duration"
               value={session.duration}
             />
-            {/* Custom "You earn" Box Design */}
+            {/* "You earn" box */}
             <div className="rounded-xl border border-slate-100 bg-white p-3 shadow-sm">
               <div className="flex items-center gap-1.5 text-slate-400">
                 <Star size={15} />
-                <span className="text-[10px] font-medium">{isGroup ? "You earn (total)" : "You earn"}</span>
+                <span className="text-[10px] font-medium">
+                  {isGroup ? "You earn (total)" : "You earn"}
+                </span>
               </div>
-              <p className="mt-1.5 text-base font-bold text-slate-800">{inr(session.earning ?? 0)}</p>
+              <p className="mt-1.5 text-base font-bold text-slate-800">
+                {inr(session.earning ?? 0)}
+              </p>
             </div>
           </div>
         </div>
 
         {timerRunning && (
           <div
-            className={`mt-4 flex items-center justify-between gap-4 rounded-xl border p-3 ${isFinalWarning
+            className={`mt-4 flex items-center justify-between gap-4 rounded-xl border p-3 ${
+              isFinalWarning
                 ? "border-amber-200 bg-amber-50"
                 : "border-emerald-200 bg-emerald-50"
-              }`}
+            }`}
           >
             <div className="flex items-center gap-2.5">
               {isFinalWarning ? (
@@ -1242,10 +1256,11 @@ const SessionCard = ({
               </div>
             </div>
             <div
-              className={`rounded-lg px-3 py-1.5 font-mono text-xl font-bold tabular-nums ${isFinalWarning
+              className={`rounded-lg px-3 py-1.5 font-mono text-xl font-bold tabular-nums ${
+                isFinalWarning
                   ? "bg-amber-200 text-amber-900"
                   : "bg-emerald-200 text-emerald-900"
-                }`}
+              }`}
             >
               {fmtClock(remaining)}
             </div>
