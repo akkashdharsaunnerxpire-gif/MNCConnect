@@ -477,9 +477,7 @@ export default function SessionBoard() {
 
   const totalWallet = Math.max(0, Number(me?.walletBalance) || 0);
   // group sessions: only real cash balance, no bonus / referral credit
-  const walletBalance = isGroup
-    ? Math.max(0, Number(me?.refundableBalance) || 0)
-    : totalWallet;
+  const walletBalance = totalWallet;
 
   const profileGender = cleanGender(me?.gender) || cleanGender(user?.gender);
   const effectiveGender = isGroup
@@ -1234,8 +1232,7 @@ export default function SessionBoard() {
                     <p className="mt-1">
                       At least {Math.min(f.members, MIN_GROUP)} people must have
                       paid 15 minutes before the start. Otherwise the group is
-                      cancelled and everyone is refunded. Welcome bonus and
-                      referral credit cannot be used for group sessions.
+                      cancelled and everyone is refunded.
                     </p>
                   </div>
                 </div>
@@ -1688,9 +1685,6 @@ export default function SessionBoard() {
                               ? `Not enough balance. You need ${inr(price - walletBalance)} more.`
                               : "Your wallet is empty."
                             : `No extra fee. Balance after booking: ${inr(walletAfter)}`}
-                        {isGroup && me
-                          ? " Group sessions use cash balance only."
-                          : ""}
                       </span>
                     </span>
                   </button>
