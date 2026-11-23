@@ -28,7 +28,7 @@ export const EVENTS = {
 
 export const NOTIFICATIONS_CHANGED = "fresher:notifications-changed";
 
-export const PRICE_PER_30_MIN = 200; // ₹400 / hour. Keep equal to PRICE_PER_30_MIN on the server.
+export const PRICE_PER_30_MIN = 175; // Rs 350 / hour. Keep equal to RATE_PER_HOUR / 2 on the server. // ₹400 / hour. Keep equal to PRICE_PER_30_MIN on the server.
 export const priceFor = (minutes) => (minutes / 30) * PRICE_PER_30_MIN;
 
 export const DURATIONS = [30, 60, 90, 120, 150, 180, 210, 240];
@@ -168,8 +168,10 @@ export const startFrom = (isoDate, hhmm) =>
 
 export const fmtClock = (ms) => {
   const s = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(s / 3600);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
   const m = Math.floor((s % 3600) / 60);
   const pad = (n) => String(n).padStart(2, "0");
+  if (d > 0) return `${d}d ${h}h`;
   return h > 0 ? `${h}:${pad(m)}:${pad(s % 60)}` : `${pad(m)}:${pad(s % 60)}`;
 };

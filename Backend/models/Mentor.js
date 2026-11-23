@@ -77,6 +77,7 @@ const mentorSchema = new mongoose.Schema(
     rating: { type: Number, default: 0, min: 0, max: 5 },
     totalReviews: { type: Number, default: 0, min: 0 },
     totalSessions: { type: Number, default: 0, min: 0 },
+      missedSessions: { type: Number, default: 0, min: 0 },
 
     lastLoginAt: { type: Date, default: null },
     passwordResetToken: { type: String, default: undefined, select: false },

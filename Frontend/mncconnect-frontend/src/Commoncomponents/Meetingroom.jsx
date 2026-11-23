@@ -6,17 +6,17 @@
 // Backend: POST /bookings/:id/livekit-token must work for BOTH modes.
 //   Identity: mentor => "mentor:<id>", fresher => "fresher:<id>".
 //
-// POPUPS (FIXED)
-//   - Mentor: "Meeting Success" button appears in the last 3 minutes (always visible, no stale state)
+// FULLSCREEN FIX
+//   - exitFs() exits full screen safely (awaited)
+//   - when the meeting is finished (ended / awaiting_confirmation / post_review / error)
+//     full screen is exited AUTOMATICALLY, so the buttons always work
+//   - leaveRoom() waits for the full screen exit, then navigates
+//
+// POPUPS
+//   - Mentor: "Meeting Success" button appears in the last 3 minutes
 //   - Fresher (single) / group HOST: "Did the session go well?" appears ONLY after the mentor clicked
-//        Yes -> confirmed
-//        No  -> valid reason -> "Are you sure?" (OK / Cancel) -> declined (mentor can ask again)
-//        (set AUTO_ASK_FRESHER = true to ALSO ask automatically in the last 3 minutes)
-//   - Review (stars + feedback, last 1 minute)      -> EVERY fresher (host and friends)
-//   - Meeting finished and NOT confirmed            -> confirm popup is shown again:
-//        * if the fresher is still on the page  -> meeting:ended event
-//        * if the fresher re-opens the meeting link -> booking status is checked
-//        * if the fresher is on another page    -> PendingConfirmationGate shows it
+//   - Review (stars + feedback, last 1 minute) -> EVERY fresher (host and friends)
+//   - Meeting finished and NOT confirmed -> confirm popup is shown again
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
@@ -74,6 +74,14 @@ const AUTO_MEDIA_MAX = 6;
 // group gallery: tiles per page
 const GRID_PAGE = 12;
 
+// phases where the meeting is over -> full screen must be closed
+const FINISHED_PHASES = [
+  "ended",
+  "awaiting_confirmation",
+  "post_review",
+  "error",
+];
+
 const initialsOf = (name = "") =>
   String(name)
     .split(" ")
@@ -85,6 +93,19 @@ const initialsOf = (name = "") =>
 
 // gallery columns by number of tiles (rows are filled so the grid uses the whole stage)
 const colsFor = (n) => (n <= 1 ? 1 : n <= 4 ? 2 : n <= 9 ? 3 : 4);
+
+// exit full screen safely (works even if the browser says it is not in full screen)
+const exitFs = async () => {
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else if (document.webkitFullscreenElement && document.webkitExitFullscreen) {
+      document.webkitExitFullscreen();
+    }
+  } catch {
+    /* ignore */
+  }
+};
 
 /* ---------- Fresher (host / single / friend): last 1 minute, stars + feedback REQUIRED ---------- */
 const ReviewGate = ({ booking, onDone }) => {
@@ -372,6 +393,12 @@ export default function MeetingRoom() {
     }
   };
 
+  // FIX: the meeting is over (or failed) -> leave full screen automatically,
+  // so the "Back" buttons are always clickable
+  useEffect(() => {
+    if (FINISHED_PHASES.includes(phase)) exitFs();
+  }, [phase]);
+
   const joined = useRef(false);
   const retryTimer = useRef(null);
 
@@ -446,8 +473,7 @@ export default function MeetingRoom() {
       socket.off("meeting:ended", onEnded);
       socket.off("connect", onReconnect);
       // leave full screen when the meeting page closes
-      if (document.fullscreenElement)
-        document.exitFullscreen?.().catch(() => {});
+      exitFs();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookingId]);
@@ -615,7 +641,6 @@ export default function MeetingRoom() {
         if (!alive || !d.booking) return;
         setBooking(d.booking);
         // FIX: the meeting is over but nobody confirmed -> show the confirm screen
-        // (before this the page said "Session completed / confirmed" for everybody)
         if (phase === "ended" && d.booking.status === "awaiting_confirmation")
           setPhase("awaiting_confirmation");
       })
@@ -636,7 +661,7 @@ export default function MeetingRoom() {
   const inLast1 =
     clock.running && currentRemaining > 0 && currentRemaining <= REVIEW_AT_MS;
 
-  // FIX: derived value (no state + effect) so the mentor button can never get stuck hidden
+  // derived value (no state + effect) so the mentor button can never get stuck hidden
   const showSuccessBtn = isMentor && phase === "in" && inLast3;
 
   // a new request from the mentor -> the fresher may answer again
@@ -696,8 +721,6 @@ export default function MeetingRoom() {
     !alreadyReviewed;
 
   // "Did the session go well?" -> ONLY single fresher / group HOST
-  //   - when the employee clicked "Meeting Success"
-  //   - (optional) automatically in the last 3 minutes when AUTO_ASK_FRESHER = true
   const showSuccessConfirm =
     isHostFresher &&
     phase === "in" &&
@@ -757,8 +780,9 @@ export default function MeetingRoom() {
     setViewMode((v) => (v === "grid" ? "speaker" : "grid"));
   };
 
-  const leaveRoom = () => {
-    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+  // FIX: always leave full screen FIRST, then navigate (works from any screen)
+  const leaveRoom = async () => {
+    await exitFs();
     navigate(isMentor ? "/mentor/sessions" : "/Home/my-bookings");
   };
 
@@ -866,11 +890,11 @@ export default function MeetingRoom() {
               onYes={async () => {
                 await confirmSessionApi(bookingId, true);
                 if (!alreadyReviewed && booking) setPhase("post_review");
-                else leaveRoom();
+                else await leaveRoom();
               }}
               onNo={async (reason) => {
                 await confirmSessionApi(bookingId, false, reason);
-                leaveRoom();
+                await leaveRoom();
               }}
             />
           </>

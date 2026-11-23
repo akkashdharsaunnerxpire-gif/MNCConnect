@@ -30,6 +30,7 @@ import {
   X,
 } from "lucide-react";
 import { JOIN_OPEN_MS } from "../../utils/sessionTiming";
+import LiveClock from "../../utils/LiveClock";
 import useLive from "../../hooks/useLive";
 import useUserEvents from "../../hooks/useUserEvents";
 import {
@@ -107,31 +108,26 @@ const HEADER_SURFACE = {
 /* ------------------------------------------------------------------ */
 
 const getGenderAvatarUrl = (u) => {
-  const seed = encodeURIComponent(u?.email || u?.name || u?._id || u?.id || "fresher");
-  const gender = String(u?.gender || "").trim().toLowerCase();
-  if (gender.startsWith("m")) return `https://avatar.iran.liara.run/public/boy?username=${seed}`;
-  if (gender.startsWith("f")) return `https://avatar.iran.liara.run/public/girl?username=${seed}`;
+  const seed = encodeURIComponent(
+    u?.email || u?.name || u?._id || u?.id || "fresher",
+  );
+  const gender = String(u?.gender || "")
+    .trim()
+    .toLowerCase();
+  if (gender.startsWith("m"))
+    return `https://avatar.iran.liara.run/public/boy?username=${seed}`;
+  if (gender.startsWith("f"))
+    return `https://avatar.iran.liara.run/public/girl?username=${seed}`;
   return `https://api.dicebear.com/9.x/personas/svg?seed=${seed}&backgroundType=solid&backgroundColor=dbeafe`;
 };
 
-const resolveAvatar = (u) => (u ? getRawAvatarUrl(u) || getGenderAvatarUrl(u) : null);
+const resolveAvatar = (u) =>
+  u ? getRawAvatarUrl(u) || getGenderAvatarUrl(u) : null;
 
 const toMs = (v) => {
   if (v === undefined || v === null || v === "") return null;
   const n = typeof v === "number" ? v : Date.parse(v);
   return Number.isFinite(n) ? n : null;
-};
-
-const countdown = (ms) => {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  const d = Math.floor(s / 86400);
-  const h = Math.floor((s % 86400) / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  const pad = (n) => String(n).padStart(2, "0");
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${pad(m)}m`;
-  return `${pad(m)}:${pad(sec)}`;
 };
 
 // Always-latest callback with a stable identity, so memoized children
@@ -170,17 +166,6 @@ const LogoMark = ({ size = 40 }) => (
   </svg>
 );
 
-/* Ticks on its own, so only this tiny node re-renders every second
-   instead of the whole header. */
-const Countdown = ({ target }) => {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick((n) => n + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
-  return <>{countdown(target - Date.now())}</>;
-};
-
 const Avatar = ({ src, initial, iconSize = 17 }) => {
   const [failed, setFailed] = useState(false);
 
@@ -199,7 +184,11 @@ const Avatar = ({ src, initial, iconSize = 17 }) => {
       />
     );
   }
-  return initial ? <span>{initial}</span> : <User size={iconSize} className="text-[#444746]" />;
+  return initial ? (
+    <span>{initial}</span>
+  ) : (
+    <User size={iconSize} className="text-[#444746]" />
+  );
 };
 
 const GuideHand = ({ getTarget, title, text, onSkip }) => {
@@ -215,7 +204,10 @@ const GuideHand = ({ getTarget, title, text, onSkip }) => {
         return;
       }
       const r = el.getBoundingClientRect();
-      const next = { x: Math.round(r.left + r.width / 2), y: Math.round(r.bottom) };
+      const next = {
+        x: Math.round(r.left + r.width / 2),
+        y: Math.round(r.bottom),
+      };
       setPos((p) => (p && p.x === next.x && p.y === next.y ? p : next));
     };
 
@@ -232,7 +224,10 @@ const GuideHand = ({ getTarget, title, text, onSkip }) => {
     update();
     const id = setInterval(update, 250);
     window.addEventListener("resize", onScrollOrResize);
-    window.addEventListener("scroll", onScrollOrResize, { capture: true, passive: true });
+    window.addEventListener("scroll", onScrollOrResize, {
+      capture: true,
+      passive: true,
+    });
     return () => {
       clearInterval(id);
       if (raf) cancelAnimationFrame(raf);
@@ -300,7 +295,9 @@ const useSlidePill = (activeKey) => {
     }
     const x = el.offsetLeft;
     const w = el.offsetWidth;
-    setBox((p) => (p && p.x === x && p.w === w ? p : { x, w, anim: Boolean(p) }));
+    setBox((p) =>
+      p && p.x === x && p.w === w ? p : { x, w, anim: Boolean(p) },
+    );
   }, [activeKey]);
 
   useLayoutEffect(() => {
@@ -334,9 +331,10 @@ const SlidePill = ({ box }) => (
       width: box ? box.w : 0,
       opacity: box ? 1 : 0,
       transform: `translate3d(${box ? box.x : 0}px,0,0)`,
-      transition: box && box.anim
-        ? "transform 320ms cubic-bezier(0.22,1,0.36,1), width 320ms cubic-bezier(0.22,1,0.36,1)"
-        : "none",
+      transition:
+        box && box.anim
+          ? "transform 320ms cubic-bezier(0.22,1,0.36,1), width 320ms cubic-bezier(0.22,1,0.36,1)"
+          : "none",
       willChange: "transform",
     }}
   />
@@ -368,7 +366,10 @@ const CountUp = ({ value, instant = false }) => {
     let raf;
     const tick = (t) => {
       const p = Math.min((t - t0) / 800, 1);
-      const v = p === 1 ? value : Math.round(a + (value - a) * (1 - Math.pow(1 - p, 3)));
+      const v =
+        p === 1
+          ? value
+          : Math.round(a + (value - a) * (1 - Math.pow(1 - p, 3)));
       from.current = v;
       setShown(v);
       if (p < 1) raf = requestAnimationFrame(tick);
@@ -394,18 +395,26 @@ const NotificationRow = React.memo(function NotificationRow({ n, onOpen }) {
         n.read ? "bg-transparent" : "bg-[#EDF2FA]"
       }`}
     >
-      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${cls}`}>
+      <div
+        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${cls}`}
+      >
         <Icon size={18} />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-2">
-          <h3 className={`text-sm text-[#1F1F1F] ${n.read ? "font-medium" : "font-semibold"}`}>
+          <h3
+            className={`text-sm text-[#1F1F1F] ${n.read ? "font-medium" : "font-semibold"}`}
+          >
             {n.title}
           </h3>
-          {!n.read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[#0B57D0]" />}
+          {!n.read && (
+            <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[#0B57D0]" />
+          )}
         </div>
         <p className="mt-0.5 text-xs leading-5 text-[#444746]">{n.message}</p>
-        <p className="mt-1 text-[10px] font-medium text-[#747775]">{timeAgo(n.createdAt)}</p>
+        <p className="mt-1 text-[10px] font-medium text-[#747775]">
+          {timeAgo(n.createdAt)}
+        </p>
       </div>
     </button>
   );
@@ -424,8 +433,12 @@ const NotificationsPopup = React.memo(function NotificationsPopup({
   const [filter, setFilter] = useState("all");
 
   const shown = useMemo(
-    () => (filter === "unread" ? notifications.filter((n) => !n.read) : notifications).slice(0, 8),
-    [filter, notifications]
+    () =>
+      (filter === "unread"
+        ? notifications.filter((n) => !n.read)
+        : notifications
+      ).slice(0, 8),
+    [filter, notifications],
   );
 
   return (
@@ -469,7 +482,9 @@ const NotificationsPopup = React.memo(function NotificationsPopup({
                   <ArrowLeft size={20} />
                 </button>
                 <div>
-                  <h2 className="text-base font-semibold text-[#1F1F1F]">Notifications</h2>
+                  <h2 className="text-base font-semibold text-[#1F1F1F]">
+                    Notifications
+                  </h2>
                   <p className="text-xs text-[#444746]">{unreadCount} unread</p>
                 </div>
               </div>
@@ -497,7 +512,10 @@ const NotificationsPopup = React.memo(function NotificationsPopup({
             <div className="flex gap-2 px-4 pb-3 pt-1" role="tablist">
               {[
                 { id: "all", label: "All" },
-                { id: "unread", label: `Unread${unreadCount ? ` (${unreadCount})` : ""}` },
+                {
+                  id: "unread",
+                  label: `Unread${unreadCount ? ` (${unreadCount})` : ""}`,
+                },
               ].map((t) => (
                 <button
                   key={t.id}
@@ -528,10 +546,14 @@ const NotificationsPopup = React.memo(function NotificationsPopup({
             >
               {shown.length === 0 ? (
                 <p className="px-4 py-10 text-center text-sm text-[#747775]">
-                  {filter === "unread" ? "You're all caught up" : "No notifications yet"}
+                  {filter === "unread"
+                    ? "You're all caught up"
+                    : "No notifications yet"}
                 </p>
               ) : (
-                shown.map((n) => <NotificationRow key={n.id} n={n} onOpen={onOpenItem} />)
+                shown.map((n) => (
+                  <NotificationRow key={n.id} n={n} onOpen={onOpenItem} />
+                ))
               )}
             </div>
 
@@ -570,7 +592,9 @@ const Header = () => {
   const [reminder, setReminder] = useState(null);
   const [dismissedId, setDismissedId] = useState(null);
   const [now, setNow] = useState(Date.now());
-  const [online, setOnline] = useState(typeof navigator === "undefined" ? true : navigator.onLine);
+  const [online, setOnline] = useState(
+    typeof navigator === "undefined" ? true : navigator.onLine,
+  );
   const [toasts, setToasts] = useState([]);
   const [ring, setRing] = useState(0);
   const [hold, setHold] = useState(null);
@@ -642,7 +666,9 @@ const Header = () => {
   const avatarSrc = getRawAvatarUrl(me);
 
   const profileStatus = useMemo(() => getProfileStatus(me), [me]);
-  const onProfilePage = location.pathname.toLowerCase().startsWith("/home/profile");
+  const onProfilePage = location.pathname
+    .toLowerCase()
+    .startsWith("/home/profile");
   const guideKey = getGuideKey(userId);
 
   /* ---- profile guide ---- */
@@ -679,10 +705,16 @@ const Header = () => {
     }
   };
 
-  const showGuide = Boolean(me) && guideReady && !guideSeen && !profileStatus.ok && !onProfilePage;
+  const showGuide =
+    Boolean(me) &&
+    guideReady &&
+    !guideSeen &&
+    !profileStatus.ok &&
+    !onProfilePage;
 
   const getGuideTarget = () => {
-    const visible = (el) => (el && el.getBoundingClientRect().width > 0 ? el : null);
+    const visible = (el) =>
+      el && el.getBoundingClientRect().width > 0 ? el : null;
     return (
       (menuOpen ? visible(profileItemRef.current) : null) ||
       visible(profileBtnRef.current) ||
@@ -690,7 +722,8 @@ const Header = () => {
     );
   };
 
-  const guideOnItem = menuOpen && Boolean(profileItemRef.current?.getBoundingClientRect().width);
+  const guideOnItem =
+    menuOpen && Boolean(profileItemRef.current?.getBoundingClientRect().width);
 
   useEffect(() => {
     if (typeof reloadMe !== "function") return undefined;
@@ -724,9 +757,10 @@ const Header = () => {
 
   const notifications = useMemo(
     () => (data?.notifications || []).map((n) => ({ ...n, id: n.id || n._id })),
-    [data]
+    [data],
   );
-  const unreadCount = data?.unreadCount ?? notifications.filter((n) => !n.read).length;
+  const unreadCount =
+    data?.unreadCount ?? notifications.filter((n) => !n.read).length;
 
   /* ---- bookings ---- */
   const { data: bookingData } = useLive({
@@ -761,7 +795,10 @@ const Header = () => {
     for (const v of boundaries) if (v > t && v < next) next = v;
     if (next === Infinity) return undefined;
     // cap at 1h so very distant sessions never overflow setTimeout
-    const id = setTimeout(() => setNow(Date.now()), Math.min(next - t, 3600000) + 50);
+    const id = setTimeout(
+      () => setNow(Date.now()),
+      Math.min(next - t, 3600000) + 50,
+    );
     return () => clearTimeout(id);
   }, [boundaries, now]);
 
@@ -774,17 +811,17 @@ const Header = () => {
       bookings
         .filter((b) => b.status === "accepted" && (toMs(b.endsAt) ?? 0) > now)
         .sort((a, b) => (toMs(a.startsAt) ?? 0) - (toMs(b.startsAt) ?? 0)),
-    [bookings, now]
+    [bookings, now],
   );
 
   const pendingCount = bookings.filter(
-    (b) => b.status === "pending" && (toMs(b.expiresAt) ?? Infinity) > now
+    (b) => b.status === "pending" && (toMs(b.expiresAt) ?? Infinity) > now,
   ).length;
 
   // Sessions still waiting (room not open yet) -> "My Bookings" badge
   // Sessions whose room is open (start - JOIN_OPEN_MS) -> "Meetings" badge
   const waitingCount = upcoming.filter(
-    (b) => (toMs(b.startsAt) ?? 0) - now > JOIN_OPEN_MS
+    (b) => (toMs(b.startsAt) ?? 0) - now > JOIN_OPEN_MS,
   ).length;
   const meetingsCount = upcoming.length - waitingCount;
 
@@ -796,7 +833,11 @@ const Header = () => {
   const nextId = nextBooking?.requestGroupId || nextBooking?.id;
 
   const reminderFresh =
-    reminder && !(toMs(reminder.startsAt) && now - toMs(reminder.startsAt) > REMINDER_STALE_MS);
+    reminder &&
+    !(
+      toMs(reminder.startsAt) &&
+      now - toMs(reminder.startsAt) > REMINDER_STALE_MS
+    );
   const banner = reminderFresh
     ? { id: reminder.requestGroupId, startsAt: toMs(reminder.startsAt) }
     : joinOpen
@@ -834,7 +875,10 @@ const Header = () => {
     fresh.slice(0, 2).forEach((n) => {
       setToasts((t) => [n, ...t.filter((x) => x.id !== n.id)].slice(0, 3));
       timers.current.push(
-        setTimeout(() => setToasts((t) => t.filter((x) => x.id !== n.id)), TOAST_MS)
+        setTimeout(
+          () => setToasts((t) => t.filter((x) => x.id !== n.id)),
+          TOAST_MS,
+        ),
       );
     });
   }, [data]);
@@ -869,14 +913,18 @@ const Header = () => {
         ...(d || {}),
         unreadCount: Math.max(0, (d?.unreadCount || 1) - 1),
         notifications: (d?.notifications || []).map((x) =>
-          (x.id || x._id) === n.id ? { ...x, read: true } : x
+          (x.id || x._id) === n.id ? { ...x, read: true } : x,
         ),
       }));
       api(ENDPOINTS.notificationRead(n.id), { method: "PATCH" }).catch(reload);
     }
     setToasts((t) => t.filter((x) => x.id !== n.id));
     setShowNotifications(false);
-    if (typeof n.link === "string" && n.link.startsWith("/") && !n.link.startsWith("//")) {
+    if (
+      typeof n.link === "string" &&
+      n.link.startsWith("/") &&
+      !n.link.startsWith("//")
+    ) {
       navigate(n.link);
     }
   };
@@ -885,9 +933,14 @@ const Header = () => {
     setData((d) => ({
       ...(d || {}),
       unreadCount: 0,
-      notifications: (d?.notifications || []).map((x) => ({ ...x, read: true })),
+      notifications: (d?.notifications || []).map((x) => ({
+        ...x,
+        read: true,
+      })),
     }));
-    api(ENDPOINTS.notificationsReadAll || "/fresher/notifications/read-all", { method: "PATCH" })
+    api(ENDPOINTS.notificationsReadAll || "/fresher/notifications/read-all", {
+      method: "PATCH",
+    })
       .then(() => window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED)))
       .catch(reload);
   };
@@ -913,7 +966,8 @@ const Header = () => {
   useEffect(() => {
     if (!menuOpen) return undefined;
     const onDown = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+      if (menuRef.current && !menuRef.current.contains(e.target))
+        setMenuOpen(false);
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
@@ -949,7 +1003,9 @@ const Header = () => {
   const stableClose = useCallback(() => setShowNotifications(false), []);
 
   const isActive = (item) =>
-    item.exact ? location.pathname === item.path : location.pathname.startsWith(item.path);
+    item.exact
+      ? location.pathname === item.path
+      : location.pathname.startsWith(item.path);
 
   const activeNavPath = NAV_ITEMS.find(isActive)?.path ?? null;
   const islandNav = useSlidePill(activeNavPath);
@@ -965,12 +1021,20 @@ const Header = () => {
           : 0;
 
   const initial = userName ? userName.charAt(0).toUpperCase() : "";
-  const bellActive = location.pathname.toLowerCase().startsWith("/home/notifications");
+  const bellActive = location.pathname
+    .toLowerCase()
+    .startsWith("/home/notifications");
 
   /* ---- session chip (next session / waiting for employee) ----
      variant: "pill" (separate pill beside the bell, desktop), "block" (full-width, mobile menu) */
   const chipKind =
-    nextBooking && nextId ? (joinOpen ? "join" : "next") : pendingCount > 0 ? "pending" : null;
+    nextBooking && nextId
+      ? joinOpen
+        ? "join"
+        : "next"
+      : pendingCount > 0
+        ? "pending"
+        : null;
 
   const renderSessionChip = (variant = "pill") => {
     const block = variant === "block";
@@ -990,7 +1054,8 @@ const Header = () => {
             <span className="absolute inline-flex h-full w-full rounded-full bg-white opacity-70 motion-safe:animate-ping" />
             <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
           </span>
-          <Video size={14} /> {msToStart <= 0 ? "Join live session" : "Join now"}
+          <Video size={14} />{" "}
+          {msToStart <= 0 ? "Join live session" : "Join now"}
         </button>
       );
     }
@@ -1008,9 +1073,15 @@ const Header = () => {
           }
         >
           <Clock3 size={14} className="text-[#0B57D0]" />
-          <span className={block ? "" : "hidden xl:inline"}>Next session in</span>{" "}
+          <span className={block ? "" : "hidden xl:inline"}>
+            Room opens in
+          </span>{" "}
           <span className="font-mono tabular-nums">
-            {nextStart !== null ? <Countdown target={nextStart} /> : "--"}
+            {nextStart !== null ? (
+              <LiveClock target={nextStart - JOIN_OPEN_MS} />
+            ) : (
+              "--"
+            )}
           </span>
         </button>
       );
@@ -1027,7 +1098,8 @@ const Header = () => {
               : "inline-flex h-10 items-center gap-2 rounded-full bg-[#FEEFC3] px-4 text-xs font-semibold text-[#4D3800] transition-colors hover:bg-[#FBE5A0]"
           }
         >
-          <Loader2 size={14} className="motion-safe:animate-spin" /> Waiting for employee
+          <Loader2 size={14} className="motion-safe:animate-spin" /> Waiting for
+          employee
           {pendingCount > 1 ? ` (${pendingCount})` : ""}
         </button>
       );
@@ -1102,7 +1174,11 @@ const Header = () => {
                         <Icon size={17} />
                         {item.label}
                         {item.badge && (
-                          <Badge count={badgeFor(item.badge)} tone="amber" ring="ring-[#E9EEF6]" />
+                          <Badge
+                            count={badgeFor(item.badge)}
+                            tone="amber"
+                            ring="ring-[#E9EEF6]"
+                          />
                         )}
                       </span>
                     </Link>
@@ -1158,7 +1234,11 @@ const Header = () => {
                   <Wallet size={15} />
                 </span>
                 <span className="text-sm font-semibold text-[#B06000]">
-                  {me ? <CountUp value={balance} instant={hold !== null} /> : "₹–"}
+                  {me ? (
+                    <CountUp value={balance} instant={hold !== null} />
+                  ) : (
+                    "₹–"
+                  )}
                 </span>
               </motion.button>
 
@@ -1171,7 +1251,9 @@ const Header = () => {
                   aria-expanded={menuOpen}
                   aria-label="Profile menu"
                   className={`flex h-10 items-center gap-1 rounded-full py-1 pl-1 pr-2.5 transition-colors ${
-                    menuOpen ? "bg-[#DDE3EA]" : "bg-[#E9EEF6] hover:bg-[#DDE3EA]"
+                    menuOpen
+                      ? "bg-[#DDE3EA]"
+                      : "bg-[#E9EEF6] hover:bg-[#DDE3EA]"
                   }`}
                 >
                   <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-[#D3E3FD] text-sm font-semibold text-[#0B57D0]">
@@ -1196,13 +1278,19 @@ const Header = () => {
                     >
                       <div className="mb-1 flex items-center gap-3 rounded-[22px] bg-white px-3.5 py-3">
                         <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#D3E3FD] text-base font-semibold text-[#0B57D0]">
-                          <Avatar src={avatarSrc} initial={initial} iconSize={22} />
+                          <Avatar
+                            src={avatarSrc}
+                            initial={initial}
+                            iconSize={22}
+                          />
                         </span>
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold text-[#1F1F1F]">
                             {userName || "My account"}
                           </p>
-                          <p className="mt-0.5 text-xs text-[#444746]">Bonus balance ₹{balance}</p>
+                          <p className="mt-0.5 text-xs text-[#444746]">
+                            Bonus balance ₹{balance}
+                          </p>
                         </div>
                       </div>
 
@@ -1210,13 +1298,18 @@ const Header = () => {
                         {MENU_ITEMS.map(({ path, label, icon: Icon }) => (
                           <button
                             key={label}
-                            ref={path === "/Home/profile" ? profileItemRef : undefined}
+                            ref={
+                              path === "/Home/profile"
+                                ? profileItemRef
+                                : undefined
+                            }
                             type="button"
                             role="menuitem"
                             onClick={() => go(path)}
                             className="flex w-full items-center gap-3 rounded-full px-4 py-3 text-left text-sm font-medium text-[#1F1F1F] transition-colors hover:bg-[#E1E8F2]"
                           >
-                            <Icon size={18} className="text-[#444746]" /> {label}
+                            <Icon size={18} className="text-[#444746]" />{" "}
+                            {label}
                           </button>
                         ))}
                         <div className="mx-3 my-1 border-t border-[#C4C7C5]/60" />
@@ -1295,7 +1388,8 @@ const Header = () => {
                   role="alert"
                 >
                   <div className="flex items-center justify-center gap-2 px-4 py-2 text-xs font-medium">
-                    <WifiOff size={14} /> You're offline. Live updates will resume when you reconnect.
+                    <WifiOff size={14} /> You're offline. Live updates will
+                    resume when you reconnect.
                   </div>
                 </motion.div>
               )}
@@ -1321,18 +1415,26 @@ const Header = () => {
                       className="mb-2 flex w-full items-center gap-3 rounded-[22px] bg-white px-3 py-3 text-left"
                     >
                       <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#D3E3FD] text-lg font-semibold text-[#0B57D0]">
-                        <Avatar src={avatarSrc} initial={initial} iconSize={22} />
+                        <Avatar
+                          src={avatarSrc}
+                          initial={initial}
+                          iconSize={22}
+                        />
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-semibold text-[#1F1F1F]">
                           {userName || "My account"}
                         </span>
-                        <span className="block text-xs text-[#444746]">View profile</span>
+                        <span className="block text-xs text-[#444746]">
+                          View profile
+                        </span>
                       </span>
                       <ChevronRight size={18} className="text-[#747775]" />
                     </button>
 
-                    {chipKind && <div className="mb-2">{renderSessionChip("block")}</div>}
+                    {chipKind && (
+                      <div className="mb-2">{renderSessionChip("block")}</div>
+                    )}
 
                     {NAV_ITEMS.map((item) => {
                       const Icon = item.icon;
@@ -1358,18 +1460,18 @@ const Header = () => {
                       );
                     })}
 
-                    {MENU_ITEMS.filter((m) => !NAV_ITEMS.some((n) => n.path === m.path)).map(
-                      ({ path, label, icon: Icon }) => (
-                        <button
-                          key={label}
-                          type="button"
-                          onClick={() => go(path)}
-                          className="flex w-full items-center gap-3 rounded-full px-4 py-3 text-left text-sm font-medium text-[#1F1F1F] transition-colors hover:bg-[#E1E8F2]"
-                        >
-                          <Icon size={18} /> {label}
-                        </button>
-                      )
-                    )}
+                    {MENU_ITEMS.filter(
+                      (m) => !NAV_ITEMS.some((n) => n.path === m.path),
+                    ).map(({ path, label, icon: Icon }) => (
+                      <button
+                        key={label}
+                        type="button"
+                        onClick={() => go(path)}
+                        className="flex w-full items-center gap-3 rounded-full px-4 py-3 text-left text-sm font-medium text-[#1F1F1F] transition-colors hover:bg-[#E1E8F2]"
+                      >
+                        <Icon size={18} /> {label}
+                      </button>
+                    ))}
 
                     <button
                       type="button"
@@ -1379,7 +1481,9 @@ const Header = () => {
                       <span className="flex items-center gap-3 text-sm font-medium text-[#B06000]">
                         <Wallet size={18} /> Bonus Wallet
                       </span>
-                      <span className="text-sm font-semibold text-[#B06000]">₹{balance}</span>
+                      <span className="text-sm font-semibold text-[#B06000]">
+                        ₹{balance}
+                      </span>
                     </button>
 
                     <button
@@ -1414,8 +1518,12 @@ const Header = () => {
                         ) : (
                           <>
                             Your session starts in{" "}
-                            {bannerMs !== null ? <Countdown target={banner.startsAt} /> : "20 minutes"}. The
-                            meeting room is open.
+                            {bannerMs !== null ? (
+                              <LiveClock target={banner.startsAt} />
+                            ) : (
+                              "20 minutes"
+                            )}
+                            . The meeting room is open.
                           </>
                         )}
                       </span>
@@ -1475,7 +1583,11 @@ const Header = () => {
                     <Icon size={19} />
                     {item.badge && badgeFor(item.badge) > 0 && (
                       <span className="absolute -right-2.5 -top-1.5">
-                        <Badge count={badgeFor(item.badge)} tone="amber" ring="ring-[#E9EEF6]" />
+                        <Badge
+                          count={badgeFor(item.badge)}
+                          tone="amber"
+                          ring="ring-[#E9EEF6]"
+                        />
                       </span>
                     )}
                   </span>
@@ -1509,7 +1621,8 @@ const Header = () => {
         <AnimatePresence>
           {toasts.map((n) => {
             const { icon: Icon, cls } = styleFor(n.type);
-            const dismissToast = () => setToasts((t) => t.filter((x) => x.id !== n.id));
+            const dismissToast = () =>
+              setToasts((t) => t.filter((x) => x.id !== n.id));
             return (
               <motion.button
                 key={n.id}
@@ -1521,11 +1634,15 @@ const Header = () => {
                 onClick={() => openNotification(n)}
                 className="pointer-events-auto flex w-full gap-3 rounded-[20px] bg-[#F0F4F9] p-3.5 text-left shadow-[0_4px_16px_rgba(0,0,0,0.2)] transition-colors hover:bg-[#E9EEF6]"
               >
-                <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${cls}`}>
+                <span
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${cls}`}
+                >
                   <Icon size={18} />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-semibold text-[#1F1F1F]">{n.title}</span>
+                  <span className="block text-sm font-semibold text-[#1F1F1F]">
+                    {n.title}
+                  </span>
                   <span className="mt-0.5 line-clamp-2 block text-xs leading-5 text-[#444746]">
                     {n.message}
                   </span>

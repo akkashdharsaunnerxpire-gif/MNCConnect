@@ -2,9 +2,21 @@ const mongoose = require("mongoose");
 
 const fresherSchema = new mongoose.Schema(
   {
-    name: { type: String, required: true, trim: true, minlength: 2, maxlength: 100 },
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+      minlength: 2,
+      maxlength: 100,
+    },
 
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+    },
     isEmailVerified: { type: Boolean, default: false },
     // sha256 HMAC of the code (never the plain OTP)
     emailOtp: { type: String, default: null },
@@ -33,10 +45,17 @@ const fresherSchema = new mongoose.Schema(
 
     // lifetime statistics only (never spendable)
     totalRefunds: { type: Number, default: 0 },
+    // dispute abuse tracking (written by confirmCompletion when the fresher reports a session)
+    disputeCount: { type: Number, default: 0, min: 0 },
+    lastDisputeAt: { type: Date, default: null },
     referralEarnings: { type: Number, default: 0 },
 
     referralCode: { type: String, unique: true, sparse: true },
-    referredBy: { type: mongoose.Schema.Types.ObjectId, ref: "Fresher", default: null },
+    referredBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Fresher",
+      default: null,
+    },
     hasUsedReferral: { type: Boolean, default: false },
     // code typed at sign-up. The reward is paid only AFTER the email is verified.
     pendingReferralCode: { type: String, default: "" },
@@ -63,6 +82,7 @@ const fresherSchema = new mongoose.Schema(
     chatPrivacyAcceptedAt: { type: Date, default: null },
     chatPrivacyVersion: { type: String, default: "" },
   },
+
   {
     timestamps: true,
     toJSON: { virtuals: true },
@@ -77,7 +97,10 @@ fresherSchema.index({ mobile: 1 }, { unique: true });
 // When the user finishes sign-up the name changes, so the account no longer matches.
 fresherSchema.index(
   { createdAt: 1 },
-  { expireAfterSeconds: 24 * 60 * 60, partialFilterExpression: { name: "Temp" } },
+  {
+    expireAfterSeconds: 24 * 60 * 60,
+    partialFilterExpression: { name: "Temp" },
+  },
 );
 
 fresherSchema.virtual("fullMobile").get(function () {

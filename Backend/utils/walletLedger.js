@@ -4,20 +4,23 @@
 //   bonusBalance      = promo credit (welcome bonus etc.)  -> NOT cash
 //   referralBalance   = referral credit                    -> NOT cash
 // Spend order: bonus -> referral -> refundable (promo money is used first).
+// opts.cashOnly = true  -> ONLY refundableBalance is used (group sessions: no promo credit).
 const Fresher = require("../models/Fresher");
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const n0 = (v) => Number(v) || 0;
 
-const planDebit = (f, amount) => {
+const planDebit = (f, amount, cashOnly = false) => {
   let left = round2(amount);
   const plan = { bonus: 0, referral: 0, refundable: 0 };
 
-  plan.bonus = round2(Math.min(n0(f.bonusBalance), left));
-  left = round2(left - plan.bonus);
+  if (!cashOnly) {
+    plan.bonus = round2(Math.min(n0(f.bonusBalance), left));
+    left = round2(left - plan.bonus);
 
-  plan.referral = round2(Math.min(n0(f.referralBalance), left));
-  left = round2(left - plan.referral);
+    plan.referral = round2(Math.min(n0(f.referralBalance), left));
+    left = round2(left - plan.referral);
+  }
 
   plan.refundable = round2(Math.min(n0(f.refundableBalance), left));
   left = round2(left - plan.refundable);
@@ -28,7 +31,8 @@ const planDebit = (f, amount) => {
 // Atomic debit (optimistic: the filter re-checks every bucket, so it can never go negative).
 // Pass a mongoose `session` to run inside a transaction.
 // returns { ok:true, plan } | { ok:false, reason:"INSUFFICIENT"|"BUSY"|"NOT_FOUND" }
-const debitWallet = async (fresherId, amount, session = null) => {
+const debitWallet = async (fresherId, amount, session = null, opts = {}) => {
+  const cashOnly = Boolean(opts.cashOnly);
   amount = round2(amount);
   if (!(amount > 0)) return { ok: false, reason: "INSUFFICIENT" };
 
@@ -39,7 +43,7 @@ const debitWallet = async (fresherId, amount, session = null) => {
       .lean();
     if (!f) return { ok: false, reason: "NOT_FOUND" };
 
-    const { plan, short } = planDebit(f, amount);
+    const { plan, short } = planDebit(f, amount, cashOnly);
     if (short > 0.001) return { ok: false, reason: "INSUFFICIENT" };
 
     const filter = { _id: fresherId };

@@ -1,26 +1,24 @@
 // controllers/bookingController.js
 // SINGLE + GROUP sessions.
-//   single : 1 fresher pays RATE_PER_HOUR
+//   single : 1 fresher pays RATE_PER_HOUR            (Rs 350 / hour)
 //   group  : host creates the booking (pays own share), friends join with an invite code
-//            and EACH pays GROUP_RATE_PER_HOUR (per person). Refunds / earnings are per payment.
+//            and EACH pays GROUP_RATE_PER_HOUR       (Rs 99 / hour / person)
 //
-// SECURITY (contact leak fix):
-//   - email / phone / linkedin of one side is NEVER sent to the other side.
-//   - POPULATE_MENTOR, MENTOR_PUBLIC_FIELDS, mentorCard, toMentorPayload, getCounterpart: email removed.
-//   - getAcceptedBookings now uses the logged-in user (no more ?email=).
-//   - Email / WhatsApp are still sent SERVER-SIDE only (emailBookingParties) and never returned in an API.
+// RULES IN THIS VERSION
+//   1. GROUP MINIMUM  : a group needs at least GROUP_MIN_MEMBERS (default 2) paid members
+//                       GROUP_FILL_CUTOFF_MIN (default 15) minutes before the start.
+//                       Not filled -> group cancelled, everybody refunded to the wallet.
+//                       With 2 or more members the session runs normally.
+//   2. DISPUTE HOLD   : fresher clicks "session not complete" -> money is held, admin decides.
+//                       If admin does nothing for DISPUTE_REVIEW_HOURS the decision is made
+//                       from PRESENCE + run time + the fresher's dispute history (autoDecisionFor).
+//   3. FRESHER NO-SHOW: employee joined, fresher did not -> no-show fee (default 50%) to the employee.
+//   4. EMPLOYEE NO-SHOW: fresher joined, employee did not -> FULL refund + strike
+//                       (3 strikes = warning, 5 strikes = account suspended).
+//   5. PRESENCE       : stamped ONLY by the LiveKit webhook (participant_joined), never by taking a token.
 //
-// REFUND FIXES (this version):
-//   1. closeAndRefund: booking is locked with refundStatus "pending" BEFORE refunding, and a
-//      crash / exception while refunding no longer leaves it stuck. (Before, a booking that was
-//      already moved to "expired" but whose refund crashed had refundStatus "" and was NEVER retried.)
-//   2. Scheduler step 4 now retries every closed booking whose refundStatus is not "refunded"
-//      (pending / failed / empty), not only "failed".
-//   3. Every scheduler step runs in its own try/catch, so one failing step (or one bad booking)
-//      can no longer block the refund steps after it.
-//   4. Scheduler watchdog: if one run hangs (DB / Razorpay call), it is released after 3 minutes
-//      instead of blocking the scheduler forever.
-//   5. refundToWalletAtomic saves the real error in Payment.refundError (visible in the DB).
+// SECURITY: email / phone / linkedin of one side is NEVER sent to the other side.
+// REFUND SAFETY: closeAndRefund locks the booking ("pending") BEFORE refunding; the scheduler retries.
 const crypto = require("crypto");
 const mongoose = require("mongoose");
 const Razorpay = require("razorpay");
@@ -31,7 +29,12 @@ const Payment = require("../models/Payment");
 const Mentor = require("../models/Mentor");
 const Fresher = require("../models/Fresher");
 const { sendMail, sessionEmail } = require("../utils/mailer");
-const { expectedPrice, MAX_GROUP } = require("../utils/sessionPrice");
+const {
+  expectedPrice,
+  MAX_GROUP,
+  RATE_PER_HOUR,
+  GROUP_RATE_PER_HOUR,
+} = require("../utils/sessionPrice");
 const { creditWallet } = require("../utils/walletLedger");
 const { sendSessionWhatsApp } = require("../utils/whatsapp");
 const SITE_URL = (
@@ -50,31 +53,32 @@ const { parseSessionStart } = require("../utils/sessionTime");
 const { splitAmount } = require("../utils/wallet");
 const {
   linkPaymentToRequest,
-  assignMentorToRequest,
   claimPayment,
   reconcileStaleOrders,
 } = require("./paymentController");
-const {
-  refundableAmountOf,
-  checkoutOf,
-  getConfig,
-  toPaise,
-  round2,
-} = require("../utils/pricing");
+const { checkoutOf, toPaise, round2 } = require("../utils/pricing");
 
 /* ============================ CONFIG ============================ */
+
+// reads a number from .env, but a real 0 stays 0 (Number(x) || default would turn 0 into default)
+const envNum = (name, def) => {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return def;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : def;
+};
 
 // What a fresher may see about a mentor. NO email, NO phone, NO linkedin.
 const MENTOR_PUBLIC_FIELDS =
   "name profilePic currentCompany designation department officeLocation yearsOfExperience languages skills bio gender isVerified";
 
-const PAYMENT_GRACE_MS = (Number(process.env.PAYMENT_GRACE_SEC) || 60) * 1000;
+const PAYMENT_GRACE_MS = envNum("PAYMENT_GRACE_SEC", 60) * 1000;
 
 const GAP_MS = 30 * 60 * 1000;
 const OPEN_BEFORE_MS = 5 * 60 * 1000;
-const PLATFORM_FEE_PERCENT = Number(process.env.PLATFORM_FEE_PERCENT || 25);
+const PLATFORM_FEE_PERCENT = envNum("PLATFORM_FEE_PERCENT", 25);
 
-const PENDING_CUTOFF_MIN = Number(process.env.PENDING_CUTOFF_MIN) || 10;
+const PENDING_CUTOFF_MIN = envNum("PENDING_CUTOFF_MIN", 10) || 10;
 const PENDING_CUTOFF_MS = PENDING_CUTOFF_MIN * 60 * 1000;
 const MIN_WAIT_MS = 2 * 60 * 1000;
 
@@ -89,22 +93,71 @@ const expiryFor = (startsAt) => {
 const MAX_REFUND_ATTEMPTS = 50;
 const REFUND_RETRY_GAP_MS = 5 * 60 * 1000;
 // a freshly closed booking is left alone this long before the scheduler retries it
-// (so the scheduler never races with the refund that is still running)
 const REFUND_RETRY_AFTER_CLOSE_MS = 2 * 60 * 1000;
 
 // scheduler watchdog: a run that hangs longer than this is released
 const SCHEDULER_STUCK_MS = 3 * 60 * 1000;
 
-const NO_SHOW_GRACE_MS =
-  (Number(process.env.NO_SHOW_GRACE_MIN) || 15) * 60 * 1000;
+const NO_SHOW_GRACE_MS = envNum("NO_SHOW_GRACE_MIN", 15) * 60 * 1000;
 
-const CONFIRM_WAIT_MS =
-  (Number(process.env.CONFIRM_WAIT_HOURS) || 24) * 60 * 60 * 1000;
+// fresher did not join but the employee did: this % of the session price is kept
+// (goes to the employee after the platform cut). 0 = always full refund, 100 = no refund.
+const FRESHER_NOSHOW_FEE_PERCENT = Math.min(
+  100,
+  Math.max(0, envNum("FRESHER_NOSHOW_FEE_PERCENT", 50)),
+);
+
+const CONFIRM_WAIT_MS = envNum("CONFIRM_WAIT_HOURS", 24) * 60 * 60 * 1000;
 const UNCONFIRMED_ACTION =
   process.env.UNCONFIRMED_ACTION === "refund" ? "refund" : "release";
+
+// DISPUTE: money is held until the admin decides. After this time the auto decision runs.
+const DISPUTE_REVIEW_MS = envNum("DISPUTE_REVIEW_HOURS", 72) * 60 * 60 * 1000;
+const DISPUTE_DEFAULT_DECISION =
+  process.env.DISPUTE_DEFAULT_DECISION === "release" ? "release" : "refund";
+
+// session ran at least this % of its length with both sides present -> release
+const DISPUTE_MIN_RUN_PERCENT = envNum("DISPUTE_MIN_RUN_PERCENT", 60);
+// a fresher with this many disputes is "flagged"
+const DISPUTE_FLAG_COUNT = envNum("DISPUTE_FLAG_COUNT", 3);
+
+// GROUP: minimum paid members (2 = host + 1 friend) and when it is checked
+const GROUP_MIN_MEMBERS = Math.max(2, envNum("GROUP_MIN_MEMBERS", 2));
+const GROUP_FILL_CUTOFF_MS = envNum("GROUP_FILL_CUTOFF_MIN", 15) * 60 * 1000;
+
+// employee strikes
+const STRIKE_WARN = envNum("MENTOR_STRIKE_WARN", 3);
+const STRIKE_SUSPEND = envNum("MENTOR_STRIKE_SUSPEND", 5);
+
 // closed (expired / missed / cancelled) + refunded bookings are deleted after this
 const CLOSED_RETENTION_MS =
-  (Number(process.env.CLOSED_RETENTION_HOURS) || 24) * 60 * 60 * 1000;
+  envNum("CLOSED_RETENTION_HOURS", 24) * 60 * 60 * 1000;
+
+// What the dispute timeout does with a dispute nobody reviewed.
+// Presence comes from the LiveKit webhook only (cannot be faked by taking a token).
+const autoDecisionFor = (b, disputeCount = 0) => {
+  const mentorHere = Boolean(b.mentorJoinedAt);
+  const fresherHere = Boolean(b.fresherJoinedAt);
+
+  // the employee never really joined -> the fresher is right
+  if (!mentorHere) return "refund";
+
+  // both were in the room and the timer ran most of the session -> not a real problem
+  const start = b.meeting?.startedAt;
+  const end = b.meeting?.endedAt;
+  if (mentorHere && fresherHere && start && end) {
+    const ranMin =
+      (new Date(end).getTime() - new Date(start).getTime()) / 60000;
+    if (ranMin >= (Number(b.durationMinutes) * DISPUTE_MIN_RUN_PERCENT) / 100)
+      return "release";
+  }
+
+  // repeat reporter and the employee was present -> release
+  if (disputeCount >= DISPUTE_FLAG_COUNT) return "release";
+
+  return DISPUTE_DEFAULT_DECISION;
+};
+
 /* ============================ HELPERS ============================ */
 
 let razorpay = null;
@@ -271,8 +324,6 @@ const emitBooking = (b) => {
 // NOTE: these are sent SERVER-SIDE. Contact details are read here, used to send
 // the message, and are never returned to any client.
 
-// the phone number can be saved under many different field names.
-// We select all of them and pick the first one that has a value.
 const CONTACT_FIELDS =
   "name email phone mobile phoneNumber whatsappNumber whatsapp mobileNumber contactNumber contact";
 
@@ -287,7 +338,6 @@ const pickPhone = (d) =>
     d.contactNumber ||
     d.contact);
 
-// Mail + WhatsApp to the freshers (host + friends) and the employee: "join 5 minutes early"
 // kind: "booked" | "reminder".  opts.only = one fresher id, opts.skipMentor = true
 const emailBookingParties = async (b, kind = "booked", opts = {}) => {
   try {
@@ -314,8 +364,6 @@ const emailBookingParties = async (b, kind = "booked", opts = {}) => {
     };
 
     const jobs = [];
-
-    // ================= FRESHER EMAIL + WHATSAPP =================
 
     for (const f of freshers) {
       const meetingUrl = `${SITE_URL}/Home/meeting/${b.requestGroupId}`;
@@ -355,8 +403,6 @@ const emailBookingParties = async (b, kind = "booked", opts = {}) => {
         );
       }
     }
-
-    // ================= MENTOR EMAIL + WHATSAPP =================
 
     if (!opts.skipMentor && mentorDoc) {
       const meetingUrl = `${SITE_URL}/mentor/meeting/${b.requestGroupId}`;
@@ -398,8 +444,6 @@ const emailBookingParties = async (b, kind = "booked", opts = {}) => {
         );
       }
     }
-
-    // ================= EXECUTE NOTIFICATIONS =================
 
     const results = await Promise.allSettled(jobs);
 
@@ -512,13 +556,21 @@ function toClient(b) {
       (b.status === "pending" ? mentorCard(b.preferredMentor) : null),
     direct: Boolean(b.preferredMentor),
     reviewed: Boolean(b.reviewed),
+    // "review" = a dispute is waiting for the admin (frontend: show "Under review")
     refundStatus: b.refundStatus || "",
+    noShowBy: b.noShowBy || "",
     closedAt: b.closedAt || null,
     remainingMs: remainingOf(b),
     timerRunning: isRunning(b),
     // ---- group ----
     mode: b.sessionMode || "single",
     maxMembers: b.maxMembers || 1,
+    minMembers: b.minMembers || 1,
+    // true while a group still has fewer paid members than it needs to start
+    needsMoreMembers:
+      isGroup(b) &&
+      ["pending", "accepted"].includes(b.status) &&
+      membersOf(b).length < (b.minMembers || 1),
     perPersonAmount: b.perPersonAmount || b.amount,
     inviteCode: isGroup(b) ? b.inviteCode || "" : "",
     hostId: b.fresher ? String(b.fresher._id || b.fresher) : "",
@@ -546,6 +598,25 @@ const isWalletPayment = (p) =>
   Boolean(p) &&
   (p.method === "wallet" ||
     String(p.razorpayPaymentId || "").startsWith("wallet_pay_"));
+
+// wallet-paid -> back to the SAME buckets (scaled for partial refunds),
+// Razorpay-paid -> refundable cash
+const walletCreditFor = (payment, back, sessionAmount) => {
+  const wb = payment.walletBreakdown || {};
+  const hasBreakdown =
+    isWalletPayment(payment) &&
+    (Number(wb.bonus) > 0 ||
+      Number(wb.referral) > 0 ||
+      Number(wb.refundable) > 0);
+
+  if (!hasBreakdown) return { refundable: back };
+
+  const ratio = sessionAmount > 0 ? back / sessionAmount : 0;
+  const bonus = round2((Number(wb.bonus) || 0) * ratio);
+  const referral = round2((Number(wb.referral) || 0) * ratio);
+  const refundable = Math.max(0, round2(back - bonus - referral));
+  return { bonus, referral, refundable };
+};
 
 // Wallet refund = "mark payment refunded" + "credit the wallet" in ONE transaction.
 // Crash in between -> everything rolls back, the scheduler retries. No lost money.
@@ -582,18 +653,7 @@ const refundToWalletAtomic = async (fresh, amount) => {
         return;
       }
 
-      // wallet-paid -> back to the SAME buckets, Razorpay-paid -> refundable cash
-      const wb = before.walletBreakdown || {};
-      const hasBreakdown =
-        isWalletPayment(before) &&
-        (Number(wb.bonus) > 0 ||
-          Number(wb.referral) > 0 ||
-          Number(wb.refundable) > 0);
-
-      const credit = hasBreakdown
-        ? { bonus: wb.bonus, referral: wb.referral, refundable: wb.refundable }
-        : { refundable: amount };
-
+      const credit = walletCreditFor(before, amount, amount);
       await creditWallet(before.fresher, credit, session);
 
       if (Number(credit.refundable) > 0) {
@@ -609,8 +669,7 @@ const refundToWalletAtomic = async (fresh, amount) => {
     console.error("refundToWalletAtomic failed:", fresh._id, e.message);
     result = "failed";
 
-    // FIX: keep the real reason in the DB so it can be seen without server logs
-    // (e.g. "Transaction numbers are only allowed on a replica set member")
+    // keep the real reason in the DB so it can be seen without server logs
     await Payment.updateOne(
       { _id: fresh._id, status: "paid" },
       {
@@ -664,10 +723,11 @@ const refundPayment = async (payment, reason = "", options = {}) => {
   // never refund more than the customer really paid
   const amount = round2(Math.min(sessionAmount, checkoutOf(fresh)));
   if (!(amount > 0)) return "failed";
-  const feePart = 0; // convenience fee is never refunded
+
   // wallet refunds are atomic (payment status + wallet credit together)
   if (toWallet) return refundToWalletAtomic(fresh, amount);
 
+  // ---------- original payment method (Razorpay) ----------
   // ATOMIC lock. Refund amounts are written here, so the books are right even if something fails later.
   const before = await Payment.findOneAndUpdate(
     { _id: fresh._id, status: "paid" },
@@ -675,10 +735,10 @@ const refundPayment = async (payment, reason = "", options = {}) => {
       $set: {
         status: "refunded",
         sessionStatus: "cancelled",
-        refundMethod: toWallet ? "wallet" : "original",
+        refundMethod: "original",
         refundedAt: new Date(),
         refundAmount: amount,
-        convenienceFeeRefunded: feePart,
+        convenienceFeeRefunded: 0,
         refundError: "",
       },
     },
@@ -705,40 +765,8 @@ const refundPayment = async (payment, reason = "", options = {}) => {
     ).catch(() => {});
   };
 
-  const creditWalletNow = async () => {
-    // wallet-paid payment -> back to the SAME buckets it came from.
-    // Razorpay-paid (or old wallet payments without breakdown) -> refundable cash.
-    const wb = before.walletBreakdown || {};
-    const hasBreakdown =
-      isWalletPayment(before) &&
-      (Number(wb.bonus) > 0 ||
-        Number(wb.referral) > 0 ||
-        Number(wb.refundable) > 0);
-
-    const credit = hasBreakdown
-      ? { bonus: wb.bonus, referral: wb.referral, refundable: wb.refundable }
-      : { refundable: amount };
-
-    // FIX: this used to call creditWalletNow() itself (infinite recursion).
-    // It must call the imported ledger function `creditWallet`.
-    await creditWallet(before.fresher, credit);
-
-    // totalRefunds = lifetime stat of CASH refunded only
-    if (Number(credit.refundable) > 0) {
-      await Fresher.updateOne(
-        { _id: before.fresher },
-        { $inc: { totalRefunds: Number(credit.refundable) } },
-      );
-    }
-    emitToUser(String(before.fresher), "wallet:updated", { amount });
-  };
   try {
-    if (toWallet) {
-      await creditWalletNow(); // money is given from here: NEVER unlock after this line
-      return "refunded";
-    }
-
-    // partial refund: only the session price (₹200), not the ₹204.84 the customer paid
+    // partial refund: only the session price, not the fee the customer paid
     await getRazorpay().payments.refund(before.razorpayPaymentId, {
       amount: toPaise(amount),
       speed: "normal",
@@ -749,13 +777,11 @@ const refundPayment = async (payment, reason = "", options = {}) => {
     const rz = error?.error || {};
     const desc = rz.description || error.message || "";
 
-    if (!toWallet && /already.*refund|fully refunded/i.test(desc))
-      return "refunded";
+    if (/already.*refund|fully refunded/i.test(desc)) return "refunded";
 
     console.error("REFUND FAILED:", {
       payment: before.razorpayPaymentId,
       amount,
-      toWallet,
       statusCode: error?.statusCode,
       code: rz.code,
       description: desc,
@@ -764,9 +790,8 @@ const refundPayment = async (payment, reason = "", options = {}) => {
     // Razorpay clearly said NO (4xx, e.g. low balance) -> give the money to the wallet instead
     const definiteNo =
       Number(error?.statusCode) >= 400 && Number(error?.statusCode) < 500;
-    if (!toWallet && definiteNo && before.fresher) {
+    if (definiteNo && before.fresher) {
       try {
-        // FIX: arguments were missing here. Check the signature in utils/walletLedger.js
         await creditWallet(before.fresher, { refundable: amount });
         await Fresher.updateOne(
           { _id: before.fresher },
@@ -812,7 +837,7 @@ const refundAll = async (booking, reason, options = {}) => {
 
   let allOk = true;
   for (const p of list) {
-    // FIX: one payment throwing must not stop the others (or leave the booking stuck)
+    // one payment throwing must not stop the others (or leave the booking stuck)
     let r = "failed";
     try {
       r = await refundPayment(p, reason, options);
@@ -864,14 +889,21 @@ const notifyRefunds = (fresh, payments, result, { title, reason }) => {
 
 const closeAndRefund = async (
   bookingId,
-  { from, to, reason, title, mentorNote, refundTo },
+  { from, to, reason, title, mentorNote, refundTo, noShowBy },
 ) => {
-  // FIX: refundStatus is set to "pending" together with the status change.
-  // If the server crashes / sleeps from here on, the scheduler (step 4) still finds
+  // refundStatus is set to "pending" together with the status change.
+  // If the server crashes / sleeps from here on, the scheduler still finds
   // this booking (refundStatus != "refunded") and finishes the refund.
   const locked = await Booking.findOneAndUpdate(
     { _id: bookingId, status: { $in: from } },
-    { $set: { status: to, closedAt: new Date(), refundStatus: "pending" } },
+    {
+      $set: {
+        status: to,
+        closedAt: new Date(),
+        refundStatus: "pending",
+        ...(noShowBy ? { noShowBy } : {}),
+      },
+    },
     { returnDocument: "after" },
   );
   if (!locked) return null;
@@ -879,7 +911,11 @@ const closeAndRefund = async (
   let result = "failed";
   let payments = [];
   try {
-    const out = await refundAll(locked, reason, refundTo ? { to: refundTo } : {});
+    const out = await refundAll(
+      locked,
+      reason,
+      refundTo ? { to: refundTo } : {},
+    );
     result = out.result;
     payments = out.payments;
   } catch (e) {
@@ -925,6 +961,296 @@ const expireAndRefund = (bookingId, reason) =>
     title: "Booking auto-cancelled",
     refundTo: "wallet",
   });
+
+/* ============================ FRESHER NO-SHOW (partial settle) ============================ */
+// The employee was in the room, the fresher never came.
+// For every payment:  keep = FRESHER_NOSHOW_FEE_PERCENT of the session price
+//   -> the payment is marked completed, the employee earns (keep - platform cut)
+//   -> the rest (price - keep) is credited back to the fresher's wallet
+// Payment update + wallet credit run in ONE transaction. Safe to call again (idempotent).
+const settleNoShowPayment = async (payment, mentorId) => {
+  const fresh = await Payment.findById(payment._id || payment);
+  if (!fresh) return "failed";
+  if (fresh.status === "refunded") return "refunded";
+  if (fresh.status !== "paid") return "failed";
+  // already settled by an earlier run
+  if (fresh.sessionStatus === "completed") return "refunded";
+  if (!fresh.fresher) return "failed";
+
+  const sessionAmount = round2(
+    Math.min(Number(fresh.amount) || 0, checkoutOf(fresh)),
+  );
+  if (!(sessionAmount > 0)) return "failed";
+
+  const keep = round2((sessionAmount * FRESHER_NOSHOW_FEE_PERCENT) / 100);
+  const back = round2(sessionAmount - keep);
+  const { fee, earning } = splitAmount(keep, PLATFORM_FEE_PERCENT);
+
+  const session = await mongoose.startSession();
+  let result = "failed";
+
+  try {
+    await session.withTransaction(async () => {
+      result = "failed"; // the driver can retry this callback
+
+      const before = await Payment.findOneAndUpdate(
+        {
+          _id: fresh._id,
+          status: "paid",
+          sessionStatus: { $nin: ["completed", "cancelled"] },
+        },
+        {
+          $set: {
+            sessionStatus: "completed",
+            releasedAt: new Date(),
+            ...(mentorId ? { mentor: mentorId } : {}),
+            platformFee: fee,
+            mentorEarning: earning,
+            refundMethod: back > 0 ? "wallet" : "",
+            refundedAt: back > 0 ? new Date() : null,
+            refundAmount: back,
+            convenienceFeeRefunded: 0,
+            refundError: "",
+          },
+        },
+        { returnDocument: "before", session },
+      );
+
+      if (!before) {
+        const cur = await Payment.findById(fresh._id)
+          .select("status sessionStatus")
+          .session(session)
+          .lean();
+        result =
+          cur?.status === "refunded" || cur?.sessionStatus === "completed"
+            ? "refunded"
+            : "failed";
+        return;
+      }
+
+      if (back > 0) {
+        const credit = walletCreditFor(before, back, sessionAmount);
+        await creditWallet(before.fresher, credit, session);
+        if (Number(credit.refundable) > 0) {
+          await Fresher.updateOne(
+            { _id: before.fresher },
+            { $inc: { totalRefunds: Number(credit.refundable) } },
+            { session },
+          );
+        }
+      }
+      result = "refunded";
+    });
+  } catch (e) {
+    console.error("settleNoShowPayment failed:", fresh._id, e.message);
+    result = "failed";
+    await Payment.updateOne(
+      { _id: fresh._id, status: "paid" },
+      {
+        $set: {
+          refundError: String(e.message || "no-show settle failed").slice(
+            0,
+            300,
+          ),
+          refundFailedAt: new Date(),
+        },
+      },
+    ).catch(() => {});
+  } finally {
+    session.endSession();
+  }
+
+  if (result === "refunded" && back > 0) {
+    emitToUser(String(fresh.fresher), "wallet:updated", { amount: back });
+  }
+  return result;
+};
+
+const settleNoShowPayments = async (booking) => {
+  const ids = paymentIdsOf(booking);
+  const list = ids.length
+    ? await Payment.find({ razorpayPaymentId: { $in: ids } })
+    : [];
+  if (!list.length) return { result: "failed", payments: [] };
+
+  const mentorId = booking.mentor ? booking.mentor._id || booking.mentor : null;
+
+  let allOk = true;
+  for (const p of list) {
+    let r = "failed";
+    try {
+      r = await settleNoShowPayment(p, mentorId);
+    } catch (e) {
+      console.error("settleNoShowPayment threw:", p._id, e.message);
+    }
+    if (r !== "refunded") allOk = false;
+  }
+
+  const payments = await Payment.find({
+    razorpayPaymentId: { $in: ids },
+  }).lean();
+  return { result: allOk ? "refunded" : "failed", payments };
+};
+
+// tells everybody what happened after a fresher no-show settle
+const notifyNoShowOutcome = async (fresh, payments, result) => {
+  for (const mem of membersOf(fresh)) {
+    if (!mem.fresher) continue;
+    const pay = payments.find(
+      (p) => p.razorpayPaymentId === mem.razorpayPaymentId,
+    );
+    const back = Number(pay?.refundAmount) || 0;
+    const paid = Number(pay?.amount) || Number(mem.amount) || 0;
+    const kept = round2(Math.max(0, paid - back));
+
+    notify({
+      user: mem.fresher,
+      role: "fresher",
+      title: "Session missed",
+      message:
+        result === "refunded"
+          ? `You did not join the session. A no-show fee of ₹${kept} was charged and ₹${back} was added back to your wallet.`
+          : "You did not join the session. Your balance is being settled, we will update you soon.",
+      type: "payment",
+      link: "/Home/bonus-wallet",
+    });
+  }
+
+  if (fresh.mentor) {
+    const mentorId = fresh.mentor._id || fresh.mentor;
+    const earned = round2(
+      payments
+        .filter((p) => p.sessionStatus === "completed")
+        .reduce((s, p) => s + (Number(p.mentorEarning) || 0), 0),
+    );
+    notify({
+      user: mentorId,
+      role: "mentor",
+      title: "Fresher did not join",
+      message:
+        earned > 0
+          ? `The ${isGroup(fresh) ? "group" : "fresher"} did not join. ₹${earned} was added to your wallet for your time.`
+          : `The ${isGroup(fresh) ? "group" : "fresher"} did not join, so the session was marked as missed.`,
+      type: "payment",
+      link: "/mentor/earnings",
+    });
+    emitToUser(mentorId, "wallet:updated", {
+      requestGroupId: fresh.requestGroupId,
+    });
+  }
+};
+
+const handleFresherNoShow = async (bookingId) => {
+  const locked = await Booking.findOneAndUpdate(
+    { _id: bookingId, status: "accepted" },
+    {
+      $set: {
+        status: "missed",
+        closedAt: new Date(),
+        refundStatus: "pending",
+        noShowBy: "fresher",
+      },
+    },
+    { returnDocument: "after" },
+  );
+  if (!locked) return null;
+
+  let out = { result: "failed", payments: [] };
+  try {
+    out = await settleNoShowPayments(locked);
+  } catch (e) {
+    console.error("handleFresherNoShow threw:", locked.requestGroupId, e);
+  }
+
+  await Booking.updateOne(
+    { _id: locked._id },
+    { $set: { refundStatus: out.result } },
+  );
+
+  const fresh = await Booking.findById(locked._id).populate(
+    "mentor",
+    POPULATE_MENTOR,
+  );
+  if (!fresh) return null;
+
+  await notifyNoShowOutcome(fresh, out.payments, out.result);
+  emitBooking(fresh);
+  return fresh;
+};
+
+// adds one strike to the employee. 3 = warning, 5 = suspended.
+const addMentorStrike = async (mentorId) => {
+  const m = await Mentor.findOneAndUpdate(
+    { _id: mentorId },
+    { $inc: { missedSessions: 1 } },
+    { returnDocument: "after" },
+  )
+    .select("missedSessions accountStatus")
+    .lean()
+    .catch(() => null);
+  if (!m) return;
+
+  if (m.missedSessions >= STRIKE_SUSPEND && m.accountStatus === "active") {
+    await Mentor.updateOne(
+      { _id: m._id },
+      { $set: { accountStatus: "suspended" } },
+    ).catch(() => {});
+    notify({
+      user: m._id,
+      role: "mentor",
+      title: "Account suspended",
+      message: `You missed ${m.missedSessions} sessions, so your account was suspended. Please contact support.`,
+      type: "session",
+      link: "/mentor/sessions",
+    });
+  } else if (m.missedSessions >= STRIKE_WARN) {
+    notify({
+      user: m._id,
+      role: "mentor",
+      title: "Warning: missed sessions",
+      message: `You have missed ${m.missedSessions} sessions. At ${STRIKE_SUSPEND} misses your account will be suspended.`,
+      type: "session",
+      link: "/mentor/sessions",
+    });
+  }
+};
+
+// decides what to do with an accepted booking whose timer never started
+const handleNoShow = async (bookingId) => {
+  const b = await Booking.findById(bookingId);
+  if (!b || b.status !== "accepted") return null;
+
+  const mentorHere = Boolean(b.mentorJoinedAt);
+  const fresherHere = Boolean(b.fresherJoinedAt);
+
+  // employee was waiting, fresher never came -> fresher pays the no-show fee
+  if (mentorHere && !fresherHere && FRESHER_NOSHOW_FEE_PERCENT > 0) {
+    return handleFresherNoShow(b._id);
+  }
+
+  // everything else (employee missing, nobody came, both came but it never started): FULL refund
+  const mentorMissing = !mentorHere && fresherHere;
+
+  const closed = await closeAndRefund(b._id, {
+    from: ["accepted"],
+    to: "missed",
+    title: "Session missed",
+    reason: mentorMissing
+      ? "The employee did not join the session, so you got a full refund."
+      : "The session did not start because nobody joined in time.",
+    mentorNote: mentorMissing
+      ? "You did not join the session, so it was marked as missed and the fresher was refunded. Repeated misses can affect your account."
+      : "The session did not start in time, so it was marked as missed and the fresher was refunded.",
+    refundTo: "wallet",
+    noShowBy: mentorMissing ? "mentor" : undefined,
+  });
+
+  // employee strike
+  if (closed && mentorMissing && b.mentor) {
+    await addMentorStrike(b.mentor._id || b.mentor);
+  }
+  return closed;
+};
 
 /* ============================ BROADCAST ============================ */
 
@@ -1057,8 +1383,7 @@ exports.createRequest = async (req, res) => {
       user.photo ||
       user.photoUrl;
 
-    // 3. Career is optional.
-    // Only these 9 fields are required.
+    // 3. Career is optional. Only these 9 fields are required.
     const requiredFields = [
       photo,
       user.name,
@@ -1138,8 +1463,7 @@ exports.createRequest = async (req, res) => {
       return fail(res, 409, "This payment is already used for another booking");
     }
 
-    // Payment without an owner cannot be refunded to a wallet.
-    // Attach the logged-in fresher.
+    // Payment without an owner cannot be refunded to a wallet. Attach the logged-in fresher.
     if (req.user?.role === "fresher" && !payment.fresher) {
       await Payment.updateOne(
         { _id: payment._id, fresher: null },
@@ -1253,15 +1577,9 @@ exports.createRequest = async (req, res) => {
       : null;
 
     // ---- WHO may receive this request (gender rule) ----
-    // Single: fresher's own gender from profile.
-    // Group: whatever the host selected.
-
     const profileGender = norm(fresherDoc?.gender);
-
     const profileKnown = profileGender === "male" || profileGender === "female";
-
     const pickedGender = norm(sd.gender);
-
     const pickedKnown = pickedGender === "male" || pickedGender === "female";
 
     let fresherGender = "";
@@ -1323,6 +1641,9 @@ exports.createRequest = async (req, res) => {
       // ---- group ----
       sessionMode: mode,
       maxMembers,
+      // a group of 2 needs both people, bigger groups need GROUP_MIN_MEMBERS (default 2)
+      minMembers:
+        mode === "group" ? Math.min(maxMembers, GROUP_MIN_MEMBERS) : 1,
       perPersonAmount: Number(payment.amount),
       inviteCode: mode === "group" ? makeInviteCode() : "",
 
@@ -1426,6 +1747,7 @@ exports.joinPreview = async (req, res) => {
         durationMinutes: b.durationMinutes,
         perPersonAmount: b.perPersonAmount || b.amount,
         maxMembers: b.maxMembers,
+        minMembers: b.minMembers || 1,
         joined,
         spotsLeft: Math.max(0, b.maxMembers - joined),
         status: b.status,
@@ -1568,7 +1890,7 @@ exports.joinGroup = async (req, res) => {
     emitBooking(updated);
 
     // mentor already accepted -> the new friend also gets the
-    // "join 5 minutes early" email + WhatsApp (req.user.id is available HERE)
+    // "join 5 minutes early" email + WhatsApp
     if (updated.mentor) {
       emailBookingParties(updated, "booked", {
         only: String(req.user.id),
@@ -1692,8 +2014,7 @@ exports.respondToRequest = exports.updateRequest;
 
 /* ============================ READ ============================ */
 
-// REPLACE the whole existing exports.getRequestStatus
-// FIX: only the people of this booking (or a mentor it was sent to) may read it
+// only the people of this booking (or a mentor it was sent to) may read it
 exports.getRequestStatus = async (req, res) => {
   try {
     const b = await Booking.findOne({
@@ -1723,9 +2044,8 @@ exports.getRequestStatus = async (req, res) => {
     return fail(res, 500, "Failed to load request");
   }
 };
-// SECURITY FIX: this used to read ?email= from the URL, so anybody could type
-// any email and read that person's bookings. It now uses the logged-in user.
-// The route must be behind the fresher auth middleware.
+
+// SECURITY FIX: uses the logged-in user (no more ?email=). Route must be behind fresher auth.
 exports.getAcceptedBookings = async (req, res) => {
   try {
     if (!req.user?.id) return fail(res, 401, "Please login.");
@@ -1762,8 +2082,7 @@ exports.myBookings = async (req, res) => {
   }
 };
 
-// REPLACE the whole existing exports.needsReview
-// FIX: group friends can be asked to review too (the old code looked at the host only)
+// group friends can be asked to review too (the old code looked at the host only)
 exports.needsReview = async (req, res) => {
   try {
     const uid = String(req.user.id);
@@ -1800,11 +2119,25 @@ exports.getBooking = async (req, res) => {
       .populate("mentor", POPULATE_MENTOR)
       .populate("preferredMentor", POPULATE_MENTOR);
     if (!b) return fail(res, 404, "Not found");
-    const mine =
-      participantUserIds(b).includes(String(req.user.id)) ||
-      String(b.mentor?._id || b.mentor) === req.user.id;
+    const isMember = participantUserIds(b).includes(String(req.user.id));
+    const mine = isMember || String(b.mentor?._id || b.mentor) === req.user.id;
     if (!mine) return fail(res, 403, "Access denied");
-    return res.json({ success: true, booking: toClient(b) });
+
+    // FIX: MeetingRoom reads `myReviewed`. Without it every group friend was asked to review again.
+    let myReviewed = false;
+    if (isMember) {
+      myReviewed = Boolean(
+        await Review.exists({
+          fresher: req.user.id,
+          sessionKey: b.requestGroupId,
+        }),
+      );
+    }
+
+    return res.json({
+      success: true,
+      booking: { ...toClient(b), myReviewed },
+    });
   } catch (error) {
     return fail(res, 500, "Failed to load booking");
   }
@@ -1846,7 +2179,6 @@ exports.getCounterpart = async (req, res) => {
         .lean();
       if (!m) return fail(res, 404, "Employee not found");
 
-      // rating + reviews + sessions (calculated live, no schema fields needed)
       const [byStar, recent, completedCount] = await Promise.all([
         Review.aggregate([
           { $match: { mentor: m._id } },
@@ -2020,19 +2352,29 @@ const pushTimerOff = (b) => {
   if (b.mentor) emitToUser(b.mentor._id || b.mentor, "meeting:timer", payload);
 };
 
-const settleCompleted = async (booking, { auto = false } = {}) => {
+// auto       : nobody answered in time -> auto-confirmed
+// fromDispute: the admin (or the review timeout) decided to RELEASE the held money to the employee
+const settleCompleted = async (
+  booking,
+  { auto = false, fromDispute = false } = {},
+) => {
   const now = new Date();
+  const filter = fromDispute
+    ? { _id: booking._id, status: "disputed", refundStatus: "review" }
+    : {
+        _id: booking._id,
+        status: { $in: ["awaiting_confirmation", "in_progress", "accepted"] },
+      };
+
   const updated = await Booking.findOneAndUpdate(
-    {
-      _id: booking._id,
-      status: { $in: ["awaiting_confirmation", "in_progress", "accepted"] },
-    },
+    filter,
     {
       $set: {
         status: "completed",
         completedAt: now,
         "meeting.remainingMs": 0,
         "meeting.endedAt": now,
+        ...(fromDispute ? { refundStatus: "" } : {}),
       },
     },
     { returnDocument: "after" },
@@ -2076,9 +2418,11 @@ const settleCompleted = async (booking, { auto = false } = {}) => {
       user: updated.mentor._id,
       role: "mentor",
       title: "Session confirmed & Paid",
-      message: auto
-        ? `The session was auto-confirmed. ₹${mentorShare} added to your wallet.`
-        : `Fresher confirmed the session. ₹${mentorShare} added to your wallet.`,
+      message: fromDispute
+        ? `Our team reviewed the report and confirmed the session. ₹${mentorShare} added to your wallet.`
+        : auto
+          ? `The session was auto-confirmed. ₹${mentorShare} added to your wallet.`
+          : `Fresher confirmed the session. ₹${mentorShare} added to your wallet.`,
       type: "payment",
       link: "/mentor/earnings",
     });
@@ -2101,10 +2445,6 @@ const settleCompleted = async (booking, { auto = false } = {}) => {
   }
 
   emitBooking(updated);
-
-  // NOTE: the old "emailBookingParties(... req.user.id ...)" block was removed from here.
-  // `req` does not exist in this function. That logic lives in joinGroup().
-
   pushTimerOff(updated);
   return updated;
 };
@@ -2160,10 +2500,16 @@ const completeBooking = async (requestGroupId) => {
 
 exports.completeBooking = completeBooking;
 
+// POST /api/bookings/:requestGroupId/confirm   { accepted: true | false, reason }
+//   accepted = true  -> session completed, employee is paid
+//   accepted = false -> DISPUTE. Money is HELD for admin review (no automatic refund).
 exports.confirmCompletion = async (req, res) => {
   try {
     const requestGroupId = String(req.params.requestGroupId || "").trim();
     const accepted = Boolean(req.body?.accepted);
+    const reportReason = String(req.body?.reason || "")
+      .trim()
+      .slice(0, 500);
 
     const booking = await Booking.findOne({ requestGroupId }).populate(
       "mentor",
@@ -2199,58 +2545,51 @@ exports.confirmCompletion = async (req, res) => {
       });
     }
 
-    // FIX: refundStatus "pending" together with the status change (same reason as closeAndRefund)
+    // ---------- DISPUTE: hold the money, admin decides ----------
     const updated = await Booking.findOneAndUpdate(
       { _id: booking._id, status: "awaiting_confirmation" },
       {
         $set: {
           status: "disputed",
-          completedAt: new Date(),
-          refundStatus: "pending",
+          disputedAt: new Date(),
+          disputeReason: reportReason,
+          refundStatus: "review",
         },
       },
       { returnDocument: "after" },
     ).populate("mentor", POPULATE_MENTOR);
     if (!updated) return fail(res, 409, "Session already updated");
 
-    // refund EVERY member to their wallet
-    const { result, payments } = await refundAll(
-      booking,
-      "Fresher marked the session as not complete",
-      { to: "wallet" },
-    );
-    await Booking.updateOne(
-      { _id: updated._id },
-      { $set: { refundStatus: result } },
-    );
-    updated.refundStatus = result;
+    // count the report (repeat reporters get flagged in the admin list)
+    await Fresher.updateOne(
+      { _id: booking.fresher },
+      { $inc: { disputeCount: 1 }, $set: { lastDisputeAt: new Date() } },
+    ).catch(() => {});
 
-    for (const mem of membersOf(updated)) {
-      if (!mem.fresher) continue;
-      const pay = payments.find(
-        (p) => p.razorpayPaymentId === mem.razorpayPaymentId,
-      );
-      const amt =
-        pay && Number(pay.refundAmount) > 0
-          ? pay.refundAmount
-          : mem.amount || updated.amount;
+    const hours = Math.round(DISPUTE_REVIEW_MS / 3600000);
+
+    participantUserIds(updated).forEach((id) =>
       notify({
-        user: mem.fresher,
+        user: id,
         role: "fresher",
-        title:
-          result === "refunded"
-            ? "Refund added to wallet"
-            : "Refund is processing",
+        title: "Report received",
+        message: `We received your report. Our team will review it within ${hours} hours and update you.`,
+        type: "session",
+        link: "/Home/my-meetings?tab=cancelled",
+      }),
+    );
+
+    if (updated.mentor) {
+      notify({
+        user: updated.mentor._id,
+        role: "mentor",
+        title: "Session under review",
         message:
-          result === "refunded"
-            ? `₹${amt} was added back to your wallet.`
-            : "We could not add the refund yet. We will retry automatically.",
-        type: "payment",
-        link: "/Home/wallet",
+          "The fresher reported a problem with this session. Our team is reviewing it and will update you.",
+        type: "session",
+        link: "/mentor/sessions",
       });
-      emitToUser(mem.fresher, "wallet:updated", { amount: amt });
     }
-    void payments;
 
     emitBooking(updated);
     return res.json({
@@ -2261,6 +2600,203 @@ exports.confirmCompletion = async (req, res) => {
   } catch (error) {
     console.error("confirmCompletion error:", error);
     return fail(res, 500, "Unable to confirm session");
+  }
+};
+
+/* ============================ DISPUTES (admin) ============================ */
+
+// decision = "refund"  -> every member is refunded to the wallet
+//          = "release" -> the session counts as completed, the employee is paid
+const applyDisputeDecision = async (
+  bookingId,
+  decision,
+  { note = "" } = {},
+) => {
+  const b = await Booking.findOne({
+    _id: bookingId,
+    status: "disputed",
+    refundStatus: "review",
+  }).populate("mentor", POPULATE_MENTOR);
+  if (!b) return null;
+
+  if (decision === "release") {
+    const done = await settleCompleted(b, { fromDispute: true });
+    if (!done) return null;
+    participantUserIds(done).forEach((id) =>
+      notify({
+        user: id,
+        role: "fresher",
+        title: "Report reviewed",
+        message:
+          "We reviewed your report. The session was confirmed as completed, so no refund is due.",
+        type: "session",
+        link: "/Home/my-bookings",
+      }),
+    );
+    return { decision, booking: done };
+  }
+
+  // refund
+  const lock = await Booking.findOneAndUpdate(
+    { _id: b._id, status: "disputed", refundStatus: "review" },
+    {
+      $set: {
+        refundStatus: "pending",
+        completedAt: new Date(),
+        disputeNote: String(note || "").slice(0, 300),
+      },
+    },
+    { returnDocument: "after" },
+  );
+  if (!lock) return null;
+
+  let result = "failed";
+  let payments = [];
+  try {
+    const out = await refundAll(
+      lock,
+      "Your report was approved after review.",
+      { to: "wallet" },
+    );
+    result = out.result;
+    payments = out.payments;
+  } catch (e) {
+    console.error(
+      "applyDisputeDecision: refundAll threw:",
+      lock.requestGroupId,
+      e,
+    );
+  }
+
+  await Booking.updateOne(
+    { _id: lock._id },
+    { $set: { refundStatus: result } },
+  );
+
+  const fresh = await Booking.findById(lock._id).populate(
+    "mentor",
+    POPULATE_MENTOR,
+  );
+  if (!fresh) return null;
+
+  notifyRefunds(fresh, payments, result, {
+    title: "Report approved",
+    reason: "We reviewed your report and approved your refund.",
+  });
+
+  if (fresh.mentor) {
+    notify({
+      user: fresh.mentor._id,
+      role: "mentor",
+      title: "Session refunded",
+      message:
+        "After review, this session was refunded to the fresher. No earnings were released for it.",
+      type: "session",
+      link: "/mentor/sessions",
+    });
+  }
+
+  emitBooking(fresh);
+  return { decision, booking: fresh };
+};
+
+// GET /api/bookings/admin/disputes   (admin)
+exports.listDisputes = async (req, res) => {
+  try {
+    if (req.user?.role !== "admin") return fail(res, 403, "Admin only");
+
+    const list = await Booking.find({
+      status: "disputed",
+      refundStatus: "review",
+    })
+      .populate("mentor", "name currentCompany")
+      .sort({ disputedAt: 1 })
+      .lean();
+
+    const hostIds = [
+      ...new Set(
+        list
+          .map((b) => b.fresher)
+          .filter(Boolean)
+          .map(String),
+      ),
+    ];
+    const hosts = hostIds.length
+      ? await Fresher.find({ _id: { $in: hostIds } })
+          .select("disputeCount")
+          .lean()
+      : [];
+    const countOf = (id) =>
+      Number(hosts.find((h) => String(h._id) === String(id))?.disputeCount) ||
+      0;
+
+    return res.json({
+      success: true,
+      count: list.length,
+      disputes: list.map((b) => ({
+        requestGroupId: b.requestGroupId,
+        companyName: b.companyName,
+        sessionType: b.sessionType,
+        mode: b.sessionMode || "single",
+        members: membersOf(b).length,
+        hostName: b.fresherName,
+        mentorName: b.mentor?.name || "",
+        date: b.date,
+        time: b.time,
+        durationMinutes: b.durationMinutes,
+        perPersonAmount: b.perPersonAmount || b.amount,
+        totalHeld: round2(
+          membersOf(b).reduce((s, m) => s + (Number(m.amount) || 0), 0),
+        ),
+        sessionPurpose: b.reason || "",
+        reportReason: b.disputeReason || "",
+        disputedAt: b.disputedAt || null,
+        mentorJoinedAt: b.mentorJoinedAt || null,
+        fresherJoinedAt: b.fresherJoinedAt || null,
+        presenceProof: Boolean(b.mentorJoinedAt && b.fresherJoinedAt),
+        hostDisputeCount: countOf(b.fresher),
+        flagged: countOf(b.fresher) >= DISPUTE_FLAG_COUNT,
+        autoDecisionAt: b.disputedAt
+          ? new Date(new Date(b.disputedAt).getTime() + DISPUTE_REVIEW_MS)
+          : null,
+        autoDecision: autoDecisionFor(b, countOf(b.fresher)),
+      })),
+    });
+  } catch (error) {
+    console.error("listDisputes error:", error);
+    return fail(res, 500, "Failed to load disputes");
+  }
+};
+
+// POST /api/bookings/admin/disputes/:requestGroupId/resolve   (admin)   { decision: "refund"|"release", note }
+exports.resolveDispute = async (req, res) => {
+  try {
+    if (req.user?.role !== "admin") return fail(res, 403, "Admin only");
+
+    const decision = String(req.body?.decision || "").toLowerCase();
+    if (!["refund", "release"].includes(decision))
+      return fail(res, 400, 'decision must be "refund" or "release"');
+
+    const b = await Booking.findOne({
+      requestGroupId: String(req.params.requestGroupId || "").trim(),
+    }).select("_id status refundStatus");
+    if (!b) return fail(res, 404, "Booking not found");
+    if (b.status !== "disputed" || b.refundStatus !== "review")
+      return fail(res, 409, "This booking is not waiting for a review.");
+
+    const out = await applyDisputeDecision(b._id, decision, {
+      note: req.body?.note,
+    });
+    if (!out) return fail(res, 409, "Already resolved");
+
+    return res.json({
+      success: true,
+      decision,
+      booking: toClient(out.booking),
+    });
+  } catch (error) {
+    console.error("resolveDispute error:", error);
+    return fail(res, 500, "Failed to resolve the dispute");
   }
 };
 
@@ -2367,7 +2903,44 @@ exports.startSchedulers = (app) => {
         }
       });
 
-      // 2) NO-SHOW
+      // 1b) GROUP NOT FILLED: fewer than minMembers paid -> cancel, refund everybody
+      await safely("group-fill", async () => {
+        const unfilled = await Booking.find({
+          status: { $in: ["pending", "accepted"] },
+          sessionMode: "group",
+          startsAt: { $lte: new Date(now.getTime() + GROUP_FILL_CUTOFF_MS) },
+          minMembers: { $gt: 1 },
+          $expr: { $lt: [{ $size: "$participants" }, "$minMembers"] },
+        })
+          .select("_id")
+          .limit(20);
+
+        for (const b of unfilled) {
+          await safely(`group-fill ${b._id}`, async () => {
+            const closed = await closeAndRefund(b._id, {
+              from: ["pending", "accepted"],
+              to: "cancelled",
+              title: "Group cancelled",
+              reason:
+                "Not enough friends joined your group in time, so it was cancelled.",
+              mentorNote:
+                "The group did not get enough members, so the session was cancelled. No action needed from you.",
+              refundTo: "wallet",
+            });
+
+            if (closed) {
+              (closed.notified || []).forEach((mentorId) =>
+                emitToMentorSockets(app, mentorId, "session-request-taken", {
+                  id: closed.requestGroupId,
+                  requestGroupId: closed.requestGroupId,
+                }),
+              );
+            }
+          });
+        }
+      });
+
+      // 2) NO-SHOW (who was missing decides who pays)
       await safely("no-show", async () => {
         const noShows = await Booking.find({
           status: "accepted",
@@ -2376,17 +2949,7 @@ exports.startSchedulers = (app) => {
         }).select("_id");
 
         for (const b of noShows) {
-          await safely(`no-show ${b._id}`, () =>
-            closeAndRefund(b._id, {
-              from: ["accepted"],
-              to: "missed",
-              title: "Session missed",
-              reason:
-                "The session did not start because both of you did not join in time.",
-              mentorNote:
-                "The session did not start in time, so it was marked as missed and the fresher was refunded.",
-            }),
-          );
+          await safely(`no-show ${b._id}`, () => handleNoShow(b._id));
         }
       });
 
@@ -2416,11 +2979,37 @@ exports.startSchedulers = (app) => {
         }
       });
 
+      // 3b) DISPUTE TIMEOUT: admin did not decide in time -> decide from presence + history
+      await safely("dispute-timeout", async () => {
+        const due = await Booking.find({
+          status: "disputed",
+          refundStatus: "review",
+          disputedAt: {
+            $ne: null,
+            $lte: new Date(now.getTime() - DISPUTE_REVIEW_MS),
+          },
+        }).limit(20);
+
+        for (const b of due) {
+          await safely(`dispute-timeout ${b.requestGroupId}`, async () => {
+            const host = b.fresher
+              ? await Fresher.findById(b.fresher).select("disputeCount").lean()
+              : null;
+            const decision = autoDecisionFor(
+              b,
+              Number(host?.disputeCount) || 0,
+            );
+            await applyDisputeDecision(b._id, decision, {
+              note: `Auto decision: ${decision} (review time over)`,
+            });
+          });
+        }
+      });
+
       // 4) RETRY REFUNDS (all members)
-      // FIX: not only refundStatus "failed". Every closed booking whose refund is NOT done
-      // ("pending" = crashed / server slept in the middle, "" = old bookings, "failed")
-      // is picked up. A freshly closed booking is left alone for 2 minutes so the scheduler
-      // never races with the refund that is still running.
+      // Every closed booking whose refund is NOT done ("pending" = crashed in the middle,
+      // "" = old bookings, "failed") is picked up. Disputes that are waiting for the admin
+      // (refundStatus "review") are NEVER touched here.
       await safely("refund-retry", async () => {
         const settleAfter = new Date(
           now.getTime() - REFUND_RETRY_AFTER_CLOSE_MS,
@@ -2429,7 +3018,7 @@ exports.startSchedulers = (app) => {
 
         const failedRefunds = await Booking.find({
           status: { $in: ["expired", "missed", "cancelled", "disputed"] },
-          refundStatus: { $ne: "refunded" },
+          refundStatus: { $nin: ["refunded", "review"] },
           razorpayPaymentId: { $ne: "" },
           refundAttempts: { $not: { $gte: MAX_REFUND_ATTEMPTS } },
           $and: [
@@ -2458,6 +3047,24 @@ exports.startSchedulers = (app) => {
                 $set: { lastRefundAttemptAt: new Date() },
               },
             );
+
+            // a fresher no-show is a PARTIAL settle. It must never be retried as a full refund.
+            if (b.noShowBy === "fresher") {
+              const out = await settleNoShowPayments(b);
+              await Booking.updateOne(
+                { _id: b._id },
+                { $set: { refundStatus: out.result } },
+              );
+              if (out.result === "refunded") {
+                const fresh = await Booking.findById(b._id).populate(
+                  "mentor",
+                  POPULATE_MENTOR,
+                );
+                if (fresh)
+                  await notifyNoShowOutcome(fresh, out.payments, out.result);
+              }
+              return;
+            }
 
             const { result } = await refundAll(b, "Retry: session refund", {
               to: "wallet",
@@ -2667,11 +3274,10 @@ exports.pushPendingToMentor = async (app, mentorId) => {
 exports.whyNot = whyNot;
 exports.participantUserIds = participantUserIds;
 
-/* ============================ GROUP VIDEO TOKEN (LiveKit) ============================ */
+/* ============================ VIDEO TOKEN (LiveKit) ============================ */
 // POST /api/bookings/:id/livekit-token   (fresher member OR the accepted mentor)
-// Group meetings (up to 60 people) run on LiveKit (SFU). P2P cannot handle that many.
-// Only people who PAID and joined (or the mentor who accepted) get a token,
-// so the link alone never lets a stranger in, and the seat limit (maxMembers) is enforced at join time.
+// Only people who PAID and joined (or the mentor who accepted) get a token.
+// NOTE: taking a token does NOT count as "joined". Presence is stamped by livekitWebhook().
 exports.livekitToken = async (req, res) => {
   try {
     const { LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET } = process.env;
@@ -2730,4 +3336,62 @@ exports.livekitToken = async (req, res) => {
     console.error("livekitToken error:", error);
     return fail(res, 500, "Could not create the meeting token");
   }
+};
+
+// POST /api/bookings/livekit-webhook   (called by LiveKit, not by a browser)
+// Presence is stamped only when LiveKit says the person REALLY joined the room.
+// Identity was set by our own server in livekitToken(): "mentor:<id>" / "fresher:<id>".
+exports.livekitWebhook = async (req, res) => {
+  try {
+    const { LIVEKIT_API_KEY, LIVEKIT_API_SECRET } = process.env;
+    if (!LIVEKIT_API_KEY || !LIVEKIT_API_SECRET) return res.status(500).end();
+
+    const { WebhookReceiver } = require("livekit-server-sdk");
+    const receiver = new WebhookReceiver(LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
+
+    const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
+    // throws if the signature is wrong
+    const event = await receiver.receive(raw, req.get("Authorization"));
+
+    if (event.event !== "participant_joined")
+      return res.json({ success: true });
+
+    const room = String(event.room?.name || "");
+    const identity = String(event.participant?.identity || "");
+    const field = identity.startsWith("mentor:")
+      ? "mentorJoinedAt"
+      : identity.startsWith("fresher:")
+        ? "fresherJoinedAt"
+        : null;
+    if (!room || !field) return res.json({ success: true });
+
+    await Booking.updateOne(
+      {
+        requestGroupId: room,
+        status: { $in: ["accepted", "in_progress"] },
+        [field]: null,
+      },
+      { $set: { [field]: new Date() } },
+    );
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("livekitWebhook error:", error.message);
+    return res.status(401).json({ success: false });
+  }
+};
+// GET /api/bookings/prices : the ONLY place the frontend reads prices from
+exports.getPrices = (req, res) => {
+  const durations = [30, 60, 90, 120, 150, 180, 210, 240];
+  const table = (mode) =>
+    Object.fromEntries(durations.map((m) => [m, expectedPrice(m, mode)]));
+
+  return res.json({
+    success: true,
+    singlePerHour: RATE_PER_HOUR,
+    groupPerHour: GROUP_RATE_PER_HOUR,
+    maxGroup: MAX_GROUP,
+    minMembers: GROUP_MIN_MEMBERS,
+    single: table("single"),
+    group: table("group"),
+  });
 };

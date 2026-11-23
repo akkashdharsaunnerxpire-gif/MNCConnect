@@ -6,7 +6,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { fixUrl, findImage } from "../../utils/imageUrl";
+import { findImage } from "../../utils/imageUrl";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   CheckCircle2,
@@ -44,7 +44,6 @@ import {
   EVENTS,
   DURATIONS,
   durationLabel,
-  priceFor,
   getUser,
   getUserId,
   toApiDate,
@@ -83,11 +82,7 @@ const LANGUAGE_OPTIONS = [
   "Kannada",
 ];
 
-// ---- GROUP pricing: PER PERSON. Keep the same as GROUP_RATE_PER_HOUR / MAX_GROUP_MEMBERS in the backend .env ----
-const GROUP_RATE_PER_HOUR = 50;
-const MAX_GROUP = 60; // college batch = up to 60 students
-const groupPriceFor = (minutes) =>
-  Math.round((GROUP_RATE_PER_HOUR * minutes) / 60);
+// NOTE: NO prices in this file. Every price comes from the backend (GET /bookings/prices).
 
 const MIN_LEAD_MIN = 30;
 // same value as backend + meeting room + My Bookings + Mentor Sessions (shared constant)
@@ -152,7 +147,7 @@ const cleanGender = (v) => {
 
 const makeEmptyForm = (user) => ({
   mode: "single", // "single" | "group"
-  members: 3, // group size INCLUDING you (2..MAX_GROUP)
+  members: 2, // group size INCLUDING you (2..max from backend)
   sessionType: SESSION_TYPES[0].value,
   reason: "",
   date: "",
@@ -242,9 +237,10 @@ const explainError = (message = "", status = 0) => {
 const inputBase =
   "h-12 w-full rounded-xl border bg-white px-4 text-sm text-slate-800 outline-none transition focus:ring-2 disabled:bg-slate-50 disabled:text-slate-400";
 const inputCls = (hasError) =>
-  `${inputBase} ${hasError
-    ? "border-red-400 focus:border-red-500 focus:ring-red-100"
-    : "border-slate-200 focus:border-blue-500 focus:ring-blue-100"
+  `${inputBase} ${
+    hasError
+      ? "border-red-400 focus:border-red-500 focus:ring-red-100"
+      : "border-slate-200 focus:border-blue-500 focus:ring-blue-100"
   }`;
 
 const Label = ({ children, htmlFor }) => (
@@ -271,8 +267,9 @@ const Section = ({ step, title, subtitle, done, children }) => (
   <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
     <div className="flex items-start gap-3">
       <span
-        className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold transition ${done ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"
-          }`}
+        className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold transition ${
+          done ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"
+        }`}
       >
         {done ? <Check size={16} /> : step}
       </span>
@@ -391,10 +388,10 @@ export default function SessionBoard() {
       p.mode === m
         ? p
         : {
-          ...p,
-          mode: m,
-          gender: m === "group" ? "" : cleanGender(user?.gender),
-        },
+            ...p,
+            mode: m,
+            gender: m === "group" ? "" : cleanGender(user?.gender),
+          },
     );
 
   // stage: null | "paying" | "sending" | "redirecting" | "expired" | "error"
@@ -405,7 +402,7 @@ export default function SessionBoard() {
   const [showErrors, setShowErrors] = useState(false); // show red field errors after a pay attempt
   const [payStep, setPayStep] = useState(0);
   const [payMode, setPayMode] = useState("online"); // "wallet" | "online"
-  
+
   // AI writing simulation state
   const [isAiWriting, setIsAiWriting] = useState(false);
 
@@ -429,6 +426,38 @@ export default function SessionBoard() {
     return () => clearInterval(t);
   }, []);
 
+  /* ---------- PRICES: the backend is the single source of truth ---------- */
+  const [prices, setPrices] = useState(null);
+  const [pricesError, setPricesError] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    api("/bookings/prices")
+      .then((p) => {
+        if (!cancelled) {
+          setPrices(p);
+          setPricesError("");
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setPrices(null);
+          setPricesError(e.message || "Could not load prices");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const pricesReady = Boolean(prices);
+  const MAX_GROUP = prices?.maxGroup || 60;
+  const MIN_GROUP = prices?.minMembers || 2;
+  const GROUP_RATE_PER_HOUR = prices?.groupPerHour || 0;
+  const priceFor = (m) => Number(prices?.single?.[m]) || 0;
+  const groupPriceFor = (m) => Number(prices?.group?.[m]) || 0;
+  // shows "₹–" until the backend prices have loaded
+  const showInr = (n) => (pricesReady ? inr(n) : "₹–");
+
   const isGroup = f.mode === "group";
   const price = isGroup ? groupPriceFor(f.minutes) : priceFor(f.minutes);
   const groupTotal = price * f.members;
@@ -445,7 +474,12 @@ export default function SessionBoard() {
   const profileStatus = useMemo(() => getProfileStatus(me), [me]);
   const profileBlocked = Boolean(me) && !profileStatus.ok;
   const [showProfileGate, setShowProfileGate] = useState(false);
-  const walletBalance = Math.max(0, Number(me?.walletBalance) || 0);
+
+  const totalWallet = Math.max(0, Number(me?.walletBalance) || 0);
+  // group sessions: only real cash balance, no bonus / referral credit
+  const walletBalance = isGroup
+    ? Math.max(0, Number(me?.refundableBalance) || 0)
+    : totalWallet;
 
   const profileGender = cleanGender(me?.gender) || cleanGender(user?.gender);
   const effectiveGender = isGroup
@@ -454,7 +488,7 @@ export default function SessionBoard() {
   const genderLocked = !isGroup && Boolean(profileGender);
 
   const [useWallet, setUseWallet] = useState(true);
-  const canWallet = walletBalance >= price;
+  const canWallet = pricesReady && walletBalance >= price;
   const payWallet = useWallet && canWallet;
   const walletAfter = payWallet ? walletBalance - price : walletBalance;
 
@@ -534,8 +568,11 @@ export default function SessionBoard() {
       const wp = whenProblem(f.date, f.time);
       if (wp) p.push({ key: "when", msg: wp });
     }
-    if (isGroup && (f.members < 2 || f.members > MAX_GROUP))
-      p.push({ key: "members", msg: `Group size must be 2 to ${MAX_GROUP}` });
+    if (isGroup && (f.members < MIN_GROUP || f.members > MAX_GROUP))
+      p.push({
+        key: "members",
+        msg: `Group size must be ${MIN_GROUP} to ${MAX_GROUP}`,
+      });
     if (!rebook) {
       if (!deptLoading && departments.length === 0)
         p.push({
@@ -559,6 +596,8 @@ export default function SessionBoard() {
     tick,
     isGroup,
     effectiveGender,
+    MIN_GROUP,
+    MAX_GROUP,
   ]);
 
   // "when" errors show live as soon as date AND time are filled; others after a pay attempt
@@ -582,12 +621,12 @@ export default function SessionBoard() {
     ...(rebook
       ? []
       : [
-        { key: "role", label: "Role", done: isDone("role") },
-        { key: "language", label: "Language", done: isDone("language") },
-        ...(!isGroup
-          ? [{ key: "gender", label: "Your gender", done: isDone("gender") }]
-          : []),
-      ]),
+          { key: "role", label: "Role", done: isDone("role") },
+          { key: "language", label: "Language", done: isDone("language") },
+          ...(!isGroup
+            ? [{ key: "gender", label: "Your gender", done: isDone("gender") }]
+            : []),
+        ]),
   ];
 
   const scrollToField = (key) => {
@@ -649,10 +688,7 @@ export default function SessionBoard() {
             email: user.email || "",
             // fresh profile (/auth/me) first, old localStorage copy only as fallback
             image:
-              findImage(me) ||
-              findImage(me?.user) ||
-              findImage(user) ||
-              "",
+              findImage(me) || findImage(me?.user) || findImage(user) || "",
           },
           sessionDetails: {
             sessionType: type.label,
@@ -663,7 +699,7 @@ export default function SessionBoard() {
             gender: effectiveGender,
             language: f.language,
             duration: f.minutes,
-            amount: price, // ORIGINAL session price (never includes the convenience fee)
+            amount: price, // ORIGINAL session price (the server checks it again)
             date: toApiDate(f.date),
             time: toApiTime(f.time),
             mode: f.mode,
@@ -703,6 +739,14 @@ export default function SessionBoard() {
   /* ---------- pay ---------- */
   const startPayment = async () => {
     if (paymentStartingRef.current || stage) return;
+
+    if (!pricesReady) {
+      setError(
+        pricesError || "Prices are still loading. Please try again in a moment.",
+      );
+      setErrorStatus(0);
+      return;
+    }
 
     if (profileBlocked) {
       setShowProfileGate(true);
@@ -859,7 +903,7 @@ export default function SessionBoard() {
             razorpay_order_id: order.id,
             reason: lastFailRef.current,
           },
-        }).catch(() => { });
+        }).catch(() => {});
       });
 
       rz.open();
@@ -906,15 +950,18 @@ export default function SessionBoard() {
     ...(rebook
       ? [["Mentor", rebook.mentorName || "Selected mentor"]]
       : [
-        ["Role", f.role || "Not selected"],
-        ["Language", f.language || "Not selected"],
-        ["Guide", genderSummary],
-      ]),
+          ["Role", f.role || "Not selected"],
+          ["Language", f.language || "Not selected"],
+          ["Guide", genderSummary],
+        ]),
   ];
 
   const actionWord = isGroup ? "create group" : "send request";
-  const payLabel =
-    problems.length > 0
+  const payLabel = !pricesReady
+    ? pricesError
+      ? "Could not load prices"
+      : "Loading prices…"
+    : problems.length > 0
       ? `${problems.length} more ${problems.length === 1 ? "detail" : "details"} needed`
       : payWallet
         ? `Pay ${inr(price)} from wallet`
@@ -923,12 +970,14 @@ export default function SessionBoard() {
   const refundedAmount = paidTotalRef.current || price;
   const errInfo = explainError(error, errorStatus);
 
+  const payDisabled = Boolean(stage) || !pricesReady;
   const payButtonCls = (disabled) =>
-    `w-full rounded-xl py-3.5 text-sm font-bold transition ${disabled
-      ? "cursor-not-allowed bg-slate-200 text-slate-400"
-      : problems.length > 0
-        ? "bg-amber-100 text-amber-900 ring-1 ring-amber-300 hover:bg-amber-200"
-        : "bg-blue-600 text-white shadow-sm hover:bg-blue-700"
+    `w-full rounded-xl py-3.5 text-sm font-bold transition ${
+      disabled
+        ? "cursor-not-allowed bg-slate-200 text-slate-400"
+        : problems.length > 0
+          ? "bg-amber-100 text-amber-900 ring-1 ring-amber-300 hover:bg-amber-200"
+          : "bg-blue-600 text-white shadow-sm hover:bg-blue-700"
     }`;
 
   const progressSteps =
@@ -1070,10 +1119,11 @@ export default function SessionBoard() {
                   disabled={Boolean(stage)}
                   onClick={() => chooseMode("single")}
                   aria-pressed={!isGroup}
-                  className={`flex items-start gap-3 rounded-2xl border p-4 text-left transition ${!isGroup
+                  className={`flex items-start gap-3 rounded-2xl border p-4 text-left transition ${
+                    !isGroup
                       ? "border-blue-500 bg-blue-50 shadow-sm"
                       : "border-slate-200 hover:border-blue-300"
-                    }`}
+                  }`}
                 >
                   <span
                     className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${!isGroup ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"}`}
@@ -1085,7 +1135,8 @@ export default function SessionBoard() {
                       Single meeting
                     </span>
                     <span className="mt-0.5 block text-xs text-slate-500">
-                      Just you and the employee · {inr(priceFor(f.minutes))}
+                      Just you and the employee ·{" "}
+                      {showInr(priceFor(f.minutes))}
                     </span>
                   </span>
                 </button>
@@ -1095,10 +1146,11 @@ export default function SessionBoard() {
                   disabled={Boolean(stage)}
                   onClick={() => chooseMode("group")}
                   aria-pressed={isGroup}
-                  className={`flex items-start gap-3 rounded-2xl border p-4 text-left transition ${isGroup
+                  className={`flex items-start gap-3 rounded-2xl border p-4 text-left transition ${
+                    isGroup
                       ? "border-blue-500 bg-blue-50 shadow-sm"
                       : "border-slate-200 hover:border-blue-300"
-                    }`}
+                  }`}
                 >
                   <span
                     className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${isGroup ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"}`}
@@ -1111,7 +1163,7 @@ export default function SessionBoard() {
                     </span>
                     <span className="mt-0.5 block text-xs text-slate-500">
                       Bring friends · each person pays only{" "}
-                      {inr(groupPriceFor(f.minutes))}
+                      {showInr(groupPriceFor(f.minutes))}
                     </span>
                   </span>
                 </button>
@@ -1123,30 +1175,38 @@ export default function SessionBoard() {
                     Group size (including you, max {MAX_GROUP})
                   </Label>
                   <div className="flex flex-wrap items-center gap-2">
-                    {[2, 3, 4, 5, 10, 20, 30, 40, 60].map((n) => (
-                      <button
-                        key={n}
-                        type="button"
-                        disabled={Boolean(stage)}
-                        onClick={() => set("members", n)}
-                        className={`flex h-11 min-w-[3.25rem] items-center justify-center gap-1.5 rounded-xl border px-4 text-sm font-semibold transition ${f.members === n
-                            ? "border-blue-500 bg-blue-50 text-blue-700"
-                            : "border-slate-200 text-slate-700 hover:border-blue-300"
+                    {[2, 3, 4, 5, 10, 20, 30, 40, 60]
+                      .filter((n) => n >= MIN_GROUP && n <= MAX_GROUP)
+                      .map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          disabled={Boolean(stage)}
+                          onClick={() => set("members", n)}
+                          className={`flex h-11 min-w-[3.25rem] items-center justify-center gap-1.5 rounded-xl border px-4 text-sm font-semibold transition ${
+                            f.members === n
+                              ? "border-blue-500 bg-blue-50 text-blue-700"
+                              : "border-slate-200 text-slate-700 hover:border-blue-300"
                           }`}
-                      >
-                        <Users size={14} /> {n}
-                      </button>
-                    ))}
+                        >
+                          <Users size={14} /> {n}
+                        </button>
+                      ))}
                     <input
                       id="field-members"
                       type="number"
-                      min={2}
+                      min={MIN_GROUP}
                       max={MAX_GROUP}
                       value={f.members}
                       disabled={Boolean(stage)}
                       onChange={(e) => {
-                        const n = Math.round(Number(e.target.value) || 2);
-                        set("members", Math.min(MAX_GROUP, Math.max(2, n)));
+                        const n = Math.round(
+                          Number(e.target.value) || MIN_GROUP,
+                        );
+                        set(
+                          "members",
+                          Math.min(MAX_GROUP, Math.max(MIN_GROUP, n)),
+                        );
                       }}
                       className="h-11 w-24 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                       aria-label="Custom group size"
@@ -1162,14 +1222,20 @@ export default function SessionBoard() {
                   )}
                   <div className="mt-3 rounded-xl bg-slate-50 p-3 text-xs leading-5 text-slate-600">
                     <p>
-                      <b className="text-slate-800">You pay {inr(price)}</b>{" "}
+                      <b className="text-slate-800">You pay {showInr(price)}</b>{" "}
                       now. After booking you get a link. Each friend opens it
-                      and pays their own {inr(price)}.
+                      and pays their own {showInr(price)}.
                     </p>
                     <p className="mt-1">
                       If all {f.members} join, the group total is{" "}
-                      {inr(groupTotal)}. UPI / card may add a small fee. Wallet
-                      payments never do.
+                      {showInr(groupTotal)}. UPI / card may add a small fee.
+                      Wallet payments never do.
+                    </p>
+                    <p className="mt-1">
+                      At least {Math.min(f.members, MIN_GROUP)} people must have
+                      paid 15 minutes before the start. Otherwise the group is
+                      cancelled and everyone is refunded. Welcome bonus and
+                      referral credit cannot be used for group sessions.
                     </p>
                   </div>
                 </div>
@@ -1194,25 +1260,25 @@ export default function SessionBoard() {
                     type="button"
                     onClick={() => set("sessionType", t.value)}
                     aria-pressed={f.sessionType === t.value}
-                    className={`rounded-full border px-4 py-2 text-sm font-medium transition ${f.sessionType === t.value
+                    className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                      f.sessionType === t.value
                         ? "border-blue-500 bg-blue-50 text-blue-700"
                         : "border-slate-200 text-slate-600 hover:border-blue-300"
-                      }`}
+                    }`}
                   >
                     {t.label}
                   </button>
                 ))}
               </div>
 
-              {/* --- NEW TEXTAREA DESIGN & AI BUTTON --- */}
               <div className="mt-5">
-                <div className="flex items-end justify-between mb-2">
-                  <Label htmlFor="field-reason" className="mb-0">What do you want to learn?</Label>
+                <div className="mb-2 flex items-end justify-between">
+                  <Label htmlFor="field-reason">What do you want to learn?</Label>
                   <button
                     type="button"
                     disabled={Boolean(stage) || isAiWriting}
                     onClick={handleAiWrite}
-                    className="flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-700 disabled:opacity-50 transition"
+                    className="flex items-center gap-1.5 text-xs font-bold text-indigo-600 transition hover:text-indigo-700 disabled:opacity-50"
                   >
                     {isAiWriting ? (
                       <Loader2 size={14} className="animate-spin" />
@@ -1222,7 +1288,7 @@ export default function SessionBoard() {
                     {isAiWriting ? "Writing..." : "Write with AI"}
                   </button>
                 </div>
-                
+
                 <textarea
                   id="field-reason"
                   value={f.reason}
@@ -1230,25 +1296,25 @@ export default function SessionBoard() {
                   rows={4}
                   maxLength={1000}
                   placeholder="e.g. I'm a 2026 CSE graduate. I want to know the hiring process, which skills to prepare and how a referral works."
-                  className={`w-full resize-none rounded-xl border p-4 text-sm outline-none transition placeholder:text-slate-400 focus:ring-2 ${errFor("reason")
+                  className={`w-full resize-none rounded-xl border p-4 text-sm outline-none transition placeholder:text-slate-400 focus:ring-2 ${
+                    errFor("reason")
                       ? "border-red-400 focus:border-red-500 focus:ring-red-100"
                       : "border-slate-200 focus:border-blue-500 focus:ring-blue-100"
-                    }`}
+                  }`}
                 />
                 <div className="mt-1.5 flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <FieldError msg={errFor("reason")} />
                   </div>
                   <span
-                    className={`shrink-0 text-xs ${reasonDone ? "text-emerald-600" : "text-red-500"
-                      }`}
+                    className={`shrink-0 text-xs ${
+                      reasonDone ? "text-emerald-600" : "text-red-500"
+                    }`}
                   >
                     {f.reason.trim().length}/10 minimum
                   </span>
                 </div>
               </div>
-              {/* --- END NEW TEXTAREA DESIGN --- */}
-
             </Section>
 
             {/* 3. WHEN */}
@@ -1298,8 +1364,8 @@ export default function SessionBoard() {
               <div className="mt-6">
                 <Label>
                   {isGroup
-                    ? `Duration (${inr(GROUP_RATE_PER_HOUR)} per person per hour)`
-                    : `Duration (${inr(priceFor(60))} per hour)`}
+                    ? `Duration (${showInr(GROUP_RATE_PER_HOUR)} per person per hour)`
+                    : `Duration (${showInr(priceFor(60))} per hour)`}
                 </Label>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                   {DURATIONS.map((m) => (
@@ -1308,16 +1374,17 @@ export default function SessionBoard() {
                       type="button"
                       onClick={() => set("minutes", m)}
                       aria-pressed={f.minutes === m}
-                      className={`rounded-xl border px-3 py-3 text-center transition ${f.minutes === m
+                      className={`rounded-xl border px-3 py-3 text-center transition ${
+                        f.minutes === m
                           ? "border-blue-500 bg-blue-50 text-blue-700 shadow-sm"
                           : "border-slate-200 text-slate-700 hover:border-blue-300"
-                        }`}
+                      }`}
                     >
                       <div className="text-sm font-bold">
                         {durationLabel(m)}
                       </div>
                       <div className="mt-0.5 text-xs">
-                        {inr(isGroup ? groupPriceFor(m) : priceFor(m))}
+                        {showInr(isGroup ? groupPriceFor(m) : priceFor(m))}
                         {isGroup ? " / person" : ""}
                       </div>
                     </button>
@@ -1364,7 +1431,7 @@ export default function SessionBoard() {
                       <p className="mt-1.5 text-xs text-slate-400">
                         {!deptLoading && departments.length === 0
                           ? deptError ||
-                          `No ${companyName} employees have registered yet.`
+                            `No ${companyName} employees have registered yet.`
                           : `Roles of ${companyName} employees on MNCConnect.`}
                       </p>
                     )}
@@ -1488,9 +1555,9 @@ export default function SessionBoard() {
                   {isGroup && (
                     <p>
                       <b className="text-slate-900">+</b> Share your group link
-                      from My Bookings. Each friend pays {inr(price)} and joins.
-                      Friends can join until the session starts. Unfilled spots
-                      are left empty.
+                      from My Bookings. Each friend pays {showInr(price)} and
+                      joins. Friends can join until the session starts. Unfilled
+                      spots are left empty.
                     </p>
                   )}
                   <p>
@@ -1532,16 +1599,18 @@ export default function SessionBoard() {
 
               {/* WHAT IS LEFT */}
               <div
-                className={`mt-5 rounded-xl border p-3 ${problems.length === 0
+                className={`mt-5 rounded-xl border p-3 ${
+                  problems.length === 0
                     ? "border-emerald-200 bg-emerald-50"
                     : "border-slate-200 bg-slate-50"
-                  }`}
+                }`}
               >
                 <p
-                  className={`text-xs font-bold ${problems.length === 0
+                  className={`text-xs font-bold ${
+                    problems.length === 0
                       ? "text-emerald-800"
                       : "text-slate-700"
-                    }`}
+                  }`}
                 >
                   {problems.length === 0
                     ? "All set. You can pay now."
@@ -1558,10 +1627,11 @@ export default function SessionBoard() {
                             setShowErrors(true);
                             scrollToField(c.key);
                           }}
-                          className={`flex w-full items-center gap-2 rounded-lg px-1 py-1 text-left text-xs ${c.done
+                          className={`flex w-full items-center gap-2 rounded-lg px-1 py-1 text-left text-xs ${
+                            c.done
                               ? "text-slate-400 line-through"
                               : "font-semibold text-slate-800 hover:bg-white"
-                            }`}
+                          }`}
                         >
                           {c.done ? (
                             <CheckCircle2
@@ -1596,10 +1666,11 @@ export default function SessionBoard() {
                     disabled={!canWallet || Boolean(stage)}
                     onClick={() => setUseWallet(true)}
                     aria-pressed={payWallet}
-                    className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition ${payWallet
+                    className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition ${
+                      payWallet
                         ? "border-indigo-400 bg-indigo-50"
                         : "border-slate-200"
-                      } ${!canWallet ? "cursor-not-allowed opacity-70" : "hover:border-indigo-300"}`}
+                    } ${!canWallet ? "cursor-not-allowed opacity-70" : "hover:border-indigo-300"}`}
                   >
                     <Wallet size={18} className="mt-0.5 text-indigo-600" />
                     <span className="min-w-0 flex-1">
@@ -1610,13 +1681,16 @@ export default function SessionBoard() {
                         </span>
                       </span>
                       <span className="mt-0.5 block text-xs text-slate-500">
-                        {!me
+                        {!me || !pricesReady
                           ? "Checking your wallet…"
                           : !canWallet
                             ? walletBalance > 0
                               ? `Not enough balance. You need ${inr(price - walletBalance)} more.`
                               : "Your wallet is empty."
                             : `No extra fee. Balance after booking: ${inr(walletAfter)}`}
+                        {isGroup && me
+                          ? " Group sessions use cash balance only."
+                          : ""}
                       </span>
                     </span>
                   </button>
@@ -1626,10 +1700,11 @@ export default function SessionBoard() {
                     disabled={Boolean(stage)}
                     onClick={() => setUseWallet(false)}
                     aria-pressed={!payWallet}
-                    className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition ${!payWallet
+                    className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition ${
+                      !payWallet
                         ? "border-blue-400 bg-blue-50"
                         : "border-slate-200 hover:border-blue-300"
-                      }`}
+                    }`}
                   >
                     <CreditCard size={18} className="mt-0.5 text-blue-600" />
                     <span className="min-w-0 flex-1">
@@ -1651,7 +1726,7 @@ export default function SessionBoard() {
                 <div className="flex justify-between gap-4">
                   <span className="text-slate-500">Session price</span>
                   <span className="font-semibold text-slate-900">
-                    {inr(price)}
+                    {showInr(price)}
                   </span>
                 </div>
                 {!payWallet && (
@@ -1667,13 +1742,13 @@ export default function SessionBoard() {
                     {isGroup ? "You pay (per person)" : "Total to pay"}
                   </span>
                   <span className="text-2xl font-extrabold text-slate-950">
-                    {inr(totalPayable)}
+                    {showInr(totalPayable)}
                   </span>
                 </div>
                 {isGroup && (
                   <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">
-                    {f.members} people × {inr(price)} = {inr(groupTotal)} when
-                    everyone joins. Each friend pays their own share.
+                    {f.members} people × {showInr(price)} = {showInr(groupTotal)}{" "}
+                    when everyone joins. Each friend pays their own share.
                   </p>
                 )}
               </div>
@@ -1698,12 +1773,12 @@ export default function SessionBoard() {
               <button
                 type="button"
                 onClick={startPayment}
-                disabled={Boolean(stage)}
-                className={`mt-5 hidden lg:block ${payButtonCls(Boolean(stage))}`}
+                disabled={payDisabled}
+                className={`mt-5 hidden lg:block ${payButtonCls(payDisabled)}`}
               >
                 {payLabel}
               </button>
-              {problems.length === 0 && (
+              {problems.length === 0 && pricesReady && (
                 <p className="mt-2 hidden text-center text-xs text-slate-500 lg:block">
                   Then we will {actionWord} to{" "}
                   {rebook
@@ -1728,14 +1803,14 @@ export default function SessionBoard() {
               {isGroup ? "You pay" : "Total"}
             </p>
             <p className="text-lg font-extrabold leading-tight text-slate-950">
-              {inr(totalPayable)}
+              {showInr(totalPayable)}
             </p>
           </div>
           <button
             type="button"
             onClick={startPayment}
-            disabled={Boolean(stage)}
-            className={payButtonCls(Boolean(stage))}
+            disabled={payDisabled}
+            className={payButtonCls(payDisabled)}
           >
             {payLabel}
           </button>

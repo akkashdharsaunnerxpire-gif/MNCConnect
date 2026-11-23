@@ -746,7 +746,10 @@ exports.payWithWallet = async (req, res) => {
       await session.withTransaction(async () => {
         outcome = null; // the callback can be retried by the driver
 
-        const debit = await debitWallet(fresherId, amount, session);
+        // GROUP sessions can only be paid with real cash balance (no welcome bonus / referral credit)
+        const debit = await debitWallet(fresherId, amount, session, {
+          cashOnly: priced.mode === "group",
+        });
         if (!debit.ok) {
           outcome = { failed: debit.reason };
           return; // nothing written -> nothing to roll back
@@ -809,9 +812,13 @@ exports.payWithWallet = async (req, res) => {
 
     if (!outcome || outcome.failed) {
       if (outcome && outcome.failed === "INSUFFICIENT") {
-        return res
-          .status(402)
-          .json({ success: false, message: "Insufficient wallet balance" });
+        return res.status(402).json({
+          success: false,
+          message:
+            priced.mode === "group"
+              ? "Insufficient wallet balance. Bonus and referral credit cannot be used for group sessions."
+              : "Insufficient wallet balance",
+        });
       }
       return res.status(409).json({
         success: false,

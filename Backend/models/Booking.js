@@ -73,15 +73,17 @@ const bookingSchema = new Schema(
     acceptedAt: { type: Date, default: null },
     completedAt: { type: Date, default: null },
 
-    // NEW: the moment the booking became expired / missed / cancelled.
+    // the moment the booking became expired / missed / cancelled.
     // The scheduler deletes the booking 24h after this (storage saving).
     closedAt: { type: Date, default: null },
 
     // the HOST's payment (friends' payments are inside `participants`)
     razorpayPaymentId: { type: String, default: "" },
+
+    // "pending" = refund in progress (crash safe), "review" = dispute waiting for admin
     refundStatus: {
       type: String,
-      enum: ["", "refunded", "failed"],
+      enum: ["", "pending", "refunded", "failed", "review"],
       default: "",
     },
     // scheduler retry limit for failed refunds
@@ -90,6 +92,17 @@ const bookingSchema = new Schema(
 
     reminderSent: { type: Boolean, default: false },
     reviewed: { type: Boolean, default: false },
+
+    // ---------- PRESENCE (written ONLY by the LiveKit webhook) ----------
+    mentorJoinedAt: { type: Date, default: null },
+    fresherJoinedAt: { type: Date, default: null },
+    // who caused a "missed" session: "", "fresher", "mentor"
+    noShowBy: { type: String, enum: ["", "fresher", "mentor"], default: "" },
+
+    // ---------- DISPUTE ----------
+    disputedAt: { type: Date, default: null },
+    disputeReason: { type: String, default: "", maxlength: 500 },
+    disputeNote: { type: String, default: "", maxlength: 300 },
 
     meeting: {
       remainingMs: { type: Number, default: null },
@@ -112,6 +125,8 @@ const bookingSchema = new Schema(
       index: true,
     },
     maxMembers: { type: Number, default: 1, min: 1 },
+    // group is cancelled + refunded if fewer than this many paid before the fill cut-off
+    minMembers: { type: Number, default: 1, min: 1 },
     perPersonAmount: { type: Number, default: 0 },
     inviteCode: { type: String, default: "", index: true },
     // everybody who PAID: host first, then the friends / students who joined
@@ -132,8 +147,12 @@ bookingSchema.index({ status: 1, expiresAt: 1 });
 bookingSchema.index({ mentor: 1, status: 1, startsAt: 1 });
 bookingSchema.index({ status: 1, "meeting.timerEndsAt": 1 });
 bookingSchema.index({ status: 1, refundStatus: 1 });
-// NEW: the 24h cleanup query
+// the 24h cleanup query
 bookingSchema.index({ status: 1, refundStatus: 1, closedAt: 1 });
+// dispute list + dispute timeout
+bookingSchema.index({ status: 1, refundStatus: 1, disputedAt: 1 });
+// group fill check
+bookingSchema.index({ sessionMode: 1, status: 1, startsAt: 1 });
 
 // Prevent duplicate bookings using the same Razorpay payment ID (host payment)
 bookingSchema.index(

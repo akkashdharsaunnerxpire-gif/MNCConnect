@@ -46,14 +46,13 @@ import useLive from "../../hooks/useLive";
 import ChatPanel from "../../Commoncomponents/Chatpanel";
 import { socket } from "../../utils/socket";
 import { JOIN_OPEN_MS } from "../../utils/sessionTiming";
-
+import LiveClock from "../../utils/LiveClock";
 import {
   api,
   ENDPOINTS,
   EVENTS,
   getUserId,
   durationLabel,
-  fmtClock,
   inr,
 } from "../../services/fresherApi";
 
@@ -95,38 +94,6 @@ const BAR_H = 64;
 const MODAL_ANIM_MS = 220;
 
 /* =========================================================================
-   LIVE CLOCK
-========================================================================= */
-
-const tickListeners = new Set();
-let tickTimer = null;
-
-const subscribeTick = (fn) => {
-  tickListeners.add(fn);
-
-  if (!tickTimer) {
-    tickTimer = setInterval(() => tickListeners.forEach((f) => f()), 1000);
-  }
-
-  return () => {
-    tickListeners.delete(fn);
-
-    if (!tickListeners.size && tickTimer) {
-      clearInterval(tickTimer);
-      tickTimer = null;
-    }
-  };
-};
-
-const LiveClock = ({ target }) => {
-  const [, setTick] = useState(0);
-
-  useEffect(() => subscribeTick(() => setTick((n) => n + 1)), []);
-
-  return <>{fmtClock(Math.max(0, target - Date.now()))}</>;
-};
-
-/* =========================================================================
    SKELETON
 ========================================================================= */
 
@@ -164,7 +131,7 @@ const BookingCardSkeleton = () => (
         <Bone className="h-11 w-full !rounded-xl" />
         <Bone className="h-11 w-full !rounded-xl" />
       </div>
-    </div>
+    </div>    
 
     <div className="mx-3 mb-4 sm:mx-6">
       <div className="mx-auto flex max-w-2xl">
