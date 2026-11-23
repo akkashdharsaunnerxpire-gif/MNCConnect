@@ -50,7 +50,6 @@ import PersonDetailsModal from "../../Commoncomponents/Persondetailsmodal";
 const INDIA_TIMEZONE = "Asia/Kolkata";
 const TABS = ["Upcoming", "Awaiting Confirmation", "Completed", "Cancelled"];
 
-// Status only moves forward: Upcoming -> awaiting_confirmation -> Completed/Cancelled
 const STATUS_RANK = {
   Upcoming: 0,
   awaiting_confirmation: 1,
@@ -58,7 +57,6 @@ const STATUS_RANK = {
   Cancelled: 2,
 };
 
-// booking.status (backend) -> status used by this page
 const mapBookingStatus = (status) => {
   switch (String(status || "").toLowerCase()) {
     case "awaiting_confirmation":
@@ -75,14 +73,6 @@ const mapBookingStatus = (status) => {
   }
 };
 
-/* ------------------------------------------------------------------ */
-/* FRESHER PHOTO                                                       */
-/* The sessions list does not carry the fresher's profile photo, so we */
-/* load it once per session from the booking's /counterpart endpoint   */
-/* and cache it (no repeated requests when the page re-renders).       */
-/* findImage() finds the photo whatever the field is called, and       */
-/* fixUrl() turns "/uploads/x.jpg" into a full url.                    */
-/* ------------------------------------------------------------------ */
 const imageOfPerson = (p) => findImage(p);
 
 const photoCache = new Map(); // sessionId -> Promise<string>
@@ -92,9 +82,12 @@ const loadPersonImage = (id) => {
 
   if (!photoCache.has(key)) {
     const promise = api(`${ENDPOINTS.booking(key)}/counterpart`)
-      .then((d) =>
-        imageOfPerson(d?.person || d?.fresher || d?.user || d?.counterpart),
-      )
+      .then((d) => {
+        // Try every possible structure the backend might return
+        return imageOfPerson(
+          d?.person || d?.fresher || d?.user || d?.counterpart || d?.people?.[0] || d
+        );
+      })
       .catch(() => {
         photoCache.delete(key); // allow a retry next time
         return "";
@@ -105,13 +98,17 @@ const loadPersonImage = (id) => {
   return photoCache.get(key);
 };
 
-// returns the photo the list already has, otherwise the loaded one
 const usePersonImage = (id, existing, enabled) => {
   const [loaded, setLoaded] = useState("");
 
   useEffect(() => {
-    if (!enabled || existing || !id) {
+    if (!enabled || !id) {
       setLoaded("");
+      return undefined;
+    }
+
+    // Check if we already have a valid image directly from the session object
+    if (existing && existing.trim() !== "") {
       return undefined;
     }
 
@@ -128,15 +125,6 @@ const usePersonImage = (id, existing, enabled) => {
   return existing || loaded;
 };
 
-/* ------------------------------------------------------------------ */
-/* GROUP FIX                                                           */
-/* The backend returns one row per PAYMENT (host + every friend), all  */
-/* with the SAME session id (= requestGroupId). That showed 2 cards    */
-/* for ONE meeting. Here we merge rows with the same id into ONE card: */
-/*   - members      : how many freshers paid                           */
-/*   - memberNames  : their names (no duplicates)                      */
-/*   - earning      : total of every member's earning                  */
-/* ------------------------------------------------------------------ */
 const mergeGroupSessions = (list) => {
   const map = new Map();
 
@@ -159,7 +147,6 @@ const mergeGroupSessions = (list) => {
     }
     prev.earning = (Number(prev.earning) || 0) + (Number(s.earning) || 0);
 
-    // keep the furthest status if rows disagree (status only moves forward)
     if ((STATUS_RANK[s.status] ?? 0) > (STATUS_RANK[prev.status] ?? 0)) {
       prev.status = s.status;
     }
@@ -168,11 +155,6 @@ const mergeGroupSessions = (list) => {
   return [...map.values()];
 };
 
-/* ------------------------------------------------------------------ */
-/* Circular loader with label (MUI) – shown until the session becomes */
-/* Completed. Spinner is indeterminate (confirmation time is unknown),*/
-/* the label in the middle shows how long we have been waiting.       */
-/* ------------------------------------------------------------------ */
 const CircularProgressWithLabel = ({ label, size = 54, color = "#D97706" }) => (
   <Box sx={{ position: "relative", display: "inline-flex", flexShrink: 0 }}>
     <CircularProgress
@@ -319,12 +301,7 @@ const getJoinStatus = (session, nowMs) => {
     msUntilOpen: Math.max(0, joinOpen - nowMs),
   };
 };
-/* ------------------------------------------------------------------ */
-/* GROUP details modal                                                 */
-/* LEFT  : every fresher of the group (host first)                     */
-/* RIGHT : full details of the selected fresher                        */
-/* A field is shown only when the fresher has a value for it.          */
-/* ------------------------------------------------------------------ */
+
 const eduText = (e) => {
   if (!e) return "";
   if (typeof e === "string") return e;
@@ -336,8 +313,6 @@ const eduText = (e) => {
     .join(" · ");
 };
 
-// round photo, falls back to the first letter (also when the image fails to load)
-// p.image can be missing -> findImage(p) looks at any image-like field
 const Avatar = ({
   p,
   size = "h-10 w-10",
@@ -345,7 +320,10 @@ const Avatar = ({
   className = "",
 }) => {
   const [failed, setFailed] = useState(false);
-  const src = fixUrl(p.image) || findImage(p);
+  const src =
+    fixUrl(p.image) ||
+    fixUrl(p.avatar) ||
+    findImage(p);
 
   useEffect(() => {
     setFailed(false);
@@ -361,7 +339,7 @@ const Avatar = ({
     />
   ) : (
     <div
-      className={`${size} ${text} flex shrink-0 items-center justify-center rounded-full bg-blue-100 font-bold text-blue-700 ${className}`}
+      className={`${size} ${text} flex shrink-0 items-center justify-center rounded-full bg-blue-50 font-bold text-blue-600 border border-blue-100 ${className}`}
     >
       {(p.name || "?").charAt(0).toUpperCase()}
     </div>
@@ -373,11 +351,10 @@ const Chips = ({ items, tone = "blue" }) => (
     {items.map((x) => (
       <span
         key={x}
-        className={`rounded-lg px-2.5 py-1 text-[11px] font-medium ${
-          tone === "blue"
+        className={`rounded-lg px-2.5 py-1 text-[11px] font-medium ${tone === "blue"
             ? "bg-blue-50 text-blue-700"
             : "bg-indigo-50 text-indigo-700"
-        }`}
+          }`}
       >
         {x}
       </span>
@@ -480,7 +457,6 @@ const GroupDetailsModal = ({ bookingId, onClose }) => {
           setPeople(d.people);
           return;
         }
-        // fallback (old backend): host + names of the others
         const host = d?.person ? [{ ...d.person, isHost: true }] : [];
         const others = (d?.session?.members || [])
           .filter((n) => n && n !== d?.person?.name)
@@ -529,18 +505,16 @@ const GroupDetailsModal = ({ bookingId, onClose }) => {
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
-            {/* LEFT: users */}
             <ul className="max-h-40 shrink-0 space-y-1 overflow-y-auto border-b border-slate-100 p-3 sm:max-h-none sm:w-60 sm:border-b-0 sm:border-r">
               {people.map((p, i) => (
                 <li key={p.id || p.name}>
                   <button
                     type="button"
                     onClick={() => setSelected(i)}
-                    className={`flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition ${
-                      i === selected
+                    className={`flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition ${i === selected
                         ? "bg-blue-50 ring-1 ring-blue-200"
                         : "hover:bg-slate-50"
-                    }`}
+                      }`}
                   >
                     <Avatar p={p} size="h-9 w-9" text="text-xs" />
                     <span className="min-w-0 flex-1">
@@ -558,7 +532,6 @@ const GroupDetailsModal = ({ bookingId, onClose }) => {
               ))}
             </ul>
 
-            {/* RIGHT: selected user's details */}
             <div className="min-h-0 flex-1 overflow-y-auto p-5">
               {current && <PersonDetail p={current} />}
             </div>
@@ -582,35 +555,24 @@ const MentorSessions = () => {
     reload,
   } = useMentorSessions();
 
-  // id -> { remainingMs, running, at }
   const [timers, setTimers] = useState({});
-  // id -> status seen from live booking data (moves the card instantly,
-  // without waiting for the sessions list to reload)
   const [statusOverrides, setStatusOverrides] = useState({});
 
   const [activeTab, setActiveTab] = useState("Upcoming");
   const [search, setSearch] = useState("");
   const [nowMs, setNowMs] = useState(Date.now());
 
-  // ---- unread chat messages: requestGroupId -> count ----
   const [unreadCounts, setUnreadCounts] = useState({});
   const openChatId = useRef(null);
   const seenMessageIds = useRef(new Set());
-
-  // id -> true when the meeting timer was running at least once
-  // (same idea as the fresher My Bookings page -> both sides finish together)
   const wasRunningRef = useRef({});
-
-  // id -> last status we told the header about (avoid spamming it every poll)
   const notifiedStatusRef = useRef({});
 
-  // keep latest reload without re-creating effects
   const reloadRef = useRef(reload);
   useEffect(() => {
     reloadRef.current = reload;
   }, [reload]);
 
-  // the header owns a separate copy of the sessions -> tell it when a status moved
   const notifyStatus = useCallback((id, status) => {
     const key = String(id);
     if (notifiedStatusRef.current[key] === status) return;
@@ -618,13 +580,11 @@ const MentorSessions = () => {
     notifySessionsChanged(key);
   }, []);
 
-  // GROUP FIX: one booking = one card (merge duplicate rows with the same id)
   const mergedServer = useMemo(
     () => mergeGroupSessions(serverSessions || []),
     [serverSessions],
   );
 
-  // Apply status overrides on top of server data (status only moves forward)
   const sessions = useMemo(
     () =>
       mergedServer.map((s) => {
@@ -636,12 +596,10 @@ const MentorSessions = () => {
       }),
     [mergedServer, statusOverrides],
   );
-  // always the latest sessions inside the polling interval (no re-creating the interval)
+
   const sessionsRef = useRef([]);
   sessionsRef.current = sessions;
 
-  // first load only: nothing to show yet -> show skeleton cards
-  // (background reloads keep the old list on screen, so no skeleton flash)
   const initialLoading = loading && (serverSessions || []).length === 0;
 
   const setOverride = useCallback(
@@ -649,7 +607,6 @@ const MentorSessions = () => {
       if (!id || !status) return;
       const key = String(id);
       setStatusOverrides((prev) => {
-        // status only moves forward
         if ((STATUS_RANK[prev[key]] ?? -1) >= (STATUS_RANK[status] ?? 0))
           return prev;
         return { ...prev, [key]: status };
@@ -659,13 +616,11 @@ const MentorSessions = () => {
     [notifyStatus],
   );
 
-  // 1-second clock
   useEffect(() => {
     const t = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  // Refresh the list when the user comes back to this tab / page
   useEffect(() => {
     const refresh = () => {
       if (document.visibilityState === "visible") reloadRef.current?.();
@@ -678,20 +633,18 @@ const MentorSessions = () => {
     };
   }, []);
 
-  // unread counts that are already saved on the server (survives refresh)
   useEffect(() => {
     let cancelled = false;
     api("/chat/unread")
       .then((d) => {
         if (!cancelled && d?.counts) setUnreadCounts(d.counts);
       })
-      .catch(() => {});
+      .catch(() => { });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // new message from the fresher -> +1 (unless that chat is open right now)
   useEffect(() => {
     const onChatMessage = (message) => {
       if (message.senderRole === "mentor") return;
@@ -723,7 +676,6 @@ const MentorSessions = () => {
     openChatId.current = null;
   }, []);
 
-  // ids of sessions that can still change (stops polling once Completed)
   const activeIds = useMemo(
     () =>
       sessions
@@ -733,7 +685,6 @@ const MentorSessions = () => {
     [sessions],
   );
 
-  // Poll the same booking data the meeting room uses
   useEffect(() => {
     if (!activeIds) return undefined;
     const ids = activeIds.split(",");
@@ -741,7 +692,6 @@ const MentorSessions = () => {
 
     const fetchTimers = async () => {
       const nowTs = Date.now();
-      // poll ONLY bookings where something can change (room open - 30s ... end + 30min)
       const due = ids.filter((id) => {
         const s = sessionsRef.current.find((x) => String(x.id) === String(id));
         return (
@@ -779,7 +729,6 @@ const MentorSessions = () => {
               } else if (
                 hasTimerFinished(wasRunningRef.current[id], running, remaining)
               ) {
-                // timer ran and stopped -> same moment the fresher sees it finish
                 statusResults[id] = "awaiting_confirmation";
                 changed = true;
               }
@@ -794,7 +743,6 @@ const MentorSessions = () => {
       setTimers((prev) => ({ ...prev, ...timerResults }));
 
       if (changed) {
-        // move cards to the right tab immediately
         setStatusOverrides((prev) => {
           const next = { ...prev };
           let diff = false;
@@ -808,12 +756,10 @@ const MentorSessions = () => {
           return diff ? next : prev;
         });
 
-        // tell the header (only once per status change)
         Object.entries(statusResults).forEach(([id, st]) => {
           if (st !== "Upcoming") notifyStatus(id, st);
         });
 
-        // and sync the real list from the server
         const moved = Object.values(statusResults).some(
           (st) => st !== "Upcoming",
         );
@@ -829,7 +775,6 @@ const MentorSessions = () => {
     };
   }, [activeIds, notifyStatus]);
 
-  // Socket updates (instant when server sends them to this user)
   useEffect(() => {
     const onTimer = (p) => {
       const id = p?.requestGroupId || p?.bookingId;
@@ -855,7 +800,6 @@ const MentorSessions = () => {
         },
       }));
 
-      // timer ended -> move the card right away (same as the fresher page)
       if (
         !mapped &&
         hasTimerFinished(wasRunningRef.current[id], running, p.remainingMs)
@@ -872,7 +816,6 @@ const MentorSessions = () => {
     };
   }, [setOverride]);
 
-  // booking updated -> refresh list
   useEffect(() => {
     const onUpdated = (p) => {
       const id = p?.requestGroupId || p?.bookingId || p?.id;
@@ -888,7 +831,6 @@ const MentorSessions = () => {
   const location = useLocation();
   const [autoOpenId, setAutoOpenId] = useState(null);
 
-  // opened from the global message alert
   useEffect(() => {
     const id = location.state?.openChatId;
     if (!id) return;
@@ -897,7 +839,6 @@ const MentorSessions = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state]);
 
-  // switch to the tab where that session lives
   useEffect(() => {
     if (!autoOpenId) return;
     const s = sessions.find((x) => String(x.id) === autoOpenId);
@@ -947,7 +888,6 @@ const MentorSessions = () => {
   return (
     <div className="min-h-screen bg-white text-slate-900">
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        {/* header */}
         <header className="mb-6">
           <p className="text-sm font-medium text-blue-600">Mentor workspace</p>
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">
@@ -972,11 +912,10 @@ const MentorSessions = () => {
                   key={tab}
                   type="button"
                   onClick={() => setActiveTab(tab)}
-                  className={`flex items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2.5 text-sm font-medium transition ${
-                    active
+                  className={`flex items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2.5 text-sm font-medium transition ${active
                       ? "bg-blue-600 text-white shadow-sm"
                       : "text-slate-500 hover:bg-blue-50 hover:text-blue-600"
-                  }`}
+                    }`}
                 >
                   {tab}
                   <span
@@ -1055,7 +994,6 @@ const MentorSessions = () => {
   );
 };
 
-/* Message button with the unread badge (same look as the fresher My Bookings page) */
 const MessageButton = ({ unread, onClick, className }) => (
   <button type="button" onClick={onClick} className={className}>
     <MessageSquare size={15} />
@@ -1080,7 +1018,6 @@ const SessionCard = ({
   onAutoOpened,
 }) => {
   const [chatFor, setChatFor] = useState(null);
-  // fresher details modal
   const [showFresher, setShowFresher] = useState(false);
   const closeFresher = useCallback(() => setShowFresher(false), []);
 
@@ -1104,7 +1041,6 @@ const SessionCard = ({
   const isCompleted = session.status === "Completed";
   const isCancelled = session.status === "Cancelled";
 
-  // GROUP: several freshers inside ONE meeting
   const memberCount = session.members || 1;
   const isGroup = memberCount > 1 || session.mode === "group";
   const names =
@@ -1116,11 +1052,16 @@ const SessionCard = ({
     names.slice(0, NAMES_SHOWN).join(", ") +
     (names.length > NAMES_SHOWN ? ` +${names.length - NAMES_SHOWN} more` : "");
 
-  // fresher's profile photo (single sessions): from the list, else loaded once
+  // Ensure we find an image in the session object, or fallback to the dedicated endpoint
+  const initialImage =
+    fixUrl(session.avatar) ||
+    fixUrl(session.image) ||
+    findImage(session);
+
   const fresherPhoto = usePersonImage(
     session.id,
-    fixUrl(session.avatar),
-    !isGroup,
+    initialImage,
+    true
   );
 
   const base = getJoinStatus(session, nowMs);
@@ -1130,7 +1071,6 @@ const SessionCard = ({
       ? `${fmtTime(new Date(session.startsAt))} → ${fmtTime(new Date(session.endsAt))}`
       : session.time;
 
-  // ---- LIVE MEETING TIMER (same value + same rules as the fresher side) ----
   const timerActive = isUpcoming && Boolean(timer?.running);
   const baseRemaining =
     typeof timer?.remainingMs === "number"
@@ -1140,7 +1080,6 @@ const SessionCard = ({
     timerActive && typeof baseRemaining === "number"
       ? Math.max(0, baseRemaining - (nowMs - (timer?.at || nowMs)))
       : 0;
-  // when the clock reaches 0 the meeting is over (do not wait for the server)
   const timerRunning =
     timerActive && (typeof baseRemaining !== "number" || remaining > 0);
   const isFinalWarning = timerRunning && remaining <= FINAL_WARNING_MS;
@@ -1151,7 +1090,6 @@ const SessionCard = ({
   const { joinOpenAt, sessionEndAt } = base;
   const joinable = isUpcoming && (isLive || isJoinWindow);
 
-  // time since the session ended (used by the loader label)
   const elapsedSinceEnd = session.endsAt ? nowMs - session.endsAt : 0;
 
   const btnStyle = isLive
@@ -1182,7 +1120,6 @@ const SessionCard = ({
   const secondaryBtn =
     "flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50";
 
-  // Fresher details button (same on every tab)
   const fresherBtn = (
     <button
       type="button"
@@ -1205,10 +1142,13 @@ const SessionCard = ({
               </div>
             ) : (
               <Avatar
-                p={{ name: session.name, image: fresherPhoto }}
+                p={{
+                  name: session.name,
+                  image: fresherPhoto,
+                }}
                 size="h-12 w-12"
                 text="text-sm"
-                className="border-2 border-blue-100"
+                className="border border-blue-100"
               />
             )}
             <div className="min-w-0">
@@ -1239,7 +1179,7 @@ const SessionCard = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:w-[560px]">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:w-[580px]">
             <SessionInfo
               icon={<CalendarDays size={15} />}
               label="Date"
@@ -1255,22 +1195,23 @@ const SessionCard = ({
               label="Duration"
               value={session.duration}
             />
-            <SessionInfo
-              icon={<Star size={15} />}
-              label={isGroup ? "You earn (total)" : "You earn"}
-              value={inr(session.earning ?? 0)}
-            />
+            {/* Custom "You earn" Box Design */}
+            <div className="rounded-xl border border-slate-100 bg-white p-3 shadow-sm">
+              <div className="flex items-center gap-1.5 text-slate-400">
+                <Star size={15} />
+                <span className="text-[10px] font-medium">{isGroup ? "You earn (total)" : "You earn"}</span>
+              </div>
+              <p className="mt-1.5 text-base font-bold text-slate-800">{inr(session.earning ?? 0)}</p>
+            </div>
           </div>
         </div>
 
-        {/* LIVE TIMER BAR */}
         {timerRunning && (
           <div
-            className={`mt-4 flex items-center justify-between gap-4 rounded-xl border p-3 ${
-              isFinalWarning
+            className={`mt-4 flex items-center justify-between gap-4 rounded-xl border p-3 ${isFinalWarning
                 ? "border-amber-200 bg-amber-50"
                 : "border-emerald-200 bg-emerald-50"
-            }`}
+              }`}
           >
             <div className="flex items-center gap-2.5">
               {isFinalWarning ? (
@@ -1301,11 +1242,10 @@ const SessionCard = ({
               </div>
             </div>
             <div
-              className={`rounded-lg px-3 py-1.5 font-mono text-xl font-bold tabular-nums ${
-                isFinalWarning
+              className={`rounded-lg px-3 py-1.5 font-mono text-xl font-bold tabular-nums ${isFinalWarning
                   ? "bg-amber-200 text-amber-900"
                   : "bg-emerald-200 text-emerald-900"
-              }`}
+                }`}
             >
               {fmtClock(remaining)}
             </div>
@@ -1357,7 +1297,6 @@ const SessionCard = ({
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {/* UPCOMING: Fresher details + Message + Join */}
             {isUpcoming && !hasEnded && (
               <>
                 {fresherBtn}
@@ -1377,7 +1316,6 @@ const SessionCard = ({
               </>
             )}
 
-            {/* AWAITING / COMPLETED / CANCELLED: Fresher details + Message */}
             {(isCompleted || isCancelled || isAwaitingConfirmation) && (
               <>
                 {fresherBtn}
@@ -1389,7 +1327,6 @@ const SessionCard = ({
               </>
             )}
 
-            {/* Upcoming but already ended (status is still updating) */}
             {isUpcoming && hasEnded && fresherBtn}
           </div>
         </div>
@@ -1427,7 +1364,6 @@ const SessionCard = ({
           </div>
         )}
 
-        {/* Loader: shown from the moment the meeting ends until it is Completed */}
         {isUpcoming && hasEnded && (
           <div className="mt-4">
             <SessionFinalizingIndicator
@@ -1470,12 +1406,15 @@ const SessionCard = ({
 };
 
 const SessionInfo = ({ icon, label, value }) => (
-  <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-    <div className="flex items-center gap-1.5 text-slate-400">
+  <div className="min-w-0 rounded-xl border border-slate-100 bg-slate-50 p-3">
+    <div className="flex items-center gap-1.5 whitespace-nowrap text-slate-400">
       {icon}
       <span className="text-[10px]">{label}</span>
     </div>
-    <p className="mt-1.5 text-xs font-semibold text-slate-700">{value}</p>
+
+    <p className="mt-1.5 whitespace-nowrap text-[11px] font-semibold leading-5 tracking-tight text-slate-700">
+      {value}
+    </p>
   </div>
 );
 
@@ -1489,11 +1428,6 @@ const EmptyState = ({ title, description }) => (
   </div>
 );
 
-/* ------------------------------------------------------------------ */
-/* SKELETON: same layout as SessionCard, shown on the first load only  */
-/* (same sizes as the real card, so the page does not jump when the    */
-/* data arrives)                                                       */
-/* ------------------------------------------------------------------ */
 const Bone = ({ className = "" }) => (
   <div className={`rounded-md bg-slate-200 ${className}`} />
 );
@@ -1504,7 +1438,6 @@ const SessionCardSkeleton = () => (
     aria-hidden="true"
   >
     <div className="flex flex-col gap-5 lg:flex-row lg:items-center">
-      {/* avatar + name + chips */}
       <div className="flex flex-1 items-center gap-4">
         <Bone className="h-12 w-12 shrink-0 !rounded-full" />
         <div className="min-w-0 flex-1 space-y-2">
@@ -1517,7 +1450,6 @@ const SessionCardSkeleton = () => (
         </div>
       </div>
 
-      {/* 4 info boxes (Date / Start-End / Duration / Earn) */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:w-[560px]">
         {[0, 1, 2, 3].map((i) => (
           <div
@@ -1531,7 +1463,6 @@ const SessionCardSkeleton = () => (
       </div>
     </div>
 
-    {/* footer: status + buttons */}
     <div className="mt-5 flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
       <Bone className="h-3 w-32" />
       <div className="flex gap-2">

@@ -6,6 +6,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { fixUrl, findImage } from "../../utils/imageUrl";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   CheckCircle2,
@@ -27,6 +28,7 @@ import {
   Info,
   WifiOff,
   Search,
+  Sparkles,
 } from "lucide-react";
 import useUserEvents from "../../hooks/useUserEvents";
 import useLive from "../../hooks/useLive";
@@ -240,10 +242,9 @@ const explainError = (message = "", status = 0) => {
 const inputBase =
   "h-12 w-full rounded-xl border bg-white px-4 text-sm text-slate-800 outline-none transition focus:ring-2 disabled:bg-slate-50 disabled:text-slate-400";
 const inputCls = (hasError) =>
-  `${inputBase} ${
-    hasError
-      ? "border-red-400 focus:border-red-500 focus:ring-red-100"
-      : "border-slate-200 focus:border-blue-500 focus:ring-blue-100"
+  `${inputBase} ${hasError
+    ? "border-red-400 focus:border-red-500 focus:ring-red-100"
+    : "border-slate-200 focus:border-blue-500 focus:ring-blue-100"
   }`;
 
 const Label = ({ children, htmlFor }) => (
@@ -270,9 +271,8 @@ const Section = ({ step, title, subtitle, done, children }) => (
   <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
     <div className="flex items-start gap-3">
       <span
-        className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold transition ${
-          done ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"
-        }`}
+        className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold transition ${done ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"
+          }`}
       >
         {done ? <Check size={16} /> : step}
       </span>
@@ -391,10 +391,10 @@ export default function SessionBoard() {
       p.mode === m
         ? p
         : {
-            ...p,
-            mode: m,
-            gender: m === "group" ? "" : cleanGender(user?.gender),
-          },
+          ...p,
+          mode: m,
+          gender: m === "group" ? "" : cleanGender(user?.gender),
+        },
     );
 
   // stage: null | "paying" | "sending" | "redirecting" | "expired" | "error"
@@ -405,6 +405,9 @@ export default function SessionBoard() {
   const [showErrors, setShowErrors] = useState(false); // show red field errors after a pay attempt
   const [payStep, setPayStep] = useState(0);
   const [payMode, setPayMode] = useState("online"); // "wallet" | "online"
+  
+  // AI writing simulation state
+  const [isAiWriting, setIsAiWriting] = useState(false);
 
   const [departments, setDepartments] = useState([]);
   const [deptLoading, setDeptLoading] = useState(true);
@@ -579,12 +582,12 @@ export default function SessionBoard() {
     ...(rebook
       ? []
       : [
-          { key: "role", label: "Role", done: isDone("role") },
-          { key: "language", label: "Language", done: isDone("language") },
-          ...(!isGroup
-            ? [{ key: "gender", label: "Your gender", done: isDone("gender") }]
-            : []),
-        ]),
+        { key: "role", label: "Role", done: isDone("role") },
+        { key: "language", label: "Language", done: isDone("language") },
+        ...(!isGroup
+          ? [{ key: "gender", label: "Your gender", done: isDone("gender") }]
+          : []),
+      ]),
   ];
 
   const scrollToField = (key) => {
@@ -644,7 +647,12 @@ export default function SessionBoard() {
           requester: {
             fullName: user.fullName || user.name || "Fresher",
             email: user.email || "",
-            image: user.image || user.avatar || "",
+            // fresh profile (/auth/me) first, old localStorage copy only as fallback
+            image:
+              findImage(me) ||
+              findImage(me?.user) ||
+              findImage(user) ||
+              "",
           },
           sessionDetails: {
             sessionType: type.label,
@@ -682,6 +690,7 @@ export default function SessionBoard() {
   }, [
     companyName,
     user,
+    me,
     type,
     f,
     price,
@@ -850,7 +859,7 @@ export default function SessionBoard() {
             razorpay_order_id: order.id,
             reason: lastFailRef.current,
           },
-        }).catch(() => {});
+        }).catch(() => { });
       });
 
       rz.open();
@@ -897,10 +906,10 @@ export default function SessionBoard() {
     ...(rebook
       ? [["Mentor", rebook.mentorName || "Selected mentor"]]
       : [
-          ["Role", f.role || "Not selected"],
-          ["Language", f.language || "Not selected"],
-          ["Guide", genderSummary],
-        ]),
+        ["Role", f.role || "Not selected"],
+        ["Language", f.language || "Not selected"],
+        ["Guide", genderSummary],
+      ]),
   ];
 
   const actionWord = isGroup ? "create group" : "send request";
@@ -915,18 +924,46 @@ export default function SessionBoard() {
   const errInfo = explainError(error, errorStatus);
 
   const payButtonCls = (disabled) =>
-    `w-full rounded-xl py-3.5 text-sm font-bold transition ${
-      disabled
-        ? "cursor-not-allowed bg-slate-200 text-slate-400"
-        : problems.length > 0
-          ? "bg-amber-100 text-amber-900 ring-1 ring-amber-300 hover:bg-amber-200"
-          : "bg-blue-600 text-white shadow-sm hover:bg-blue-700"
+    `w-full rounded-xl py-3.5 text-sm font-bold transition ${disabled
+      ? "cursor-not-allowed bg-slate-200 text-slate-400"
+      : problems.length > 0
+        ? "bg-amber-100 text-amber-900 ring-1 ring-amber-300 hover:bg-amber-200"
+        : "bg-blue-600 text-white shadow-sm hover:bg-blue-700"
     }`;
 
   const progressSteps =
     payMode === "wallet"
       ? ["Paying from wallet", "Sending your request"]
       : ["Completing payment", "Verifying payment", "Sending your request"];
+
+  // Simulate AI generating a personalized prompt based on name and session type
+  const handleAiWrite = () => {
+    setIsAiWriting(true);
+    setTimeout(() => {
+      const myName = (me?.name || user?.name || "a student").trim();
+      let aiText = "";
+
+      switch (f.sessionType) {
+        case "company_prep":
+          aiText = `Hi, I am ${myName}. I am very interested in joining ${companyName} and would love to understand your journey. Could you share insights on the current hiring process, the specific skills the team looks for, and how I can stand out as a candidate?`;
+          break;
+        case "interview_ideas":
+          aiText = `Hi, I am ${myName}. I have an upcoming interview (or want to start preparing) and would appreciate your guidance. What are the typical rounds, the core technical topics I should focus on, and the best way to structure my answers?`;
+          break;
+        case "referral":
+          aiText = `Hi, I am ${myName}. I believe my skills align well with the culture at ${companyName}. I would love to know more about the team dynamics, current openings, and if you'd be open to discussing a potential referral based on my profile.`;
+          break;
+        case "road_map":
+          aiText = `Hi, I am ${myName}. I want to build a strong career path towards a role at ${companyName}. Can we discuss a roadmap? I'd love to know what projects, certifications, or skills I should prioritize over the next 6 months.`;
+          break;
+        default:
+          aiText = `Hi, I am ${myName}. I have a few questions about working at ${companyName}, the company culture, and the growth opportunities available. I would love to hear your perspective and get some advice.`;
+      }
+
+      set("reason", aiText);
+      setIsAiWriting(false);
+    }, 1500);
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 pb-28 lg:pb-0">
@@ -1033,11 +1070,10 @@ export default function SessionBoard() {
                   disabled={Boolean(stage)}
                   onClick={() => chooseMode("single")}
                   aria-pressed={!isGroup}
-                  className={`flex items-start gap-3 rounded-2xl border p-4 text-left transition ${
-                    !isGroup
+                  className={`flex items-start gap-3 rounded-2xl border p-4 text-left transition ${!isGroup
                       ? "border-blue-500 bg-blue-50 shadow-sm"
                       : "border-slate-200 hover:border-blue-300"
-                  }`}
+                    }`}
                 >
                   <span
                     className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${!isGroup ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"}`}
@@ -1059,11 +1095,10 @@ export default function SessionBoard() {
                   disabled={Boolean(stage)}
                   onClick={() => chooseMode("group")}
                   aria-pressed={isGroup}
-                  className={`flex items-start gap-3 rounded-2xl border p-4 text-left transition ${
-                    isGroup
+                  className={`flex items-start gap-3 rounded-2xl border p-4 text-left transition ${isGroup
                       ? "border-blue-500 bg-blue-50 shadow-sm"
                       : "border-slate-200 hover:border-blue-300"
-                  }`}
+                    }`}
                 >
                   <span
                     className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${isGroup ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"}`}
@@ -1094,11 +1129,10 @@ export default function SessionBoard() {
                         type="button"
                         disabled={Boolean(stage)}
                         onClick={() => set("members", n)}
-                        className={`flex h-11 min-w-[3.25rem] items-center justify-center gap-1.5 rounded-xl border px-4 text-sm font-semibold transition ${
-                          f.members === n
+                        className={`flex h-11 min-w-[3.25rem] items-center justify-center gap-1.5 rounded-xl border px-4 text-sm font-semibold transition ${f.members === n
                             ? "border-blue-500 bg-blue-50 text-blue-700"
                             : "border-slate-200 text-slate-700 hover:border-blue-300"
-                        }`}
+                          }`}
                       >
                         <Users size={14} /> {n}
                       </button>
@@ -1160,19 +1194,35 @@ export default function SessionBoard() {
                     type="button"
                     onClick={() => set("sessionType", t.value)}
                     aria-pressed={f.sessionType === t.value}
-                    className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
-                      f.sessionType === t.value
+                    className={`rounded-full border px-4 py-2 text-sm font-medium transition ${f.sessionType === t.value
                         ? "border-blue-500 bg-blue-50 text-blue-700"
                         : "border-slate-200 text-slate-600 hover:border-blue-300"
-                    }`}
+                      }`}
                   >
                     {t.label}
                   </button>
                 ))}
               </div>
 
+              {/* --- NEW TEXTAREA DESIGN & AI BUTTON --- */}
               <div className="mt-5">
-                <Label htmlFor="field-reason">What do you want to learn?</Label>
+                <div className="flex items-end justify-between mb-2">
+                  <Label htmlFor="field-reason" className="mb-0">What do you want to learn?</Label>
+                  <button
+                    type="button"
+                    disabled={Boolean(stage) || isAiWriting}
+                    onClick={handleAiWrite}
+                    className="flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-700 disabled:opacity-50 transition"
+                  >
+                    {isAiWriting ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <Sparkles size={14} className="text-amber-500" />
+                    )}
+                    {isAiWriting ? "Writing..." : "Write with AI"}
+                  </button>
+                </div>
+                
                 <textarea
                   id="field-reason"
                   value={f.reason}
@@ -1180,25 +1230,25 @@ export default function SessionBoard() {
                   rows={4}
                   maxLength={1000}
                   placeholder="e.g. I'm a 2026 CSE graduate. I want to know the hiring process, which skills to prepare and how a referral works."
-                  className={`w-full resize-none rounded-xl border p-4 text-sm outline-none transition placeholder:text-slate-400 focus:ring-2 ${
-                    errFor("reason")
+                  className={`w-full resize-none rounded-xl border p-4 text-sm outline-none transition placeholder:text-slate-400 focus:ring-2 ${errFor("reason")
                       ? "border-red-400 focus:border-red-500 focus:ring-red-100"
                       : "border-slate-200 focus:border-blue-500 focus:ring-blue-100"
-                  }`}
+                    }`}
                 />
                 <div className="mt-1.5 flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <FieldError msg={errFor("reason")} />
                   </div>
                   <span
-                    className={`shrink-0 text-xs ${
-                      reasonDone ? "text-emerald-600" : "text-slate-400"
-                    }`}
+                    className={`shrink-0 text-xs ${reasonDone ? "text-emerald-600" : "text-red-500"
+                      }`}
                   >
                     {f.reason.trim().length}/10 minimum
                   </span>
                 </div>
               </div>
+              {/* --- END NEW TEXTAREA DESIGN --- */}
+
             </Section>
 
             {/* 3. WHEN */}
@@ -1258,11 +1308,10 @@ export default function SessionBoard() {
                       type="button"
                       onClick={() => set("minutes", m)}
                       aria-pressed={f.minutes === m}
-                      className={`rounded-xl border px-3 py-3 text-center transition ${
-                        f.minutes === m
+                      className={`rounded-xl border px-3 py-3 text-center transition ${f.minutes === m
                           ? "border-blue-500 bg-blue-50 text-blue-700 shadow-sm"
                           : "border-slate-200 text-slate-700 hover:border-blue-300"
-                      }`}
+                        }`}
                     >
                       <div className="text-sm font-bold">
                         {durationLabel(m)}
@@ -1315,7 +1364,7 @@ export default function SessionBoard() {
                       <p className="mt-1.5 text-xs text-slate-400">
                         {!deptLoading && departments.length === 0
                           ? deptError ||
-                            `No ${companyName} employees have registered yet.`
+                          `No ${companyName} employees have registered yet.`
                           : `Roles of ${companyName} employees on MNCConnect.`}
                       </p>
                     )}
@@ -1483,18 +1532,16 @@ export default function SessionBoard() {
 
               {/* WHAT IS LEFT */}
               <div
-                className={`mt-5 rounded-xl border p-3 ${
-                  problems.length === 0
+                className={`mt-5 rounded-xl border p-3 ${problems.length === 0
                     ? "border-emerald-200 bg-emerald-50"
                     : "border-slate-200 bg-slate-50"
-                }`}
+                  }`}
               >
                 <p
-                  className={`text-xs font-bold ${
-                    problems.length === 0
+                  className={`text-xs font-bold ${problems.length === 0
                       ? "text-emerald-800"
                       : "text-slate-700"
-                  }`}
+                    }`}
                 >
                   {problems.length === 0
                     ? "All set. You can pay now."
@@ -1511,11 +1558,10 @@ export default function SessionBoard() {
                             setShowErrors(true);
                             scrollToField(c.key);
                           }}
-                          className={`flex w-full items-center gap-2 rounded-lg px-1 py-1 text-left text-xs ${
-                            c.done
+                          className={`flex w-full items-center gap-2 rounded-lg px-1 py-1 text-left text-xs ${c.done
                               ? "text-slate-400 line-through"
                               : "font-semibold text-slate-800 hover:bg-white"
-                          }`}
+                            }`}
                         >
                           {c.done ? (
                             <CheckCircle2
@@ -1550,11 +1596,10 @@ export default function SessionBoard() {
                     disabled={!canWallet || Boolean(stage)}
                     onClick={() => setUseWallet(true)}
                     aria-pressed={payWallet}
-                    className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition ${
-                      payWallet
+                    className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition ${payWallet
                         ? "border-indigo-400 bg-indigo-50"
                         : "border-slate-200"
-                    } ${!canWallet ? "cursor-not-allowed opacity-70" : "hover:border-indigo-300"}`}
+                      } ${!canWallet ? "cursor-not-allowed opacity-70" : "hover:border-indigo-300"}`}
                   >
                     <Wallet size={18} className="mt-0.5 text-indigo-600" />
                     <span className="min-w-0 flex-1">
@@ -1581,11 +1626,10 @@ export default function SessionBoard() {
                     disabled={Boolean(stage)}
                     onClick={() => setUseWallet(false)}
                     aria-pressed={!payWallet}
-                    className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition ${
-                      !payWallet
+                    className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition ${!payWallet
                         ? "border-blue-400 bg-blue-50"
                         : "border-slate-200 hover:border-blue-300"
-                    }`}
+                      }`}
                   >
                     <CreditCard size={18} className="mt-0.5 text-blue-600" />
                     <span className="min-w-0 flex-1">

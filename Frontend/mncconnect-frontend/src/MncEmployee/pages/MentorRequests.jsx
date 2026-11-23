@@ -25,6 +25,7 @@ import useMentorSessions from "../../hooks/useMentorSessions";
 import { api, ENDPOINTS, inr } from "../../services/mentorApi";
 import { notifyRequestsChanged } from "../../utils/requestEvents";
 import { notifySessionsChanged } from "../../utils/sessionEvents";
+import { fixUrl, findImage } from "../../utils/imageUrl";
 import {
   assignPaymentToMentor,
   formatDuration,
@@ -37,9 +38,8 @@ import {
   SESSION_GAP_MINUTES,
 } from "../../utils/sessionRequests";
 
-const FALLBACK_AVATAR = "https://i.pravatar.cc/150?img=12";
-
 const PLATFORM_FEE = 0.25;
+// what the MENTOR earns (the fresher's paid amount is never shown to the mentor)
 const mentorShare = (amount) =>
   Math.round((Number(amount) || 0) * (1 - PLATFORM_FEE));
 
@@ -48,7 +48,8 @@ const TABS = ["Pending", "Rejected"];
 const TIMING_OPTIONS = ["All", "Morning", "Afternoon", "Evening", "Night"];
 const ROLE_OPTIONS = ["All", "Student", "Fresher", "Developer", "Other"];
 const DURATION_OPTIONS = ["All", "30 mins", "60 mins", "120 mins"];
-const AMOUNT_OPTIONS = ["All", "Below ₹300", "₹300 - ₹400", "Above ₹400"];
+// these ranges are based on the MENTOR's earning
+const EARNING_OPTIONS = ["All", "Below ₹200", "₹200 - ₹300", "Above ₹300"];
 
 const PENDING_SYNC_MS = 20000; // re-sync with the server
 const CLOCK_TICK_MS = 5000; // hide requests that expired meanwhile
@@ -64,6 +65,59 @@ const isAlive = (r, clock) => {
     if (Number.isFinite(t) && t <= clock) return false;
   }
   return true;
+};
+
+/* ---------- fresher photo ---------- */
+
+// Normalizes a request from the server / socket AND makes sure the
+// fresher's photo is found (whatever the field is called) with a full url.
+const buildRequest = (raw) => {
+  const base = normalizeSessionRequest(raw);
+  const avatar =
+    fixUrl(base?.avatar) ||
+    fixUrl(findImage(raw)) ||
+    fixUrl(findImage(raw?.fresher)) ||
+    fixUrl(findImage(raw?.user)) ||
+    fixUrl(findImage(raw?.person)) ||
+    "";
+
+  return {
+    ...base,
+    avatar,
+    expiresAt: raw?.expiresAt || null,
+    status: "Pending",
+  };
+};
+
+// round photo, falls back to the first letter (also when the image fails to load)
+const Avatar = ({
+  src,
+  name,
+  size = "h-12 w-12",
+  text = "text-sm",
+  className = "",
+}) => {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  return src && !failed ? (
+    <img
+      src={src}
+      alt={name}
+      onError={() => setFailed(true)}
+      referrerPolicy="no-referrer"
+      className={`${size} shrink-0 rounded-full object-cover ${className}`}
+    />
+  ) : (
+    <div
+      className={`${size} ${text} flex shrink-0 items-center justify-center rounded-full bg-blue-100 font-semibold text-blue-700 ${className}`}
+    >
+      {(name || "?").charAt(0).toUpperCase()}
+    </div>
+  );
 };
 
 /* ---------- filter helpers ---------- */
@@ -97,10 +151,11 @@ const getRole = (role) => {
   return "Other";
 };
 
-const matchesAmount = (amount, filter) => {
-  if (filter === "Below ₹300") return amount < 300;
-  if (filter === "₹300 - ₹400") return amount >= 300 && amount <= 400;
-  if (filter === "Above ₹400") return amount > 400;
+// `earning` = mentor's earning (NOT what the fresher paid)
+const matchesEarning = (earning, filter) => {
+  if (filter === "Below ₹200") return earning < 200;
+  if (filter === "₹200 - ₹300") return earning >= 200 && earning <= 300;
+  if (filter === "Above ₹300") return earning > 300;
   return true;
 };
 
@@ -138,16 +193,12 @@ const MentorRequests = () => {
   );
 
   /* The server list is the truth for PENDING requests:
-     it replaces the old pending ones (expired / taken ones disappear).
-     "Rejected" ones stay (local only). */
+    it replaces the old pending ones (expired / taken ones disappear).
+    "Rejected" ones stay (local only). */
   const loadPending = useCallback(async () => {
     try {
       const d = await api(ENDPOINTS.mentorPending);
-      const list = (d.requests || []).map((r) => ({
-        ...normalizeSessionRequest(r),
-        expiresAt: r.expiresAt || null,
-        status: "Pending",
-      }));
+      const list = (d.requests || []).map(buildRequest);
       setRequests((prev) => [
         ...list,
         ...prev.filter((r) => r.status !== "Pending"),
@@ -186,11 +237,7 @@ const MentorRequests = () => {
     };
 
     const handleSessionRequest = (incoming) => {
-      const request = {
-        ...normalizeSessionRequest(incoming),
-        expiresAt: incoming?.expiresAt || null,
-        status: "Pending",
-      };
+      const request = buildRequest(incoming);
       if (!request.id) return;
 
       setRequests((prev) =>
@@ -279,7 +326,7 @@ const MentorRequests = () => {
         return false;
       if (
         filters.amount !== "All" &&
-        !matchesAmount(request.amount, filters.amount)
+        !matchesEarning(mentorShare(request.amount), filters.amount)
       )
         return false;
 
@@ -406,8 +453,13 @@ const MentorRequests = () => {
     setFilters((prev) => ({ ...prev, [key]: value }));
 
   return (
-    <div className="min-h-screen bg-white text-slate-900">
+    <div className="mr-font min-h-screen bg-white text-slate-900 antialiased">
       <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+        .mr-font, .mr-font button, .mr-font input, .mr-font select {
+          font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+          font-feature-settings: "cv11", "ss01", "tnum";
+        }
         @keyframes mr-modal-in { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: scale(1); } }
         .mr-modal-in { animation: mr-modal-in .28s cubic-bezier(.2,.7,.2,1) both; }
         @media (prefers-reduced-motion: reduce) { .mr-modal-in { animation: none; } }
@@ -417,10 +469,10 @@ const MentorRequests = () => {
         {/* header (same pattern as Sessions / Earnings) */}
         <header className="mb-6">
           <p className="text-sm font-medium text-blue-600">Mentor workspace</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">
+          <h1 className="mt-1 text-4xl font-light tracking-tight sm:text-5xl">
             Mentor Requests
           </h1>
-          <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+          <p className="mt-2 flex flex-wrap items-center gap-2 text-sm font-normal text-slate-500">
             Fresher session requests assigned to you.
             <span
               className={`inline-flex items-center gap-1 text-xs font-medium ${
@@ -441,7 +493,7 @@ const MentorRequests = () => {
                   key={tab}
                   type="button"
                   onClick={() => setActiveTab(tab)}
-                  className={`flex items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2.5 text-sm font-medium transition ${
+                  className={`flex items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2.5 text-sm font-medium tracking-tight transition ${
                     active
                       ? "bg-blue-600 text-white shadow-sm"
                       : "text-slate-500 hover:bg-blue-50 hover:text-blue-600"
@@ -449,7 +501,7 @@ const MentorRequests = () => {
                 >
                   {tab}
                   <span
-                    className={`rounded-md px-1.5 py-0.5 text-[10px] ${
+                    className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium tabular-nums ${
                       active
                         ? "bg-white/20 text-white"
                         : "bg-slate-100 text-slate-500"
@@ -473,14 +525,14 @@ const MentorRequests = () => {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search requests..."
-                className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm outline-none focus:border-blue-400"
+                className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm font-normal outline-none focus:border-blue-400"
               />
             </div>
 
             <button
               type="button"
               onClick={() => setShowFilters((prev) => !prev)}
-              className={`flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium transition ${
+              className={`flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium tracking-tight transition ${
                 showFilters || activeFilterCount > 0
                   ? "border-blue-200 bg-blue-50 text-blue-600"
                   : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
@@ -489,7 +541,7 @@ const MentorRequests = () => {
               <SlidersHorizontal size={16} />
               <span className="hidden sm:inline">Filters</span>
               {activeFilterCount > 0 && (
-                <span className="rounded-md bg-blue-600 px-1.5 py-0.5 text-[10px] text-white">
+                <span className="rounded-md bg-blue-600 px-1.5 py-0.5 text-[11px] font-medium text-white">
                   {activeFilterCount}
                 </span>
               )}
@@ -500,7 +552,9 @@ const MentorRequests = () => {
         {showFilters && (
           <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="font-semibold text-slate-900">Filters</h2>
+              <h2 className="text-base font-medium tracking-tight text-slate-900">
+                Filters
+              </h2>
 
               <button
                 type="button"
@@ -532,9 +586,9 @@ const MentorRequests = () => {
                 onChange={updateFilter("duration")}
               />
               <FilterSelect
-                label="Amount"
+                label="You earn"
                 value={filters.amount}
-                options={AMOUNT_OPTIONS}
+                options={EARNING_OPTIONS}
                 onChange={updateFilter("amount")}
               />
             </div>
@@ -590,7 +644,7 @@ const MentorRequests = () => {
 };
 
 /* ============================================================
-   CONFIRM MODAL (accept = full details, reject = short summary)
+  CONFIRM MODAL (accept = full details, reject = short summary)
 ============================================================ */
 
 const ConfirmRequestModal = ({
@@ -654,7 +708,7 @@ const ConfirmRequestModal = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+      className="mr-font fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm antialiased"
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-title"
@@ -671,13 +725,16 @@ const ConfirmRequestModal = ({
           <div className="flex items-start justify-between gap-3">
             <div>
               <p
-                className={`text-xs font-semibold uppercase tracking-wider ${
+                className={`text-xs font-medium tracking-wide ${
                   isAccept ? "text-blue-100" : "text-red-100"
                 }`}
               >
                 {isAccept ? "Review before accepting" : "Review before rejecting"}
               </p>
-              <h2 id="confirm-title" className="mt-1 text-xl font-bold">
+              <h2
+                id="confirm-title"
+                className="mt-1 text-2xl font-light tracking-tight"
+              >
                 {isAccept
                   ? "Check the fresher's requirements"
                   : "Reject this request?"}
@@ -699,16 +756,17 @@ const ConfirmRequestModal = ({
         {/* Body */}
         <div className="max-h-[60vh] overflow-y-auto px-6 py-5">
           <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <img
-              src={request.avatar || FALLBACK_AVATAR}
-              alt={request.name}
-              className="h-11 w-11 shrink-0 rounded-full object-cover"
+            <Avatar
+              src={request.avatar}
+              name={request.name}
+              size="h-11 w-11"
+              text="text-sm"
             />
             <div className="min-w-0 flex-1">
-              <p className="truncate font-semibold text-slate-900">
+              <p className="truncate text-base font-medium tracking-tight text-slate-900">
                 {request.name}
               </p>
-              <p className="truncate text-xs text-slate-500">
+              <p className="truncate text-xs font-normal text-slate-500">
                 {request.topic || request.role || "Mentoring session"}
                 {request.company ? ` · ${request.company}` : ""}
               </p>
@@ -736,11 +794,11 @@ const ConfirmRequestModal = ({
                     >
                       <div className="flex items-center gap-2.5 text-slate-500">
                         <Icon size={15} />
-                        <span className="text-xs font-medium">{r.label}</span>
+                        <span className="text-xs font-normal">{r.label}</span>
                       </div>
                       <span
-                        className={`text-right text-sm ${
-                          r.strong ? "font-bold" : "font-medium"
+                        className={`text-right text-sm tabular-nums ${
+                          r.strong ? "font-semibold" : "font-medium"
                         } ${r.green ? "text-emerald-600" : "text-slate-900"}`}
                       >
                         {r.value}
@@ -752,11 +810,11 @@ const ConfirmRequestModal = ({
 
               {request.message && (
                 <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/60 p-4">
-                  <div className="mb-1 flex items-center gap-2 text-xs font-semibold text-blue-700">
+                  <div className="mb-1 flex items-center gap-2 text-xs font-medium text-blue-700">
                     <MessageSquare size={13} />
                     Why the fresher wants this session
                   </div>
-                  <p className="text-sm leading-6 text-slate-700">
+                  <p className="text-sm font-normal leading-6 text-slate-700">
                     {request.message}
                   </p>
                 </div>
@@ -768,10 +826,10 @@ const ConfirmRequestModal = ({
                   className="mt-0.5 shrink-0 text-blue-600"
                 />
                 <div>
-                  <p className="text-sm font-semibold text-blue-900">
+                  <p className="text-sm font-medium text-blue-900">
                     {SESSION_GAP_MINUTES}-minute gap rule
                   </p>
-                  <p className="mt-1 text-xs leading-5 text-blue-700">
+                  <p className="mt-1 text-xs font-normal leading-5 text-blue-700">
                     Every session must have at least {SESSION_GAP_MINUTES}{" "}
                     minutes gap from the previous or next session.
                   </p>
@@ -786,14 +844,16 @@ const ConfirmRequestModal = ({
                   disabled={loading}
                   className="mt-0.5 h-5 w-5 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
                 />
-                <span className="text-sm text-emerald-900">
-                  <strong>I can handle this session.</strong> I match the
-                  requirements above, I'll be on time, and I'll follow the
-                  mentor guidelines.
+                <span className="text-sm font-normal leading-6 text-emerald-900">
+                  <strong className="font-semibold">
+                    I can handle this session.
+                  </strong>{" "}
+                  I match the requirements above, I'll be on time, and I'll
+                  follow the mentor guidelines.
                 </span>
               </label>
 
-              <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+              <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-normal leading-5 text-amber-800">
                 <AlertTriangle size={14} className="mt-0.5 shrink-0" />
                 <span>
                   Only accept if you genuinely match the language, role, gender
@@ -809,7 +869,10 @@ const ConfirmRequestModal = ({
                 label="Duration"
                 value={formatDuration(request.duration)}
               />
-              <Detail label="Amount" value={inr(request.amount)} />
+              <Detail
+                label="You earn"
+                value={inr(mentorShare(request.amount))}
+              />
             </div>
           )}
         </div>
@@ -820,7 +883,7 @@ const ConfirmRequestModal = ({
             type="button"
             onClick={onCancel}
             disabled={loading}
-            className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
+            className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-medium tracking-tight text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
           >
             Cancel
           </button>
@@ -829,7 +892,7 @@ const ConfirmRequestModal = ({
             type="button"
             onClick={onConfirm}
             disabled={loading || (isAccept && !ackMatch)}
-            className={`inline-flex items-center justify-center gap-2 rounded-xl px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${
+            className={`inline-flex items-center justify-center gap-2 rounded-xl px-6 py-2.5 text-sm font-medium tracking-tight text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${
               isAccept
                 ? "bg-emerald-600 hover:bg-emerald-700"
                 : "bg-red-600 hover:bg-red-700"
@@ -857,8 +920,10 @@ const ConfirmRequestModal = ({
 
 const Detail = ({ label, value }) => (
   <div>
-    <p className="text-xs text-slate-500">{label}</p>
-    <p className="mt-1 text-sm font-semibold text-slate-900">{value}</p>
+    <p className="text-xs font-normal text-slate-500">{label}</p>
+    <p className="mt-1 text-sm font-medium tabular-nums text-slate-900">
+      {value}
+    </p>
   </div>
 );
 
@@ -871,7 +936,7 @@ const FilterSelect = ({ label, value, options, onChange }) => (
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-400"
+      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-700 outline-none focus:border-blue-400"
     >
       {options.map((option) => (
         <option key={option} value={option}>
@@ -883,16 +948,18 @@ const FilterSelect = ({ label, value, options, onChange }) => (
 );
 
 /* ============================================================
-   REQUEST CARD (same layout as the Sessions page card)
+  REQUEST CARD (same layout as the Sessions page card)
 ============================================================ */
 
 const RequestInfo = ({ icon, label, value }) => (
   <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
     <div className="flex items-center gap-1.5 text-slate-400">
       {icon}
-      <span className="text-[10px]">{label}</span>
+      <span className="text-xs font-normal">{label}</span>
     </div>
-    <p className="mt-1.5 text-xs font-semibold text-slate-700">{value}</p>
+    <p className="mt-1.5 text-sm font-medium tabular-nums tracking-tight text-slate-800">
+      {value}
+    </p>
   </div>
 );
 
@@ -903,30 +970,30 @@ const RequestCard = ({ request, onAccept, onReject }) => {
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-200 hover:shadow-md">
       <div className="flex flex-col gap-5 lg:flex-row lg:items-center">
         <div className="flex flex-1 items-center gap-4">
-          <img
-            src={request.avatar || FALLBACK_AVATAR}
-            alt={request.name}
-            className="h-12 w-12 shrink-0 rounded-full border-2 border-blue-100 object-cover"
+          <Avatar
+            src={request.avatar}
+            name={request.name}
+            size="h-12 w-12"
+            text="text-sm"
+            className="border-2 border-blue-100"
           />
 
           <div className="min-w-0">
-            <h3 className="font-semibold text-slate-900">{request.name}</h3>
-            <p className="mt-0.5 text-xs text-slate-500">
-              {request.role}
-              {request.company ? ` · ${request.company}` : ""}
-            </p>
+            <h3 className="text-lg font-medium tracking-tight text-slate-900">
+              {request.name}
+            </h3>
             <div className="mt-2 flex flex-wrap gap-2">
               {group && (
-                <span className="rounded-lg bg-indigo-50 px-2.5 py-1 text-[10px] font-semibold text-indigo-700">
+                <span className="rounded-lg bg-indigo-50 px-2.5 py-1 text-[11px] font-medium text-indigo-700">
                   Group
                 </span>
               )}
               {request.topic && (
-                <span className="rounded-lg bg-blue-50 px-2.5 py-1 text-[10px] font-medium text-blue-600">
+                <span className="rounded-lg bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-600">
                   {request.topic}
                 </span>
               )}
-              <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-[10px] font-medium text-slate-500">
+              <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-500">
                 {group ? "Group Video Call" : "Video Call"}
               </span>
             </div>
@@ -951,19 +1018,21 @@ const RequestCard = ({ request, onAccept, onReject }) => {
           />
           <RequestInfo
             icon={<Star size={15} />}
-            label="Amount"
-            value={inr(request.amount)}
+            label="You earn"
+            value={inr(mentorShare(request.amount))}
           />
         </div>
       </div>
 
       {request.message && (
         <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3">
-          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-blue-700">
+          <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-blue-700">
             <MessageSquare size={12} />
             Message from the fresher
           </div>
-          <p className="text-sm leading-6 text-slate-600">{request.message}</p>
+          <p className="text-sm font-normal leading-6 text-slate-600">
+            {request.message}
+          </p>
         </div>
       )}
 
@@ -972,7 +1041,7 @@ const RequestCard = ({ request, onAccept, onReject }) => {
           {request.status === "Pending" && (
             <>
               <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
-              <span className="text-xs font-medium text-emerald-600">
+              <span className="text-sm font-medium text-emerald-600">
                 Waiting for your response
               </span>
             </>
@@ -980,7 +1049,7 @@ const RequestCard = ({ request, onAccept, onReject }) => {
           {request.status === "Rejected" && (
             <>
               <XCircle size={16} className="text-red-500" />
-              <span className="text-xs font-medium text-red-500">
+              <span className="text-sm font-medium text-red-500">
                 Rejected
               </span>
             </>
@@ -992,7 +1061,7 @@ const RequestCard = ({ request, onAccept, onReject }) => {
             <button
               type="button"
               onClick={onReject}
-              className="flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-xs font-semibold text-red-600 transition hover:bg-red-50"
+              className="flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-medium tracking-tight text-red-600 transition hover:bg-red-50"
             >
               Reject
             </button>
@@ -1000,7 +1069,7 @@ const RequestCard = ({ request, onAccept, onReject }) => {
             <button
               type="button"
               onClick={onAccept}
-              className="flex min-w-[150px] items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-emerald-700"
+              className="flex min-w-[150px] items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium tracking-tight text-white transition hover:bg-emerald-700"
             >
               Accept Request
             </button>
@@ -1016,8 +1085,10 @@ const EmptyState = ({ title, description, offline }) => (
     <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50">
       <CalendarDays size={25} className="text-blue-500" />
     </div>
-    <h3 className="mt-5 text-lg font-semibold text-slate-900">{title}</h3>
-    <p className="mt-2 text-sm text-slate-500">{description}</p>
+    <h3 className="mt-5 text-xl font-light tracking-tight text-slate-900">
+      {title}
+    </h3>
+    <p className="mt-2 text-sm font-normal text-slate-500">{description}</p>
     {offline && (
       <p className="mt-3 text-xs font-medium text-amber-600">
         Real-time connection is currently offline.
@@ -1027,7 +1098,7 @@ const EmptyState = ({ title, description, offline }) => (
 );
 
 /* ============================================================
-   SKELETON (same sizes as RequestCard -> no layout jump)
+  SKELETON (same sizes as RequestCard -> no layout jump)
 ============================================================ */
 
 const Bone = ({ className = "" }) => (

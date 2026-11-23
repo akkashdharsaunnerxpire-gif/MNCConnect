@@ -9,6 +9,18 @@
 //   - POPULATE_MENTOR, MENTOR_PUBLIC_FIELDS, mentorCard, toMentorPayload, getCounterpart: email removed.
 //   - getAcceptedBookings now uses the logged-in user (no more ?email=).
 //   - Email / WhatsApp are still sent SERVER-SIDE only (emailBookingParties) and never returned in an API.
+//
+// REFUND FIXES (this version):
+//   1. closeAndRefund: booking is locked with refundStatus "pending" BEFORE refunding, and a
+//      crash / exception while refunding no longer leaves it stuck. (Before, a booking that was
+//      already moved to "expired" but whose refund crashed had refundStatus "" and was NEVER retried.)
+//   2. Scheduler step 4 now retries every closed booking whose refundStatus is not "refunded"
+//      (pending / failed / empty), not only "failed".
+//   3. Every scheduler step runs in its own try/catch, so one failing step (or one bad booking)
+//      can no longer block the refund steps after it.
+//   4. Scheduler watchdog: if one run hangs (DB / Razorpay call), it is released after 3 minutes
+//      instead of blocking the scheduler forever.
+//   5. refundToWalletAtomic saves the real error in Payment.refundError (visible in the DB).
 const crypto = require("crypto");
 const mongoose = require("mongoose");
 const Razorpay = require("razorpay");
@@ -73,8 +85,15 @@ const expiryFor = (startsAt) => {
   return new Date(Math.min(start - 30 * 1000, Math.max(ideal, floor)));
 };
 
-const MAX_REFUND_ATTEMPTS = 5;
-const REFUND_RETRY_GAP_MS = 30 * 60 * 1000;
+// refund retry: every 5 min, up to 50 times (~4 hours)
+const MAX_REFUND_ATTEMPTS = 50;
+const REFUND_RETRY_GAP_MS = 5 * 60 * 1000;
+// a freshly closed booking is left alone this long before the scheduler retries it
+// (so the scheduler never races with the refund that is still running)
+const REFUND_RETRY_AFTER_CLOSE_MS = 2 * 60 * 1000;
+
+// scheduler watchdog: a run that hangs longer than this is released
+const SCHEDULER_STUCK_MS = 3 * 60 * 1000;
 
 const NO_SHOW_GRACE_MS =
   (Number(process.env.NO_SHOW_GRACE_MIN) || 15) * 60 * 1000;
@@ -589,6 +608,21 @@ const refundToWalletAtomic = async (fresh, amount) => {
   } catch (e) {
     console.error("refundToWalletAtomic failed:", fresh._id, e.message);
     result = "failed";
+
+    // FIX: keep the real reason in the DB so it can be seen without server logs
+    // (e.g. "Transaction numbers are only allowed on a replica set member")
+    await Payment.updateOne(
+      { _id: fresh._id, status: "paid" },
+      {
+        $set: {
+          refundError: String(e.message || "wallet refund failed").slice(
+            0,
+            300,
+          ),
+          refundFailedAt: new Date(),
+        },
+      },
+    ).catch(() => {});
   } finally {
     session.endSession();
   }
@@ -778,7 +812,13 @@ const refundAll = async (booking, reason, options = {}) => {
 
   let allOk = true;
   for (const p of list) {
-    const r = await refundPayment(p, reason, options);
+    // FIX: one payment throwing must not stop the others (or leave the booking stuck)
+    let r = "failed";
+    try {
+      r = await refundPayment(p, reason, options);
+    } catch (e) {
+      console.error("refundPayment threw:", p._id, e.message);
+    }
     if (r !== "refunded") allOk = false;
   }
 
@@ -826,18 +866,26 @@ const closeAndRefund = async (
   bookingId,
   { from, to, reason, title, mentorNote, refundTo },
 ) => {
+  // FIX: refundStatus is set to "pending" together with the status change.
+  // If the server crashes / sleeps from here on, the scheduler (step 4) still finds
+  // this booking (refundStatus != "refunded") and finishes the refund.
   const locked = await Booking.findOneAndUpdate(
     { _id: bookingId, status: { $in: from } },
-    { $set: { status: to, closedAt: new Date() } },
+    { $set: { status: to, closedAt: new Date(), refundStatus: "pending" } },
     { returnDocument: "after" },
   );
   if (!locked) return null;
 
-  const { result, payments } = await refundAll(
-    locked,
-    reason,
-    refundTo ? { to: refundTo } : {},
-  );
+  let result = "failed";
+  let payments = [];
+  try {
+    const out = await refundAll(locked, reason, refundTo ? { to: refundTo } : {});
+    result = out.result;
+    payments = out.payments;
+  } catch (e) {
+    console.error("closeAndRefund: refundAll threw:", locked.requestGroupId, e);
+  }
+
   await Booking.updateOne(
     { _id: locked._id },
     { $set: { refundStatus: result } },
@@ -2151,9 +2199,16 @@ exports.confirmCompletion = async (req, res) => {
       });
     }
 
+    // FIX: refundStatus "pending" together with the status change (same reason as closeAndRefund)
     const updated = await Booking.findOneAndUpdate(
       { _id: booking._id, status: "awaiting_confirmation" },
-      { $set: { status: "disputed", completedAt: new Date() } },
+      {
+        $set: {
+          status: "disputed",
+          completedAt: new Date(),
+          refundStatus: "pending",
+        },
+      },
       { returnDocument: "after" },
     ).populate("mentor", POPULATE_MENTOR);
     if (!updated) return fail(res, 409, "Session already updated");
@@ -2257,213 +2312,297 @@ exports.markAllFresherNotificationsRead = async (req, res) => {
 
 /* ============================ SCHEDULERS ============================ */
 let schedulerBusy = false;
+let busySince = 0;
 let lastReconcileAt = 0;
+
+// Runs one scheduler step. A crash inside a step is logged and the NEXT steps still run.
+const safely = async (name, fn) => {
+  try {
+    await fn();
+  } catch (e) {
+    console.error(`scheduler step failed [${name}]:`, e);
+  }
+};
 
 exports.startSchedulers = (app) => {
   setInterval(async () => {
     if (mongoose.connection.readyState !== 1) return;
-    if (schedulerBusy) return;
+
+    // watchdog: a run that hangs (DB / Razorpay call) is released after SCHEDULER_STUCK_MS
+    if (schedulerBusy) {
+      if (Date.now() - busySince < SCHEDULER_STUCK_MS) return;
+      console.error(
+        "scheduler: previous run looks stuck, releasing the lock and continuing",
+      );
+    }
     schedulerBusy = true;
+    busySince = Date.now();
 
     try {
       const now = new Date();
 
       // 1) AUTO-CANCEL (refunds EVERY member of a group)
-      const stale = await Booking.find({
-        status: "pending",
-        expiresAt: { $lte: now },
-      }).select("_id");
-      for (const b of stale) {
-        const closed = await expireAndRefund(
-          b._id,
-          `No employee accepted your request ${PENDING_CUTOFF_MIN} minutes before the session, so it was cancelled automatically.`,
-        );
+      await safely("auto-cancel", async () => {
+        const stale = await Booking.find({
+          status: "pending",
+          expiresAt: { $lte: now },
+        }).select("_id");
 
-        if (closed) {
-          (closed.notified || []).forEach((mentorId) =>
-            emitToMentorSockets(app, mentorId, "session-request-taken", {
-              id: closed.requestGroupId,
-              requestGroupId: closed.requestGroupId,
+        for (const b of stale) {
+          await safely(`auto-cancel ${b._id}`, async () => {
+            const closed = await expireAndRefund(
+              b._id,
+              `No employee accepted your request ${PENDING_CUTOFF_MIN} minutes before the session, so it was cancelled automatically.`,
+            );
+
+            if (closed) {
+              (closed.notified || []).forEach((mentorId) =>
+                emitToMentorSockets(app, mentorId, "session-request-taken", {
+                  id: closed.requestGroupId,
+                  requestGroupId: closed.requestGroupId,
+                }),
+              );
+            }
+          });
+        }
+      });
+
+      // 2) NO-SHOW
+      await safely("no-show", async () => {
+        const noShows = await Booking.find({
+          status: "accepted",
+          startsAt: { $lte: new Date(now.getTime() - NO_SHOW_GRACE_MS) },
+          "meeting.timerEndsAt": null,
+        }).select("_id");
+
+        for (const b of noShows) {
+          await safely(`no-show ${b._id}`, () =>
+            closeAndRefund(b._id, {
+              from: ["accepted"],
+              to: "missed",
+              title: "Session missed",
+              reason:
+                "The session did not start because both of you did not join in time.",
+              mentorNote:
+                "The session did not start in time, so it was marked as missed and the fresher was refunded.",
             }),
           );
         }
-      }
-
-      // 2) NO-SHOW
-      const noShows = await Booking.find({
-        status: "accepted",
-        startsAt: { $lte: new Date(now.getTime() - NO_SHOW_GRACE_MS) },
-        "meeting.timerEndsAt": null,
-      }).select("_id");
-      for (const b of noShows) {
-        await closeAndRefund(b._id, {
-          from: ["accepted"],
-          to: "missed",
-          title: "Session missed",
-          reason:
-            "The session did not start because both of you did not join in time.",
-          mentorNote:
-            "The session did not start in time, so it was marked as missed and the fresher was refunded.",
-        });
-      }
+      });
 
       // 3) fresher never answered "did it go well?"
-      const unconfirmed = await Booking.find({
-        status: "awaiting_confirmation",
-        "meeting.endedAt": { $lte: new Date(now.getTime() - CONFIRM_WAIT_MS) },
-      }).select("_id");
-      for (const b of unconfirmed) {
-        if (UNCONFIRMED_ACTION === "refund") {
-          await closeAndRefund(b._id, {
-            from: ["awaiting_confirmation"],
-            to: "cancelled",
-            title: "Session not confirmed",
-            reason: "The session was not confirmed in time.",
+      await safely("unconfirmed", async () => {
+        const unconfirmed = await Booking.find({
+          status: "awaiting_confirmation",
+          "meeting.endedAt": {
+            $lte: new Date(now.getTime() - CONFIRM_WAIT_MS),
+          },
+        }).select("_id");
+
+        for (const b of unconfirmed) {
+          await safely(`unconfirmed ${b._id}`, async () => {
+            if (UNCONFIRMED_ACTION === "refund") {
+              await closeAndRefund(b._id, {
+                from: ["awaiting_confirmation"],
+                to: "cancelled",
+                title: "Session not confirmed",
+                reason: "The session was not confirmed in time.",
+              });
+            } else {
+              const full = await Booking.findById(b._id);
+              if (full) await settleCompleted(full, { auto: true });
+            }
           });
-        } else {
-          const full = await Booking.findById(b._id);
-          if (full) await settleCompleted(full, { auto: true });
         }
-      }
+      });
 
-      // 4) retry failed refunds (all members)
-      const failedRefunds = await Booking.find({
-        status: { $in: ["expired", "missed", "cancelled", "disputed"] },
-        refundStatus: "failed",
-        razorpayPaymentId: { $ne: "" },
-        refundAttempts: { $not: { $gte: MAX_REFUND_ATTEMPTS } },
-        $or: [
-          { lastRefundAttemptAt: null },
-          {
-            lastRefundAttemptAt: {
-              $lte: new Date(now.getTime() - REFUND_RETRY_GAP_MS),
-            },
-          },
-        ],
-      }).limit(10);
-
-      for (const b of failedRefunds) {
-        await Booking.updateOne(
-          { _id: b._id },
-          {
-            $inc: { refundAttempts: 1 },
-            $set: { lastRefundAttemptAt: new Date() },
-          },
+      // 4) RETRY REFUNDS (all members)
+      // FIX: not only refundStatus "failed". Every closed booking whose refund is NOT done
+      // ("pending" = crashed / server slept in the middle, "" = old bookings, "failed")
+      // is picked up. A freshly closed booking is left alone for 2 minutes so the scheduler
+      // never races with the refund that is still running.
+      await safely("refund-retry", async () => {
+        const settleAfter = new Date(
+          now.getTime() - REFUND_RETRY_AFTER_CLOSE_MS,
         );
+        const retryBefore = new Date(now.getTime() - REFUND_RETRY_GAP_MS);
 
-        const { result } = await refundAll(b, "Retry: session refund", {
-          to: undefined, // uses REFUND_DESTINATION (wallet by default)
-        });
+        const failedRefunds = await Booking.find({
+          status: { $in: ["expired", "missed", "cancelled", "disputed"] },
+          refundStatus: { $ne: "refunded" },
+          razorpayPaymentId: { $ne: "" },
+          refundAttempts: { $not: { $gte: MAX_REFUND_ATTEMPTS } },
+          $and: [
+            { $or: [{ closedAt: null }, { closedAt: { $lte: settleAfter } }] },
+            {
+              $or: [
+                { completedAt: null },
+                { completedAt: { $lte: settleAfter } },
+              ],
+            },
+            {
+              $or: [
+                { lastRefundAttemptAt: null },
+                { lastRefundAttemptAt: { $lte: retryBefore } },
+              ],
+            },
+          ],
+        }).limit(10);
 
-        if (result === "refunded") {
-          await Booking.updateOne(
-            { _id: b._id },
-            { $set: { refundStatus: "refunded" } },
-          );
-          for (const mem of membersOf(b)) {
-            if (!mem.fresher) continue;
-            notify({
-              user: mem.fresher,
-              role: "fresher",
-              title: "Refund completed",
-              message: `Your refund of ₹${mem.amount || b.amount} has been processed.`,
-              type: "payment",
-              link: "/Home",
+        for (const b of failedRefunds) {
+          await safely(`refund-retry ${b._id}`, async () => {
+            await Booking.updateOne(
+              { _id: b._id },
+              {
+                $inc: { refundAttempts: 1 },
+                $set: { lastRefundAttemptAt: new Date() },
+              },
+            );
+
+            const { result } = await refundAll(b, "Retry: session refund", {
+              to: "wallet",
             });
-            emitToUser(mem.fresher, "booking:updated", {
-              requestGroupId: b.requestGroupId,
-              refundStatus: "refunded",
-            });
-          }
+
+            // keep the status honest: "refunded" or "failed" (never left as "pending")
+            await Booking.updateOne(
+              { _id: b._id },
+              { $set: { refundStatus: result } },
+            );
+
+            if (result === "refunded") {
+              for (const mem of membersOf(b)) {
+                if (!mem.fresher) continue;
+                notify({
+                  user: mem.fresher,
+                  role: "fresher",
+                  title: "Refund completed",
+                  message: `Your refund of ₹${mem.amount || b.amount} has been added to your wallet.`,
+                  type: "payment",
+                  link: "/Home/bonus-wallet",
+                });
+                emitToUser(mem.fresher, "wallet:updated", {
+                  amount: mem.amount || b.amount,
+                });
+                emitToUser(mem.fresher, "booking:updated", {
+                  requestGroupId: b.requestGroupId,
+                  refundStatus: "refunded",
+                });
+              }
+            }
+          });
         }
-      }
+      });
 
       // 5) overdue running timers
-      const overdue = await Booking.find({
-        status: "in_progress",
-        "meeting.timerEndsAt": { $lte: now },
-      }).select("requestGroupId");
-      for (const b of overdue) await completeBooking(b.requestGroupId);
+      await safely("overdue-timers", async () => {
+        const overdue = await Booking.find({
+          status: "in_progress",
+          "meeting.timerEndsAt": { $lte: now },
+        }).select("requestGroupId");
+        for (const b of overdue) {
+          await safely(`overdue ${b.requestGroupId}`, () =>
+            completeBooking(b.requestGroupId),
+          );
+        }
+      });
 
       // 6) reminders: the room is open now -> email + WhatsApp everyone once
-      const soon = await Booking.find({
-        status: "accepted",
-        reminderSent: false,
-        startsAt: { $lte: new Date(now.getTime() + OPEN_BEFORE_MS) },
-      });
-      for (const b of soon) {
-        const r = await Booking.updateOne(
-          { _id: b._id, reminderSent: false },
-          { $set: { reminderSent: true } },
-        );
-        if (r.modifiedCount) {
-          const full = await Booking.findById(b._id).populate(
-            "mentor",
-            POPULATE_MENTOR,
+      await safely("reminders", async () => {
+        const soon = await Booking.find({
+          status: "accepted",
+          reminderSent: false,
+          startsAt: { $lte: new Date(now.getTime() + OPEN_BEFORE_MS) },
+        });
+        for (const b of soon) {
+          const r = await Booking.updateOne(
+            { _id: b._id, reminderSent: false },
+            { $set: { reminderSent: true } },
           );
-          if (full) emailBookingParties(full, "reminder");
+          if (r.modifiedCount) {
+            const full = await Booking.findById(b._id).populate(
+              "mentor",
+              POPULATE_MENTOR,
+            );
+            if (full) emailBookingParties(full, "reminder");
+          }
         }
-      }
+      });
 
       // 7) money was taken (wallet OR Razorpay) but the booking / group join never happened -> give it back
-      const orphanPaid = await Payment.find({
-        status: "paid",
-        sessionStatus: "unassigned",
-        $or: [
-          {
-            method: "wallet",
-            paidAt: { $lte: new Date(now.getTime() - 10 * 60 * 1000) },
-          },
-          {
-            method: { $ne: "wallet" },
-            paidAt: { $lte: new Date(now.getTime() - 30 * 60 * 1000) },
-          },
-        ],
-      }).limit(20);
+      await safely("orphan-payments", async () => {
+        const orphanPaid = await Payment.find({
+          status: "paid",
+          sessionStatus: "unassigned",
+          $or: [
+            {
+              method: "wallet",
+              paidAt: { $lte: new Date(now.getTime() - 10 * 60 * 1000) },
+            },
+            {
+              method: { $ne: "wallet" },
+              paidAt: { $lte: new Date(now.getTime() - 30 * 60 * 1000) },
+            },
+          ],
+        }).limit(20);
 
-      for (const p of orphanPaid) {
-        if (await paymentUsed(p.razorpayPaymentId)) continue;
+        for (const p of orphanPaid) {
+          await safely(`orphan ${p._id}`, async () => {
+            if (await paymentUsed(p.razorpayPaymentId)) return;
 
-        const result = await refundPayment(p, "Booking was not created", {});
-        if (result === "refunded" && p.fresher) {
-          const done = await Payment.findById(p._id)
-            .select("refundMethod refundAmount")
-            .lean();
-          const toWallet = done?.refundMethod === "wallet";
-          const amt = done?.refundAmount || p.amount;
-          notify({
-            user: p.fresher,
-            role: "fresher",
-            title: toWallet ? "Wallet refund" : "Payment refunded",
-            message: toWallet
-              ? `₹${amt} was added back to your wallet because the booking was not completed.`
-              : `₹${amt} is being refunded to your payment method because the booking was not completed.`,
-            type: "payment",
-            link: toWallet ? "/Home/bonus-wallet" : "/Home",
+            const result = await refundPayment(
+              p,
+              "Booking was not created",
+              {},
+            );
+            if (result === "refunded" && p.fresher) {
+              const done = await Payment.findById(p._id)
+                .select("refundMethod refundAmount")
+                .lean();
+              const toWallet = done?.refundMethod === "wallet";
+              const amt = done?.refundAmount || p.amount;
+              notify({
+                user: p.fresher,
+                role: "fresher",
+                title: toWallet ? "Wallet refund" : "Payment refunded",
+                message: toWallet
+                  ? `₹${amt} was added back to your wallet because the booking was not completed.`
+                  : `₹${amt} is being refunded to your payment method because the booking was not completed.`,
+                type: "payment",
+                link: toWallet ? "/Home/bonus-wallet" : "/Home",
+              });
+            }
           });
         }
-      }
-      const oldClosed = await Booking.find({
-        status: { $in: ["expired", "missed", "cancelled"] },
-        refundStatus: "refunded",
-        closedAt: {
-          $ne: null,
-          $lte: new Date(now.getTime() - CLOSED_RETENTION_MS),
-        },
-      })
-        .select("_id")
-        .limit(50)
-        .lean();
+      });
 
-      if (oldClosed.length) {
-        await Booking.deleteMany({ _id: { $in: oldClosed.map((b) => b._id) } });
-      }
+      // 8) clean up old closed + refunded bookings
+      await safely("cleanup", async () => {
+        const oldClosed = await Booking.find({
+          status: { $in: ["expired", "missed", "cancelled"] },
+          refundStatus: "refunded",
+          closedAt: {
+            $ne: null,
+            $lte: new Date(now.getTime() - CLOSED_RETENTION_MS),
+          },
+        })
+          .select("_id")
+          .limit(50)
+          .lean();
 
-      // 8) Razorpay money captured but verify never reached us / abandoned or failed checkouts (every 5 min)
-      if (Date.now() - lastReconcileAt > 5 * 60 * 1000) {
-        lastReconcileAt = Date.now();
-        await reconcileStaleOrders();
-      }
+        if (oldClosed.length) {
+          await Booking.deleteMany({
+            _id: { $in: oldClosed.map((b) => b._id) },
+          });
+        }
+      });
+
+      // 9) Razorpay money captured but verify never reached us / abandoned or failed checkouts (every 5 min)
+      await safely("reconcile", async () => {
+        if (Date.now() - lastReconcileAt > 5 * 60 * 1000) {
+          lastReconcileAt = Date.now();
+          await reconcileStaleOrders();
+        }
+      });
     } catch (e) {
       console.error("scheduler error:", e);
     } finally {

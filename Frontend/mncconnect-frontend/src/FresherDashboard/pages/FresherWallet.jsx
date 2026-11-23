@@ -11,7 +11,6 @@ const inr = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
 const FresherWallet = () => {
   const userId = getUserId();
-
   const [copied, setCopied] = useState(false);
   const [referralInput, setReferralInput] = useState("");
   const [applying, setApplying] = useState(false);

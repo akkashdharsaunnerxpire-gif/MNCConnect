@@ -8,8 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import useLive from "./useLive";
 import { api, ENDPOINTS, EVENTS } from "../services/mentorApi";
 
-const avatarFor = (name) =>
-  `https://ui-avatars.com/api/?name=${encodeURIComponent(name || "Fresher")}&background=eff6ff&color=2563eb`;
+
 
 // real booking status (server) -> status used by the Sessions page
 const BOOKING_TO_PAGE = {
@@ -40,7 +39,13 @@ export const toSession = (p, now) => {
     id: p.requestGroupId || p._id || p.id,
     name: p.fresherName || "Fresher",
     role: "Fresher",
-    avatar: avatarFor(p.fresherName),
+    avatar:
+      p.person?.image ||
+      p.fresher?.image ||
+      p.fresherImage ||
+      p.profileImage ||
+      p.image ||
+      "",
     topic: p.topic || "",
     type: "Video Call",
     date: p.sessionDate || "",

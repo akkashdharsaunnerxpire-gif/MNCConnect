@@ -979,11 +979,6 @@ const BrowseMentors = () => {
                 />
               </span>
               Online now
-              {totalOnline > 0 && (
-                <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold leading-none text-emerald-700">
-                  {totalOnline}
-                </span>
-              )}
             </button>
 
             <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-500 transition focus-within:border-blue-400 hover:border-blue-300">
@@ -1464,7 +1459,7 @@ const OnlineBadge = ({ count = 0, variant = "overlay" }) => {
   const overlay = variant === "overlay";
 
   const shell =
-    "inline-flex items-center gap-2 rounded-full py-1 pl-2.5 pr-3 text-[11px] font-semibold leading-none tracking-wide transition";
+    "inline-flex items-center gap-2 whitespace-nowrap rounded-full py-1 pl-2.5 pr-3 text-[11px] font-semibold leading-none tracking-wide transition";
 
   const tone = overlay
     ? online
@@ -1506,7 +1501,7 @@ const RatingText = ({ company }) => {
       : null;
 
   return rating ? (
-    <span className="inline-flex items-center gap-1 text-sm font-semibold text-slate-800">
+    <span className="inline-flex items-center gap-1 whitespace-nowrap text-sm font-semibold text-slate-800">
       <Star size={14} className="fill-amber-400 text-amber-400" />
       {rating}
       {company.ratingCount ? (
@@ -1591,21 +1586,33 @@ const CompanyCard = ({ company, index, query }) => {
 
 // ============================================================
 // LIST ROW
+// On lg+ screens the row is a CSS grid with FIXED column widths, so every
+// row (Amazon, TCS, Accenture ...) lines up in exactly the same columns,
+// no matter how many avatars / which badge a row has.
+//
+// columns:  logo | name (flexible) | employees | rating | online | avatars | book
+// On smaller screens it falls back to the wrapping flex layout.
 // ============================================================
+
+const ROW_GRID =
+  "lg:grid lg:grid-cols-[3.5rem_minmax(0,1fr)_9rem_5.5rem_7.5rem_8.5rem_6rem] lg:items-center lg:gap-4";
 
 const CompanyRow = ({ company, index, query }) => {
   const name = company.companyName || "";
+  const count = company.mentorCount || 0;
 
   return (
     <Link
       to={sessionLink(company)}
       aria-label={`Book a session with ${name}`}
-      className="mc-rise group flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition duration-200 hover:border-blue-300 hover:shadow-lg hover:shadow-blue-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 sm:flex-row sm:items-center"
+      className={`mc-rise group flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition duration-200 hover:border-blue-300 hover:shadow-lg hover:shadow-blue-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 sm:flex-row sm:items-center ${ROW_GRID}`}
       style={{ animationDelay: `${Math.min(index, 12) * 30}ms` }}
     >
+      {/* col 1: logo */}
       <Logo company={company} size="h-14 w-14" rounded="rounded-xl" />
 
-      <div className="min-w-0 flex-1">
+      {/* col 2: name + industry */}
+      <div className="min-w-0 flex-1 lg:flex-none">
         <h3 className="truncate text-base font-semibold text-slate-900">
           <Highlight text={name} query={query} />
         </h3>
@@ -1614,24 +1621,35 @@ const CompanyRow = ({ company, index, query }) => {
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-        <span className="inline-flex items-center gap-2 text-sm text-slate-600">
-          <Users size={15} className="text-slate-400" />
-          <span className="font-semibold text-slate-900">
-            {company.mentorCount || 0}
-          </span>{" "}
-          employees
-        </span>
-        <RatingText company={company} />
-        <OnlineBadge count={company.onlineCount || 0} />
-        <AvatarStack
-          mentors={company.mentors}
-          total={company.mentorCount || 0}
-          max={3}
-        />
+      {/* cols 3-6 (lg:contents => each child becomes its own grid cell) */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 lg:contents">
+        {/* col 3: employees */}
+        <div className="flex items-center lg:justify-start">
+          <span className="inline-flex items-center gap-2 whitespace-nowrap text-sm text-slate-600">
+            <Users size={15} className="text-slate-400" />
+            <span className="font-semibold text-slate-900">{count}</span>
+            {count === 1 ? "employee" : "employees"}
+          </span>
+        </div>
+
+        {/* col 4: rating / New */}
+        <div className="flex items-center lg:justify-start">
+          <RatingText company={company} />
+        </div>
+
+        {/* col 5: online badge */}
+        <div className="flex items-center lg:justify-start">
+          <OnlineBadge count={company.onlineCount || 0} />
+        </div>
+
+        {/* col 6: avatars */}
+        <div className="flex items-center lg:justify-start">
+          <AvatarStack mentors={company.mentors} total={count} max={3} />
+        </div>
       </div>
 
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700 transition group-hover:bg-blue-600 group-hover:text-white sm:ml-2">
+      {/* col 7: book button */}
+      <span className="inline-flex items-center justify-center gap-1.5 rounded-full bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700 transition group-hover:bg-blue-600 group-hover:text-white sm:ml-2 lg:ml-0">
         Book
         <ArrowRight
           size={16}

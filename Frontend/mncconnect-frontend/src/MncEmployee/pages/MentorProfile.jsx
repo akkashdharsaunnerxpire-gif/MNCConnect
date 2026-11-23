@@ -232,6 +232,7 @@ const MentorProfile = () => {
       id: mentor._id,
       name: mentor.name || "Mentor",
       email: mentor.email || authEmail || "Not provided",
+      mentorCode: mentor.mentorCode || mentorCode || "Not provided",
       phone: mentor.mobile || "Not provided",
       company: mentor.currentCompany || "",
       designation: mentor.designation || "",
@@ -451,6 +452,7 @@ const MentorProfile = () => {
                   <dl className="mt-4 divide-y divide-slate-100">
                     <InfoRow label="Full name" value={profile.name} />
                     <InfoRow label="Email" value={profile.email} />
+                    <InfoRow label="EmployeeID" value={profile.mentorCode} />
                     <InfoRow label="Phone" value={profile.phone} />
                     <InfoRow label="Employee ID" value={profile.employeeId} />
                     <InfoRow label="Department" value={profile.department} />

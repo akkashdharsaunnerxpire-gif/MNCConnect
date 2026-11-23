@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Camera, Pencil, X, Check, Plus, GraduationCap, MapPin, Phone, Mail, Loader2,
   AlertTriangle, ShieldAlert, User, Calendar, Globe, Code, Heart, BriefcaseBusiness,
-  Trash2, Building2, Info, Settings as SettingsIcon, Sparkles, Circle, CheckCircle2,
+  Trash2, Building2, Info, Settings as SettingsIcon, Sparkles, Circle, CheckCircle2, Search, SlidersHorizontal
 } from "lucide-react";
 import {
   PROFILE_IMAGE_KEYS, REQUIRED_PERCENT, getRawAvatarUrl, getProfileStatus,
@@ -62,14 +62,14 @@ const FIELD_DEFS = {
   bio: { label: "About me", group: "about", type: "textarea", placeholder: "Tell us about yourself..." },
 };
 
-/* ============================== STYLES ============================== */
-const INPUT = "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500";
-const BTN_PRIMARY = "inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60";
-const BTN_OUTLINE = "inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50";
-const CARD = "rounded-2xl border border-slate-200 bg-white p-6 shadow-sm";
+/* ============================== LIGHT MODE STYLES ============================== */
+const CARD = "bg-white rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100";
+const INPUT = "w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-pink-400 focus:bg-white focus:ring-4 focus:ring-pink-500/10 disabled:cursor-not-allowed disabled:opacity-50";
+const BTN_PRIMARY = "inline-flex shrink-0 items-center justify-center gap-2 rounded-full bg-gradient-to-r from-orange-400 to-pink-500 px-6 py-2.5 text-sm font-semibold text-white shadow-md shadow-pink-500/20 transition hover:brightness-105 disabled:opacity-60";
+const BTN_OUTLINE = "inline-flex shrink-0 items-center justify-center gap-2 rounded-full border border-gray-200 bg-white px-5 py-2 text-sm font-semibold text-gray-600 transition hover:bg-gray-50 hover:text-gray-900";
+const PILL_BTN = "inline-flex items-center justify-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold text-white transition shadow-sm hover:brightness-110";
 
 const TABS = [
-  { id: "overview", label: "Overview", icon: Info },
   { id: "education", label: "Education", icon: GraduationCap },
   { id: "career", label: "Career", icon: BriefcaseBusiness },
   { id: "skills", label: "Skills", icon: Code },
@@ -81,77 +81,23 @@ const AvatarImage = ({ src, name, className = "", textClass = "text-4xl" }) => {
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [src]);
   const initial = (name || "").trim().charAt(0).toUpperCase() || "F";
-  if (src && !failed) {
-    return <img src={src} alt={name || "Profile"} onError={() => setFailed(true)} className={`${className} bg-slate-100 object-cover`} />;
-  }
-  return (
-    <div role="img" aria-label={name || "Profile"} className={`${className} flex items-center justify-center bg-blue-600 font-bold text-white ${textClass}`}>
-      {initial}
-    </div>
-  );
+  return src && !failed
+    ? <img src={src} alt={name || "Profile"} onError={() => setFailed(true)} className={`${className} object-cover`} />
+    : <div role="img" aria-label={name || "Profile"} className={`${className} flex items-center justify-center bg-gradient-to-br from-pink-400 to-orange-400 font-bold text-white ${textClass}`}>{initial}</div>;
 };
 
-const RequiredMark = () => <span className="ml-0.5 font-semibold text-rose-500">*</span>;
-
-const SectionTitle = ({ icon: Icon, children, action }) => (
-  <div className="mb-5 flex items-center justify-between gap-3">
-    <h2 className="flex items-center gap-2.5 text-base font-bold text-slate-900">
-      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-50 text-blue-600"><Icon size={18} /></span>
-      {children}
-    </h2>
-    {action}
-  </div>
-);
-
-const EmptyTab = ({ icon: Icon, text, cta, onCta }) => (
-  <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 py-12 text-center">
-    <span className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600"><Icon size={22} /></span>
-    <p className="text-sm text-slate-500">{text}</p>
-    {cta && <button onClick={onCta} className={BTN_PRIMARY}><Plus size={16} /> {cta}</button>}
-  </div>
-);
-
-const StatTile = ({ icon: Icon, label, value }) => (
-  <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600"><Icon size={20} /></span>
-    <div className="min-w-0">
-      <p className="text-xl font-bold leading-none text-slate-900">{value}</p>
-      <p className="mt-1 truncate text-[11px] font-semibold uppercase tracking-wider text-slate-500">{label}</p>
-    </div>
-  </div>
-);
-
-const InfoRow = ({ icon: Icon, label, value }) => (
-  <div className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 p-3.5">
-    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-blue-600 shadow-sm"><Icon size={16} /></span>
-    <div className="min-w-0">
-      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{label}</p>
-      <p className="truncate text-sm font-semibold text-slate-900">{value || "Not added"}</p>
-    </div>
-  </div>
-);
-
-const ProgressRing = ({ percent, size = 88 }) => (
-  <div className="relative flex shrink-0 items-center justify-center" style={{ width: size, height: size }}>
-    <svg className="absolute inset-0 h-full w-full -rotate-90" viewBox="0 0 100 100">
-      <circle cx="50" cy="50" r="40" fill="transparent" stroke="#e2e8f0" strokeWidth="9" />
-      <circle cx="50" cy="50" r="40" fill="transparent" stroke="#2563eb" strokeWidth="9"
-        strokeDasharray={`${(percent / 100) * 251.2} 251.2`} strokeLinecap="round" />
-    </svg>
-    <span className="text-lg font-bold text-slate-900">{percent}%</span>
-  </div>
-);
+const RequiredMark = () => <span className="ml-0.5 font-semibold text-pink-500">*</span>;
 
 /* ============================== MODALS ============================== */
 const ModalShell = ({ title, onClose, children }) => (
   <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-    className="fixed inset-0 z-[100] flex items-end justify-center overscroll-contain bg-slate-900/50 backdrop-blur-sm sm:items-center sm:p-4" onClick={onClose}>
+    className="fixed inset-0 z-[100] flex items-end justify-center overscroll-contain bg-gray-900/40 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={onClose}>
     <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }}
       onClick={(e) => e.stopPropagation()}
-      className="max-h-[92dvh] w-full max-w-lg overflow-y-auto overscroll-contain rounded-t-2xl bg-white p-6 shadow-2xl sm:rounded-2xl">
+      className="max-h-[92dvh] w-full max-w-xl overflow-y-auto overscroll-contain rounded-t-3xl bg-white p-6 shadow-2xl sm:rounded-3xl">
       <div className="mb-5 flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-        <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100"><X size={18} /></button>
+        <h2 className="text-lg font-bold text-gray-900">{title}</h2>
+        <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-900"><X size={18} /></button>
       </div>
       {children}
     </motion.div>
@@ -160,123 +106,12 @@ const ModalShell = ({ title, onClose, children }) => (
 
 const ModalInput = ({ label, name, value, onChange, placeholder, type = "text", required = false, disabled = false }) => (
   <div>
-    <label className="mb-1.5 block text-xs font-semibold text-slate-700">{label}{required && <RequiredMark />}</label>
+    <label className="mb-1.5 block text-xs font-semibold text-gray-700">{label}{required && <RequiredMark />}</label>
     <input type={type} name={name} value={value} onChange={onChange} placeholder={placeholder} disabled={disabled} required={required} className={INPUT} />
   </div>
 );
 
-const ModalButtons = ({ onClose, submitText }) => (
-  <div className="flex gap-2.5 pt-4">
-    <button type="button" onClick={onClose} className={`${BTN_OUTLINE} flex-1`}>Cancel</button>
-    <button type="submit" className={`${BTN_PRIMARY} flex-1`}>{submitText}</button>
-  </div>
-);
-
-const EMPTY_EDU = { institution: "", degree: "", field: "", graduationYear: "", cgpa: "", description: "" };
-const AddEducationModal = ({ onClose, onAdd }) => {
-  const [f, setF] = useState(EMPTY_EDU);
-  const change = (e) => setF({ ...f, [e.target.name]: e.target.value });
-  const submit = (e) => {
-    e.preventDefault();
-    if (!f.institution.trim() || !f.degree.trim()) return;
-    onAdd({ id: Date.now().toString(), ...f });
-    onClose();
-  };
-  return (
-    <ModalShell title="Add education" onClose={onClose}>
-      <form onSubmit={submit} className="space-y-4">
-        <ModalInput label="Institution / University" name="institution" value={f.institution} onChange={change} placeholder="e.g. MIT" required />
-        <ModalInput label="Degree" name="degree" value={f.degree} onChange={change} placeholder="e.g. B.Tech" required />
-        <ModalInput label="Field / Specialization" name="field" value={f.field} onChange={change} placeholder="e.g. Computer Science" />
-        <div className="grid grid-cols-2 gap-3">
-          <ModalInput label="Graduation year" name="graduationYear" type="number" value={f.graduationYear} onChange={change} placeholder="2025" />
-          <ModalInput label="CGPA / Percentage" name="cgpa" value={f.cgpa} onChange={change} placeholder="8.5 / 85%" />
-        </div>
-        <div>
-          <label className="mb-1.5 block text-xs font-semibold text-slate-700">Description</label>
-          <textarea name="description" value={f.description} onChange={change} rows={3} placeholder="Additional details..." className={`${INPUT} resize-none`} />
-        </div>
-        <ModalButtons onClose={onClose} submitText="Add education" />
-      </form>
-    </ModalShell>
-  );
-};
-
-const EMPTY_CAREER = { company: "", role: "", industry: "", startDate: "", endDate: "", current: false, description: "" };
-const AddCareerModal = ({ onClose, onAdd }) => {
-  const [f, setF] = useState(EMPTY_CAREER);
-  const change = (e) => {
-    const { name, value, type, checked } = e.target;
-    setF({ ...f, [name]: type === "checkbox" ? checked : value });
-  };
-  const submit = (e) => {
-    e.preventDefault();
-    if (!f.company.trim() || !f.role.trim()) return;
-    onAdd({ id: Date.now().toString(), ...f });
-    onClose();
-  };
-  return (
-    <ModalShell title="Add experience" onClose={onClose}>
-      <form onSubmit={submit} className="space-y-4">
-        <ModalInput label="Company" name="company" value={f.company} onChange={change} placeholder="e.g. Google" required />
-        <ModalInput label="Role" name="role" value={f.role} onChange={change} placeholder="e.g. Software Engineer" required />
-        <ModalInput label="Industry" name="industry" value={f.industry} onChange={change} placeholder="e.g. Technology" />
-        <div className="grid grid-cols-2 gap-3">
-          <ModalInput label="Start date" name="startDate" type="date" value={f.startDate} onChange={change} />
-          <ModalInput label="End date" name="endDate" type="date" value={f.endDate} onChange={change} disabled={f.current} />
-        </div>
-        <label className="flex items-center gap-2 text-sm text-slate-700">
-          <input type="checkbox" name="current" checked={f.current} onChange={change} className="h-4 w-4 rounded border-slate-300" />
-          Currently working here
-        </label>
-        <div>
-          <label className="mb-1.5 block text-xs font-semibold text-slate-700">Description</label>
-          <textarea name="description" value={f.description} onChange={change} rows={3} placeholder="Describe your role..." className={`${INPUT} resize-none`} />
-        </div>
-        <ModalButtons onClose={onClose} submitText="Add experience" />
-      </form>
-    </ModalShell>
-  );
-};
-
-const AddTagsModal = ({ onClose, onAdd, existing, title, label, placeholder, submitText }) => {
-  const [input, setInput] = useState("");
-  const [items, setItems] = useState([]);
-  const add = () => {
-    const t = input.trim();
-    if (t && !items.includes(t) && !existing.includes(t)) { setItems([...items, t]); setInput(""); }
-  };
-  const submit = (e) => {
-    e.preventDefault();
-    if (!items.length) return;
-    onAdd(items);
-    onClose();
-  };
-  return (
-    <ModalShell title={title} onClose={onClose}>
-      <form onSubmit={submit} className="space-y-4">
-        <div>
-          <label className="mb-1.5 block text-xs font-semibold text-slate-700">{label}</label>
-          <div className="flex gap-2">
-            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={placeholder}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }} className={`${INPUT} min-w-0 flex-1`} />
-            <button type="button" onClick={add} className={BTN_PRIMARY}>Add</button>
-          </div>
-        </div>
-        <div className="flex min-h-[60px] flex-wrap content-start gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-3">
-          {items.length === 0 ? <p className="w-full py-2 text-center text-sm text-slate-400">Nothing added yet</p> : items.map((i) => (
-            <span key={i} className="flex items-center gap-1.5 rounded-full bg-blue-100 px-3 py-1.5 text-xs font-semibold text-blue-700">
-              {i}
-              <button type="button" onClick={() => setItems(items.filter((s) => s !== i))}><X size={12} /></button>
-            </span>
-          ))}
-        </div>
-        <ModalButtons onClose={onClose} submitText={submitText} />
-      </form>
-    </ModalShell>
-  );
-};
-
+/* ============================== EDIT PROFILE MODAL ============================== */
 const EditProfileModal = ({ user, saving, onClose, onSave, onAvatarUpload, onAvatarRemove, avatarUrl, hasRealAvatar }) => {
   const [form, setForm] = useState({ ...user, phone: user.phone || user.mobile || "" });
   const [preview, setPreview] = useState(null);
@@ -308,7 +143,7 @@ const EditProfileModal = ({ user, saving, onClose, onSave, onAvatarUpload, onAva
 
   const renderField = ({ key, def }) => (
     <div key={key}>
-      <label className="mb-1.5 block text-xs font-semibold text-slate-700">{def.label}{def.required && <RequiredMark />}</label>
+      <label className="mb-1.5 block text-xs font-semibold text-gray-700">{def.label}{def.required && <RequiredMark />}</label>
       {def.type === "select" ? (
         <select value={form[key] || ""} onChange={(e) => update(key, e.target.value)} className={INPUT}>
           <option value="">Select</option>
@@ -325,39 +160,39 @@ const EditProfileModal = ({ user, saving, onClose, onSave, onAvatarUpload, onAva
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[90] flex items-center justify-center overscroll-contain bg-slate-900/60 p-4 backdrop-blur-sm" onClick={onClose}>
+      className="fixed inset-0 z-[90] flex items-center justify-center overscroll-contain bg-gray-900/40 p-4 backdrop-blur-sm" onClick={onClose}>
       <motion.div initial={{ opacity: 0, scale: 0.96, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 20 }}
         onClick={(e) => e.stopPropagation()}
-        className="flex max-h-[92dvh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
-          <h2 className="text-lg font-semibold text-slate-900">Edit profile</h2>
-          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100"><X size={17} /></button>
+        className="flex max-h-[92dvh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+          <h2 className="text-lg font-bold text-gray-900">Edit profile</h2>
+          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-900"><X size={17} /></button>
         </div>
         <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-6 py-5">
-            <div className="flex flex-col items-center gap-4 rounded-2xl border border-slate-100 bg-slate-50 p-5 sm:flex-row">
+            <div className="flex flex-col items-center gap-4 rounded-2xl bg-gray-50 p-5 sm:flex-row border border-gray-100">
               <div className="relative">
                 <AvatarImage src={preview || avatarUrl} name={user?.name} className="h-20 w-20 rounded-2xl" textClass="text-2xl" />
-                {uploading && <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-white/60"><Loader2 size={22} className="animate-spin text-blue-600" /></div>}
-                <label htmlFor="edit-image" className="absolute -bottom-1 -right-1 flex h-7 w-7 cursor-pointer items-center justify-center rounded-full bg-blue-600 text-white shadow-md">
+                {uploading && <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-white/70"><Loader2 size={22} className="animate-spin text-pink-500" /></div>}
+                <label htmlFor="edit-image" className="absolute -bottom-1 -right-1 flex h-7 w-7 cursor-pointer items-center justify-center rounded-full bg-gradient-to-r from-orange-400 to-pink-500 text-white shadow-lg">
                   <Camera size={13} />
                   <input id="edit-image" type="file" accept="image/*" onChange={pick} className="hidden" disabled={uploading} />
                 </label>
               </div>
               <div className="text-center sm:text-left">
-                <h3 className="text-sm font-semibold text-slate-900">Profile photo <RequiredMark /></h3>
-                <p className="mt-1 text-xs text-slate-500">JPG, PNG or WEBP. Max 5MB.</p>
-                {hasRealAvatar && <button type="button" onClick={onAvatarRemove} className="mt-2 text-xs font-semibold text-red-600">Remove photo</button>}
+                <h3 className="text-sm font-semibold text-gray-900">Profile photo <RequiredMark /></h3>
+                <p className="mt-1 text-xs text-gray-500">JPG, PNG or WEBP. Max 5MB.</p>
+                {hasRealAvatar && <button type="button" onClick={onAvatarRemove} className="mt-2 text-xs font-semibold text-pink-600 hover:text-pink-700">Remove photo</button>}
               </div>
             </div>
             {[["basic", "Basic information", "sm:grid-cols-2"], ["contact", "Contact", "sm:grid-cols-2"], ["about", "About you", ""]].map(([g, title, cols]) => (
               <div key={g}>
-                <h4 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">{title}</h4>
+                <h4 className="mb-3 text-xs font-bold uppercase tracking-wider text-gray-400">{title}</h4>
                 <div className={`grid gap-4 ${cols}`}>{group(g).map(renderField)}</div>
               </div>
             ))}
           </div>
-          <div className="flex gap-3 border-t border-slate-100 bg-white px-6 py-4 sm:justify-end">
+          <div className="flex gap-3 border-t border-gray-100 px-6 py-4 sm:justify-end">
             <button type="button" onClick={onClose} className={BTN_OUTLINE}>Cancel</button>
             <button type="submit" disabled={saving} className={BTN_PRIMARY}>
               {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Save changes
@@ -369,78 +204,168 @@ const EditProfileModal = ({ user, saving, onClose, onSave, onAvatarUpload, onAva
   );
 };
 
-/* ============================== TAB CONTENT ============================== */
-const Timeline = ({ children }) => <div className="relative space-y-4 pl-6 before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-px before:bg-slate-200">{children}</div>;
+/* ============================== DETAILS MODAL (VIEW & UPDATE) ============================== */
+const DetailsModal = ({ title, icon: Icon, onClose, user, onUpdate }) => {
+  const [activeTab, setActiveTab] = useState("list"); // 'list' or 'form'
+  
+  // State for adding new items
+  const [eduForm, setEduForm] = useState({ institution: "", degree: "", field: "", graduationYear: "", cgpa: "", description: "" });
+  const [careerForm, setCareerForm] = useState({ company: "", role: "", industry: "", startDate: "", endDate: "", current: false, description: "" });
+  const [tagInput, setTagInput] = useState("");
 
-const TimelineItem = ({ icon: Icon, title, subtitle, meta, onDelete, children }) => (
-  <div className="group relative rounded-xl border border-slate-100 bg-white p-4 transition hover:bg-slate-50">
-    <span className="absolute -left-[25px] top-5 flex h-[22px] w-[22px] items-center justify-center rounded-full border-4 border-white bg-blue-600 text-white" />
-    <div className="flex items-start gap-3">
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><Icon size={18} /></span>
-      <div className="min-w-0 flex-1">
-        <h3 className="font-bold text-slate-900">{title}</h3>
-        {subtitle && <p className="text-sm font-medium text-slate-600">{subtitle}</p>}
-        {meta}
-        {children}
+  const handleAddEducation = (e) => {
+    e.preventDefault();
+    if (!eduForm.institution || !eduForm.degree) return;
+    onUpdate({ education: [...user.education, { id: Date.now().toString(), ...eduForm }] }, "Education added.");
+    setEduForm({ institution: "", degree: "", field: "", graduationYear: "", cgpa: "", description: "" });
+    setActiveTab("list");
+  };
+
+  const handleAddCareer = (e) => {
+    e.preventDefault();
+    if (!careerForm.company || !careerForm.role) return;
+    onUpdate({ career: [...user.career, { id: Date.now().toString(), ...careerForm }] }, "Experience added.");
+    setCareerForm({ company: "", role: "", industry: "", startDate: "", endDate: "", current: false, description: "" });
+    setActiveTab("list");
+  };
+
+  const handleAddTag = (e) => {
+    e.preventDefault();
+    const val = tagInput.trim();
+    if (!val) return;
+    const field = title.toLowerCase(); // 'skills' or 'interests'
+    if (!user[field].includes(val)) {
+      onUpdate({ [field]: [...user[field], val] }, `${title} added.`);
+    }
+    setTagInput("");
+  };
+
+  const handleDelete = (type, id) => {
+    onUpdate({ [type]: user[type].filter((x) => x.id !== id) }, "Item removed.");
+  };
+
+  return (
+    <ModalShell title={`Manage ${title}`} onClose={onClose}>
+      <div className="flex gap-2 mb-6 border-b border-gray-100 pb-2">
+        <button onClick={() => setActiveTab("list")} className={`text-sm font-semibold px-4 py-2 rounded-full transition ${activeTab === "list" ? "bg-gray-100 text-gray-900" : "text-gray-500 hover:text-gray-900"}`}>View Details</button>
+        <button onClick={() => setActiveTab("form")} className={`text-sm font-semibold px-4 py-2 rounded-full transition ${activeTab === "form" ? "bg-pink-50 text-pink-600" : "text-gray-500 hover:text-gray-900"}`}>+ Add New</button>
       </div>
-      <button onClick={onDelete} aria-label="Delete" className="rounded-lg p-1.5 text-slate-400 opacity-100 transition hover:bg-red-50 hover:text-red-600 sm:opacity-0 sm:group-hover:opacity-100"><Trash2 size={16} /></button>
-    </div>
-  </div>
-);
 
-const Chip = ({ children, tone = "slate" }) => (
-  <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${tone === "green" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{children}</span>
-);
+      {activeTab === "list" && (
+        <div className="space-y-4">
+          {title === "Education" && (
+            user.education.length ? user.education.map(e => (
+              <div key={e.id} className="p-4 rounded-xl border border-gray-100 bg-gray-50 relative group">
+                <h4 className="font-bold text-gray-900">{e.institution}</h4>
+                <p className="text-sm text-gray-600">{e.degree} {e.field && `· ${e.field}`}</p>
+                <div className="flex gap-2 mt-2">
+                  {e.graduationYear && <span className="text-xs bg-white border border-gray-200 px-2 py-0.5 rounded text-gray-500">{e.graduationYear}</span>}
+                  {e.cgpa && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded font-semibold">{e.cgpa}</span>}
+                </div>
+                <button onClick={() => handleDelete('education', e.id)} className="absolute top-4 right-4 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"><Trash2 size={16}/></button>
+              </div>
+            )) : <p className="text-sm text-gray-400 text-center py-4 italic">No education details added yet.</p>
+          )}
 
-const TagCloud = ({ items, onDelete }) => (
-  <div className="flex flex-wrap gap-2">
-    {items.map((i) => (
-      <span key={i} className="flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700">
-        {i}
-        <button onClick={() => onDelete(i)} aria-label={`Remove ${i}`} className="text-blue-400 hover:text-red-500"><X size={14} /></button>
-      </span>
-    ))}
-  </div>
-);
+          {title === "Career" && (
+            user.career.length ? user.career.map(c => (
+              <div key={c.id} className="p-4 rounded-xl border border-gray-100 bg-gray-50 relative group">
+                <h4 className="font-bold text-gray-900">{c.role}</h4>
+                <p className="text-sm text-gray-600">{c.company} {c.industry && `· ${c.industry}`}</p>
+                <p className="text-xs text-gray-400 mt-1">{c.startDate} - {c.current ? "Present" : c.endDate}</p>
+                <button onClick={() => handleDelete('career', c.id)} className="absolute top-4 right-4 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"><Trash2 size={16}/></button>
+              </div>
+            )) : <p className="text-sm text-gray-400 text-center py-4 italic">No experience added yet.</p>
+          )}
+
+          {(title === "Skills" || title === "Interests") && (
+            <div className="flex flex-wrap gap-2">
+              {user[title.toLowerCase()].length ? user[title.toLowerCase()].map(item => (
+                <span key={item} className="flex items-center gap-2 bg-gray-100 text-gray-700 px-3 py-1.5 rounded-full text-sm font-medium">
+                  {item}
+                  <button onClick={() => {
+                    const field = title.toLowerCase();
+                    onUpdate({ [field]: user[field].filter(x => x !== item) }, `${title} removed.`);
+                  }} className="text-gray-400 hover:text-red-500"><X size={14}/></button>
+                </span>
+              )) : <p className="text-sm text-gray-400 text-center w-full py-4 italic">None added yet.</p>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === "form" && (
+        <div>
+          {title === "Education" && (
+            <form onSubmit={handleAddEducation} className="space-y-4">
+              <ModalInput label="Institution" value={eduForm.institution} onChange={e => setEduForm({...eduForm, institution: e.target.value})} required />
+              <ModalInput label="Degree" value={eduForm.degree} onChange={e => setEduForm({...eduForm, degree: e.target.value})} required />
+              <div className="grid grid-cols-2 gap-3">
+                <ModalInput label="Year" value={eduForm.graduationYear} onChange={e => setEduForm({...eduForm, graduationYear: e.target.value})} />
+                <ModalInput label="CGPA" value={eduForm.cgpa} onChange={e => setEduForm({...eduForm, cgpa: e.target.value})} />
+              </div>
+              <button type="submit" className={`${BTN_PRIMARY} w-full mt-4`}>Save Education</button>
+            </form>
+          )}
+
+          {title === "Career" && (
+            <form onSubmit={handleAddCareer} className="space-y-4">
+              <ModalInput label="Company" value={careerForm.company} onChange={e => setCareerForm({...careerForm, company: e.target.value})} required />
+              <ModalInput label="Role" value={careerForm.role} onChange={e => setCareerForm({...careerForm, role: e.target.value})} required />
+              <div className="grid grid-cols-2 gap-3">
+                <ModalInput label="Start Date" type="date" value={careerForm.startDate} onChange={e => setCareerForm({...careerForm, startDate: e.target.value})} />
+                <ModalInput label="End Date" type="date" value={careerForm.endDate} onChange={e => setCareerForm({...careerForm, endDate: e.target.value})} disabled={careerForm.current} />
+              </div>
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input type="checkbox" checked={careerForm.current} onChange={e => setCareerForm({...careerForm, current: e.target.checked})} className="h-4 w-4 rounded text-pink-500" />
+                Currently working here
+              </label>
+              <button type="submit" className={`${BTN_PRIMARY} w-full mt-4`}>Save Experience</button>
+            </form>
+          )}
+
+          {(title === "Skills" || title === "Interests") && (
+            <form onSubmit={handleAddTag} className="space-y-4">
+              <ModalInput label={`Add new ${title.slice(0,-1)}`} value={tagInput} onChange={e => setTagInput(e.target.value)} placeholder={`e.g. ${title === 'Skills' ? 'React' : 'AI/ML'}`} />
+              <button type="submit" className={`${BTN_PRIMARY} w-full mt-4`}>Add {title.slice(0,-1)}</button>
+            </form>
+          )}
+        </div>
+      )}
+    </ModalShell>
+  );
+};
 
 /* ============================== MAIN ============================== */
 const FresherProfile = () => {
   const [user, setUser] = useState(null);
   const [status, setStatus] = useState("loading");
   const [editOpen, setEditOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
-  const [tab, setTab] = useState("overview");
-  const [modal, setModal] = useState(null); // education | career | skills | interests
   const [previewImage, setPreviewImage] = useState(null);
   const [uploading, setUploading] = useState(false);
   const toastTimer = useRef(null);
 
-  // Lock the page behind any profile modal and restore its scroll position on close.
   useEffect(() => {
-    const modalOpen = editOpen || Boolean(modal);
+    const modalOpen = editOpen || Boolean(detailsOpen);
     if (!modalOpen) return;
-
     const scrollY = window.scrollY;
     const body = document.body;
-    const previousPosition = body.style.position;
-    const previousTop = body.style.top;
-    const previousWidth = body.style.width;
-    const previousOverflow = body.style.overflow;
-
+    const prev = { position: body.style.position, top: body.style.top, width: body.style.width, overflow: body.style.overflow };
     body.style.position = "fixed";
     body.style.top = `-${scrollY}px`;
     body.style.width = "100%";
     body.style.overflow = "hidden";
-
     return () => {
-      body.style.position = previousPosition;
-      body.style.top = previousTop;
-      body.style.width = previousWidth;
-      body.style.overflow = previousOverflow;
+      body.style.position = prev.position;
+      body.style.top = prev.top;
+      body.style.width = prev.width;
+      body.style.overflow = prev.overflow;
       window.scrollTo(0, scrollY);
     };
-  }, [editOpen, modal]);
+  }, [editOpen, detailsOpen]);
 
   const showToast = useCallback((type, message) => {
     setToast({ type, message });
@@ -475,27 +400,26 @@ const FresherProfile = () => {
     }
   };
 
-  const handleAvatarUpload = async (file) => {
-    if (!file) return;
-    if (!file.type.startsWith("image/")) return showToast("error", "Select an image.");
-    if (file.size > 5 * 1024 * 1024) return showToast("error", "Max 5MB.");
-    setUploading(true);
-    const reader = new FileReader();
-    reader.onloadend = () => setPreviewImage(reader.result);
-    reader.readAsDataURL(file);
-    try {
-      const updated = await apiUploadAvatar(file);
-      if (updated) {
-        setUser((p) => ({ ...p, ...updated }));
-        setPreviewImage(null);
-        notifyProfileChanged();
-        showToast("success", "Photo updated.");
-      }
-    } catch (err) {
-      showToast("error", err.message || "Upload failed.");
-      setPreviewImage(null);
-    } finally { setUploading(false); }
-  };
+ const handleAvatarUpload = async (file) => {
+  if (!file) return;
+  if (!file.type.startsWith("image/")) return showToast("error", "Select a valid image.");
+  if (file.size > 5 * 1024 * 1024) return showToast("error", "Max 5MB.");
+
+  setUploading(true);
+  try {
+    const updated = await apiUploadAvatar(file);
+    if (!updated || !getRawAvatarUrl(updated)) throw new Error("Avatar URL missing from server response.");
+    setUser((prev) => ({ ...prev, ...updated }));
+    setPreviewImage(null);
+    notifyProfileChanged();
+    showToast("success", "Photo updated.");
+  } catch (err) {
+    console.error("Avatar upload error:", err);
+    showToast("error", err.message || "Upload failed.");
+  } finally {
+    setUploading(false);
+  }
+};
 
   const handleAvatarRemove = async () => {
     try {
@@ -516,192 +440,126 @@ const FresherProfile = () => {
     finally { setSaving(false); }
   };
 
-  const profile = useMemo(
-    () => getProfileStatus(user, { hasPhoto: Boolean(getRawAvatarUrl(user)) || Boolean(previewImage) }),
-    [user, previewImage],
-  );
-
   if (status === "unauthenticated") return <StateShell icon={<ShieldAlert size={22} />} title="Sign in required" message="Your session expired." action={<Link to="/login" className={BTN_PRIMARY}>Login</Link>} />;
   if (status === "error") return <StateShell icon={<AlertTriangle size={22} />} title="Couldn't load profile" message="Please check your connection." action={<button onClick={loadUser} className={BTN_PRIMARY}>Retry</button>} />;
   if (status === "loading" || !user) return <Skeleton />;
 
   const name = (user.name || "").trim() || "Fresher";
   const avatarUrl = previewImage || getRawAvatarUrl(user);
-  const latestEdu = user.education[user.education.length - 1];
-  const headline = latestEdu ? `${latestEdu.degree}${latestEdu.field ? ` in ${latestEdu.field}` : ""} · ${latestEdu.institution}` : "Fresher · add your education";
-  const missing = Array.isArray(profile?.missing) ? profile.missing : [];
 
   return (
-    <div className="min-h-screen bg-[#f4f7f9] pb-20">
-      <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 lg:py-10">
-        {/* HERO */}
-        <section className="mb-6 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-          <div className="h-28 bg-gradient-to-r from-blue-600 via-indigo-500 to-sky-400 sm:h-36" />
-          <div className="px-5 pb-6 sm:px-8">
-            <div className="-mt-14 flex flex-col gap-5 sm:-mt-16 md:flex-row md:items-end">
-              <div className="relative mx-auto shrink-0 md:mx-0">
-                <div className="rounded-3xl border-4 border-white bg-white shadow-lg">
-                  <AvatarImage src={avatarUrl} name={name} className="h-28 w-28 rounded-2xl sm:h-32 sm:w-32" textClass="text-5xl" />
-                </div>
-                <label htmlFor="avatar-upload" className="absolute -bottom-2 -right-2 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border-2 border-white bg-blue-600 text-white shadow-md hover:bg-blue-700">
-                  <Camera size={15} />
-                  <input id="avatar-upload" type="file" accept="image/*" className="hidden" disabled={uploading}
+    // Changed to h-screen and overflow-hidden to stop main page scroll
+    <div className="h-screen bg-[#f4f7f9] text-slate-800 flex flex-col overflow-hidden">
+      
+      {/* Container takes full height, max-w-7xl, overflow hidden, NO padding top/bottom */}
+      <main className="mx-auto w-full max-w-7xl px-4 sm:px-6 grid grid-cols-1 lg:grid-cols-3 gap-8 h-full overflow-hidden">
+        
+        {/* LEFT COLUMN: Profile Image Card - Centered vertically, no scroll */}
+        <div className="hidden lg:flex lg:col-span-1 h-full items-center justify-center">
+          <div className={`${CARD} overflow-hidden w-full max-h-[85vh]`}>
+            <div className="relative w-full h-full aspect-[4/5] bg-gray-100">
+              <AvatarImage src={avatarUrl} name={name} className="h-full w-full object-cover grayscale-[10%]" textClass="text-6xl" />
+              <label htmlFor="avatar-upload" className="absolute bottom-4 right-4 flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-white/90 shadow-md text-gray-700 hover:bg-white transition">
+                <Camera size={18} />
+                <input id="avatar-upload" type="file" accept="image/*" className="hidden" disabled={uploading}
+                  onChange={(e) => { handleAvatarUpload(e.target.files?.[0]); e.target.value = ""; }} />
+              </label>
+              {uploading && <div className="absolute inset-0 flex items-center justify-center bg-white/50 backdrop-blur-sm"><Loader2 size={24} className="animate-spin text-pink-500" /></div>}
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT COLUMN: Name, Info, and List - THIS is the only part that scrolls */}
+        {/* Added py-6 and pb-24 here to allow scrolling to the very bottom */}
+        <div className="col-span-1 lg:col-span-2 h-full overflow-y-auto py-6 pb-24 pr-2 space-y-6 custom-scrollbar">
+          
+          {/* Mobile Image (Shows only on mobile) */}
+          <div className="lg:hidden flex justify-center mb-6">
+            <div className={`${CARD} overflow-hidden w-full max-w-sm`}>
+              <div className="relative w-full aspect-square bg-gray-100">
+                <AvatarImage src={avatarUrl} name={name} className="h-full w-full object-cover grayscale-[10%]" textClass="text-6xl" />
+                <label htmlFor="avatar-upload-mobile" className="absolute bottom-4 right-4 flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-white/90 shadow-md text-gray-700 hover:bg-white transition">
+                  <Camera size={18} />
+                  <input id="avatar-upload-mobile" type="file" accept="image/*" className="hidden" disabled={uploading}
                     onChange={(e) => { handleAvatarUpload(e.target.files?.[0]); e.target.value = ""; }} />
                 </label>
-                {uploading && <div className="absolute inset-0 flex items-center justify-center rounded-3xl bg-white/50 backdrop-blur-sm"><Loader2 size={24} className="animate-spin text-blue-600" /></div>}
-              </div>
-
-              <div className="min-w-0 flex-1 text-center md:mb-1 md:text-left">
-                <div className="flex flex-wrap items-center justify-center gap-2 md:justify-start">
-                  <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">{name}</h1>
-                  {profile.ok && (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700">
-                      <CheckCircle2 size={12} /> Booking ready
-                    </span>
-                  )}
-                </div>
-                <p className="mt-1 text-sm font-medium text-slate-600">{headline}</p>
-                <div className="mt-2 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-slate-500 md:justify-start">
-                  {user.location && <span className="flex items-center gap-1.5"><MapPin size={13} className="text-blue-500" />{user.location}</span>}
-                  {user.email && <span className="flex items-center gap-1.5"><Mail size={13} className="text-blue-500" />{user.email}</span>}
-                </div>
-              </div>
-
-              <div className="flex justify-center gap-2 md:mb-1">
-                <button onClick={() => setEditOpen(true)} className={BTN_PRIMARY}><Pencil size={15} /> Edit profile</button>
-                <Link to="/Home/settings" className={BTN_OUTLINE} aria-label="Settings"><SettingsIcon size={15} /> Settings</Link>
               </div>
             </div>
           </div>
-        </section>
 
-        {/* STATS */}
-        <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatTile icon={GraduationCap} label="Education" value={user.education.length} />
-          <StatTile icon={BriefcaseBusiness} label="Experience" value={user.career.length} />
-          <StatTile icon={Code} label="Skills" value={user.skills.length} />
-          <StatTile icon={Heart} label="Interests" value={user.interests.length} />
-        </div>
+          {/* Profile Header Card */}
+          <div className={`${CARD} p-8`}>
+            <div className="flex justify-between items-start mb-6">
+               <div>
+                  <h1 className="text-3xl font-bold text-gray-900">{name}</h1>
+                  <p className="text-gray-500 mt-1">{user.bio || "Fresher · add your bio"}</p>
+               </div>
+               <button onClick={() => setEditOpen(true)} className={`${BTN_PRIMARY} px-4 py-2 text-xs`}>Edit Profile</button>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+               <div className="flex items-center gap-3 text-sm text-gray-600">
+                  <div className="bg-gray-100 p-2 rounded-lg"><Mail size={16} /></div>
+                  {user.email}
+               </div>
+               <div className="flex items-center gap-3 text-sm text-gray-600">
+                  <div className="bg-gray-100 p-2 rounded-lg"><Phone size={16} /></div>
+                  {user.phone || "Not added"}
+               </div>
+               <div className="flex items-center gap-3 text-sm text-gray-600">
+                  <div className="bg-gray-100 p-2 rounded-lg"><MapPin size={16} /></div>
+                  {user.location || "Not added"}
+               </div>
+               <div className="flex items-center gap-3 text-sm text-gray-600">
+                  <div className="bg-gray-100 p-2 rounded-lg"><User size={16} /></div>
+                  {user.gender || "Not added"}
+               </div>
+            </div>
+          </div>
 
-        {/* TABS */}
-        <nav className="mb-6 flex gap-1 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {TABS.map(({ id, label, icon: Icon }) => (
-            <button key={id} onClick={() => setTab(id)}
-              className={`flex flex-1 shrink-0 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${tab === id ? "bg-blue-600 text-white shadow-md" : "text-slate-600 hover:bg-slate-50"}`}>
-              <Icon size={16} /> {label}
-            </button>
-          ))}
-        </nav>
+          {/* Categories / List Card */}
+          <div className={`${CARD} p-8`}>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold text-gray-900">My Profile Details</h2>
+            </div>
 
-        <AnimatePresence mode="wait">
-          <motion.div key={tab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.18 }}>
-            {tab === "overview" && (
-              <div className="grid gap-6 lg:grid-cols-3">
-                <div className="space-y-6 lg:col-span-2">
-                  <div className={CARD}>
-                    <SectionTitle icon={User} action={<button onClick={() => setEditOpen(true)} className="rounded-lg p-2 text-blue-600 hover:bg-blue-50" aria-label="Edit about"><Pencil size={15} /></button>}>About me</SectionTitle>
-                    {user.bio ? <p className="whitespace-pre-line text-sm leading-relaxed text-slate-600">{user.bio}</p>
-                      : <p className="text-sm italic text-slate-400">Add a short introduction so mentors know your goals.</p>}
-                  </div>
-                  <div className={CARD}>
-                    <SectionTitle icon={Phone}>Contact & details</SectionTitle>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <InfoRow icon={Mail} label="Email" value={user.email} />
-                      <InfoRow icon={Phone} label="Phone" value={user.phone} />
-                      <InfoRow icon={MapPin} label="Location" value={user.location} />
-                      <InfoRow icon={Globe} label="Nationality" value={user.nationality} />
-                      <InfoRow icon={User} label="Gender" value={user.gender} />
-                      <InfoRow icon={Calendar} label="Date of birth" value={user.dateOfBirth ? String(user.dateOfBirth).slice(0, 10) : ""} />
+            <div className="space-y-4">
+              {TABS.map((t) => (
+                <div key={t.id} className="flex items-center justify-between p-4 rounded-2xl border border-gray-100 bg-gray-50/50 hover:bg-gray-50 transition">
+                  <div className="flex items-center gap-4">
+                    <div className="h-10 w-10 rounded-full bg-white shadow-sm flex items-center justify-center text-gray-400">
+                       <t.icon size={18} />
                     </div>
-                  </div>
-                </div>
-
-                <div className="space-y-6">
-                  <div className={CARD}>
-                    <SectionTitle icon={Sparkles}>Profile strength</SectionTitle>
-                    <div className="flex items-center gap-4">
-                      <ProgressRing percent={profile.percent} />
-                      <p className="text-xs leading-relaxed text-slate-500">
-                        {profile.ok ? "Your profile is ready to book sessions." : `Reach ${REQUIRED_PERCENT}% and add a photo to book sessions.`}
+                    <div>
+                      <h3 className="text-sm font-bold text-gray-800">{t.label}</h3>
+                      <p className="text-xs text-gray-500">
+                         {t.id === 'education' && `${user.education.length} entries`}
+                         {t.id === 'career' && `${user.career.length} entries`}
+                         {t.id === 'skills' && `${user.skills.length} skills`}
+                         {t.id === 'interests' && `${user.interests.length} interests`}
                       </p>
                     </div>
-                    {missing.length > 0 && (
-                      <ul className="mt-4 space-y-2">
-                        {missing.map((m) => (
-                          <li key={m.key} className="flex items-center gap-2 text-xs text-slate-600"><Circle size={10} className="text-amber-500" />{m.label}</li>
-                        ))}
-                      </ul>
-                    )}
-                    {missing.length > 0 && <button onClick={() => setEditOpen(true)} className={`${BTN_PRIMARY} mt-4 w-full`}>Complete profile</button>}
                   </div>
-                  <div className={CARD}>
-                    <SectionTitle icon={Code}>Top skills</SectionTitle>
-                    {user.skills.length ? (
-                      <div className="flex flex-wrap gap-2">{user.skills.slice(0, 8).map((s) => <Chip key={s}>{s}</Chip>)}</div>
-                    ) : <p className="text-sm italic text-slate-400">No skills yet.</p>}
-                  </div>
+                  <button onClick={() => setDetailsOpen(t.label)} className={`${PILL_BTN} bg-gradient-to-r from-pink-500 to-rose-500`}>
+                    View Details
+                  </button>
                 </div>
-              </div>
-            )}
+              ))}
+            </div>
+          </div>
 
-            {tab === "education" && (
-              <div className={CARD}>
-                <SectionTitle icon={GraduationCap} action={<button onClick={() => setModal("education")} className={BTN_PRIMARY}><Plus size={16} /> Add</button>}>Education</SectionTitle>
-                {user.education.length ? (
-                  <Timeline>
-                    {user.education.map((e, i) => (
-                      <TimelineItem key={e.id || i} icon={GraduationCap} title={e.institution} subtitle={`${e.degree}${e.field ? ` · ${e.field}` : ""}`}
-                        onDelete={() => persist({ education: user.education.filter((x) => x.id !== e.id) }, "Education removed.")}
-                        meta={<div className="mt-2 flex flex-wrap gap-2">{e.graduationYear && <Chip>{e.graduationYear}</Chip>}{e.cgpa && <Chip tone="green">{e.cgpa}</Chip>}</div>}>
-                        {e.description && <p className="mt-2 text-xs text-slate-500">{e.description}</p>}
-                      </TimelineItem>
-                    ))}
-                  </Timeline>
-                ) : <EmptyTab icon={GraduationCap} text="No education added yet." cta="Add education" onCta={() => setModal("education")} />}
-              </div>
-            )}
-
-            {tab === "career" && (
-              <div className={CARD}>
-                <SectionTitle icon={BriefcaseBusiness} action={<button onClick={() => setModal("career")} className={BTN_PRIMARY}><Plus size={16} /> Add</button>}>Experience</SectionTitle>
-                {user.career.length ? (
-                  <Timeline>
-                    {user.career.map((c, i) => (
-                      <TimelineItem key={c.id || i} icon={Building2} title={c.role} subtitle={`${c.company}${c.industry ? ` · ${c.industry}` : ""}`}
-                        onDelete={() => persist({ career: user.career.filter((x) => x.id !== c.id) }, "Experience removed.")}
-                        meta={<div className="mt-2 flex flex-wrap gap-2">{c.startDate && <Chip>{c.startDate}</Chip>}{c.current ? <Chip tone="green">Present</Chip> : c.endDate && <Chip>{c.endDate}</Chip>}</div>}>
-                        {c.description && <p className="mt-2 text-xs text-slate-500">{c.description}</p>}
-                      </TimelineItem>
-                    ))}
-                  </Timeline>
-                ) : <EmptyTab icon={BriefcaseBusiness} text="No experience added yet." cta="Add experience" onCta={() => setModal("career")} />}
-              </div>
-            )}
-
-            {tab === "skills" && (
-              <div className={CARD}>
-                <SectionTitle icon={Code} action={<button onClick={() => setModal("skills")} className={BTN_PRIMARY}><Plus size={16} /> Add</button>}>Skills</SectionTitle>
-                {user.skills.length ? <TagCloud items={user.skills} onDelete={(s) => persist({ skills: user.skills.filter((x) => x !== s) }, "Skill removed.")} />
-                  : <EmptyTab icon={Code} text="No skills added yet." cta="Add skills" onCta={() => setModal("skills")} />}
-              </div>
-            )}
-
-            {tab === "interests" && (
-              <div className={CARD}>
-                <SectionTitle icon={Heart} action={<button onClick={() => setModal("interests")} className={BTN_PRIMARY}><Plus size={16} /> Add</button>}>Interests</SectionTitle>
-                {user.interests.length ? <TagCloud items={user.interests} onDelete={(s) => persist({ interests: user.interests.filter((x) => x !== s) }, "Interest removed.")} />
-                  : <EmptyTab icon={Heart} text="No interests added yet." cta="Add interests" onCta={() => setModal("interests")} />}
-              </div>
-            )}
-          </motion.div>
-        </AnimatePresence>
+        </div>
       </main>
 
       <AnimatePresence>
-        {modal === "education" && <AddEducationModal onClose={() => setModal(null)} onAdd={(e) => persist({ education: [...user.education, e] }, "Education added.")} />}
-        {modal === "career" && <AddCareerModal onClose={() => setModal(null)} onAdd={(c) => persist({ career: [...user.career, c] }, "Experience added.")} />}
-        {modal === "skills" && <AddTagsModal onClose={() => setModal(null)} existing={user.skills} title="Add skills" label="Skill" placeholder="e.g. React" submitText="Save skills" onAdd={(s) => persist({ skills: [...user.skills, ...s] }, "Skills added.")} />}
-        {modal === "interests" && <AddTagsModal onClose={() => setModal(null)} existing={user.interests} title="Add interests" label="Interest" placeholder="e.g. AI/ML" submitText="Save interests" onAdd={(s) => persist({ interests: [...user.interests, ...s] }, "Interests added.")} />}
+        {detailsOpen && (
+          <DetailsModal 
+            title={detailsOpen} 
+            onClose={() => setDetailsOpen(null)} 
+            user={user} 
+            onUpdate={persist} 
+          />
+        )}
         {editOpen && (
           <EditProfileModal user={user} saving={saving} onClose={() => setEditOpen(false)} onSave={handleSave}
             onAvatarUpload={handleAvatarUpload} onAvatarRemove={handleAvatarRemove} avatarUrl={avatarUrl} hasRealAvatar={Boolean(getRawAvatarUrl(user))} />
@@ -711,11 +569,11 @@ const FresherProfile = () => {
       <AnimatePresence>
         {toast && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} className="fixed bottom-6 right-6 z-[110]">
-            <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-xl">
-              <span className={`flex h-8 w-8 items-center justify-center rounded-full text-white ${toast.type === "error" ? "bg-red-500" : "bg-emerald-500"}`}>
+            <div className="flex items-center gap-3 rounded-xl bg-white px-4 py-3 shadow-xl border border-gray-100">
+              <span className={`flex h-8 w-8 items-center justify-center rounded-full ${toast.type === "error" ? "bg-red-100 text-red-500" : "bg-green-100 text-green-500"}`}>
                 {toast.type === "error" ? <AlertTriangle size={14} /> : <Check size={14} strokeWidth={3} />}
               </span>
-              <p className="text-sm font-medium text-slate-800">{toast.message}</p>
+              <p className="text-sm font-medium text-gray-800">{toast.message}</p>
             </div>
           </motion.div>
         )}
@@ -725,23 +583,24 @@ const FresherProfile = () => {
 };
 
 const StateShell = ({ icon, title, message, action }) => (
-  <div className="flex min-h-screen items-center justify-center bg-slate-50 px-5">
-    <div className="w-full max-w-sm rounded-2xl border border-slate-100 bg-white p-8 text-center shadow-lg">
-      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-100 text-blue-600">{icon}</div>
-      <h1 className="mt-5 text-lg font-bold text-slate-900">{title}</h1>
-      <p className="mt-2 text-sm text-slate-500">{message}</p>
+  <div className="flex min-h-screen items-center justify-center bg-[#f4f7f9] px-5">
+    <div className="w-full max-w-sm rounded-3xl bg-white p-8 text-center shadow-xl border border-gray-100">
+      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-r from-orange-400 to-pink-500 text-white">{icon}</div>
+      <h1 className="mt-5 text-lg font-bold text-gray-900">{title}</h1>
+      <p className="mt-2 text-sm text-gray-500">{message}</p>
       <div className="mt-6 flex justify-center">{action}</div>
     </div>
   </div>
 );
 
 const Skeleton = () => (
-  <div className="min-h-screen bg-[#f4f7f9] p-6">
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div className="h-64 animate-pulse rounded-3xl bg-white" />
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{[0, 1, 2, 3].map((i) => <div key={i} className="h-20 animate-pulse rounded-2xl bg-white" />)}</div>
-      <div className="h-14 animate-pulse rounded-2xl bg-white" />
-      <div className="h-64 animate-pulse rounded-2xl bg-white" />
+  <div className="h-screen bg-[#f4f7f9] p-6 flex justify-center overflow-hidden">
+    <div className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-3 gap-8">
+       <div className="hidden lg:block h-[500px] animate-pulse rounded-3xl bg-white shadow-sm" />
+       <div className="lg:col-span-2 space-y-6 overflow-hidden">
+         <div className="h-48 animate-pulse rounded-3xl bg-white shadow-sm" />
+         <div className="h-96 animate-pulse rounded-3xl bg-white shadow-sm" />
+       </div>
     </div>
   </div>
 );

@@ -33,7 +33,7 @@ import { ThemeProvider } from "../context/ThemeContext";
 import JoinGroup from "../FresherDashboard/pages/JoinGroup";
 import LaptopOnlyGuard from "../Commoncomponents/LaptopOnlyGuard";
 import SiteAssistant from "../Commoncomponents/SiteAssistant";
-
+import FresherMeetings from "../FresherDashboard/pages/Fresher_mettings";
 // Fresher auth pages (lazy, only loaded when opened)
 const Login = lazy(
   () => import("../Authpage/FresherAuth/FresherLoginRegister"),
@@ -221,7 +221,7 @@ const FresherRoutes = () => {
 
           <Route path="bonus-wallet" element={<BonusWallet />} />
           <Route path="my-bookings" element={<MyBookings />} />
-          <Route path="notifications" element={<Notifications />} />
+          <Route path="my-meetings" element={<FresherMeetings />} />          <Route path="notifications" element={<Notifications />} />
           <Route path="profile" element={<FresherProfile />} />
           <Route path="settings" element={<FresherSettings />} />
           <Route path="mnc-logos" element={<Mnclogos />} />
