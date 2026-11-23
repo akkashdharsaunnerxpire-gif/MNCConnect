@@ -2076,7 +2076,14 @@ exports.myBookings = async (req, res) => {
       .populate("mentor", POPULATE_MENTOR)
       .populate("preferredMentor", POPULATE_MENTOR)
       .sort({ startsAt: -1 });
-    return res.json({ success: true, bookings: list.map((b) => toClient(b)) });
+
+    return res.json({
+      success: true,
+      bookings: list.map((b) => ({
+        ...toClient(b),
+        isHost: String(b.fresher?._id || b.fresher) === String(req.user.id),
+      })),
+    });
   } catch (error) {
     return fail(res, 500, "Failed to load bookings");
   }

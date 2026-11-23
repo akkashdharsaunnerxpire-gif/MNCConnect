@@ -40,6 +40,9 @@ import {
   Users,
   Copy,
   X,
+  Share2,
+  Mail,
+  MessageCircle,
 } from "lucide-react";
 
 import useLive from "../../hooks/useLive";
@@ -131,7 +134,7 @@ const BookingCardSkeleton = () => (
         <Bone className="h-11 w-full !rounded-xl" />
         <Bone className="h-11 w-full !rounded-xl" />
       </div>
-    </div>    
+    </div>
 
     <div className="mx-3 mb-4 sm:mx-6">
       <div className="mx-auto flex max-w-2xl">
@@ -288,53 +291,209 @@ const BookingStepper = ({ b, v }) => {
 };
 
 /* =========================================================================
-   GROUP INFO
+   GROUP INFO  +  INVITE FRIENDS (professional share popup)
+   - isHost comes from the SERVER (b.isHost). The id compare is only a fallback.
 ========================================================================= */
 
 const NAMES_SHOWN = 8;
 
+const inviteMessage = (b, link, spotsLeft, hostName) => {
+  const startMs = new Date(b.startsAt).getTime();
+  const at = Number.isFinite(startMs)
+    ? `${b.date} at ${fmtTimeIST(startMs)} IST`
+    : `${b.date} at ${b.time}`;
+
+  return (
+    `Hi,\n\n` +
+    `I have scheduled a group mentoring session on MNCConnect and would like you to join.\n\n` +
+    `Topic: ${b.sessionType || "Mentoring session"}\n` +
+    `Company: ${b.companyName}\n` +
+    `Date & time: ${at}\n` +
+    `Duration: ${durationLabel(b.durationMinutes)}\n` +
+    `Your share: ${inr(b.perPersonAmount || b.amount)}\n\n` +
+    `Join here: ${link}\n\n` +
+    `Only ${spotsLeft} spot${spotsLeft === 1 ? "" : "s"} left, so please join before the session starts.\n\n` +
+    `Regards,\n${hostName}`
+  );
+};
+
+const InviteModal = ({ message, link, onClose }) => {
+  const [copied, setCopied] = useState(null); // "msg" | "link"
+
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const copy = async (text, which) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(which);
+      setTimeout(() => setCopied(null), 2000);
+    } catch {
+      window.prompt("Copy this text", text);
+    }
+  };
+
+  const nativeShare = async () => {
+    try {
+      await navigator.share({
+        title: "Join my MNCConnect group session",
+        text: message,
+      });
+    } catch {
+      /* user cancelled */
+    }
+  };
+
+  const option =
+    "flex w-full items-center gap-3 rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-800 transition hover:border-indigo-300 hover:bg-indigo-50";
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 px-4 py-6"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Invite friends"
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <div>
+            <h3 className="text-base font-bold text-slate-900">
+              Invite your friends
+            </h3>
+            <p className="mt-0.5 text-xs text-slate-400">
+              Each friend opens the link and pays their own share.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="px-5 py-4">
+          <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-xl bg-slate-50 p-3 font-sans text-xs leading-5 text-slate-600">
+            {message}
+          </pre>
+
+          <div className="mt-4 space-y-2">
+            <a
+              className={option}
+              target="_blank"
+              rel="noreferrer"
+              href={`https://wa.me/?text=${encodeURIComponent(message)}`}
+            >
+              <MessageCircle className="h-5 w-5 text-emerald-600" />
+              Share on WhatsApp
+            </a>
+
+            <a
+              className={option}
+              href={`mailto:?subject=${encodeURIComponent(
+                "Invitation: group mentoring session on MNCConnect",
+              )}&body=${encodeURIComponent(message)}`}
+            >
+              <Mail className="h-5 w-5 text-blue-600" />
+              Share by email
+            </a>
+
+            {typeof navigator !== "undefined" && navigator.share && (
+              <button type="button" onClick={nativeShare} className={option}>
+                <Share2 className="h-5 w-5 text-indigo-600" />
+                More apps
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => copy(message, "msg")}
+              className={option}
+            >
+              {copied === "msg" ? (
+                <Check className="h-5 w-5 text-emerald-600" />
+              ) : (
+                <Copy className="h-5 w-5 text-slate-500" />
+              )}
+              {copied === "msg" ? "Message copied" : "Copy invitation message"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => copy(link, "link")}
+              className={option}
+            >
+              {copied === "link" ? (
+                <Check className="h-5 w-5 text-emerald-600" />
+              ) : (
+                <Copy className="h-5 w-5 text-slate-500" />
+              )}
+              {copied === "link" ? "Link copied" : "Copy link only"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+};
+
 const GroupInfo = ({ b, me }) => {
-  const [copied, setCopied] = useState(false);
+  const [open, setOpen] = useState(false);
+  const closeInvite = useCallback(() => setOpen(false), []);
 
   if (b.mode !== "group") return null;
 
-  const isHost = String(b.hostId) === String(me);
-  const link = `${window.location.origin}/Home/join/${b.inviteCode}`;
-
-  const canInvite =
-    isHost && b.inviteCode && ["pending", "accepted"].includes(b.status);
+  // The server tells us if I am the host (b.isHost). The id compare is only a fallback.
+  const isHost =
+    typeof b.isHost === "boolean"
+      ? b.isHost
+      : Boolean(me) && String(b.hostId) === String(me);
 
   const members = b.members || [];
+  const joined = members.length || 1;
+  const spotsLeft = Math.max(0, (b.maxMembers || 0) - joined);
+
+  const canInvite =
+    isHost &&
+    Boolean(b.inviteCode) &&
+    ["pending", "accepted"].includes(b.status) &&
+    spotsLeft > 0;
+
+  const link = `${window.location.origin}/Home/join/${b.inviteCode}`;
+  const hostName =
+    members.find((m) => m.id === b.hostId)?.name || "Your friend";
+
   const shown = members.slice(0, NAMES_SHOWN).map((m) => m.name);
   const more = Math.max(0, members.length - NAMES_SHOWN);
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(link);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      window.prompt("Copy this link", link);
-    }
-  };
 
   return (
     <div className="mx-5 mb-4 rounded-xl border border-indigo-100 bg-indigo-50 p-3 sm:mx-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="flex items-center gap-1.5 text-xs font-semibold text-indigo-900">
           <Users className="h-4 w-4" />
-          Group session · {members.length || 1}/{b.maxMembers} joined
+          Group session · {joined}/{b.maxMembers} joined
           {isHost ? " · you are the host" : ""}
         </p>
 
         {canInvite && (
           <button
             type="button"
-            onClick={copy}
-            className="flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"
+            onClick={() => setOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"
           >
-            <Copy className="h-3.5 w-3.5" />
-            {copied ? "Link copied" : "Copy invite link"}
+            <Share2 className="h-3.5 w-3.5" />
+            Invite friends ({spotsLeft} spot{spotsLeft === 1 ? "" : "s"} left)
           </button>
         )}
       </div>
@@ -344,6 +503,14 @@ const GroupInfo = ({ b, me }) => {
           {shown.join(", ")}
           {more > 0 ? ` +${more} more` : ""}
         </p>
+      )}
+
+      {open && (
+        <InviteModal
+          message={inviteMessage(b, link, spotsLeft, hostName)}
+          link={link}
+          onClose={closeInvite}
+        />
       )}
     </div>
   );
@@ -1321,9 +1488,7 @@ const BookingCard = React.memo(function BookingCard({
                 <Clock3 className="h-4 w-4 shrink-0 text-indigo-500" />
 
                 <span className="flex min-w-0 items-center gap-2">
-                  <b className="truncate font-bold text-[indigo]">
-                    {range}
-                  </b>
+                  <b className="truncate font-bold text-[indigo]">{range}</b>
 
                   <span className="shrink-0 rounded-md bg-orange-50 px-2 py-0.5 text-xs font-bold text-orange-600">
                     {durationLabel(b.durationMinutes)}
@@ -1448,11 +1613,7 @@ const BookingCard = React.memo(function BookingCard({
       </div>
 
       {/* FULL DESCRIPTION POPUP (smooth animated, portal) */}
-      <ReasonModal
-        open={reasonModalOpen}
-        text={reason}
-        onClose={closeReason}
-      />
+      <ReasonModal open={reasonModalOpen} text={reason} onClose={closeReason} />
     </div>
   );
 });
@@ -1634,9 +1795,7 @@ const MyBookings = () => {
 
     if (!id || !bookings.length) return;
 
-    const b = bookings.find(
-      (x) => String(x.requestGroupId) === String(id),
-    );
+    const b = bookings.find((x) => String(x.requestGroupId) === String(id));
 
     if (!b) return;
 
@@ -1704,9 +1863,7 @@ const MyBookings = () => {
     const time = (v) => (Number.isFinite(v.starts) ? v.starts : Infinity);
 
     return decorated
-      .filter(
-        ({ v }) => v.key === "pending" || v.key === "confirmed",
-      )
+      .filter(({ v }) => v.key === "pending" || v.key === "confirmed")
       .sort((x, y) => {
         const r = rank(x.v) - rank(y.v);
 
@@ -1742,17 +1899,11 @@ const MyBookings = () => {
         <div className="h-full px-4 sm:px-6 lg:px-8">
           <div className="mx-auto flex h-full max-w-6xl items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm">
-              <CalendarDays
-                size={16}
-                className="shrink-0 text-indigo-500"
-              />
+              <CalendarDays size={16} className="shrink-0 text-indigo-500" />
 
               <span className="truncate">Booking sessions</span>
 
-              <span
-                aria-hidden="true"
-                className="h-4 w-px bg-slate-200"
-              />
+              <span aria-hidden="true" className="h-4 w-px bg-slate-200" />
 
               <span
                 className={`inline-flex shrink-0 items-center gap-1 text-xs font-medium ${
@@ -1765,9 +1916,7 @@ const MyBookings = () => {
             </div>
 
             <span className="shrink-0 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm">
-              {showSkeleton
-                ? "Upcoming"
-                : `Upcoming (${upcoming.length})`}
+              {showSkeleton ? "Upcoming" : `Upcoming (${upcoming.length})`}
             </span>
           </div>
         </div>
@@ -1779,10 +1928,7 @@ const MyBookings = () => {
       </div>
 
       <div className="mx-auto max-w-6xl">
-        <div
-          aria-hidden="true"
-          style={{ height: BAR_H + 8 }}
-        />
+        <div aria-hidden="true" style={{ height: BAR_H + 8 }} />
 
         {liveCount > 0 && (
           <Link
@@ -1805,10 +1951,7 @@ const MyBookings = () => {
         {error && (
           <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
             {error}{" "}
-            <button
-              onClick={reload}
-              className="ml-2 font-semibold underline"
-            >
+            <button onClick={reload} className="ml-2 font-semibold underline">
               Retry
             </button>
           </div>
@@ -1846,9 +1989,7 @@ const MyBookings = () => {
                 b={b}
                 v={v}
                 me={userId}
-                unread={
-                  unreadCounts[String(b.requestGroupId)] || 0
-                }
+                unread={unreadCounts[String(b.requestGroupId)] || 0}
                 onOpenChat={openChat}
                 onOpenDetails={openDetails}
               />
@@ -1867,9 +2008,7 @@ const MyBookings = () => {
           group={chatFor.mode === "group"}
           myUserId={userId}
           peerImage={
-            chatFor.mentor?.profilePic ||
-            chatFor.mentor?.image ||
-            ""
+            chatFor.mentor?.profilePic || chatFor.mentor?.image || ""
           }
           images={Object.fromEntries(
             (chatFor.members || [])
@@ -1907,9 +2046,7 @@ const MyBookings = () => {
           key={detailsFor.requestGroupId}
           title="MncEmployee details"
           fetcher={() =>
-            api(
-              `${ENDPOINTS.booking(detailsFor.requestGroupId)}/counterpart`,
-            )
+            api(`${ENDPOINTS.booking(detailsFor.requestGroupId)}/counterpart`)
           }
           onClose={closeDetails}
         />
