@@ -33,7 +33,7 @@ import { ThemeProvider } from "../context/ThemeContext";
 import JoinGroup from "../FresherDashboard/pages/JoinGroup";
 import LaptopOnlyGuard from "../Commoncomponents/LaptopOnlyGuard";
 import SiteAssistant from "../Commoncomponents/SiteAssistant";
-import FresherMeetings from "../FresherDashboard/pages/Fresher_mettings";
+import FresherMeetings from "../FresherDashboard/pages/Freshermettings";
 // Fresher auth pages (lazy, only loaded when opened)
 const Login = lazy(
   () => import("../Authpage/FresherAuth/FresherLoginRegister"),
