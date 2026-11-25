@@ -17,6 +17,7 @@ import { X, Reply, CheckCheck, Send, Check, ArrowUpRight } from "lucide-react";
 
 import { socket } from "../utils/socket";
 import { isChatOpen } from "../utils/chatOpenRegistry";
+import { playNotificationSound, unlockAudio } from "../utils/chatSounds";
 
 import {
   api as fresherApi,
@@ -34,6 +35,8 @@ import {
 const AUTO_HIDE_MS = 7000;
 const MAX_LEN = 1000;
 const MAX_SEEN = 300;
+// Same chat, many messages in a short time -> only ONE sound.
+const SOUND_GAP_MS = 3000;
 
 // Default colours (mentor side keeps these).
 // Fresher side is re-coloured by theme.css through the "ca-*" class names.
@@ -500,6 +503,7 @@ export default function ChatAlertHost({ role, getMyId }) {
 
   const seen = useRef(new Set());
   const personCache = useRef(new Map());
+  const lastSound = useRef({}); // chatId -> time of the last sound
 
   // Keep latest values in refs so the socket listener is not
   // re-subscribed on every render.
@@ -508,6 +512,18 @@ export default function ChatAlertHost({ role, getMyId }) {
 
   const getMyIdRef = useRef(getMyId);
   getMyIdRef.current = getMyId;
+
+  // Browsers block sound until the user has clicked / typed once.
+  useEffect(() => {
+    const events = ["pointerdown", "keydown", "touchstart"];
+    const handler = () => {
+      unlockAudio();
+      events.forEach((ev) => window.removeEventListener(ev, handler));
+    };
+    events.forEach((ev) => window.addEventListener(ev, handler));
+    return () =>
+      events.forEach((ev) => window.removeEventListener(ev, handler));
+  }, []);
 
   const close = useCallback((key) => {
     setItems((prev) => prev.filter((item) => item.key !== key));
@@ -679,6 +695,13 @@ export default function ChatAlertHost({ role, getMyId }) {
 
       // ONLY ONE alert at a time: the new message replaces the old one
       setItems([item]);
+
+      // WhatsApp style "ding-ding" (one sound per chat in a short burst)
+      const nowTs = Date.now();
+      if (nowTs - (lastSound.current[bookingId] || 0) >= SOUND_GAP_MS) {
+        lastSound.current[bookingId] = nowTs;
+        playNotificationSound();
+      }
 
       // Profile photo fallback
       if (!image) {

@@ -281,3 +281,52 @@ export const playNotificationSound = () => {
     /* ignore audio errors */
   }
 };
+
+/**
+ * NEW SESSION REQUEST (Home page, mentor side).
+ * Different from the chat sound on purpose: a soft rising E-major chime
+ * (E5 - G#5 - B5 - E6), played twice, so the mentor knows it is a request
+ * and not a chat message.
+ */
+export const playRequestSound = () => {
+  try {
+    const c = getCtx();
+    if (!c) return;
+    unlockAudio();
+
+    const note = (start, f, vol, dur = 0.45) => {
+      // main tone
+      tone(c, { start, dur, vol, freq: f, type: "sine", attack: 0.006 });
+      // warm octave
+      tone(c, {
+        start,
+        dur: dur * 0.65,
+        vol: vol * 0.25,
+        freq: f * 2,
+        type: "sine",
+        attack: 0.004,
+      });
+      // soft shimmer
+      tone(c, {
+        start,
+        dur: dur * 0.3,
+        vol: vol * 0.08,
+        freq: f * 3,
+        type: "triangle",
+        attack: 0.003,
+      });
+    };
+
+    const phrase = (t) => {
+      note(t, 659.25, 0.3); // E5
+      note(t + 0.14, 830.61, 0.32); // G#5
+      note(t + 0.28, 987.77, 0.34); // B5
+      note(t + 0.44, 1318.51, 0.4, 0.85); // E6 (long, resolves)
+    };
+
+    phrase(0);
+    phrase(1.0);
+  } catch {
+    /* ignore audio errors */
+  }
+};

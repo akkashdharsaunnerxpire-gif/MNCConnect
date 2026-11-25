@@ -22,6 +22,7 @@ import {
   Star,
   Video,
   Volume2,
+  VolumeX,
   Wallet,
   X,
   Briefcase,
@@ -34,6 +35,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import { socket } from "../../utils/socket";
+import { playRequestSound, unlockAudio } from "../../utils/chatSounds";
 import useLive from "../../hooks/useLive";
 import useMentorSessions from "../../hooks/useMentorSessions";
 import { api, ENDPOINTS, EVENTS, inr, timeAgo } from "../../services/mentorApi";
@@ -104,30 +106,6 @@ const greetingFor = (date) => {
   if (h < 17) return "Good afternoon";
   if (h < 21) return "Good evening";
   return "Good night";
-};
-
-const playChime = () => {
-  try {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    const t = ctx.currentTime;
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(880, t);
-    osc.frequency.setValueAtTime(1175, t + 0.13);
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.15, t + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.38);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(t);
-    osc.stop(t + 0.4);
-    setTimeout(() => ctx.close().catch(() => {}), 600);
-  } catch {
-    /* sound is optional */
-  }
 };
 
 const vibrate = () => {
@@ -203,6 +181,8 @@ const Home = () => {
   const [tab, setTab] = useState("upcoming");
   // sound preference lives in memory only (nothing in localStorage)
   const [soundOn, setSoundOn] = useState(true);
+  // true after the first click / key / touch (browsers block sound before that)
+  const [audioReady, setAudioReady] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [showVoiceHint, setShowVoiceHint] = useState(false);
   const [mentorKey, setMentorKey] = useState("");
@@ -225,7 +205,7 @@ const Home = () => {
 
   const toastTimer = useRef(null);
   const soundRef = useRef(soundOn);
-  const seenIds = useRef(new Set()); // chime only for requests not seen before
+  const seenIds = useRef(new Set()); // sound only for requests not seen before
   // requests that were accepted / skipped / taken / expired: never show again
   const dismissedKeys = useRef(new Set());
   const scanBoostTimer = useRef(null);
@@ -325,13 +305,7 @@ const Home = () => {
     return { avg: avg.toFixed(1), count: list.length };
   }, [reviewData]);
 
-  /* ---------- Activity = live requests (while still open) + notifications ----------
-     - a new request shows up here the moment it arrives
-     - once it is accepted / skipped / taken / expired it leaves `requests`,
-       so it disappears from Activity too
-     - server notifications about requests are hidden (the live item above
-       replaces them, and old "request accepted" items must not linger)
-  */
+  /* ---------- Activity = live requests (while still open) + notifications ---------- */
   const requestActivity = useMemo(
     () =>
       requests.map((r) => ({
@@ -430,14 +404,28 @@ const Home = () => {
     return () => clearTimeout(t);
   }, [alertReq]);
 
-  // still-unanswered request + tab in background: repeat the chime every 6s
+  // still-unanswered request + tab in background: repeat the sound every 6s
   useEffect(() => {
     if (!requests.length) return undefined;
     const id = setInterval(() => {
-      if (document.hidden && soundRef.current) playChime();
+      if (document.hidden && soundRef.current) playRequestSound();
     }, 6000);
     return () => clearInterval(id);
   }, [requests.length]);
+
+  // browsers block sound until the first click / key / touch:
+  // unlock the shared audio context once, then remember it
+  useEffect(() => {
+    const events = ["pointerdown", "keydown", "touchstart"];
+    const handler = () => {
+      unlockAudio();
+      setAudioReady(true);
+      events.forEach((ev) => window.removeEventListener(ev, handler));
+    };
+    events.forEach((ev) => window.addEventListener(ev, handler));
+    return () =>
+      events.forEach((ev) => window.removeEventListener(ev, handler));
+  }, []);
 
   // ask notification permission on the first click anywhere (browsers need a gesture)
   useEffect(() => {
@@ -517,7 +505,7 @@ const Home = () => {
 
       if (!seenIds.current.has(key)) {
         seenIds.current.add(key);
-        if (soundRef.current) playChime();
+        if (soundRef.current) playRequestSound();
         vibrate();
         showSystemNotification(req);
         setAlertReq(req);
@@ -970,72 +958,8 @@ const Home = () => {
           </Link>
         )}
 
-        {/* earnings */}
-        <section
-          data-tour="earnings"
-          onMouseMove={(e) => {
-            const el = e.currentTarget;
-            const r = el.getBoundingClientRect();
-            el.style.setProperty(
-              "--gx",
-              `${((e.clientX - r.left) / r.width) * 100}%`,
-            );
-            el.style.setProperty(
-              "--gy",
-              `${((e.clientY - r.top) / r.height) * 100}%`,
-            );
-          }}
-          className="mc-fade-up relative mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white"
-          style={{
-            animationDelay: "140ms",
-            backgroundImage:
-              "radial-gradient(420px circle at var(--gx, 50%) var(--gy, 0%), rgba(37,99,235,0.07), transparent 60%)",
-          }}
-        >
-          <div className="grid gap-px bg-slate-100 sm:grid-cols-2 lg:grid-cols-4">
-            <Stat
-              label="Available to withdraw"
-              amount={wallet.available}
-              icon={Wallet}
-              strong
-              loading={initialLoading}
-            />
-            <Stat
-              label="Clearing after sessions"
-              amount={wallet.pending}
-              icon={Clock3}
-              loading={initialLoading}
-            />
-            <Stat
-              label="Earned this week"
-              amount={wallet.week}
-              icon={IndianRupee}
-              loading={initialLoading}
-            />
-            <Stat
-              label="Lifetime earnings"
-              amount={wallet.lifetime}
-              icon={Star}
-              loading={initialLoading}
-            />
-          </div>
-          <div className="flex flex-col gap-3 border-t border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-slate-500">
-              You keep {Math.round((1 - PLATFORM_FEE) * 100)}% of every session.
-              Earnings are released when a session ends, and you can withdraw
-              anytime above ₹500.
-            </p>
-            <Link
-              to="/mentor/earnings"
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
-            >
-              <ArrowDownToLine size={16} /> Withdraw
-            </Link>
-          </div>
-        </section>
-
-        {/* requests + side panel */}
-        <div className="mt-8 grid gap-8 lg:grid-cols-[1.5fr_1fr]">
+        {/* requests + side panel (moved UP so the mentor sees it first) */}
+        <div className="mt-6 grid gap-8 lg:grid-cols-[1.5fr_1fr]">
           <section data-tour="requests" aria-live="polite" className="min-w-0">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="flex items-center gap-2 text-lg font-semibold">
@@ -1055,7 +979,16 @@ const Home = () => {
             </div>
 
             {requests.length === 0 ? (
-              <Scanning connected={connected} boost={scanningBoost} />
+              <Scanning
+                connected={connected}
+                boost={scanningBoost}
+                audioReady={audioReady}
+                soundOn={soundOn}
+                onToggleSound={() => {
+                  unlockAudio();
+                  setSoundOn((v) => !v);
+                }}
+              />
             ) : (
               <div className="space-y-4">
                 {requests.map((r) => (
@@ -1233,6 +1166,71 @@ const Home = () => {
             </div>
           </section>
         </div>
+
+        {/* earnings (now below the live requests) */}
+        {walletError && null}
+        <section
+          data-tour="earnings"
+          onMouseMove={(e) => {
+            const el = e.currentTarget;
+            const r = el.getBoundingClientRect();
+            el.style.setProperty(
+              "--gx",
+              `${((e.clientX - r.left) / r.width) * 100}%`,
+            );
+            el.style.setProperty(
+              "--gy",
+              `${((e.clientY - r.top) / r.height) * 100}%`,
+            );
+          }}
+          className="mc-fade-up relative mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white"
+          style={{
+            animationDelay: "140ms",
+            backgroundImage:
+              "radial-gradient(420px circle at var(--gx, 50%) var(--gy, 0%), rgba(37,99,235,0.07), transparent 60%)",
+          }}
+        >
+          <div className="grid gap-px bg-slate-100 sm:grid-cols-2 lg:grid-cols-4">
+            <Stat
+              label="Available to withdraw"
+              amount={wallet.available}
+              icon={Wallet}
+              strong
+              loading={initialLoading}
+            />
+            <Stat
+              label="Clearing after sessions"
+              amount={wallet.pending}
+              icon={Clock3}
+              loading={initialLoading}
+            />
+            <Stat
+              label="Earned this week"
+              amount={wallet.week}
+              icon={IndianRupee}
+              loading={initialLoading}
+            />
+            <Stat
+              label="Lifetime earnings"
+              amount={wallet.lifetime}
+              icon={Star}
+              loading={initialLoading}
+            />
+          </div>
+          <div className="flex flex-col gap-3 border-t border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-slate-500">
+              You keep {Math.round((1 - PLATFORM_FEE) * 100)}% of every session.
+              Earnings are released when a session ends, and you can withdraw
+              anytime above ₹500.
+            </p>
+            <Link
+              to="/mentor/earnings"
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+            >
+              <ArrowDownToLine size={16} /> Withdraw
+            </Link>
+          </div>
+        </section>
       </main>
 
       {/* CONFIRMATION MODAL */}
@@ -1600,53 +1598,93 @@ const SkeletonList = () => (
   </ul>
 );
 
-const Scanning = ({ connected, boost }) => (
-  <div className="flex w-full min-w-0 flex-col items-center overflow-hidden rounded-2xl border border-slate-200 bg-white px-4 py-10 text-center sm:px-6 sm:py-12">
-    {/* radar: scales with the card, always centered, never leaves the block */}
-    <div
-      className={`relative mx-auto flex aspect-square w-full max-w-[14rem] shrink-0 items-center justify-center overflow-hidden rounded-full transition-transform duration-300 ${
-        boost ? "scale-105" : ""
-      }`}
-      aria-hidden="true"
-    >
-      {connected &&
-        [0, 1, 2].map((i) => (
-          <span
-            key={i}
-            className="mc-ripple absolute inset-0 rounded-full border border-blue-300"
-            style={{
-              animationDuration: boost ? "1.2s" : "3s",
-              animationDelay: `${i}s`,
-            }}
-          />
-        ))}
-      <span className="absolute inset-[11%] rounded-full border border-slate-200" />
-      <span className="absolute inset-[25%] rounded-full border border-slate-200" />
-      <span
-        className="absolute inset-0 rounded-full motion-safe:animate-spin"
-        style={{
-          animationDuration: boost ? "1s" : "2.8s",
-          background:
-            "conic-gradient(from 0deg, rgba(37,99,235,0) 0deg, rgba(37,99,235,0) 270deg, rgba(37,99,235,0.28) 360deg)",
-        }}
-      />
-      <span className="relative flex h-3 w-3">
-        <span className="absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-40 motion-safe:animate-ping" />
-        <span className="relative inline-flex h-3 w-3 rounded-full bg-blue-600" />
-      </span>
+/* Compact "scanning" strip: small radar on the left, text on the right,
+   plus a sound hint so the mentor knows the alert sound is ready. */
+const Scanning = ({ connected, boost, audioReady, soundOn, onToggleSound }) => (
+  <div className="w-full min-w-0 overflow-hidden rounded-2xl border border-blue-200 bg-blue-50/40 px-4 py-4 sm:px-5">
+    <div className="flex items-center gap-4">
+      {/* mini radar */}
+      <div
+        className={`relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full transition-transform duration-300 ${
+          boost ? "scale-110" : ""
+        }`}
+        aria-hidden="true"
+      >
+        {connected &&
+          [0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="mc-ripple absolute inset-0 rounded-full border border-blue-300"
+              style={{
+                animationDuration: boost ? "1.2s" : "3s",
+                animationDelay: `${i}s`,
+              }}
+            />
+          ))}
+        <span className="absolute inset-[14%] rounded-full border border-blue-200" />
+        <span className="absolute inset-[30%] rounded-full border border-blue-200" />
+        <span
+          className="absolute inset-0 rounded-full motion-safe:animate-spin"
+          style={{
+            animationDuration: boost ? "1s" : "2.8s",
+            background:
+              "conic-gradient(from 0deg, rgba(37,99,235,0) 0deg, rgba(37,99,235,0) 270deg, rgba(37,99,235,0.35) 360deg)",
+          }}
+        />
+        <span className="relative flex h-2.5 w-2.5">
+          <span className="absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-40 motion-safe:animate-ping" />
+          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-600" />
+        </span>
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <h3 className="font-semibold text-slate-900">
+          {!connected
+            ? "Reconnecting…"
+            : boost
+              ? "Restarting scan…"
+              : "Scanning for requests"}
+        </h3>
+        <p className="mt-0.5 text-sm text-slate-600">
+          {connected
+            ? "Keep this page open. The first mentor to accept gets the session."
+            : "Check your internet connection. We'll resume scanning automatically."}
+        </p>
+      </div>
+
+      <button
+        type="button"
+        onClick={onToggleSound}
+        aria-pressed={soundOn}
+        title={soundOn ? "Mute request alert" : "Unmute request alert"}
+        className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition active:scale-90 ${
+          soundOn
+            ? "border-blue-200 bg-white text-blue-600"
+            : "border-slate-200 bg-slate-100 text-slate-400"
+        }`}
+      >
+        {soundOn ? <Volume2 size={16} /> : <VolumeX size={16} />}
+        <span className="sr-only">Toggle request alert sound</span>
+      </button>
     </div>
-    <h3 className="mt-6 font-semibold text-slate-900">
-      {!connected
-        ? "Reconnecting…"
-        : boost
-          ? "Restarting scan…"
-          : "Scanning for requests"}
-    </h3>
-    <p className="mx-auto mt-1 max-w-xs text-sm text-slate-500">
-      {connected
-        ? "Keep this page open. The first mentor to accept gets the session."
-        : "Check your internet connection. We'll resume scanning automatically."}
-    </p>
+
+    {/* sound status */}
+    {soundOn && !audioReady ? (
+      <p className="mt-3 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+        <Bell size={13} className="shrink-0" />
+        Click anywhere on this page once to enable the alert sound.
+      </p>
+    ) : soundOn ? (
+      <p className="mt-3 flex items-center gap-2 text-xs font-medium text-emerald-700">
+        <Volume2 size={13} className="shrink-0" />
+        Sound on: you will hear an alert when a request arrives.
+      </p>
+    ) : (
+      <p className="mt-3 flex items-center gap-2 text-xs font-medium text-slate-500">
+        <VolumeX size={13} className="shrink-0" />
+        Sound is muted. Tap the speaker to turn it on.
+      </p>
+    )}
   </div>
 );
 
