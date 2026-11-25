@@ -16,7 +16,6 @@ import {
   MessageSquare,
   ShieldCheck,
   AlertTriangle,
-  Radio,
   Star,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -39,27 +38,23 @@ import {
 } from "../../utils/sessionRequests";
 
 const PLATFORM_FEE = 0.25;
-// what the MENTOR earns (the fresher's paid amount is never shown to the mentor)
+
 const mentorShare = (amount) =>
   Math.round((Number(amount) || 0) * (1 - PLATFORM_FEE));
 
 const TABS = ["Pending", "Rejected"];
 
 const TIMING_OPTIONS = ["All", "Morning", "Afternoon", "Evening", "Night"];
-const ROLE_OPTIONS = ["All", "Student", "Fresher", "Developer", "Other"];
 const DURATION_OPTIONS = ["All", "30 mins", "60 mins", "120 mins"];
-// these ranges are based on the MENTOR's earning
-const EARNING_OPTIONS = ["All", "Below ₹200", "₹200 - ₹300", "Above ₹300"];
 
-const PENDING_SYNC_MS = 20000; // re-sync with the server
-const CLOCK_TICK_MS = 5000; // hide requests that expired meanwhile
+const PENDING_SYNC_MS = 20000;
+const CLOCK_TICK_MS = 5000;
 
-// "Video Call" AND "Group Video Call" (same rule as the header badge)
 const isVideoCall = (r) => /video call/i.test(String(r?.type || ""));
+
 const isGroupCall = (r) =>
   /group/i.test(String(r?.type || "")) || r?.mode === "group";
 
-// a pending request that already expired is dead -> do not show / count it
 const isAlive = (r, clock) => {
   if (r.status === "Pending" && r.expiresAt) {
     const t = new Date(r.expiresAt).getTime();
@@ -68,12 +63,11 @@ const isAlive = (r, clock) => {
   return true;
 };
 
-/* ---------- fresher photo ---------- */
+/* ---------- Fresher Photo ---------- */
 
-// Normalizes a request from the server / socket AND makes sure the
-// fresher's photo is found (whatever the field is called) with a full url.
 const buildRequest = (raw) => {
   const base = normalizeSessionRequest(raw);
+
   const avatar =
     fixUrl(base?.avatar) ||
     fixUrl(findImage(raw)) ||
@@ -85,7 +79,6 @@ const buildRequest = (raw) => {
   return {
     ...base,
     avatar,
-    // group / single info straight from the server (so it is never lost)
     type: raw?.type ?? base?.type,
     mode: raw?.mode ?? base?.mode,
     maxMembers: raw?.maxMembers ?? base?.maxMembers,
@@ -94,7 +87,8 @@ const buildRequest = (raw) => {
   };
 };
 
-// round photo, falls back to the first letter (also when the image fails to load)
+/* ---------- Avatar ---------- */
+
 const Avatar = ({
   src,
   name,
@@ -125,21 +119,23 @@ const Avatar = ({
   );
 };
 
-/* ---------- session type badge (Group / 1:1) ---------- */
+/* ---------- Session Badge ---------- */
 
 const SessionBadge = ({ request }) =>
   isGroupCall(request) ? (
     <span className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white">
-      <Users size={12} /> Group session
+      <Users size={12} />
+      Group session
       {Number(request.maxMembers) > 1 ? ` · up to ${request.maxMembers}` : ""}
     </span>
   ) : (
     <span className="inline-flex items-center gap-1 rounded-lg bg-sky-100 px-2.5 py-1 text-[11px] font-semibold text-sky-700">
-      <Video size={12} /> 1:1 Session
+      <Video size={12} />
+      1:1 Session
     </span>
   );
 
-/* ---------- filter helpers ---------- */
+/* ---------- Filter Helpers ---------- */
 
 const getTiming = (time) => {
   const match = String(time)
@@ -157,28 +153,13 @@ const getTiming = (time) => {
   if (hour >= 5 && hour < 12) return "Morning";
   if (hour >= 12 && hour < 17) return "Afternoon";
   if (hour >= 17 && hour < 21) return "Evening";
+
   return "Night";
 };
 
-const getRole = (role) => {
-  const value = String(role).toLowerCase();
-
-  if (value.includes("student")) return "Student";
-  if (value.includes("fresher")) return "Fresher";
-  if (value.includes("developer") || value.includes("engineer"))
-    return "Developer";
-  return "Other";
-};
-
-// `earning` = mentor's earning (NOT what the fresher paid)
-const matchesEarning = (earning, filter) => {
-  if (filter === "Below ₹200") return earning < 200;
-  if (filter === "₹200 - ₹300") return earning >= 200 && earning <= 300;
-  if (filter === "Above ₹300") return earning > 300;
-  return true;
-};
-
-/* ---------- page ---------- */
+/* ============================================================
+   PAGE
+============================================================ */
 
 const MentorRequests = () => {
   const navigate = useNavigate();
@@ -186,19 +167,20 @@ const MentorRequests = () => {
   const [activeTab, setActiveTab] = useState("Pending");
   const [searchQuery, setSearchQuery] = useState("");
   const [showFilters, setShowFilters] = useState(false);
+
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [actionType, setActionType] = useState(null);
   const [acceptError, setAcceptError] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
+
   const [socketConnected, setSocketConnected] = useState(socket.connected);
   const [requests, setRequests] = useState([]);
   const [pendingLoaded, setPendingLoaded] = useState(false);
   const [clock, setClock] = useState(Date.now());
+
   const [filters, setFilters] = useState({
     timing: "All",
-    role: "All",
     duration: "All",
-    amount: "All",
   });
 
   const {
@@ -206,18 +188,19 @@ const MentorRequests = () => {
     loading: sessionsLoading,
     error: sessionsError,
   } = useMentorSessions();
+
   const serverUpcoming = useMemo(
     () => sessions.filter((s) => s.status === "Upcoming"),
     [sessions],
   );
 
-  /* The server list is the truth for PENDING requests:
-    it replaces the old pending ones (expired / taken ones disappear).
-    "Rejected" ones stay (local only). */
+  /* ---------- Load Pending ---------- */
+
   const loadPending = useCallback(async () => {
     try {
       const d = await api(ENDPOINTS.mentorPending);
       const list = (d.requests || []).map(buildRequest);
+
       setRequests((prev) => [
         ...list,
         ...prev.filter((r) => r.status !== "Pending"),
@@ -225,27 +208,32 @@ const MentorRequests = () => {
     } catch (e) {
       console.error("load pending:", e.message);
     } finally {
-      // first answer (or first failure) received -> stop showing the skeleton
       setPendingLoaded(true);
     }
   }, []);
 
   useEffect(() => {
     loadPending();
+
     const poll = setInterval(loadPending, PENDING_SYNC_MS);
+
     return () => clearInterval(poll);
   }, [loadPending]);
 
+  /* ---------- Expiry Clock ---------- */
+
   useEffect(() => {
     const t = setInterval(() => setClock(Date.now()), CLOCK_TICK_MS);
+
     return () => clearInterval(t);
   }, []);
 
-  /* ---------- live request feed ---------- */
+  /* ---------- Socket ---------- */
+
   useEffect(() => {
     const handleConnect = () => {
       setSocketConnected(true);
-      loadPending(); // resync after reconnect
+      loadPending();
     };
 
     const handleDisconnect = () => setSocketConnected(false);
@@ -257,6 +245,7 @@ const MentorRequests = () => {
 
     const handleSessionRequest = (incoming) => {
       const request = buildRequest(incoming);
+
       if (!request.id) return;
 
       setRequests((prev) =>
@@ -268,7 +257,9 @@ const MentorRequests = () => {
 
     const handleTaken = ({ id, requestGroupId } = {}) => {
       const key = String(id ?? requestGroupId ?? "");
+
       if (!key) return;
+
       setRequests((prev) =>
         prev.filter(
           (r) => String(r.id) !== key && String(r.requestGroupId) !== key,
@@ -294,7 +285,8 @@ const MentorRequests = () => {
     };
   }, [loadPending]);
 
-  /* ---------- tab counts ---------- */
+  /* ---------- Counts ---------- */
+
   const counts = useMemo(
     () =>
       Object.fromEntries(
@@ -308,11 +300,15 @@ const MentorRequests = () => {
     [requests, clock],
   );
 
-  /* ---------- filtering ---------- */
+  /* ---------- Filtering ---------- */
+
   const filteredRequests = useMemo(() => {
     const search = searchQuery.toLowerCase().trim();
+
     const selectedDuration =
-      filters.duration !== "All" ? getDurationMinutes(filters.duration) : null;
+      filters.duration !== "All"
+        ? getDurationMinutes(filters.duration)
+        : null;
 
     return requests.filter((request) => {
       if (request.status !== activeTab) return false;
@@ -328,6 +324,7 @@ const MentorRequests = () => {
         ]
           .join(" ")
           .toLowerCase();
+
         if (!text.includes(search)) return false;
       }
 
@@ -336,16 +333,10 @@ const MentorRequests = () => {
         getTiming(request.time) !== filters.timing
       )
         return false;
-      if (filters.role !== "All" && getRole(request.role) !== filters.role)
-        return false;
+
       if (
         selectedDuration !== null &&
         getDurationMinutes(request.duration) !== selectedDuration
-      )
-        return false;
-      if (
-        filters.amount !== "All" &&
-        !matchesEarning(mentorShare(request.amount), filters.amount)
       )
         return false;
 
@@ -357,10 +348,10 @@ const MentorRequests = () => {
     (v) => v !== "All",
   ).length;
 
-  // first load only: nothing to show yet -> skeleton cards
   const initialLoading = !pendingLoaded && requests.length === 0;
 
-  /* ---------- confirmation modal ---------- */
+  /* ---------- Modal ---------- */
+
   const resetModal = useCallback(() => {
     setSelectedRequest(null);
     setActionType(null);
@@ -385,13 +376,18 @@ const MentorRequests = () => {
     };
 
     window.addEventListener("keydown", onKeyDown);
+
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [selectedRequest, closeConfirmation]);
+
+  /* ---------- Remove Request ---------- */
 
   const removeRequest = (id) => {
     setRequests((prev) => prev.filter((r) => String(r.id) !== String(id)));
     notifyRequestsChanged(id);
   };
+
+  /* ---------- Confirm Action ---------- */
 
   const confirmAction = async () => {
     if (!selectedRequest || !actionType || actionLoading) return;
@@ -400,6 +396,7 @@ const MentorRequests = () => {
 
     if (isAccept) {
       const serverReady = !sessionsLoading && !sessionsError;
+
       const conflict = getSessionConflict(
         selectedRequest,
         serverReady ? serverUpcoming : null,
@@ -438,19 +435,21 @@ const MentorRequests = () => {
           ...selectedRequest,
           status: "Upcoming",
         };
+
         persistAcceptedSession(session);
 
         removeRequest(selectedRequest.id);
         resetModal();
 
-        // the header's Sessions badge must count the new session right away
         notifySessionsChanged(result.requestGroupId);
 
-        navigate("/mentor/sessions", { state: { acceptedSession: session } });
+        navigate("/mentor/sessions", {
+          state: { acceptedSession: session },
+        });
+
         return;
       }
 
-      // rejected: keep it in the "Rejected" tab, but it is no longer pending
       setRequests((prev) =>
         prev.map((r) =>
           String(r.id) === String(selectedRequest.id)
@@ -458,6 +457,7 @@ const MentorRequests = () => {
             : r,
         ),
       );
+
       notifyRequestsChanged(selectedRequest.id);
       resetModal();
     } catch (error) {
@@ -468,45 +468,84 @@ const MentorRequests = () => {
     }
   };
 
+  /* ---------- Filter Updates ---------- */
+
   const updateFilter = (key) => (value) =>
     setFilters((prev) => ({ ...prev, [key]: value }));
+
+  const resetFilters = () => {
+    setFilters({
+      timing: "All",
+      duration: "All",
+    });
+  };
+
+  /* ---------- Filter Drawer Escape ---------- */
+
+  useEffect(() => {
+    if (!showFilters) return;
+
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") setShowFilters(false);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showFilters]);
 
   return (
     <div className="mr-font min-h-screen bg-white text-slate-900 antialiased">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+
         .mr-font, .mr-font button, .mr-font input, .mr-font select {
           font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
           font-feature-settings: "cv11", "ss01", "tnum";
         }
-        @keyframes mr-modal-in { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: scale(1); } }
-        .mr-modal-in { animation: mr-modal-in .28s cubic-bezier(.2,.7,.2,1) both; }
-        @media (prefers-reduced-motion: reduce) { .mr-modal-in { animation: none; } }
+
+        @keyframes mr-modal-in {
+          from {
+            opacity: 0;
+            transform: scale(.94);
+          }
+          to {
+            opacity: 1;
+            transform: scale(1);
+          }
+        }
+
+        .mr-modal-in {
+          animation: mr-modal-in .28s cubic-bezier(.2,.7,.2,1) both;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .mr-modal-in {
+            animation: none;
+          }
+        }
       `}</style>
 
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        {/* header (same pattern as Sessions / Earnings) */}
-        <header className="mb-6">
-          <p className="text-sm font-medium text-blue-600">Mentor workspace</p>
-          <h1 className="mt-1 text-4xl font-light tracking-tight sm:text-5xl">
-            Mentor Requests
-          </h1>
-          <p className="mt-2 flex flex-wrap items-center gap-2 text-sm font-normal text-slate-500">
-            Fresher session requests assigned to you.
-            <span
-              className={`inline-flex items-center gap-1 text-xs font-medium ${
-                socketConnected ? "text-emerald-600" : "text-amber-600"
-              }`}
-            >
-              <Radio size={12} /> {socketConnected ? "Live" : "Reconnecting…"}
-            </span>
-          </p>
-        </header>
-
-        <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        {/* Header */}
+        <div
+          className="
+            sticky top-0 z-40
+            -mx-4 px-4
+            sm:-mx-6 sm:px-6
+            lg:-mx-8 lg:px-8
+            mb-6 py-3
+            flex flex-col gap-4
+            lg:flex-row lg:items-center lg:justify-between
+            border-b border-slate-100
+            bg-white
+          "
+        >
+          {/* Tabs */}
           <div className="flex w-fit max-w-full gap-2 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
             {TABS.map((tab) => {
               const active = activeTab === tab;
+
               return (
                 <button
                   key={tab}
@@ -519,6 +558,7 @@ const MentorRequests = () => {
                   }`}
                 >
                   {tab}
+
                   <span
                     className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium tabular-nums ${
                       active
@@ -533,12 +573,14 @@ const MentorRequests = () => {
             })}
           </div>
 
+          {/* Search + Filters */}
           <div className="flex w-full gap-3 lg:w-auto">
             <div className="relative flex-1 lg:w-80">
               <Search
                 size={17}
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
               />
+
               <input
                 type="text"
                 value={searchQuery}
@@ -550,7 +592,7 @@ const MentorRequests = () => {
 
             <button
               type="button"
-              onClick={() => setShowFilters((prev) => !prev)}
+              onClick={() => setShowFilters(true)}
               className={`flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium tracking-tight transition ${
                 showFilters || activeFilterCount > 0
                   ? "border-blue-200 bg-blue-50 text-blue-600"
@@ -558,7 +600,9 @@ const MentorRequests = () => {
               }`}
             >
               <SlidersHorizontal size={16} />
+
               <span className="hidden sm:inline">Filters</span>
+
               {activeFilterCount > 0 && (
                 <span className="rounded-md bg-blue-600 px-1.5 py-0.5 text-[11px] font-medium text-white">
                   {activeFilterCount}
@@ -568,52 +612,7 @@ const MentorRequests = () => {
           </div>
         </div>
 
-        {showFilters && (
-          <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-base font-medium tracking-tight text-slate-900">
-                Filters
-              </h2>
-
-              <button
-                type="button"
-                onClick={() => setShowFilters(false)}
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                aria-label="Close filters"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <FilterSelect
-                label="Timing"
-                value={filters.timing}
-                options={TIMING_OPTIONS}
-                onChange={updateFilter("timing")}
-              />
-              <FilterSelect
-                label="Role"
-                value={filters.role}
-                options={ROLE_OPTIONS}
-                onChange={updateFilter("role")}
-              />
-              <FilterSelect
-                label="Duration"
-                value={filters.duration}
-                options={DURATION_OPTIONS}
-                onChange={updateFilter("duration")}
-              />
-              <FilterSelect
-                label="You earn"
-                value={filters.amount}
-                options={EARNING_OPTIONS}
-                onChange={updateFilter("amount")}
-              />
-            </div>
-          </div>
-        )}
-
+        {/* Request List */}
         <div className="space-y-4">
           {initialLoading ? (
             <div
@@ -648,6 +647,107 @@ const MentorRequests = () => {
         </div>
       </main>
 
+      {/* ======================================================
+          SMOOTH FILTER DRAWER
+
+          Always mounted.
+          Opening: translateX(100%) -> translateX(0)
+          Closing: translateX(0) -> translateX(100%)
+          Visibility changes only after the closing transition.
+      ====================================================== */}
+
+      {/* Backdrop */}
+      <div
+        className={`fixed inset-0 z-[60] bg-slate-900/40 backdrop-blur-[2px] transition-opacity duration-300 ease-in-out ${
+          showFilters
+            ? "pointer-events-auto opacity-100"
+            : "pointer-events-none opacity-0"
+        }`}
+        onClick={() => setShowFilters(false)}
+        aria-hidden={!showFilters}
+        style={{
+          willChange: showFilters ? "opacity" : "auto",
+        }}
+      />
+
+      {/* Drawer */}
+      <div
+        className={`fixed right-0 top-0 z-[70] flex h-full w-full max-w-sm flex-col bg-white shadow-2xl transform-gpu transition-transform duration-300 ease-in-out ${
+          showFilters ? "translate-x-0" : "translate-x-full"
+        }`}
+        role="dialog"
+        aria-modal={showFilters ? "true" : undefined}
+        aria-hidden={!showFilters}
+        style={{
+          willChange: showFilters ? "transform" : "auto",
+          visibility: showFilters ? "visible" : "hidden",
+          transitionProperty: "transform, visibility",
+          transitionDuration: showFilters ? "300ms, 0ms" : "300ms, 300ms",
+          transitionTimingFunction: "ease-in-out",
+        }}
+      >
+        {/* Drawer Header */}
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight text-slate-900">
+              Filters
+            </h2>
+
+            <p className="mt-1 text-xs text-slate-500">
+              Refine session requests
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowFilters(false)}
+            className="rounded-xl border border-slate-200 p-2 text-slate-500 transition-colors duration-200 hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close filters"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Drawer Body */}
+        <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
+          <FilterSelect
+            label="Timing"
+            value={filters.timing}
+            options={TIMING_OPTIONS}
+            onChange={updateFilter("timing")}
+          />
+
+          <FilterSelect
+            label="Duration"
+            value={filters.duration}
+            options={DURATION_OPTIONS}
+            onChange={updateFilter("duration")}
+          />
+        </div>
+
+        {/* Drawer Footer */}
+        <div className="border-t border-slate-100 px-6 py-4">
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-50"
+            >
+              Reset
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowFilters(false)}
+              className="flex-1 rounded-xl bg-blue-600 px-4 py-3 text-sm font-medium text-white transition-colors duration-200 hover:bg-blue-700"
+            >
+              Apply Filters
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Confirmation Modal */}
       {selectedRequest && (
         <ConfirmRequestModal
           request={selectedRequest}
@@ -663,7 +763,7 @@ const MentorRequests = () => {
 };
 
 /* ============================================================
-  CONFIRM MODAL (accept = full details, reject = short summary)
+   CONFIRM MODAL
 ============================================================ */
 
 const ConfirmRequestModal = ({
@@ -677,11 +777,12 @@ const ConfirmRequestModal = ({
   const isAccept = actionType === "accept";
   const group = isGroupCall(request);
 
-  // lives only while the modal is mounted, so it resets for every request
   const [ackMatch, setAckMatch] = useState(false);
 
   const sessionTypeText = group
-    ? `Group session${Number(request.maxMembers) > 1 ? ` (up to ${request.maxMembers})` : ""}`
+    ? `Group session${
+        Number(request.maxMembers) > 1 ? ` (up to ${request.maxMembers})` : ""
+      }`
     : "1:1 Session";
 
   const rows = [
@@ -759,8 +860,11 @@ const ConfirmRequestModal = ({
                   isAccept ? "text-blue-100" : "text-red-100"
                 }`}
               >
-                {isAccept ? "Review before accepting" : "Review before rejecting"}
+                {isAccept
+                  ? "Review before accepting"
+                  : "Review before rejecting"}
               </p>
+
               <h2
                 id="confirm-title"
                 className="mt-1 text-2xl font-light tracking-tight"
@@ -785,6 +889,7 @@ const ConfirmRequestModal = ({
 
         {/* Body */}
         <div className="max-h-[60vh] overflow-y-auto px-6 py-5">
+          {/* Fresher */}
           <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <Avatar
               src={request.avatar}
@@ -792,20 +897,24 @@ const ConfirmRequestModal = ({
               size="h-11 w-11"
               text="text-sm"
             />
+
             <div className="min-w-0 flex-1">
               <p className="truncate text-base font-medium tracking-tight text-slate-900">
                 {request.name}
               </p>
+
               <p className="truncate text-xs font-normal text-slate-500">
                 {request.topic || request.role || "Mentoring session"}
                 {request.company ? ` · ${request.company}` : ""}
               </p>
+
               <div className="mt-1.5">
                 <SessionBadge request={request} />
               </div>
             </div>
           </div>
 
+          {/* Error */}
           {error && (
             <div
               className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4"
@@ -815,11 +924,13 @@ const ConfirmRequestModal = ({
             </div>
           )}
 
+          {/* Accept Details */}
           {isAccept ? (
             <>
               <div className="mt-4 space-y-2">
                 {rows.map((r) => {
                   const Icon = r.icon;
+
                   return (
                     <div
                       key={r.label}
@@ -829,6 +940,7 @@ const ConfirmRequestModal = ({
                         <Icon size={15} />
                         <span className="text-xs font-normal">{r.label}</span>
                       </div>
+
                       <span
                         className={`text-right text-sm tabular-nums ${
                           r.strong ? "font-semibold" : "font-medium"
@@ -841,27 +953,32 @@ const ConfirmRequestModal = ({
                 })}
               </div>
 
+              {/* Message */}
               {request.message && (
                 <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/60 p-4">
                   <div className="mb-1 flex items-center gap-2 text-xs font-medium text-blue-700">
                     <MessageSquare size={13} />
                     Why the fresher wants this session
                   </div>
+
                   <p className="text-sm font-normal leading-6 text-slate-700">
                     {request.message}
                   </p>
                 </div>
               )}
 
+              {/* Gap Rule */}
               <div className="mt-4 flex gap-3 rounded-xl border border-blue-100 bg-blue-50 p-4">
                 <CalendarDays
                   size={19}
                   className="mt-0.5 shrink-0 text-blue-600"
                 />
+
                 <div>
                   <p className="text-sm font-medium text-blue-900">
                     {SESSION_GAP_MINUTES}-minute gap rule
                   </p>
+
                   <p className="mt-1 text-xs font-normal leading-5 text-blue-700">
                     Every session must have at least {SESSION_GAP_MINUTES}{" "}
                     minutes gap from the previous or next session.
@@ -869,6 +986,7 @@ const ConfirmRequestModal = ({
                 </div>
               </div>
 
+              {/* Acknowledgement */}
               <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
                 <input
                   type="checkbox"
@@ -877,6 +995,7 @@ const ConfirmRequestModal = ({
                   disabled={loading}
                   className="mt-0.5 h-5 w-5 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
                 />
+
                 <span className="text-sm font-normal leading-6 text-emerald-900">
                   <strong className="font-semibold">
                     I can handle this session.
@@ -886,8 +1005,10 @@ const ConfirmRequestModal = ({
                 </span>
               </label>
 
+              {/* Warning */}
               <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-normal leading-5 text-amber-800">
                 <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+
                 <span>
                   Only accept if you genuinely match the language, role, gender
                   preference and timing. The fresher is paying for this session.
@@ -895,14 +1016,19 @@ const ConfirmRequestModal = ({
               </div>
             </>
           ) : (
+            /* Reject Details */
             <div className="mt-4 grid grid-cols-2 gap-4 rounded-xl bg-slate-50 p-4">
               <Detail label="Session type" value={sessionTypeText} />
+
               <Detail label="Date" value={request.date || "Not specified"} />
+
               <Detail label="Time" value={request.time || "Not specified"} />
+
               <Detail
                 label="Duration"
                 value={formatDuration(request.duration)}
               />
+
               <Detail
                 label={group ? "You earn (per person)" : "You earn"}
                 value={inr(mentorShare(request.amount))}
@@ -952,14 +1078,19 @@ const ConfirmRequestModal = ({
   );
 };
 
+/* ---------- Detail ---------- */
+
 const Detail = ({ label, value }) => (
   <div>
     <p className="text-xs font-normal text-slate-500">{label}</p>
+
     <p className="mt-1 text-sm font-medium tabular-nums text-slate-900">
       {value}
     </p>
   </div>
 );
+
+/* ---------- Filter Select ---------- */
 
 const FilterSelect = ({ label, value, options, onChange }) => (
   <div>
@@ -982,7 +1113,7 @@ const FilterSelect = ({ label, value, options, onChange }) => (
 );
 
 /* ============================================================
-  REQUEST CARD (same layout as the Sessions page card)
+   REQUEST CARD
 ============================================================ */
 
 const RequestInfo = ({ icon, label, value }) => (
@@ -991,11 +1122,14 @@ const RequestInfo = ({ icon, label, value }) => (
       {icon}
       <span className="text-xs font-normal">{label}</span>
     </div>
+
     <p className="mt-1.5 text-sm font-medium tabular-nums tracking-tight text-slate-800">
       {value}
     </p>
   </div>
 );
+
+/* ---------- Request Card ---------- */
 
 const RequestCard = ({ request, onAccept, onReject }) => {
   const group = isGroupCall(request);
@@ -1003,6 +1137,7 @@ const RequestCard = ({ request, onAccept, onReject }) => {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-200 hover:shadow-md">
       <div className="flex flex-col gap-5 lg:flex-row lg:items-center">
+        {/* User */}
         <div className="flex flex-1 items-center gap-4">
           <Avatar
             src={request.avatar}
@@ -1016,8 +1151,10 @@ const RequestCard = ({ request, onAccept, onReject }) => {
             <h3 className="text-lg font-medium tracking-tight text-slate-900">
               {request.name}
             </h3>
+
             <div className="mt-2 flex flex-wrap gap-2">
               <SessionBadge request={request} />
+
               {request.topic && (
                 <span className="rounded-lg bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-600">
                   {request.topic}
@@ -1027,22 +1164,26 @@ const RequestCard = ({ request, onAccept, onReject }) => {
           </div>
         </div>
 
+        {/* Information */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:w-[560px]">
           <RequestInfo
             icon={<CalendarDays size={15} />}
             label="Date"
             value={request.date || "Not specified"}
           />
+
           <RequestInfo
             icon={<Clock3 size={15} />}
             label="Time"
             value={request.time || "Not specified"}
           />
+
           <RequestInfo
             icon={<Video size={15} />}
             label="Duration"
             value={formatDuration(request.duration)}
           />
+
           <RequestInfo
             icon={<Star size={15} />}
             label={group ? "You earn (per person)" : "You earn"}
@@ -1051,31 +1192,37 @@ const RequestCard = ({ request, onAccept, onReject }) => {
         </div>
       </div>
 
+      {/* Message */}
       {request.message && (
         <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3">
           <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-blue-700">
             <MessageSquare size={12} />
             Message from the fresher
           </div>
+
           <p className="text-sm font-normal leading-6 text-slate-600">
             {request.message}
           </p>
         </div>
       )}
 
+      {/* Footer */}
       <div className="mt-5 flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           {request.status === "Pending" && (
             <>
               <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
+
               <span className="text-sm font-medium text-emerald-600">
                 Waiting for your response
               </span>
             </>
           )}
+
           {request.status === "Rejected" && (
             <>
               <XCircle size={16} className="text-red-500" />
+
               <span className="text-sm font-medium text-red-500">
                 Rejected
               </span>
@@ -1107,15 +1254,20 @@ const RequestCard = ({ request, onAccept, onReject }) => {
   );
 };
 
+/* ---------- Empty State ---------- */
+
 const EmptyState = ({ title, description, offline }) => (
   <div className="rounded-2xl border border-dashed border-slate-300 bg-white py-20 text-center">
     <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50">
       <CalendarDays size={25} className="text-blue-500" />
     </div>
+
     <h3 className="mt-5 text-xl font-light tracking-tight text-slate-900">
       {title}
     </h3>
+
     <p className="mt-2 text-sm font-normal text-slate-500">{description}</p>
+
     {offline && (
       <p className="mt-3 text-xs font-medium text-amber-600">
         Real-time connection is currently offline.
@@ -1125,7 +1277,7 @@ const EmptyState = ({ title, description, offline }) => (
 );
 
 /* ============================================================
-  SKELETON (same sizes as RequestCard -> no layout jump)
+   SKELETON
 ============================================================ */
 
 const Bone = ({ className = "" }) => (
@@ -1140,9 +1292,11 @@ const RequestCardSkeleton = () => (
     <div className="flex flex-col gap-5 lg:flex-row lg:items-center">
       <div className="flex flex-1 items-center gap-4">
         <Bone className="h-12 w-12 shrink-0 !rounded-full" />
+
         <div className="min-w-0 flex-1 space-y-2">
           <Bone className="h-4 w-40" />
           <Bone className="h-3 w-28" />
+
           <div className="flex gap-2 pt-1">
             <Bone className="h-5 w-20 !rounded-lg" />
             <Bone className="h-5 w-24 !rounded-lg" />
@@ -1165,6 +1319,7 @@ const RequestCardSkeleton = () => (
 
     <div className="mt-5 flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
       <Bone className="h-3 w-36" />
+
       <div className="flex gap-2">
         <Bone className="h-9 w-20 !rounded-xl" />
         <Bone className="h-9 w-36 !rounded-xl" />

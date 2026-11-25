@@ -3,107 +3,152 @@ import {
   Star,
   MessageSquare,
   Search,
-  User,
-  Filter,
-  ChevronDown,
   CheckCircle2,
-  Clock3,
   Loader2,
-  Radio,
+  Heart,
+  CalendarClock,
 } from "lucide-react";
 import useLive from "../../hooks/useLive";
-import { api, ENDPOINTS, EVENTS, timeAgo } from "../../services/mentorApi";
+import { api, ENDPOINTS, EVENTS } from "../../services/mentorApi";
 
-/* ------------------------------------------------------------------ */
-/* SKELETON: same layout + sizes as the real page, shown only until   */
-/* the first response arrives (later reloads keep the old data).      */
-/* ------------------------------------------------------------------ */
+/* ============================================================
+   LINE CLAMP HELPERS (no Tailwind plugin needed)
+============================================================ */
+
+const clamp2 = {
+  display: "-webkit-box",
+  WebkitLineClamp: 2,
+  WebkitBoxOrient: "vertical",
+  overflow: "hidden",
+};
+
+const clamp3 = {
+  display: "-webkit-box",
+  WebkitLineClamp: 3,
+  WebkitBoxOrient: "vertical",
+  overflow: "hidden",
+};
+
+/* ============================================================
+   ATTENDED DATE & TIME FORMATTER
+   Output example: "12 Mar 2026 · 4:30 PM – 5:00 PM"
+============================================================ */
+
+const IST = "Asia/Kolkata";
+
+const fmtDateIST = (d) =>
+  d.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: IST,
+  });
+
+const fmtTimeIST = (d) =>
+  d.toLocaleTimeString("en-IN", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: IST,
+  });
+
+const formatSessionRange = (startsAt, endsAt, fallbackDate, fallbackTime) => {
+  const start = startsAt ? new Date(startsAt) : null;
+
+  // No real timestamp -> show the saved text as it is (no timezone guessing)
+  if (!start || Number.isNaN(start.getTime())) {
+    return [fallbackDate, fallbackTime].filter(Boolean).join(" · ");
+  }
+
+  const end = endsAt ? new Date(endsAt) : null;
+  const endTime =
+    end && !Number.isNaN(end.getTime()) ? ` – ${fmtTimeIST(end)}` : "";
+
+  return `${fmtDateIST(start)} · ${fmtTimeIST(start)}${endTime}`;
+};
+
+/* ============================================================
+   AVATAR (shows fresher profile photo, falls back to initial)
+============================================================ */
+
+const Avatar = ({ src, name, size = "h-11 w-11", ring = "border-slate-100" }) => {
+  const [failed, setFailed] = useState(false);
+
+  if (src && !failed) {
+    return (
+      <img
+        src={src}
+        alt={name || "Fresher"}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+        className={`${size} shrink-0 rounded-full border-2 ${ring} object-cover`}
+      />
+    );
+  }
+
+  return (
+    <div
+      className={`flex ${size} shrink-0 items-center justify-center rounded-full bg-blue-50 font-semibold uppercase text-blue-600`}
+    >
+      {name?.charAt(0) || "F"}
+    </div>
+  );
+};
+
+/* ============================================================
+   SKELETON
+============================================================ */
+
 const Bone = ({ className = "" }) => (
   <div className={`rounded-md bg-slate-200 ${className}`} />
 );
 
 const ReviewCardSkeleton = () => (
-  <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-    <div className="flex items-start justify-between gap-4">
-      <div className="flex items-center gap-3">
+  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:px-5">
+    <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-5">
+      <div className="flex items-center gap-3 md:w-56 md:shrink-0">
         <Bone className="h-11 w-11 !rounded-full" />
         <div className="space-y-2">
-          <Bone className="h-3.5 w-32" />
-          <Bone className="h-3 w-20" />
+          <Bone className="h-3.5 w-28" />
+          <Bone className="h-3 w-16" />
         </div>
       </div>
-      <Bone className="h-3 w-16" />
-    </div>
-    <div className="mt-4 flex items-center gap-3">
-      <Bone className="h-4 w-24" />
-      <Bone className="h-6 w-32 !rounded-lg" />
-    </div>
-    <div className="mt-4 max-w-4xl space-y-2">
-      <Bone className="h-3.5 w-full" />
-      <Bone className="h-3.5 w-4/5" />
-    </div>
-    <div className="mt-5 border-t border-slate-100 pt-4">
-      <Bone className="h-8 w-20 !rounded-lg" />
+
+      <div className="flex gap-1">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <Bone key={i} className="h-3.5 w-3.5" />
+        ))}
+      </div>
+
+      <div className="flex-1 space-y-2">
+        <Bone className="h-3.5 w-full" />
+        <Bone className="h-3 w-1/3" />
+      </div>
+
+      <Bone className="h-10 w-24 !rounded-full" />
     </div>
   </div>
 );
 
 const ReviewsSkeleton = () => (
-  <div
-    className="min-h-screen bg-white text-slate-900"
-    role="status"
-    aria-label="Loading reviews"
-  >
-    <main
-      className="mx-auto max-w-7xl animate-pulse px-4 py-8 sm:px-6 lg:px-8"
-      aria-hidden="true"
-    >
-      {/* header */}
-      <header className="mb-8 space-y-3">
-        <Bone className="h-4 w-32" />
-        <Bone className="h-8 w-52" />
-        <Bone className="h-3.5 w-80 max-w-full" />
-      </header>
-
-      {/* summary + breakdown */}
+  <div className="min-h-screen bg-white">
+    <main className="mx-auto max-w-7xl animate-pulse px-4 py-8 sm:px-6 lg:px-8">
       <section className="mb-7 grid grid-cols-1 gap-5 lg:grid-cols-[300px_1fr]">
-        <div className="flex flex-col items-center justify-center rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <Bone className="h-12 w-24" />
-          <div className="mt-3 flex gap-1">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <Bone key={i} className="h-5 w-5" />
-            ))}
-          </div>
-          <Bone className="mt-3 h-3.5 w-36" />
+        <div className="rounded-3xl border border-slate-200 p-6">
+          <Bone className="mx-auto h-12 w-24" />
+          <Bone className="mx-auto mt-3 h-5 w-32" />
         </div>
 
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="rounded-3xl border border-slate-200 p-6">
           <Bone className="mb-5 h-4 w-32" />
-          <div className="space-y-4">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <div key={i} className="flex items-center gap-3">
-                <Bone className="h-3 w-12" />
-                <Bone className="h-2 flex-1 !rounded-full" />
-                <Bone className="h-3 w-7" />
-              </div>
-            ))}
-          </div>
+          {[0, 1, 2, 3, 4].map((i) => (
+            <Bone key={i} className="mb-4 h-3 w-full" />
+          ))}
         </div>
       </section>
 
-      {/* search + filters */}
-      <section className="mb-6 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row">
-          <Bone className="h-[46px] flex-1 !rounded-xl" />
-          <Bone className="h-[46px] w-full !rounded-xl lg:w-40" />
-          <Bone className="h-[46px] w-full !rounded-xl lg:w-40" />
-        </div>
-      </section>
-
-      <div className="mb-4 space-y-2">
-        <Bone className="h-5 w-36" />
-        <Bone className="h-3 w-24" />
-      </div>
+      <Bone className="mb-6 h-8 w-48" />
 
       <section className="space-y-4">
         {[0, 1, 2].map((i) => (
@@ -114,20 +159,268 @@ const ReviewsSkeleton = () => (
   </div>
 );
 
+/* ============================================================
+   FIVE STAR MARQUEE
+============================================================ */
+
+// Marquee shows only when there are MANY real 5-star reviews
+const MARQUEE_MIN_REVIEWS = 6;
+
+const FiveStarMarquee = ({ reviews }) => {
+  const fiveStarReviews = reviews.filter(
+    (review) => Number(review.rating) === 5
+  );
+
+  if (fiveStarReviews.length < MARQUEE_MIN_REVIEWS) return null;
+
+  // two identical halves -> translateX(-50%) loops seamlessly
+  const items = [...fiveStarReviews, ...fiveStarReviews];
+
+  return (
+    <section className="mb-8 overflow-hidden">
+      <style>{`
+        @keyframes review-marquee {
+          from {
+            transform: translateX(0);
+          }
+          to {
+            transform: translateX(-50%);
+          }
+        }
+
+        .review-marquee-track {
+          display: flex;
+          width: max-content;
+          animation: review-marquee 40s linear infinite;
+          will-change: transform;
+        }
+
+        .review-marquee:hover .review-marquee-track {
+          animation-play-state: paused;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .review-marquee-track {
+            animation: none;
+          }
+        }
+      `}</style>
+
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-semibold text-slate-900">
+            Loved by Freshers
+          </h3>
+
+          <p className="mt-1 text-xs text-slate-500">
+            Highlights from 5-star session experiences
+          </p>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1.5 rounded-full border border-amber-100 bg-amber-50 px-3 py-2">
+          <Star size={14} fill="currentColor" className="text-amber-400" />
+
+          <span className="text-xs font-semibold text-amber-700">
+            5 Star Reviews
+          </span>
+        </div>
+      </div>
+
+      <div className="review-marquee relative">
+        <div className="review-marquee-track gap-4">
+          {items.map((review, index) => (
+            <article
+              key={`${review.id}-${index}`}
+              className="w-[310px] shrink-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
+            >
+              <div className="flex items-center gap-3">
+                <Avatar
+                  src={review.avatar}
+                  name={review.name}
+                  ring="border-blue-100"
+                />
+
+                <div className="min-w-0 flex-1">
+                  <h4 className="truncate text-sm font-semibold text-slate-900">
+                    {review.name}
+                  </h4>
+
+                  <p className="truncate text-xs text-slate-500">
+                    {review.role || "Fresher"}
+                  </p>
+                </div>
+
+                <div className="rounded-full bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-600">
+                  5.0 ★
+                </div>
+              </div>
+
+              <div className="mt-3 flex gap-1">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <Star
+                    key={star}
+                    size={14}
+                    fill="currentColor"
+                    className="text-amber-400"
+                  />
+                ))}
+              </div>
+
+              <p
+                className="mt-3 min-h-[60px] text-sm leading-5 text-slate-600"
+                style={clamp3}
+              >
+                "{review.review}"
+              </p>
+
+              <p className="mt-3 border-t border-slate-100 pt-3 text-[11px] font-medium text-blue-600">
+                {review.session || "Session"}
+              </p>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+};
+
+/* ============================================================
+   REVIEW CARD  (SINGLE ROW LAYOUT)
+   Profile -> Stars + Rating -> Description -> Heart (last)
+============================================================ */
+
+const ReviewCard = ({ review, onLike, likeLoading }) => {
+  const liked = Boolean(review.liked);
+  const count = Number(review.likesCount || 0);
+
+  return (
+    <article className="group rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm transition-all duration-200 hover:border-slate-300 hover:shadow-md sm:px-5">
+      {/* SINGLE ROW */}
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-5">
+        {/* 1. PROFILE */}
+        <div className="flex min-w-0 items-center gap-3 md:w-56 md:shrink-0">
+          <Avatar src={review.avatar} name={review.name} />
+
+          <div className="min-w-0">
+            <h3 className="truncate text-sm font-semibold text-slate-900">
+              {review.name}
+            </h3>
+            <p className="truncate text-xs text-slate-500">
+              {review.role || "Fresher"}
+            </p>
+          </div>
+        </div>
+
+        {/* 2. RATING */}
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="flex gap-0.5">
+            {[1, 2, 3, 4, 5].map((star) => (
+              <Star
+                key={star}
+                size={14}
+                fill={star <= review.rating ? "currentColor" : "none"}
+                className={
+                  star <= review.rating ? "text-amber-400" : "text-slate-200"
+                }
+              />
+            ))}
+          </div>
+
+          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-600">
+            {review.rating.toFixed(1)}
+          </span>
+        </div>
+
+        {/* 3. DESCRIPTION (+ session & time) */}
+        <div className="min-w-0 flex-1">
+          <p
+            className="break-words text-sm leading-5 text-slate-600"
+            style={clamp2}
+            title={review.review}
+          >
+            {review.review || "No written feedback."}
+          </p>
+
+          <p className="mt-1 truncate text-xs">
+            <span className="font-medium text-blue-600">
+              {review.session || "Session"}
+            </span>
+          </p>
+
+          {review.attendedAt && (
+            <p className="mt-1 flex items-center gap-1 truncate text-xs text-slate-500">
+              <CalendarClock size={12} className="shrink-0 text-slate-400" />
+              <span>Attended: {review.attendedAt}</span>
+            </p>
+          )}
+        </div>
+
+        {/* 4. HEART LIKE (LAST) */}
+        <button
+          type="button"
+          onClick={() => onLike(review)}
+          disabled={likeLoading}
+          aria-pressed={liked}
+          aria-label={liked ? "Unlike review" : "Like review"}
+          className={`group/like inline-flex min-h-10 shrink-0 items-center gap-2 self-start rounded-full border px-4 py-2 transition-all duration-200 active:scale-90 disabled:cursor-not-allowed disabled:opacity-60 md:self-center ${
+            liked
+              ? "border-rose-200 bg-rose-50 text-rose-600"
+              : "border-slate-200 bg-white text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-500"
+          }`}
+        >
+          {likeLoading ? (
+            <Loader2 size={16} className="animate-spin" />
+          ) : (
+            <Heart
+              size={17}
+              fill={liked ? "currentColor" : "none"}
+              className={`transition-transform duration-200 ${
+                liked ? "scale-110" : "group-hover/like:scale-110"
+              }`}
+            />
+          )}
+
+          <span className="text-xs font-semibold">
+            {liked ? "Liked" : "Like"}
+          </span>
+
+          <span className="text-xs tabular-nums">{count}</span>
+        </button>
+      </div>
+
+      {/* REPLY (below the row) */}
+      {review.reply && (
+        <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50/50 p-3">
+          <p className="text-xs font-semibold text-blue-700">Your reply</p>
+
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            {review.reply}
+          </p>
+        </div>
+      )}
+    </article>
+  );
+};
+
+/* ============================================================
+   MAIN PAGE
+============================================================ */
+
 const MentorReviews = () => {
   const [search, setSearch] = useState("");
   const [ratingFilter, setRatingFilter] = useState("All");
   const [sortBy, setSortBy] = useState("Latest");
-  const [replyId, setReplyId] = useState(null);
-  const [replyText, setReplyText] = useState("");
-  const [sending, setSending] = useState(false);
-  const [replyError, setReplyError] = useState("");
 
-  const { data, loading, error, connected, reload } = useLive({
+  const [likeLoading, setLikeLoading] = useState({});
+  const [likeError, setLikeError] = useState("");
+
+  const { data, loading, error, reload, setData } = useLive({
     fetcher: () => api(ENDPOINTS.reviews),
     events: [EVENTS.reviewNew, EVENTS.reviewUpdated],
     pollMs: 60000,
   });
+
+  /* REAL REVIEWS */
 
   const reviews = useMemo(
     () =>
@@ -137,64 +430,222 @@ const MentorReviews = () => {
         role: r.fresherRole || "Fresher",
         rating: Number(r.rating) || 0,
         createdAt: r.createdAt,
-        session: r.session || "Mentoring session",
+        session: r.session || "Session",
+
+        // Session time (IST). Falls back to the review date if nothing else exists.
+        attendedAt:
+          formatSessionRange(
+            r.sessionStartsAt || r.attendedAt || r.startsAt,
+            r.sessionEndsAt || r.endsAt,
+            r.sessionDate || r.booking?.date || r.date,
+            r.sessionTime || r.booking?.time || r.time
+          ) ||
+          (r.createdAt ? fmtDateIST(new Date(r.createdAt)) : ""),
+
         review: r.comment || "",
         reply: r.reply?.text || "",
+        avatar:
+          r.fresherAvatar ||
+          r.fresherProfileImage ||
+          r.fresherProfilePicture ||
+          r.fresherPhoto ||
+          r.fresherImage ||
+          r.avatar ||
+          r.profileImage ||
+          r.profilePicture ||
+          r.photo ||
+          r.image ||
+          r.fresher?.avatar ||
+          r.fresher?.profileImage ||
+          r.fresher?.profilePicture ||
+          r.fresher?.photo ||
+          r.fresher?.image ||
+          r.fresherId?.avatar ||
+          r.fresherId?.profileImage ||
+          r.fresherId?.profilePicture ||
+          r.user?.avatar ||
+          r.user?.profileImage ||
+          "",
+
+        likesCount: Number(
+          r.likesCount ?? r.likedBy?.length ?? r.likes?.length ?? 0
+        ),
+        liked: Boolean(r.isLiked ?? r.likedByMentor ?? r.liked),
       })),
-    [data],
+    [data]
   );
+
+  /* RATING STATS */
 
   const stats = useMemo(() => {
     const total = reviews.length;
     const count = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+
     reviews.forEach((r) => {
-      if (count[r.rating] !== undefined) count[r.rating] += 1;
+      if (count[r.rating] !== undefined) {
+        count[r.rating] += 1;
+      }
     });
+
     const average = total
-      ? reviews.reduce((s, r) => s + r.rating, 0) / total
+      ? reviews.reduce((sum, r) => sum + r.rating, 0) / total
       : 0;
-    return { total, count, average: average.toFixed(1) };
+
+    return {
+      total,
+      count,
+      average: average.toFixed(1),
+    };
   }, [reviews]);
+
+  /* MARQUEE (real 5-star reviews only) */
+
+  const marqueeReviews = useMemo(
+    () => reviews.filter((r) => r.rating === 5),
+    [reviews]
+  );
+
+  /* FILTER + SORT */
 
   const filtered = useMemo(() => {
     let list = [...reviews];
+
     const kw = search.toLowerCase().trim();
+
     if (kw) {
       list = list.filter((r) =>
         [r.name, r.role, r.session, r.review].some((v) =>
-          String(v).toLowerCase().includes(kw),
-        ),
+          String(v).toLowerCase().includes(kw)
+        )
       );
     }
-    if (ratingFilter !== "All")
+
+    if (ratingFilter !== "All") {
       list = list.filter((r) => r.rating === Number(ratingFilter));
-    if (sortBy === "Highest") list.sort((a, b) => b.rating - a.rating);
-    else if (sortBy === "Lowest") list.sort((a, b) => a.rating - b.rating);
-    else
-      list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    }
+
+    if (sortBy === "Highest") {
+      list.sort((a, b) => b.rating - a.rating);
+    } else if (sortBy === "Lowest") {
+      list.sort((a, b) => a.rating - b.rating);
+    } else {
+      list.sort(
+        (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+      );
+    }
+
     return list;
   }, [reviews, search, ratingFilter, sortBy]);
 
-  const sendReply = async (id) => {
-    if (!replyText.trim()) return;
-    setSending(true);
-    setReplyError("");
+  /* OPTIMISTIC LIKE / UNLIKE */
+
+  const toggleReviewLike = async (review) => {
+    if (!review?.id || likeLoading[review.id]) return;
+
+    setLikeError("");
+
+    const previousLiked = Boolean(review.liked);
+    const previousCount = Number(review.likesCount || 0);
+
+    const nextLiked = !previousLiked;
+    const nextCount = Math.max(0, previousCount + (nextLiked ? 1 : -1));
+
+    // Optimistic update
+    setData((previous) => {
+      if (!previous) return previous;
+
+      return {
+        ...previous,
+        reviews: (previous.reviews || []).map((r) => {
+          const id = r._id || r.id;
+
+          if (id !== review.id) return r;
+
+          return {
+            ...r,
+            likedByMentor: nextLiked,
+            isLiked: nextLiked,
+            likesCount: nextCount,
+          };
+        }),
+      };
+    });
+
+    setLikeLoading((prev) => ({
+      ...prev,
+      [review.id]: true,
+    }));
+
     try {
-      await api(ENDPOINTS.reviewReply(id), {
+      // Backend toggle endpoint
+      const result = await api(`/reviews/${review.id}/like`, {
         method: "POST",
-        body: { text: replyText.trim() },
       });
-      setReplyId(null);
-      setReplyText("");
-      reload();
+
+      // Sync with actual backend response
+      if (
+        result &&
+        (typeof result.liked === "boolean" || result.likesCount != null)
+      ) {
+        setData((previous) => {
+          if (!previous) return previous;
+
+          return {
+            ...previous,
+            reviews: (previous.reviews || []).map((r) => {
+              const id = r._id || r.id;
+
+              if (id !== review.id) return r;
+
+              const actualLiked =
+                typeof result.liked === "boolean" ? result.liked : nextLiked;
+
+              const actualCount =
+                result.likesCount != null
+                  ? Number(result.likesCount)
+                  : nextCount;
+
+              return {
+                ...r,
+                likedByMentor: actualLiked,
+                isLiked: actualLiked,
+                likesCount: actualCount,
+              };
+            }),
+          };
+        });
+      }
     } catch (e) {
-      setReplyError(e.message);
+      // Rollback on failure
+      setData((previous) => {
+        if (!previous) return previous;
+
+        return {
+          ...previous,
+          reviews: (previous.reviews || []).map((r) => {
+            const id = r._id || r.id;
+
+            if (id !== review.id) return r;
+
+            return {
+              ...r,
+              likedByMentor: previousLiked,
+              isLiked: previousLiked,
+              likesCount: previousCount,
+            };
+          }),
+        };
+      });
+
+      setLikeError(e.message || "Unable to update review like.");
     } finally {
-      setSending(false);
+      setLikeLoading((prev) => ({
+        ...prev,
+        [review.id]: false,
+      }));
     }
   };
 
-  // first load only -> skeleton. Background reloads keep the old data on screen.
   if (loading && !data) {
     return <ReviewsSkeleton />;
   }
@@ -202,20 +653,7 @@ const MentorReviews = () => {
   return (
     <div className="min-h-screen bg-white text-slate-900">
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <header className="mb-8">
-          <p className="text-sm font-medium text-blue-600">Mentor workspace</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">
-            Your Reviews
-          </h1>
-          <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
-            New reviews appear the moment a fresher posts them.
-            <span
-              className={`inline-flex items-center gap-1 text-xs font-medium ${connected ? "text-emerald-600" : "text-amber-600"}`}
-            >
-              <Radio size={12} /> {connected ? "Live" : "Reconnecting…"}
-            </span>
-          </p>
-        </header>
+        {/* ERROR */}
 
         {error && (
           <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -226,11 +664,20 @@ const MentorReviews = () => {
           </div>
         )}
 
-        <section className="mb-7 grid grid-cols-1 gap-5 lg:grid-cols-[300px_1fr]">
+        {/* MARQUEE */}
+
+        <FiveStarMarquee reviews={marqueeReviews} />
+
+        {/* RATING SUMMARY */}
+
+        <section className="mb-8 grid grid-cols-1 gap-5 lg:grid-cols-[300px_1fr]">
+          {/* AVERAGE */}
+
           <div className="flex flex-col items-center justify-center rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="text-5xl font-bold text-slate-900">
               {stats.average}
             </div>
+
             <div className="mt-3 flex gap-1">
               {[1, 2, 3, 4, 5].map((s) => (
                 <Star
@@ -245,40 +692,51 @@ const MentorReviews = () => {
                 />
               ))}
             </div>
+
             <p className="mt-3 text-sm text-slate-500">
-              Based on {stats.total} review{stats.total !== 1 ? "s" : ""}
+              Based on {stats.total} real review
+              {stats.total !== 1 ? "s" : ""}
             </p>
+
             {stats.total >= 3 && Number(stats.average) >= 4.5 && (
               <div className="mt-4 flex items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-600">
-                <CheckCircle2 size={15} /> Trusted Mentor
+                <CheckCircle2 size={15} />
+                Trusted Mentor
               </div>
             )}
           </div>
+
+          {/* BREAKDOWN */}
 
           <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="mb-5 text-sm font-semibold text-slate-900">
               Rating Breakdown
             </h3>
+
             <div className="space-y-4">
               {[5, 4, 3, 2, 1].map((rating) => {
                 const c = stats.count[rating];
                 const pct = stats.total ? (c / stats.total) * 100 : 0;
+
                 return (
                   <div key={rating} className="flex items-center gap-3">
                     <div className="flex w-12 items-center gap-1 text-xs font-medium text-slate-600">
                       <span>{rating}</span>
+
                       <Star
                         size={12}
                         fill="currentColor"
                         className="text-yellow-400"
                       />
                     </div>
+
                     <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
                       <div
                         className="h-full rounded-full bg-gradient-to-r from-yellow-500 to-orange-400 transition-all duration-500"
                         style={{ width: `${pct}%` }}
                       />
                     </div>
+
                     <span className="w-7 text-right text-xs text-slate-400">
                       {c}
                     </span>
@@ -289,203 +747,105 @@ const MentorReviews = () => {
           </div>
         </section>
 
-        <section className="mb-6 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-col gap-3 lg:flex-row">
-            <div className="flex flex-1 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100">
-              <Search size={18} className="shrink-0 text-slate-400" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search reviews..."
-                className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
-              />
+        {/* REVIEWS */}
+
+        <section>
+          <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-xl font-semibold tracking-tight text-slate-900">
+                Fresher Reviews
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Feedback from freshers who attended your sessions.
+              </p>
             </div>
-            <div className="relative">
-              <Filter
-                size={16}
-                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-              />
+
+            <div className="flex flex-col gap-3 sm:flex-row">
+              {/* SEARCH */}
+
+              <div className="relative">
+                <Search
+                  size={16}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search reviews..."
+                  className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-blue-400 sm:w-64"
+                />
+              </div>
+
+              {/* RATING */}
+
               <select
                 value={ratingFilter}
                 onChange={(e) => setRatingFilter(e.target.value)}
-                className="w-full appearance-none rounded-xl border border-slate-200 bg-slate-50 py-3 pl-9 pr-9 text-sm text-slate-600 outline-none focus:border-blue-400 lg:w-40"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-400"
               >
-                <option value="All">All Ratings</option>
-                {[5, 4, 3, 2, 1].map((n) => (
-                  <option key={n} value={n}>
-                    {n} Star{n > 1 ? "s" : ""}
-                  </option>
-                ))}
+                <option value="All">All ratings</option>
+                <option value="5">5 stars</option>
+                <option value="4">4 stars</option>
+                <option value="3">3 stars</option>
+                <option value="2">2 stars</option>
+                <option value="1">1 star</option>
               </select>
-              <ChevronDown
-                size={15}
-                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
-              />
-            </div>
-            <div className="relative">
+
+              {/* SORT */}
+
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
-                className="w-full appearance-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 pr-9 text-sm text-slate-600 outline-none focus:border-blue-400 lg:w-40"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-400"
               >
                 <option value="Latest">Latest</option>
-                <option value="Highest">Highest Rated</option>
-                <option value="Lowest">Lowest Rated</option>
+                <option value="Highest">Highest rating</option>
+                <option value="Lowest">Lowest rating</option>
               </select>
-              <ChevronDown
-                size={15}
-                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
-              />
             </div>
           </div>
-        </section>
 
-        <div className="mb-4">
-          <h3 className="text-lg font-semibold text-slate-900">
-            Recent Reviews
-          </h3>
-          <p className="mt-1 text-xs text-slate-500">
-            {filtered.length} review{filtered.length !== 1 ? "s" : ""} found
-          </p>
-        </div>
+          {likeError && (
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+              <span>{likeError}</span>
 
-        <section className="space-y-4">
+              <button
+                type="button"
+                onClick={() => setLikeError("")}
+                className="font-semibold"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {/* REVIEW LIST */}
+
           {filtered.length === 0 ? (
-            <div className="rounded-3xl border border-slate-200 bg-white p-12 text-center shadow-sm">
-              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50">
-                <MessageSquare size={30} className="text-blue-500" />
-              </div>
-              <h3 className="mt-5 text-lg font-semibold text-slate-900">
-                {reviews.length === 0 ? "No reviews yet" : "No reviews found"}
+            <div className="rounded-2xl border border-dashed border-slate-200 bg-white py-16 text-center">
+              <MessageSquare className="mx-auto text-slate-300" size={30} />
+
+              <h3 className="mt-3 font-semibold text-slate-800">
+                No reviews found
               </h3>
-              <p className="mt-2 text-sm text-slate-500">
-                {reviews.length === 0
-                  ? "Reviews from freshers will appear here as soon as they are posted."
-                  : "Try changing your search or filter."}
+
+              <p className="mt-1 text-sm text-slate-500">
+                Reviews from your sessions will appear here.
               </p>
             </div>
           ) : (
-            filtered.map((r) => (
-              <article
-                key={r.id}
-                className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition-all duration-200 hover:border-blue-200 hover:shadow-md"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-full border border-blue-100 bg-blue-50 text-blue-600">
-                      <User size={19} />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-semibold text-slate-900">
-                        {r.name}
-                      </h3>
-                      <p className="mt-0.5 text-xs text-slate-500">{r.role}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 text-xs text-slate-400">
-                    <Clock3 size={13} />
-                    {timeAgo(r.createdAt)}
-                  </div>
-                </div>
-
-                <div className="mt-4 flex flex-wrap items-center gap-3">
-                  <div className="flex gap-1">
-                    {[1, 2, 3, 4, 5].map((s) => (
-                      <Star
-                        key={s}
-                        size={16}
-                        fill={s <= r.rating ? "currentColor" : "none"}
-                        className={
-                          s <= r.rating ? "text-yellow-400" : "text-slate-200"
-                        }
-                      />
-                    ))}
-                  </div>
-                  <span className="rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-600">
-                    {r.session}
-                  </span>
-                </div>
-
-                {r.review && (
-                  <p className="mt-4 max-w-4xl text-sm leading-6 text-slate-600">
-                    "{r.review}"
-                  </p>
-                )}
-
-                {r.reply && (
-                  <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4">
-                    <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
-                      <CheckCircle2 size={14} /> Your reply
-                    </p>
-                    <p className="text-sm leading-6 text-slate-600">
-                      {r.reply}
-                    </p>
-                  </div>
-                )}
-
-                {!r.reply && replyId !== r.id && (
-                  <div className="mt-5 border-t border-slate-100 pt-4">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setReplyId(r.id);
-                        setReplyText("");
-                        setReplyError("");
-                      }}
-                      className="flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-600 transition hover:bg-blue-100"
-                    >
-                      <MessageSquare size={14} /> Reply
-                    </button>
-                  </div>
-                )}
-
-                {replyId === r.id && (
-                  <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
-                    <div className="mb-3 flex items-center gap-2">
-                      <MessageSquare size={15} className="text-blue-500" />
-                      <span className="text-xs font-semibold text-slate-700">
-                        Reply to {r.name}
-                      </span>
-                    </div>
-                    <textarea
-                      value={replyText}
-                      onChange={(e) => setReplyText(e.target.value)}
-                      rows={3}
-                      maxLength={1000}
-                      placeholder="Write a professional reply..."
-                      className="w-full resize-none rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                    />
-                    {replyError && (
-                      <p className="mt-2 text-xs text-red-600">{replyError}</p>
-                    )}
-                    <div className="mt-3 flex justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setReplyId(null);
-                          setReplyText("");
-                        }}
-                        className="rounded-lg px-4 py-2 text-xs font-medium text-slate-500 hover:bg-white"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => sendReply(r.id)}
-                        disabled={!replyText.trim() || sending}
-                        className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        {sending && (
-                          <Loader2 size={13} className="animate-spin" />
-                        )}{" "}
-                        Send Reply
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </article>
-            ))
+            <div className="space-y-3">
+              {filtered.map((review) => (
+                <ReviewCard
+                  key={review.id}
+                  review={review}
+                  onLike={toggleReviewLike}
+                  likeLoading={Boolean(likeLoading[review.id])}
+                />
+              ))}
+            </div>
           )}
         </section>
       </main>

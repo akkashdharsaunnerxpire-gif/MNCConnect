@@ -23,10 +23,11 @@ import {
   XCircle,
   ChevronLeft,
   ChevronRight,
+  Headset,
 } from "lucide-react";
 import useLive from "../../hooks/useLive";
 import ReviewModal from "./Reviewmodal";
-import PersonDetailsModal from "../../Commoncomponents/Persondetailsmodal";
+import { EmployeeDetailsModal } from "./FresherBookings";
 import { socket } from "../../utils/socket";
 import {
   JOIN_OPEN_MS,
@@ -48,6 +49,10 @@ import {
 
 const IST = "Asia/Kolkata";
 const CLOSED_REBOOK_MS = 24 * 60 * 60 * 1000;
+
+// Height of your top navbar in px. Check it in DevTools and change if needed.
+// The page fills exactly (screen height - NAV_H), so there is no gap at the bottom.
+const NAV_H = 68;
 
 // Tabs allowed in the URL (?tab=live | cancelled | completed)
 const VALID_TABS = ["live", "cancelled", "completed"];
@@ -692,7 +697,7 @@ const MeetingCard = ({ b, v, me, onReview, onDetails, onRebook }) => {
             onClick={() => onDetails(b)}
             className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
           >
-            <UserRound className="h-3.5 w-3.5" /> Employee details
+            <UserRound className="h-3.5 w-3.5" /> Employee Profile
           </button>
         )}
         {canRebook && (
@@ -798,7 +803,7 @@ const CancelledCard = ({ b, v, me, onDetails, onRebook }) => {
               onClick={() => onDetails(b)}
               className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
             >
-              <UserRound className="h-3.5 w-3.5" /> Details
+              <UserRound className="h-3.5 w-3.5" /> Employee Profile
             </button>
           )}
           {canRebook && (
@@ -919,13 +924,18 @@ const FresherMeetings = () => {
 
   const wasRunningRef = useRef({});
 
-  // Keep scrollbar space reserved so the header never shifts sideways when tabs change
+  // Lock the PAGE scroll on this screen. Only the lists inside scroll.
   useEffect(() => {
-    const root = document.documentElement;
-    const prev = root.style.scrollbarGutter;
-    root.style.scrollbarGutter = "stable";
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtml = html.style.overflow;
+    const prevBody = body.style.overflow;
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    window.scrollTo(0, 0);
     return () => {
-      root.style.scrollbarGutter = prev;
+      html.style.overflow = prevHtml;
+      body.style.overflow = prevBody;
     };
   }, []);
 
@@ -1194,48 +1204,65 @@ const FresherMeetings = () => {
   const reviewBooking = reviewTarget || needsReview;
 
   const tabs = [
-    ["live", showSkeleton ? "Meetings" : `Meetings (${meetings.length})`],
-    [
-      "cancelled",
-      showSkeleton ? "Cancelled" : `Cancelled (${cancelled.length})`,
-    ],
-    [
-      "completed",
-      showSkeleton ? "Completed" : `Completed (${completed.length})`,
-    ],
+    ["live", `Meetings (${meetings.length})`],
+    ["cancelled", `Cancelled (${cancelled.length})`],
+    ["completed", `Completed (${completed.length})`],
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 px-4 py-6 sm:px-6 lg:px-8">
+    <div
+      className="flex min-h-0 flex-col overflow-hidden bg-slate-50 px-4 py-6 sm:px-6 lg:px-8"
+      style={{ height: `calc(100dvh - ${NAV_H}px)` }}
+    >
       {/* Width is ALWAYS max-w-7xl so the header never moves between tabs */}
-      <div className="mx-auto max-w-7xl">
+      <div className="mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col">
         {/* ===== FIXED HEADER (never changes) ===== */}
-        <div className="sticky top-[68px] z-30 mb-2 flex flex-wrap items-end justify-between gap-3 bg-slate-50 pb-4 pt-3 after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-4 after:h-4 after:bg-gradient-to-b after:from-slate-50 after:to-transparent">
-          <div>
-            <p className="text-sm font-semibold text-blue-600">MNCConnect</p>
-            <h1 className="mt-1 text-2xl font-bold text-slate-900 sm:text-3xl">
-              My Meetings
-            </h1>
-            <p className="mt-1 flex items-center gap-2 text-sm text-slate-500">
-              Open rooms, cancelled and completed sessions.
+        <div className="relative z-40 mb-2 flex shrink-0 flex-wrap items-end justify-between gap-3 bg-slate-50 pb-4 pt-3 after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-4 after:h-4 after:bg-gradient-to-b after:from-slate-50 after:to-transparent">
+          <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+            <Headset size={16} className="shrink-0 text-indigo-500" />
+
+            <span className="truncate text-sm font-medium text-slate-700">
+              Meetings
+            </span>
+
+            <span className="mx-1 h-5 w-px bg-slate-200" />
+
+            <div className="flex items-center gap-1.5">
+              <Radio
+                size={12}
+                className={`shrink-0 ${connected ? "text-emerald-500" : "text-amber-500"}`}
+              />
               <span
-                className={`inline-flex items-center gap-1 text-xs font-medium ${connected ? "text-emerald-600" : "text-amber-600"}`}
+                className={`text-xs font-medium ${
+                  connected ? "text-emerald-600" : "text-amber-600"
+                }`}
               >
-                <Radio size={12} /> {connected ? "Live" : "Reconnecting..."}
+                {connected ? "Live" : "Reconnecting..."}
               </span>
-            </p>
+            </div>
           </div>
 
-          <div className="flex gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+          <div className="relative grid grid-cols-3 gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+            {/* One sliding active pill: no remount or page reload on tab clicks. */}
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute bottom-1 left-1 top-1 w-[calc((100%-8px)/3)] rounded-lg bg-blue-600 shadow-sm transition-transform duration-[420ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+              style={{
+                transform: `translateX(${Math.max(0, VALID_TABS.indexOf(tab)) * 100}%)`,
+              }}
+            />
             {tabs.map(([k, l]) => (
               <button
                 key={k}
                 type="button"
-                onClick={() => setTab(k)}
-                className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold transition sm:px-4 ${
+                aria-pressed={tab === k}
+                onClick={() => {
+                  if (tab !== k) setTab(k);
+                }}
+                className={`relative z-10 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold transition-colors duration-300 sm:px-4 motion-reduce:transition-none ${
                   tab === k
-                    ? "bg-blue-600 text-white"
-                    : "text-slate-600 hover:bg-slate-100"
+                    ? "text-white"
+                    : "text-slate-600 hover:bg-slate-100/80"
                 }`}
               >
                 {l}
@@ -1243,11 +1270,26 @@ const FresherMeetings = () => {
             ))}
           </div>
         </div>
+        <style>{`
+          @keyframes meetingsTabEnter {
+            from { opacity: 0; transform: translate3d(0, 8px, 0); }
+            to { opacity: 1; transform: translate3d(0, 0, 0); }
+          }
+          .meetings-tab-enter {
+            animation: meetingsTabEnter 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+            will-change: opacity, transform;
+          }
+          .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+          .no-scrollbar::-webkit-scrollbar { display: none; width: 0; height: 0; }
+          @media (prefers-reduced-motion: reduce) {
+            .meetings-tab-enter { animation: none; }
+          }
+        `}</style>
 
-        {/* ===== ONLY THIS AREA CHANGES BETWEEN TABS ===== */}
-        <div className="min-h-[640px]">
+        {/* ===== ONLY THIS AREA CHANGES BETWEEN TABS (fills all remaining height) ===== */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {error && (
-            <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            <div className="mb-4 shrink-0 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
               {error}{" "}
               <button onClick={reload} className="ml-2 font-semibold underline">
                 Retry
@@ -1255,223 +1297,242 @@ const FresherMeetings = () => {
             </div>
           )}
 
-          {justFinished > 0 && tab === "live" && (
-            <button
-              type="button"
-              onClick={() => {
-                setTab("completed");
-                setJustFinished(0);
-              }}
-              className="mb-4 flex w-full items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-left text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
-            >
-              <span className="flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4" /> Session finished. See it
-                in Completed
-              </span>
-              <ArrowRight className="h-4 w-4" />
-            </button>
-          )}
+          <div
+            key={tab}
+            className="meetings-tab-enter flex min-h-0 flex-1 flex-col overflow-hidden"
+          >
+            {justFinished > 0 && tab === "live" && (
+              <button
+                type="button"
+                onClick={() => {
+                  setTab("completed");
+                  setJustFinished(0);
+                }}
+                className="mb-4 flex w-full shrink-0 items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-left text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
+              >
+                <span className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4" /> Session finished. See it
+                  in Completed
+                </span>
+                <ArrowRight className="h-4 w-4" />
+              </button>
+            )}
 
-          {showSkeleton ? (
-            <div className="h-40 animate-pulse rounded-3xl bg-slate-200" />
-          ) : tab === "live" ? (
-            /* ============== MEETINGS TAB ============== */
-            meetings.length === 0 ? (
-              <div className="flex min-h-[320px] flex-col items-center justify-center rounded-3xl border border-slate-200 bg-white px-6 text-center shadow-sm">
-                <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
-                  <Inbox className="h-8 w-8 text-slate-400" />
+            {showSkeleton ? (
+              <div className="h-40 shrink-0 animate-pulse rounded-3xl bg-slate-200" />
+            ) : tab === "live" ? (
+              /* ============== MEETINGS TAB ============== */
+              meetings.length === 0 ? (
+                <div className="flex min-h-[320px] flex-1 flex-col items-center justify-center rounded-3xl border border-slate-200 bg-white px-6 text-center shadow-sm">
+                  <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
+                    <Inbox className="h-8 w-8 text-slate-400" />
+                  </div>
+                  <h2 className="text-xl font-bold text-slate-800">
+                    No meetings open right now
+                  </h2>
+                  <p className="mt-2 max-w-md text-sm text-slate-500">
+                    Your session shows here 20 minutes before it starts.
+                  </p>
+                  <Link
+                    to="/Home/my-bookings"
+                    className="mt-6 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700"
+                  >
+                    Go to My Bookings
+                  </Link>
                 </div>
-                <h2 className="text-xl font-bold text-slate-800">
-                  No meetings open right now
-                </h2>
-                <p className="mt-2 max-w-md text-sm text-slate-500">
-                  Your session shows here 20 minutes before it starts.
-                </p>
-                <Link
-                  to="/Home/my-bookings"
-                  className="mt-6 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700"
-                >
-                  Go to My Bookings
-                </Link>
-              </div>
-            ) : (
-              <div className="space-y-5">
-                {meetings.map((b) => {
-                  const left = leftOf(b);
-                  const live = left !== null && left > 0;
-                  const warn = live && left <= FINAL_WARNING_MS;
-                  const startMs = new Date(b.startsAt).getTime();
-                  const endMs = new Date(b.endsAt).getTime();
-                  const range = `${fmtTimeIST(startMs)} → ${fmtTimeIST(endMs)}`;
+              ) : (
+                <div className="no-scrollbar min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain pb-4">
+                  {meetings.map((b) => {
+                    const left = leftOf(b);
+                    const live = left !== null && left > 0;
+                    const warn = live && left <= FINAL_WARNING_MS;
+                    const startMs = new Date(b.startsAt).getTime();
+                    const endMs = new Date(b.endsAt).getTime();
+                    const range = `${fmtTimeIST(startMs)} → ${fmtTimeIST(endMs)}`;
 
-                  return (
-                    <div
-                      key={b.requestGroupId}
-                      className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm"
-                    >
-                      <div className="flex flex-col gap-5 p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="min-w-0">
-                          <div className="mb-2 flex flex-wrap items-center gap-2">
-                            <h2 className="truncate text-lg font-bold text-slate-900">
-                              {b.sessionType || "Mentoring session"}
-                            </h2>
-                            <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">
-                              {live ? "In progress" : "Meeting open"}
-                            </span>
-                            {b.mode === "group" ? (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-indigo-600 px-3 py-1 text-xs font-semibold text-white">
-                                <Users className="h-3.5 w-3.5" /> Group session
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-700">
-                                <Video className="h-3.5 w-3.5" /> 1:1 Session
-                              </span>
-                            )}
-                          </div>
-                          <div className="grid gap-2 text-sm text-slate-500 sm:grid-cols-2">
-                            <span className="flex items-center gap-2">
-                              <Building2 className="h-4 w-4 text-slate-400" />
-                              {b.companyName}
-                            </span>
-                            <span className="flex items-center gap-2">
-                              <UserRound className="h-4 w-4 text-slate-400" />
-                              {b.mentor?.name || "Employee"}
-                            </span>
-                            <span className="flex items-center gap-2">
-                              <CalendarDays className="h-4 w-4 text-slate-400" />
-                              {b.date}
-                            </span>
-                            <span className="flex items-center gap-2">
-                              <Clock3 className="h-4 w-4 text-slate-400" />
-                              {range} · {durationLabel(b.durationMinutes)}
-                            </span>
-                          </div>
-                        </div>
-
-                        <Link
-                          to={`/Home/meeting/${b.requestGroupId}`}
-                          className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-green-600 px-6 py-3 text-sm font-semibold text-white hover:bg-green-700 lg:w-56"
-                        >
-                          <Video className="h-4 w-4" />
-                          {live ? "Rejoin meeting" : "Join meeting"}
-                          <ArrowRight className="h-4 w-4" />
-                        </Link>
-                      </div>
-
-                      <GroupInfo b={b} me={userId} />
-
+                    return (
                       <div
-                        className={`mx-5 mb-5 flex items-center justify-between gap-4 rounded-xl border p-3 sm:mx-6 ${
-                          live
-                            ? warn
-                              ? "border-amber-200 bg-amber-50"
-                              : "border-emerald-200 bg-emerald-50"
-                            : "border-blue-200 bg-blue-50"
-                        }`}
+                        key={b.requestGroupId}
+                        className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm"
                       >
-                        <div>
-                          <p
-                            className={`text-xs font-semibold ${live ? (warn ? "text-amber-800" : "text-emerald-800") : "text-blue-800"}`}
-                          >
-                            {live
-                              ? warn
-                                ? "Final 5 minutes"
-                                : "Session in progress"
-                              : "Session starts soon"}
-                          </p>
-                          <p className="text-[11px] text-slate-500">
-                            {live
-                              ? `Time left · ${range}`
-                              : `Starts at ${fmtTimeIST(startMs)}`}
-                          </p>
+                        <div className="flex flex-col gap-5 p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between">
+                          <div className="min-w-0">
+                            <div className="mb-2 flex flex-wrap items-center gap-2">
+                              <h2 className="truncate text-lg font-bold text-slate-900">
+                                {b.sessionType || "Mentoring session"}
+                              </h2>
+                              <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">
+                                {live ? "In progress" : "Meeting open"}
+                              </span>
+                              {b.mode === "group" ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-indigo-600 px-3 py-1 text-xs font-semibold text-white">
+                                  <Users className="h-3.5 w-3.5" /> Group session
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-700">
+                                  <Video className="h-3.5 w-3.5" /> 1:1 Session
+                                </span>
+                              )}
+                            </div>
+                            <div className="grid gap-2 text-sm text-slate-500 sm:grid-cols-2">
+                              <span className="flex items-center gap-2">
+                                <Building2 className="h-4 w-4 text-slate-400" />
+                                {b.companyName}
+                              </span>
+                              <span className="flex items-center gap-2">
+                                <UserRound className="h-4 w-4 text-slate-400" />
+                                {b.mentor?.name || "Employee"}
+                              </span>
+                              <span className="flex items-center gap-2">
+                                <CalendarDays className="h-4 w-4 text-slate-400" />
+                                {b.date}
+                              </span>
+                              <span className="flex items-center gap-2">
+                                <Clock3 className="h-4 w-4 text-slate-400" />
+                                {range} · {durationLabel(b.durationMinutes)}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex shrink-0 flex-col gap-2 sm:flex-row lg:w-auto">
+                            {b.mentor?.id && (
+                              <button
+                                type="button"
+                                onClick={() => setDetailsFor(b)}
+                                className="flex items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-5 py-3 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
+                              >
+                                <UserRound className="h-4 w-4" />
+                                Employee Profile
+                              </button>
+                            )}
+
+                            <Link
+                              to={`/Home/meeting/${b.requestGroupId}`}
+                              className="flex items-center justify-center gap-2 rounded-xl bg-green-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-green-700 lg:w-56"
+                            >
+                              <Video className="h-4 w-4" />
+                              {live ? "Rejoin meeting" : "Join meeting"}
+                              <ArrowRight className="h-4 w-4" />
+                            </Link>
+                          </div>
                         </div>
+
+                        <GroupInfo b={b} me={userId} />
+
                         <div
-                          className={`rounded-lg px-3 py-1.5 font-mono text-xl font-bold tabular-nums ${
+                          className={`mx-5 mb-5 flex items-center justify-between gap-4 rounded-xl border p-3 sm:mx-6 ${
                             live
                               ? warn
-                                ? "bg-amber-200 text-amber-900"
-                                : "bg-emerald-200 text-emerald-900"
-                              : "bg-blue-200 text-blue-900"
+                                ? "border-amber-200 bg-amber-50"
+                                : "border-emerald-200 bg-emerald-50"
+                              : "border-blue-200 bg-blue-50"
                           }`}
                         >
-                          {live
-                            ? fmtClock(left)
-                            : fmtClock(Math.max(0, startMs - now))}
+                          <div>
+                            <p
+                              className={`text-xs font-semibold ${live ? (warn ? "text-amber-800" : "text-emerald-800") : "text-blue-800"}`}
+                            >
+                              {live
+                                ? warn
+                                  ? "Final 5 minutes"
+                                  : "Session in progress"
+                                : "Session starts soon"}
+                            </p>
+                            <p className="text-[11px] text-slate-500">
+                              {live
+                                ? `Time left · ${range}`
+                                : `Starts at ${fmtTimeIST(startMs)}`}
+                            </p>
+                          </div>
+                          <div
+                            className={`rounded-lg px-3 py-1.5 font-mono text-xl font-bold tabular-nums ${
+                              live
+                                ? warn
+                                  ? "bg-amber-200 text-amber-900"
+                                  : "bg-emerald-200 text-emerald-900"
+                                : "bg-blue-200 text-blue-900"
+                            }`}
+                          >
+                            {live
+                              ? fmtClock(left)
+                              : fmtClock(Math.max(0, startMs - now))}
+                          </div>
                         </div>
                       </div>
+                    );
+                  })}
+                </div>
+              )
+            ) : tab === "cancelled" ? (
+              /* ============== CANCELLED TAB (all missed / cancelled / expired / disputed) ============== */
+              cancelled.length === 0 ? (
+                <div className="flex min-h-[320px] flex-1 flex-col items-center justify-center rounded-3xl border border-slate-200 bg-white px-6 text-center shadow-sm">
+                  <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
+                    <Inbox className="h-8 w-8 text-slate-400" />
+                  </div>
+                  <h2 className="text-xl font-bold text-slate-800">
+                    No cancelled meetings
+                  </h2>
+                  <p className="mt-2 max-w-md text-sm text-slate-500">
+                    Missed, cancelled, expired or reported meetings show here
+                    with their refund status.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex min-h-0 flex-1 flex-col">
+                  {refundPendingCount > 0 ? (
+                    <div className="mb-4 flex shrink-0 items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-medium text-amber-800">
+                      <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
+                      Refund is being processed for {refundPendingCount}{" "}
+                      {refundPendingCount === 1 ? "meeting" : "meetings"}.
                     </div>
-                  );
-                })}
-              </div>
-            )
-          ) : tab === "cancelled" ? (
-            /* ============== CANCELLED TAB (all missed / cancelled / expired / disputed) ============== */
-            cancelled.length === 0 ? (
-              <div className="flex min-h-[320px] flex-col items-center justify-center rounded-3xl border border-slate-200 bg-white px-6 text-center shadow-sm">
-                <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
-                  <Inbox className="h-8 w-8 text-slate-400" />
-                </div>
-                <h2 className="text-xl font-bold text-slate-800">
-                  No cancelled meetings
-                </h2>
-                <p className="mt-2 max-w-md text-sm text-slate-500">
-                  Missed, cancelled, expired or reported meetings show here with
-                  their refund status.
-                </p>
-              </div>
-            ) : (
-              <div>
-                {refundPendingCount > 0 ? (
-                  <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-medium text-amber-800">
-                    <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
-                    Refund is being processed for {refundPendingCount}{" "}
-                    {refundPendingCount === 1 ? "meeting" : "meetings"}.
-                  </div>
-                ) : (
-                  <div className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-medium text-emerald-800">
-                    <CheckCircle2 className="h-4 w-4 shrink-0" />
-                    All refunds are done. The money is in your wallet.
-                  </div>
-                )}
-                {/* ROW FORMAT: 2 rectangle boxes per row */}
-                <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-                  {cancelled.map(({ b, v }) => (
-                    <CancelledCard
-                      key={b.requestGroupId}
-                      b={b}
-                      v={v}
-                      me={userId}
-                      onDetails={setDetailsFor}
-                      onRebook={bookAgain}
-                    />
-                  ))}
-                </div>
-              </div>
-            )
-          ) : (
-            /* ============== COMPLETED TAB (CALENDAR) ============== */
-            <div className="w-full rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-8">
-              <div className="mb-8 text-center">
-                <div className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full bg-blue-100">
-                  <CalendarDays className="h-6 w-6 text-blue-600" />
-                </div>
-                <h2 className="text-xl font-bold text-slate-800">
-                  Completed Sessions Calendar
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Select a highlighted date to view completed meetings.
-                </p>
-              </div>
+                  ) : (
+                    <div className="mb-4 flex shrink-0 items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-medium text-emerald-800">
+                      <CheckCircle2 className="h-4 w-4 shrink-0" />
+                      All refunds are done. The money is in your wallet.
+                    </div>
+                  )}
 
-              <div className="mx-auto w-full max-w-2xl rounded-3xl border border-slate-100 bg-gradient-to-br from-slate-50 to-blue-50/40 p-4 shadow-inner sm:p-8">
-                <PastCalendar
-                  meetingsByDate={meetingsByDate}
-                  selectedKey={selectedKey}
-                  onSelect={handleDateSelect}
-                />
+                  {/* ROW FORMAT: 2 boxes per row. Takes ALL remaining height and scrolls inside. */}
+                  <div className="no-scrollbar grid min-h-0 flex-1 grid-cols-1 content-start gap-5 overflow-y-auto overscroll-contain pb-4 md:grid-cols-2">
+                    {cancelled.map(({ b, v }) => (
+                      <CancelledCard
+                        key={b.requestGroupId}
+                        b={b}
+                        v={v}
+                        me={userId}
+                        onDetails={setDetailsFor}
+                        onRebook={bookAgain}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )
+            ) : (
+              /* ============== COMPLETED TAB (CALENDAR) ============== */
+              <div className="no-scrollbar min-h-0 w-full flex-1 overflow-y-auto overscroll-contain rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-8">
+                <div className="mb-8 text-center">
+                  <div className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full bg-blue-100">
+                    <CalendarDays className="h-6 w-6 text-blue-600" />
+                  </div>
+                  <h2 className="text-xl font-bold text-slate-800">
+                    Completed Sessions Calendar
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Select a highlighted date to view completed meetings.
+                  </p>
+                </div>
+
+                <div className="mx-auto w-full max-w-2xl rounded-3xl border border-slate-100 bg-gradient-to-br from-slate-50 to-blue-50/40 p-4 shadow-inner sm:p-8">
+                  <PastCalendar
+                    meetingsByDate={meetingsByDate}
+                    selectedKey={selectedKey}
+                    onSelect={handleDateSelect}
+                  />
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 
@@ -1499,9 +1560,9 @@ const FresherMeetings = () => {
       )}
 
       {detailsFor && (
-        <PersonDetailsModal
+        <EmployeeDetailsModal
           key={detailsFor.requestGroupId}
-          title="MncEmployee details"
+          title="Employee Profile"
           fetcher={() =>
             api(`${ENDPOINTS.booking(detailsFor.requestGroupId)}/counterpart`)
           }

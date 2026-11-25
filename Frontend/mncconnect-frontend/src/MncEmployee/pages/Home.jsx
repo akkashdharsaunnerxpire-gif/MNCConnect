@@ -31,6 +31,7 @@ import {
   MessageSquare,
   ShieldCheck,
   AlertTriangle,
+  UserPlus,
 } from "lucide-react";
 import { socket } from "../../utils/socket";
 import useLive from "../../hooks/useLive";
@@ -50,13 +51,39 @@ const CLAIM_WINDOW_SECONDS = 120;
 const CLAIM_WINDOW_MS = CLAIM_WINDOW_SECONDS * 1000;
 const JOIN_READY_MS = 2 * 60 * 1000;
 
+// Background of the "next session" banner
+const NEXT_SESSION_BG = "#85dbb0e0";
+
 // ============ CONSTANTS ============
 
 const mentorShare = (amount) => Math.round(amount * (1 - PLATFORM_FEE));
 
+// always 2 decimals: ₹187.50 (not ₹187.5)
+const fmtEarn = (n) =>
+  `₹${(Number(n) || 0).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
 // group or single? (backend sends type "Group Video Call" / "Video Call" and mode "group" / "single")
 const isGroupReq = (r) =>
   /group/i.test(String(r?.type || "")) || r?.mode === "group";
+
+// One request = one key. Group requests can reach a mentor with different ids,
+// so requestGroupId (when present) is the real identity.
+const reqKey = (r) => String(r?.requestGroupId || r?.id || "");
+
+// Booking statuses that mean "this session is no longer upcoming"
+const isFinishedStatus = (status) =>
+  [
+    "completed",
+    "awaiting_confirmation",
+    "canceled",
+    "cancelled",
+    "missed",
+    "expired",
+    "disputed",
+  ].includes(String(status || "").toLowerCase());
 
 const countdown = (ms) => {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -100,6 +127,33 @@ const playChime = () => {
     setTimeout(() => ctx.close().catch(() => {}), 600);
   } catch {
     /* sound is optional */
+  }
+};
+
+const vibrate = () => {
+  try {
+    navigator.vibrate?.([200, 100, 200, 100, 400]);
+  } catch {
+    /* not supported */
+  }
+};
+
+// system notification, only when the tab is in the background
+const showSystemNotification = (req) => {
+  try {
+    if (typeof Notification === "undefined") return;
+    if (Notification.permission !== "granted" || !document.hidden) return;
+    const n = new Notification("New session request", {
+      body: `${req.name || "A fresher"} wants a session. Accept within 2 minutes!`,
+      tag: `req-${reqKey(req)}`,
+      requireInteraction: true,
+    });
+    n.onclick = () => {
+      window.focus();
+      n.close();
+    };
+  } catch {
+    /* optional */
   }
 };
 
@@ -157,15 +211,23 @@ const Home = () => {
   // becomes true after the FIRST sessions/wallet response
   const [loadedOnce, setLoadedOnce] = useState(false);
 
+  // sessions that finished / were cancelled: hidden from Upcoming immediately
+  const [doneIds, setDoneIds] = useState(() => new Set());
+
   // Confirm modal state
   const [confirmRequest, setConfirmRequest] = useState(null);
 
   // "Scanning" pulse: briefly true right after a skip to show the transition
   const [scanningBoost, setScanningBoost] = useState(false);
 
+  // banner shown at the top when a new request arrives
+  const [alertReq, setAlertReq] = useState(null);
+
   const toastTimer = useRef(null);
   const soundRef = useRef(soundOn);
   const seenIds = useRef(new Set()); // chime only for requests not seen before
+  // requests that were accepted / skipped / taken / expired: never show again
+  const dismissedKeys = useRef(new Set());
   const scanBoostTimer = useRef(null);
 
   /* ---------- first-time login: blur the page + point at the speaker ---------- */
@@ -231,6 +293,11 @@ const Home = () => {
     reload: reloadWallet,
   } = useMentorSessions();
 
+  const reloadRef = useRef(reloadWallet);
+  useEffect(() => {
+    reloadRef.current = reloadWallet;
+  }, [reloadWallet]);
+
   const { data: notifData, loading: notifLoading } = useLive({
     fetcher: () => api(`${ENDPOINTS.notifications}?limit=5`),
     events: [EVENTS.notification],
@@ -258,21 +325,67 @@ const Home = () => {
     return { avg: avg.toFixed(1), count: list.length };
   }, [reviewData]);
 
-  const activity = (notifData?.notifications || []).slice(0, 4);
-  const unreadActivity = activity.filter((n) => !n.read).length;
+  /* ---------- Activity = live requests (while still open) + notifications ----------
+     - a new request shows up here the moment it arrives
+     - once it is accepted / skipped / taken / expired it leaves `requests`,
+       so it disappears from Activity too
+     - server notifications about requests are hidden (the live item above
+       replaces them, and old "request accepted" items must not linger)
+  */
+  const requestActivity = useMemo(
+    () =>
+      requests.map((r) => ({
+        id: `req-${reqKey(r)}`,
+        title: "New session request",
+        message: `${r.name || "A fresher"} wants a ${getDurationMinutes(r.duration)} min ${
+          isGroupReq(r) ? "group" : "1:1"
+        } session${r.date ? ` · ${r.date}` : ""}${r.time ? ` at ${r.time}` : ""}`,
+        createdAt: new Date(r.receivedAt).toISOString(),
+        read: false,
+        isRequest: true,
+      })),
+    [requests],
+  );
+
+  const serverActivity = useMemo(
+    () =>
+      (notifData?.notifications || []).filter(
+        (n) => !/request/i.test(`${n.type || ""} ${n.title || ""}`),
+      ),
+    [notifData],
+  );
+
+  const activity = useMemo(
+    () => [...requestActivity, ...serverActivity].slice(0, 5),
+    [requestActivity, serverActivity],
+  );
+  const unreadActivity =
+    requestActivity.length + serverActivity.filter((n) => !n.read).length;
 
   const serverUpcoming = useMemo(
     () => sessions.filter((s) => s.status === "Upcoming"),
     [sessions],
   );
 
-  const upcomingSessions = useMemo(
-    () =>
-      serverUpcoming
-        .filter((s) => !s.endsAt || s.endsAt > now)
-        .sort((a, b) => (a.startsAt || 0) - (b.startsAt || 0)),
-    [serverUpcoming, now],
-  );
+  // Upcoming = still "Upcoming" on the server, not over, not completed/cancelled
+  const upcomingSessions = useMemo(() => {
+    const map = new Map();
+    serverUpcoming.forEach((s) => {
+      const key = String(s.id);
+      if (doneIds.has(key)) return;
+      if (s.endsAt && s.endsAt <= now) return;
+      const prev = map.get(key);
+      if (!prev) {
+        map.set(key, { ...s });
+      } else {
+        // same group session listed once per fresher -> count it once
+        prev.earning = (Number(prev.earning) || 0) + (Number(s.earning) || 0);
+      }
+    });
+    return [...map.values()].sort(
+      (a, b) => (a.startsAt || 0) - (b.startsAt || 0),
+    );
+  }, [serverUpcoming, doneIds, now]);
   const nextSession = upcomingSessions[0];
 
   const showToast = useCallback((type, message) => {
@@ -287,13 +400,53 @@ const Home = () => {
   useEffect(() => () => clearTimeout(toastTimer.current), []);
   useEffect(() => () => clearTimeout(scanBoostTimer.current), []);
 
+  /* tab title: "(2) Title" normally, flashes "🔔 New request!" in a background tab */
   useEffect(() => {
-    const base = document.title.replace(/^\(\d+\)\s*/, "");
-    document.title = requests.length ? `(${requests.length}) ${base}` : base;
+    const base = document.title.replace(/^(\(\d+\)|🔔 New request!)\s*/, "");
+    if (!requests.length) {
+      document.title = base;
+      return undefined;
+    }
+    let on = false;
+    const tick = () => {
+      on = !on;
+      document.title =
+        on && document.hidden
+          ? `🔔 New request! ${base}`
+          : `(${requests.length}) ${base}`;
+    };
+    tick();
+    const id = setInterval(tick, 1000);
     return () => {
+      clearInterval(id);
       document.title = base;
     };
   }, [requests.length]);
+
+  // banner hides itself after 8 seconds
+  useEffect(() => {
+    if (!alertReq) return undefined;
+    const t = setTimeout(() => setAlertReq(null), 8000);
+    return () => clearTimeout(t);
+  }, [alertReq]);
+
+  // still-unanswered request + tab in background: repeat the chime every 6s
+  useEffect(() => {
+    if (!requests.length) return undefined;
+    const id = setInterval(() => {
+      if (document.hidden && soundRef.current) playChime();
+    }, 6000);
+    return () => clearInterval(id);
+  }, [requests.length]);
+
+  // ask notification permission on the first click anywhere (browsers need a gesture)
+  useEffect(() => {
+    if (typeof Notification === "undefined") return undefined;
+    if (Notification.permission !== "default") return undefined;
+    const ask = () => Notification.requestPermission().catch(() => {});
+    window.addEventListener("click", ask, { once: true });
+    return () => window.removeEventListener("click", ask);
+  }, []);
 
   /* one clock for the whole page; drops requests whose claim window is over */
   useEffect(() => {
@@ -301,11 +454,42 @@ const Home = () => {
       const ts = Date.now();
       setNow(ts);
       setRequests((prev) => {
-        const next = prev.filter((r) => ts - r.receivedAt < CLAIM_WINDOW_MS);
+        const next = prev.filter((r) => {
+          const alive = ts - r.receivedAt < CLAIM_WINDOW_MS;
+          if (!alive) dismissedKeys.current.add(reqKey(r));
+          return alive;
+        });
         return next.length === prev.length ? prev : next;
       });
     }, 1000);
     return () => clearInterval(t);
+  }, []);
+
+  /* ---------- hide finished sessions from Upcoming as soon as they end ---------- */
+  useEffect(() => {
+    const markDone = (p) => {
+      const id = p?.requestGroupId || p?.bookingId || p?.id;
+      if (!id) return;
+      if (!isFinishedStatus(p?.status)) return;
+      setDoneIds((prev) => {
+        const key = String(id);
+        if (prev.has(key)) return prev;
+        const next = new Set(prev);
+        next.add(key);
+        return next;
+      });
+      reloadRef.current?.();
+    };
+
+    const evt = EVENTS?.booking || "booking:updated";
+    socket.on(evt, markDone);
+    socket.on("meeting:state", markDone);
+    socket.on("meeting:timer", markDone);
+    return () => {
+      socket.off(evt, markDone);
+      socket.off("meeting:state", markDone);
+      socket.off("meeting:timer", markDone);
+    };
   }, []);
 
   /* ---------- live request feed ---------- */
@@ -321,28 +505,37 @@ const Home = () => {
         type: incoming?.type ?? base?.type,
         mode: incoming?.mode ?? base?.mode,
         maxMembers: incoming?.maxMembers ?? base?.maxMembers,
+        requestGroupId: incoming?.requestGroupId ?? base?.requestGroupId,
         receivedAt: Date.now(),
       };
       if (!req.id) return;
 
-      if (!seenIds.current.has(String(req.id))) {
-        seenIds.current.add(String(req.id));
+      const key = reqKey(req);
+
+      // already accepted / skipped / taken / expired -> never show again
+      if (dismissedKeys.current.has(key)) return;
+
+      if (!seenIds.current.has(key)) {
+        seenIds.current.add(key);
         if (soundRef.current) playChime();
+        vibrate();
+        showSystemNotification(req);
+        setAlertReq(req);
       }
 
+      // same request again (server re-emit, reconnect, group duplicate) -> ignore
       setRequests((prev) =>
-        prev.some((p) => String(p.id) === String(req.id))
-          ? prev
-          : [req, ...prev],
+        prev.some((p) => reqKey(p) === key) ? prev : [req, ...prev],
       );
     };
 
     const onTaken = ({ id, requestGroupId } = {}) => {
-      const key = String(id ?? requestGroupId ?? "");
-      if (!key) return;
+      const keys = [id, requestGroupId].filter(Boolean).map(String);
+      if (!keys.length) return;
+      keys.forEach((k) => dismissedKeys.current.add(k));
       setRequests((prev) =>
         prev.filter(
-          (p) => String(p.id) !== key && String(p.requestGroupId) !== key,
+          (p) => !keys.includes(String(p.id)) && !keys.includes(reqKey(p)),
         ),
       );
     };
@@ -388,6 +581,7 @@ const Home = () => {
     async (req) => {
       if (claimingId) return;
 
+      const key = reqKey(req);
       setClaimingId(req.id);
       setConfirmRequest(null);
 
@@ -395,7 +589,8 @@ const Home = () => {
         const result = await respondToSessionRequest(req, "accepted");
 
         if (result.taken) {
-          setRequests((p) => p.filter((x) => String(x.id) !== String(req.id)));
+          dismissedKeys.current.add(key);
+          setRequests((p) => p.filter((x) => reqKey(x) !== key));
           showToast("error", "Another mentor accepted this request first.");
           return;
         }
@@ -406,7 +601,9 @@ const Home = () => {
 
         const session = { ...req, status: "Upcoming" };
 
-        setRequests((p) => p.filter((x) => String(x.id) !== String(req.id)));
+        // accepted -> gone from Live requests AND from Activity
+        dismissedKeys.current.add(key);
+        setRequests((p) => p.filter((x) => reqKey(x) !== key));
         reloadWallet();
         showToast("success", "Session accepted! Check Sessions page.");
         navigate("/mentor/sessions", { state: { acceptedSession: session } });
@@ -426,20 +623,15 @@ const Home = () => {
 
       // Find the full request object so we can send it to the backend
       const target = requests.find(
-        (r) =>
-          String(r.id) === String(id) ||
-          String(r.requestGroupId) === String(id),
+        (r) => String(r.id) === String(id) || reqKey(r) === String(id),
       );
       if (!target) return;
 
+      const key = reqKey(target);
+
       // 1. Remove from UI instantly (optimistic)
-      setRequests((prev) =>
-        prev.filter(
-          (r) =>
-            String(r.id) !== String(id) &&
-            String(r.requestGroupId) !== String(id),
-        ),
-      );
+      dismissedKeys.current.add(key);
+      setRequests((prev) => prev.filter((r) => reqKey(r) !== key));
 
       // 2. Show "restarting scan" feedback
       setScanningBoost(true);
@@ -454,10 +646,9 @@ const Home = () => {
       } catch (e) {
         console.error("Skip (reject) failed:", e);
         // Put the request back if the call failed: user can retry
+        dismissedKeys.current.delete(key);
         setRequests((prev) =>
-          prev.some((r) => String(r.id) === String(target.id))
-            ? prev
-            : [target, ...prev],
+          prev.some((r) => reqKey(r) === key) ? prev : [target, ...prev],
         );
         showToast("error", "Could not skip. Please try again.");
       }
@@ -469,6 +660,16 @@ const Home = () => {
 
   // Stop voice playback when the Home page unmounts.
   useEffect(() => () => stopSpeaking(), []);
+
+  /* warm up the speech engine, so the first mic click speaks instantly */
+  useEffect(() => {
+    const synth = window.speechSynthesis;
+    if (!synth) return undefined;
+    synth.getVoices();
+    const onVoices = () => synth.getVoices();
+    synth.addEventListener?.("voiceschanged", onVoices);
+    return () => synth.removeEventListener?.("voiceschanged", onVoices);
+  }, []);
 
   /* ---------- guided tour: home sections first, then the whole sidebar ---------- */
   const buildTour = () => {
@@ -590,12 +791,52 @@ const Home = () => {
           75%  { opacity: 1; transform: scale(1); }
           100% { opacity: 0; transform: scale(.6); }
         }
+        @keyframes mc-ripple {
+          0%   { transform: scale(.35); opacity: .55; }
+          100% { transform: scale(1);   opacity: 0; }
+        }
+        .mc-ripple { animation: mc-ripple 3s ease-out infinite; }
         .mc-fade-up { animation: mc-fade-up .5s cubic-bezier(.2,.7,.2,1) both; }
         .mc-slide-in { animation: mc-slide-in .45s cubic-bezier(.2,.7,.2,1) both; }
         .mc-modal-in { animation: mc-modal-in .28s cubic-bezier(.2,.7,.2,1) both; }
         .mc-blip { animation: mc-blip 2.4s ease-in-out both; }
-        @media (prefers-reduced-motion: reduce) { .mc-fade-up, .mc-slide-in, .mc-modal-in, .mc-blip { animation: none; } }
+        @keyframes mc-drop { from { opacity: 0; transform: translateY(-24px) scale(.96); } to { opacity: 1; transform: none; } }
+        @keyframes mc-flash { 0%,100% { box-shadow: 0 0 0 0 rgba(37,99,235,.55); } 50% { box-shadow: 0 0 0 10px rgba(37,99,235,0); } }
+        .mc-drop { animation: mc-drop .35s cubic-bezier(.2,.7,.2,1) both; }
+        .mc-flash { animation: mc-slide-in .45s cubic-bezier(.2,.7,.2,1) both, mc-flash 1.2s ease-out 3; }
+        @media (prefers-reduced-motion: reduce) { .mc-fade-up, .mc-slide-in, .mc-modal-in, .mc-blip, .mc-ripple, .mc-drop, .mc-flash { animation: none; } }
       `}</style>
+
+      {/* NEW REQUEST BANNER */}
+      {alertReq &&
+        requests.some((r) => reqKey(r) === reqKey(alertReq)) && (
+          <div className="pointer-events-none fixed inset-x-0 top-4 z-[90] flex justify-center px-3">
+            <button
+              type="button"
+              onClick={() => {
+                setAlertReq(null);
+                document
+                  .querySelector('[data-tour="requests"]')
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+              className="mc-drop pointer-events-auto flex w-full max-w-md items-center gap-3 rounded-2xl bg-blue-600 px-4 py-3 text-left text-white shadow-2xl ring-4 ring-blue-300/60"
+            >
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/20">
+                <Bell size={18} className="motion-safe:animate-bounce" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold">
+                  New session request
+                </span>
+                <span className="block truncate text-xs text-blue-100">
+                  {alertReq.name || "A fresher"} ·{" "}
+                  {getDurationMinutes(alertReq.duration)} min · tap to review
+                </span>
+              </span>
+              <ArrowRight size={16} />
+            </button>
+          </div>
+        )}
 
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         {/* header */}
@@ -698,33 +939,32 @@ const Home = () => {
           <Link
             to="/mentor/sessions"
             data-tour="next"
-            className={`mc-fade-up group mt-6 flex items-center justify-between gap-4 rounded-2xl border px-5 py-4 transition hover:-translate-y-0.5 hover:shadow-md ${
-              msToNext <= JOIN_READY_MS
-                ? "border-green-200 bg-green-50"
-                : "border-blue-100 bg-blue-50/60"
-            }`}
-            style={{ animationDelay: "100ms" }}
+            className="mc-fade-up group mt-6 flex items-center justify-between gap-4 rounded-2xl border border-emerald-300/60 px-5 py-4 transition hover:-translate-y-0.5 hover:shadow-md"
+            style={{
+              animationDelay: "100ms",
+              backgroundColor: NEXT_SESSION_BG,
+            }}
           >
             <div className="flex min-w-0 items-center gap-3">
               <Avatar name={nextSession.name} src={nextSession.avatar} />
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold">
+                <p className="truncate text-sm font-semibold text-slate-900">
                   {msToNext <= JOIN_READY_MS
                     ? "Your session is ready to join"
                     : `Next session with ${nextSession.name}`}
                 </p>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-700">
                   {nextSession.date} at {nextSession.time}
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <span className="font-mono text-sm font-semibold tabular-nums text-slate-700">
+              <span className="font-mono text-sm font-semibold tabular-nums text-slate-800">
                 {msToNext > 0 ? `in ${countdown(msToNext)}` : "Live now"}
               </span>
               <ArrowRight
                 size={16}
-                className="text-slate-400 transition group-hover:translate-x-1 group-hover:text-slate-700"
+                className="text-slate-600 transition group-hover:translate-x-1 group-hover:text-slate-900"
               />
             </div>
           </Link>
@@ -796,7 +1036,7 @@ const Home = () => {
 
         {/* requests + side panel */}
         <div className="mt-8 grid gap-8 lg:grid-cols-[1.5fr_1fr]">
-          <section data-tour="requests" aria-live="polite">
+          <section data-tour="requests" aria-live="polite" className="min-w-0">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="flex items-center gap-2 text-lg font-semibold">
                 Live requests
@@ -820,7 +1060,7 @@ const Home = () => {
               <div className="space-y-4">
                 {requests.map((r) => (
                   <RequestCard
-                    key={r.id}
+                    key={reqKey(r)}
                     req={r}
                     now={now}
                     busy={claimingId === r.id}
@@ -848,7 +1088,7 @@ const Home = () => {
                 {
                   id: "activity",
                   label: "Activity",
-                  count: notifInitial ? 0 : unreadActivity,
+                  count: notifInitial ? requestActivity.length : unreadActivity,
                 },
               ].map((t) => (
                 <button
@@ -866,13 +1106,13 @@ const Home = () => {
                   {t.label}
                   {t.count > 0 && (
                     <span
-                      className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
+                      className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold leading-none tabular-nums ${
                         tab === t.id
                           ? "bg-blue-600 text-white"
                           : "bg-slate-200 text-slate-600"
                       }`}
                     >
-                      {t.count}
+                      {t.count > 99 ? "99+" : t.count}
                     </span>
                   )}
                 </button>
@@ -909,20 +1149,23 @@ const Home = () => {
                                 <p className="mt-0.5 text-xs text-slate-500">
                                   {s.date} at {s.time}
                                 </p>
-                                {ms !== null && (
-                                  <span
-                                    className={`mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${soon ? "bg-green-50 text-green-700" : "bg-slate-100 text-slate-500"}`}
-                                  >
-                                    <Clock3 size={11} />
-                                    {ms > 0
-                                      ? `in ${countdown(ms)}`
-                                      : "Live now"}
+                                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                                  {ms !== null && (
+                                    <span
+                                      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${soon ? "bg-green-50 text-green-700" : "bg-slate-100 text-slate-500"}`}
+                                    >
+                                      <Clock3 size={11} />
+                                      {ms > 0
+                                        ? `in ${countdown(ms)}`
+                                        : "Live now"}
+                                    </span>
+                                  )}
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                                    Earn:{" "}
+                                    {fmtEarn(s.earning || mentorShare(s.amount))}
                                   </span>
-                                )}
+                                </div>
                               </div>
-                              <span className="text-sm font-semibold text-slate-700">
-                                {inr(s.earning || mentorShare(s.amount))}
-                              </span>
                             </Link>
                           </li>
                         );
@@ -936,13 +1179,13 @@ const Home = () => {
                     </Link>
                   </>
                 )
-              ) : notifInitial ? (
+              ) : notifInitial && activity.length === 0 ? (
                 <SkeletonList />
               ) : activity.length === 0 ? (
                 <Empty
                   icon={Bell}
                   title="Nothing yet"
-                  text="Bookings, payments and reviews will appear here live."
+                  text="New requests, payments and reviews will appear here live."
                 />
               ) : (
                 <>
@@ -950,11 +1193,21 @@ const Home = () => {
                     {activity.map((n) => (
                       <li
                         key={n.id || n._id}
-                        className="flex gap-3 rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-blue-200 hover:shadow-sm"
+                        className={`flex gap-3 rounded-2xl border bg-white p-4 transition hover:shadow-sm ${
+                          n.isRequest
+                            ? "mc-slide-in border-blue-200 bg-blue-50/40"
+                            : "border-slate-200 hover:border-blue-200"
+                        }`}
                       >
-                        <span
-                          className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${n.read ? "bg-slate-300" : "bg-blue-600"}`}
-                        />
+                        {n.isRequest ? (
+                          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white">
+                            <UserPlus size={13} />
+                          </span>
+                        ) : (
+                          <span
+                            className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${n.read ? "bg-slate-300" : "bg-blue-600"}`}
+                          />
+                        )}
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-semibold">
                             {n.title}
@@ -1347,134 +1600,55 @@ const SkeletonList = () => (
   </ul>
 );
 
-const BLIP_COLORS = [
-  "bg-blue-100 text-blue-700 border-blue-200",
-  "bg-emerald-100 text-emerald-700 border-emerald-200",
-  "bg-amber-100 text-amber-700 border-amber-200",
-  "bg-violet-100 text-violet-700 border-violet-200",
-  "bg-rose-100 text-rose-700 border-rose-200",
-  "bg-cyan-100 text-cyan-700 border-cyan-200",
-];
-const BLIP_INITIALS = [
-  "AK",
-  "SR",
-  "MP",
-  "DV",
-  "KS",
-  "RJ",
-  "NP",
-  "TS",
-  "HG",
-  "LM",
-];
-
-const Scanning = ({ connected, boost }) => {
-  const [blips, setBlips] = useState([]);
-  const idRef = useRef(0);
-
-  // small profile bubbles pop up around the radar so the user can see scanning is alive
-  useEffect(() => {
-    const reduce = window.matchMedia?.(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
-    if (!connected || reduce) {
-      setBlips([]);
-      return undefined;
-    }
-
-    const spawn = () => {
-      const angle = Math.random() * Math.PI * 2;
-      const dist = 30 + Math.random() * 16; // % from centre
-      const blip = {
-        id: ++idRef.current,
-        left: 50 + dist * Math.cos(angle),
-        top: 50 + dist * Math.sin(angle),
-        initials:
-          BLIP_INITIALS[Math.floor(Math.random() * BLIP_INITIALS.length)],
-        color: BLIP_COLORS[Math.floor(Math.random() * BLIP_COLORS.length)],
-      };
-      // max 4 at a time
-      setBlips((prev) => [...prev.slice(-3), blip]);
-    };
-
-    spawn();
-    const t = setInterval(spawn, boost ? 600 : 1300);
-    return () => clearInterval(t);
-  }, [connected, boost]);
-
-  const removeBlip = (id) =>
-    setBlips((prev) => prev.filter((b) => b.id !== id));
-
-  return (
-    <div className="flex flex-col items-center rounded-2xl border border-slate-200 bg-white px-6 py-12 text-center">
-      <div
-        className={`relative flex h-56 w-56 items-center justify-center ${
-          boost ? "scale-105" : ""
-        } transition-transform duration-300`}
-        aria-hidden="true"
-      >
-        {[0, 1, 2].map((i) => (
+const Scanning = ({ connected, boost }) => (
+  <div className="flex w-full min-w-0 flex-col items-center overflow-hidden rounded-2xl border border-slate-200 bg-white px-4 py-10 text-center sm:px-6 sm:py-12">
+    {/* radar: scales with the card, always centered, never leaves the block */}
+    <div
+      className={`relative mx-auto flex aspect-square w-full max-w-[14rem] shrink-0 items-center justify-center overflow-hidden rounded-full transition-transform duration-300 ${
+        boost ? "scale-105" : ""
+      }`}
+      aria-hidden="true"
+    >
+      {connected &&
+        [0, 1, 2].map((i) => (
           <span
             key={i}
-            className="absolute inset-0 rounded-full border border-blue-300 motion-safe:animate-ping motion-reduce:opacity-30"
+            className="mc-ripple absolute inset-0 rounded-full border border-blue-300"
             style={{
               animationDuration: boost ? "1.2s" : "3s",
               animationDelay: `${i}s`,
-              opacity: 0.5,
             }}
           />
         ))}
-        <span className="absolute inset-6 rounded-full border border-slate-200" />
-        <span className="absolute inset-14 rounded-full border border-slate-200" />
-        <span
-          className="absolute inset-0 rounded-full motion-safe:animate-spin"
-          style={{
-            animationDuration: boost ? "1s" : "2.8s",
-            background:
-              "conic-gradient(from 0deg, rgba(37,99,235,0) 0deg, rgba(37,99,235,0) 270deg, rgba(37,99,235,0.28) 360deg)",
-          }}
-        />
-
-        {/* popping profiles */}
-        {blips.map((b) => (
-          <span
-            key={b.id}
-            className="absolute"
-            style={{
-              left: `${b.left}%`,
-              top: `${b.top}%`,
-              transform: "translate(-50%, -50%)",
-            }}
-          >
-            <span
-              onAnimationEnd={() => removeBlip(b.id)}
-              className={`mc-blip flex h-8 w-8 items-center justify-center rounded-full border text-[10px] font-semibold shadow-sm ${b.color}`}
-            >
-              {b.initials}
-            </span>
-          </span>
-        ))}
-
-        <span className="relative flex h-3 w-3">
-          <span className="absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-40 motion-safe:animate-ping" />
-          <span className="relative inline-flex h-3 w-3 rounded-full bg-blue-600" />
-        </span>
-      </div>
-      <h3 className="mt-6 font-semibold text-slate-900">
-        {!connected
-          ? "Reconnecting…"
-          : boost
-            ? "Restarting scan…"
-            : "Scanning for requests"}
-      </h3>
-      <p className="mx-auto mt-1 max-w-xs text-sm text-slate-500">
-        {connected
-          ? "Keep this page open. The first mentor to accept gets the session."
-          : "Check your internet connection. We'll resume scanning automatically."}
-      </p>
+      <span className="absolute inset-[11%] rounded-full border border-slate-200" />
+      <span className="absolute inset-[25%] rounded-full border border-slate-200" />
+      <span
+        className="absolute inset-0 rounded-full motion-safe:animate-spin"
+        style={{
+          animationDuration: boost ? "1s" : "2.8s",
+          background:
+            "conic-gradient(from 0deg, rgba(37,99,235,0) 0deg, rgba(37,99,235,0) 270deg, rgba(37,99,235,0.28) 360deg)",
+        }}
+      />
+      <span className="relative flex h-3 w-3">
+        <span className="absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-40 motion-safe:animate-ping" />
+        <span className="relative inline-flex h-3 w-3 rounded-full bg-blue-600" />
+      </span>
     </div>
-  );
-};
+    <h3 className="mt-6 font-semibold text-slate-900">
+      {!connected
+        ? "Reconnecting…"
+        : boost
+          ? "Restarting scan…"
+          : "Scanning for requests"}
+    </h3>
+    <p className="mx-auto mt-1 max-w-xs text-sm text-slate-500">
+      {connected
+        ? "Keep this page open. The first mentor to accept gets the session."
+        : "Check your internet connection. We'll resume scanning automatically."}
+    </p>
+  </div>
+);
 
 const Ring = ({ pct, urgent, label, seconds }) => {
   const radius = 18;
@@ -1532,7 +1706,7 @@ const RequestCard = ({ req, now, busy, disabled, onClaim, onSkip }) => {
 
   return (
     <article
-      className={`mc-slide-in overflow-hidden rounded-2xl border bg-white transition duration-200 hover:-translate-y-0.5 hover:shadow-lg ${
+      className={`mc-flash overflow-hidden rounded-2xl border bg-white transition duration-200 hover:-translate-y-0.5 hover:shadow-lg ${
         urgent ? "border-red-200" : "border-slate-200 hover:border-blue-300"
       }`}
     >

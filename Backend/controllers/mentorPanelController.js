@@ -5,9 +5,9 @@ const Payment = require("../models/Payment");
 const Withdrawal = require("../models/Withdrawal");
 const Review = require("../models/Review");
 const Notification = require("../models/Notification");
+const Booking = require("../models/Booking");
 const Mentor = require("../models/Mentor");
 const Fresher = require("../models/Fresher");
-const Booking = require("../models/Booking");
 
 const { computeWallet, round2, PLATFORM_FEE_PERCENT } = require("../utils/wallet");
 const { notify, emitToUser, serializeNotification } = require("../utils/realtime");
@@ -56,8 +56,8 @@ const loadWallet = async (mentorId) => {
   const requestIds = [...new Set(allRows.map((p) => p.requestGroupId).filter(Boolean))];
   const bookings = requestIds.length
     ? await Booking.find({ requestGroupId: { $in: requestIds } })
-        .select("requestGroupId status")
-        .lean()
+      .select("requestGroupId status")
+      .lean()
     : [];
   const bookingById = new Map(bookings.map((b) => [b.requestGroupId, b]));
 
@@ -156,24 +156,14 @@ exports.requestWithdrawal = async (req, res) => {
   }
 };
 
-// NOTE: admin "mark paid / reject" lives in controllers/adminWithdrawalController.js
 
-/* ============================================================
-   REVIEWS
-============================================================ */
+// controllers/mentorPanelController.js
+// Replace ALL the old `exports.getMyReviews` blocks (there are 3 copies in the file)
+// with this single one.
 
-// GET /api/reviews/me   (mentor)
-exports.getMyReviews = async (req, res) => {
-  try {
-    const reviews = await Review.find({ mentor: req.user.id }).sort({ createdAt: -1 }).lean();
-    return res.json({ success: true, reviews });
-  } catch (error) {
-    console.error("getMyReviews error:", error.message);
-    return fail(res, 500, "Unable to load reviews.");
-  }
-};
+// GET /api/reviews/me (mentor)
 
-// POST /api/reviews/:id/reply  { text }   (mentor)
+
 exports.replyToReview = async (req, res) => {
   try {
     const text = String(req.body?.text || "").trim().slice(0, 1000);
@@ -224,12 +214,16 @@ exports.createReview = async (req, res) => {
     let review;
     let created = true;
     try {
-      review = await Review.create({
+           review = await Review.create({
         mentor: mentorId,
         fresher: req.user.id,
         fresherName: fresher?.name || booking.fresherName || "Fresher",
         sessionKey: requestGroupId,
         session: booking.sessionType || booking.companyName || "Mentoring session",
+        sessionStartsAt: booking.startsAt || null,
+        sessionEndsAt: booking.endsAt || null,
+        sessionDate: booking.date || "",
+        sessionTime: booking.time || "",
         rating,
         comment,
       });
@@ -376,6 +370,205 @@ exports.getProfileStats = async (req, res) => {
     return fail(res, 500, "Unable to load stats.");
   }
 };
+
+// controllers/mentorPanelController.js
+// Replace ALL the old `exports.getMyReviews` blocks (there are 3 copies in the file)
+// with this single one.
+
+// GET /api/reviews/me (mentor)
+
+// GET /api/reviews/me (mentor)
+exports.getMyReviews = async (req, res) => {
+  try {
+    const reviews = await Review.find({ mentor: req.user.id })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const sessionKeys = [
+      ...new Set(reviews.map((r) => r.sessionKey).filter(Boolean)),
+    ];
+    const fresherIds = [
+      ...new Set(reviews.map((r) => String(r.fresher)).filter(Boolean)),
+    ];
+
+    const [bookings, freshers] = await Promise.all([
+      sessionKeys.length
+        ? Booking.find({ requestGroupId: { $in: sessionKeys } }) // no mentor filter
+            .select("requestGroupId mentor startsAt endsAt date time")
+            .lean()
+        : [],
+      fresherIds.length
+        ? Fresher.find({ _id: { $in: fresherIds } })
+            .select("name avatar profileImage profilePicture photo image")
+            .lean()
+        : [],
+    ]);
+
+    // one booking per session; prefer the one that belongs to THIS mentor
+    const bookingByKey = new Map();
+    bookings.forEach((b) => {
+      const key = String(b.requestGroupId);
+      const mine = String(b.mentor) === String(req.user.id);
+      const cur = bookingByKey.get(key);
+      if (!cur || (mine && String(cur.mentor) !== String(req.user.id))) {
+        bookingByKey.set(key, b);
+      }
+    });
+
+    const fresherById = new Map(freshers.map((f) => [String(f._id), f]));
+
+    const result = reviews.map((review) => {
+      const likedBy = review.likedBy || [];
+      const booking = bookingByKey.get(String(review.sessionKey));
+      const fresher = fresherById.get(String(review.fresher));
+
+      // live booking first, review snapshot as fallback
+      const startsAt = booking?.startsAt || review.sessionStartsAt || null;
+      const endsAt = booking?.endsAt || review.sessionEndsAt || null;
+
+      return {
+        ...review,
+        likesCount: likedBy.length,
+        isLiked: likedBy.some(
+          (item) =>
+            String(item.user) === String(req.user.id) &&
+            item.role === req.user.role
+        ),
+
+        attendedAt: startsAt ? new Date(startsAt).toISOString() : null,
+        sessionStartsAt: startsAt,
+        sessionEndsAt: endsAt,
+        sessionDate: booking?.date || review.sessionDate || "",
+        sessionTime: booking?.time || review.sessionTime || "",
+
+        fresherAvatar:
+          fresher?.avatar ||
+          fresher?.profileImage ||
+          fresher?.profilePicture ||
+          fresher?.photo ||
+          fresher?.image ||
+          "",
+      };
+    });
+
+    return res.json({ success: true, reviews: result });
+  } catch (error) {
+    console.error("getMyReviews error:", error);
+    return fail(res, 500, "Unable to load reviews.");
+  }
+};
+
+
+exports.toggleReviewLike = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const role = req.user.role;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return fail(res, 400, "Invalid review id.");
+    }
+
+    const review = await Review.findById(id).select(
+      "_id fresher fresherName likedBy"
+    );
+
+    if (!review) {
+      return fail(res, 404, "Review not found.");
+    }
+
+    if (
+      role === "fresher" &&
+      String(review.fresher) === String(userId)
+    ) {
+      return fail(res, 403, "You cannot like your own review.");
+    }
+
+    const alreadyLiked = (review.likedBy || []).some(
+      (item) =>
+        String(item.user) === String(userId) &&
+        item.role === role
+    );
+
+    let liked;
+
+    if (alreadyLiked) {
+      await Review.updateOne(
+        { _id: id },
+        {
+          $pull: {
+            likedBy: {
+              user: new mongoose.Types.ObjectId(userId),
+              role,
+            },
+          },
+        }
+      );
+
+      liked = false;
+    } else {
+      await Review.updateOne(
+        { _id: id },
+        {
+          $addToSet: {
+            likedBy: {
+              user: new mongoose.Types.ObjectId(userId),
+              role,
+            },
+          },
+        }
+      );
+
+      liked = true;
+
+      // Fetch the person who liked the review.
+      const likerModel = role === "mentor" ? Mentor : Fresher;
+
+      const liker = await likerModel
+        .findById(userId)
+        .select("name fullName")
+        .lean();
+
+      const likerName =
+        liker?.fullName ||
+        liker?.name ||
+        (role === "mentor" ? "A mentor" : "A fresher");
+
+      console.log("LIKER ROLE:", role);
+      console.log("LIKER NAME:", likerName);
+
+      // Notify the fresher who wrote this review.
+      notify({
+        user: review.fresher,
+        role: "fresher",
+        title: "Someone liked your review",
+        message: `${likerName} liked your review.`,
+        type: "review",
+        link: "/fresher/reviews",
+      });
+    }
+
+    const updatedReview = await Review.findById(id)
+      .select("likedBy")
+      .lean();
+
+    const likesCount = updatedReview?.likedBy?.length || 0;
+
+    return res.json({
+      success: true,
+      liked,
+      likesCount,
+    });
+  } catch (error) {
+    console.error("toggleReviewLike FULL ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Unable to update review like.",
+    });
+  }
+};
+
 
 // REMOVED: assignToMe. The server already assigns the mentor to every payment
 // when he accepts (bookingController.updateRequest -> assignMentorToAll).

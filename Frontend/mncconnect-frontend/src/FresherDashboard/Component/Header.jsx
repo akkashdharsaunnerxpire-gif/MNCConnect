@@ -343,12 +343,45 @@ const SlidePill = ({ box }) => (
 const Badge = ({ count, tone = "blue", ring = "ring-[#F8FAFD]" }) =>
   count > 0 ? (
     <span
-      className={`flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold leading-none text-white ring-2 ${ring} ${
-        tone === "amber" ? "bg-[#B06000]" : "bg-[#0B57D0]"
-      }`}
+      className={`flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold leading-none text-white ring-2 ${ring} ${tone === "amber" ? "bg-[#B06000]" : "bg-[#0B57D0]"
+        }`}
     >
       {count > 9 ? "9+" : count}
     </span>
+  ) : null;
+/* Bell-specific unread badge: bigger, red, shows exact count up to 99 */
+const BellBadge = ({ count }) =>
+  count > 0 ? (
+    <motion.span
+      key={count}
+      initial={{ scale: 0.6 }}
+      animate={{ scale: 1 }}
+      transition={{ type: "spring", stiffness: 500, damping: 18 }}
+      className="
+    absolute
+    -right-1
+    -top-1
+    z-10
+    flex
+    h-5
+    min-w-[20px]
+    items-center
+    justify-center
+    rounded-full
+    bg-blue-600
+    px-1
+    text-[10px]
+    sm:text-[11px]
+    font-bold
+    leading-none
+    text-white
+    ring-2
+    ring-[#F8FAFD]
+  "
+      aria-hidden="true"
+    >
+      {count > 99 ? "99+" : count}
+    </motion.span>
   ) : null;
 
 const CountUp = ({ value, instant = false }) => {
@@ -391,9 +424,8 @@ const NotificationRow = React.memo(function NotificationRow({ n, onOpen }) {
     <button
       type="button"
       onClick={() => onOpen(n)}
-      className={`flex w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-[#E9EEF6] ${
-        n.read ? "bg-transparent" : "bg-[#EDF2FA]"
-      }`}
+      className={`flex w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-[#E9EEF6] ${n.read ? "bg-transparent" : "bg-[#EDF2FA]"
+        }`}
     >
       <div
         className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${cls}`}
@@ -433,12 +465,8 @@ const NotificationsPopup = React.memo(function NotificationsPopup({
   const [filter, setFilter] = useState("all");
 
   const shown = useMemo(
-    () =>
-      (filter === "unread"
-        ? notifications.filter((n) => !n.read)
-        : notifications
-      ).slice(0, 8),
-    [filter, notifications],
+    () => notifications.filter((n) => !n.read),
+    [notifications],
   );
 
   return (
@@ -509,30 +537,7 @@ const NotificationsPopup = React.memo(function NotificationsPopup({
               </div>
             </div>
 
-            <div className="flex gap-2 px-4 pb-3 pt-1" role="tablist">
-              {[
-                { id: "all", label: "All" },
-                {
-                  id: "unread",
-                  label: `Unread${unreadCount ? ` (${unreadCount})` : ""}`,
-                },
-              ].map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={filter === t.id}
-                  onClick={() => setFilter(t.id)}
-                  className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-colors ${
-                    filter === t.id
-                      ? "bg-[#C2E7FF] text-[#001D35]"
-                      : "bg-transparent text-[#444746] ring-1 ring-[#C4C7C5] hover:bg-[#E9EEF6]"
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
+
 
             {/* The only scroll container. contain + overscroll keep it isolated
                 from the page, so wheel / touch scrolling stays on the compositor. */}
@@ -546,9 +551,7 @@ const NotificationsPopup = React.memo(function NotificationsPopup({
             >
               {shown.length === 0 ? (
                 <p className="px-4 py-10 text-center text-sm text-[#747775]">
-                  {filter === "unread"
-                    ? "You're all caught up"
-                    : "No notifications yet"}
+                  You're all caught up
                 </p>
               ) : (
                 shown.map((n) => (
@@ -907,27 +910,45 @@ const Header = () => {
   }, []);
 
   /* ---- notification actions (stable identities for the memoized popup) ---- */
-  const openNotification = (n) => {
-    if (!n.read) {
-      setData((d) => ({
-        ...(d || {}),
-        unreadCount: Math.max(0, (d?.unreadCount || 1) - 1),
-        notifications: (d?.notifications || []).map((x) =>
-          (x.id || x._id) === n.id ? { ...x, read: true } : x,
-        ),
-      }));
-      api(ENDPOINTS.notificationRead(n.id), { method: "PATCH" }).catch(reload);
-    }
-    setToasts((t) => t.filter((x) => x.id !== n.id));
-    setShowNotifications(false);
-    if (
-      typeof n.link === "string" &&
-      n.link.startsWith("/") &&
-      !n.link.startsWith("//")
-    ) {
-      navigate(n.link);
-    }
-  };
+ 
+const openNotification = (n) => {
+  // Immediately remove the clicked notification from popup and toasts.
+  setData((d) => ({
+    ...(d || {}),
+    unreadCount: n.read
+      ? d?.unreadCount || 0
+      : Math.max(0, (d?.unreadCount || 1) - 1),
+    notifications: (d?.notifications || []).filter(
+      (x) => (x.id || x._id) !== n.id
+    ),
+  }));
+
+  // Mark notification as read in backend.
+  if (!n.read) {
+    api(ENDPOINTS.notificationRead(n.id), {
+      method: "PATCH",
+    }).catch((error) => {
+      console.error("Notification read failed:", error);
+      reload();
+    });
+  }
+
+  // Remove its toast too.
+  setToasts((t) => t.filter((x) => x.id !== n.id));
+
+  // Close popup.
+  setShowNotifications(false);
+
+  // Navigate to notification link.
+  if (
+    typeof n.link === "string" &&
+    n.link.startsWith("/") &&
+    !n.link.startsWith("//")
+  ) {
+    navigate(n.link);
+  }
+};
+
 
   const markAllRead = () => {
     setData((d) => ({
@@ -1164,11 +1185,10 @@ const Header = () => {
                       to={item.path}
                       onClick={closePopups}
                       aria-current={active ? "page" : undefined}
-                      className={`relative flex items-center rounded-full px-4 py-2 text-[13px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#0B57D0] ${
-                        active
-                          ? "text-[#001D35]"
-                          : "text-[#444746] hover:bg-[#DDE3EA] hover:text-[#1F1F1F]"
-                      }`}
+                      className={`relative flex items-center rounded-full px-4 py-2 text-[13px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#0B57D0] ${active
+                        ? "text-[#001D35]"
+                        : "text-[#444746] hover:bg-[#DDE3EA] hover:text-[#1F1F1F]"
+                        }`}
                     >
                       <span className="relative z-10 flex items-center gap-2">
                         <Icon size={17} />
@@ -1204,9 +1224,8 @@ const Header = () => {
                 type="button"
                 onClick={() => setShowNotifications(true)}
                 aria-label={`Notifications, ${unreadCount} unread`}
-                className={`${bellButtonClass} h-10 w-10 ${
-                  bellActive ? "!bg-[#C2E7FF] !text-[#001D35]" : ""
-                }`}
+                className={`${bellButtonClass} h-10 w-10 ${bellActive ? "!bg-[#C2E7FF] !text-[#001D35]" : ""
+                  }`}
               >
                 <motion.span
                   key={ring}
@@ -1218,7 +1237,7 @@ const Header = () => {
                   <Bell size={19} />
                 </motion.span>
                 <span className="absolute -right-1 -top-1 z-10">
-                  <Badge count={unreadCount} />
+                  <BellBadge count={unreadCount} />
                 </span>
               </button>
 
@@ -1250,18 +1269,19 @@ const Header = () => {
                   onClick={() => setMenuOpen((v) => !v)}
                   aria-expanded={menuOpen}
                   aria-label="Profile menu"
-                  className={`flex h-10 items-center gap-1 rounded-full py-1 pl-1 pr-2.5 transition-colors ${
-                    menuOpen
+                  className={`flex h-12 items-center gap-2 rounded-full py-1 pl-1 pr-3 transition-colors ${menuOpen
                       ? "bg-[#DDE3EA]"
                       : "bg-[#E9EEF6] hover:bg-[#DDE3EA]"
-                  }`}
+                    }`}
                 >
-                  <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-[#D3E3FD] text-sm font-semibold text-[#0B57D0]">
-                    <Avatar src={avatarSrc} initial={initial} iconSize={20} />
+                  <span className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full bg-[#D3E3FD] text-sm font-semibold text-[#0B57D0]">
+                    <Avatar src={avatarSrc} initial={initial} iconSize={24} />
                   </span>
+
                   <ChevronDown
-                    size={18}
-                    className={`text-[#444746] transition-transform ${menuOpen ? "rotate-180" : ""}`}
+                    size={20}
+                    className={`text-[#444746] transition-transform ${menuOpen ? "rotate-180" : ""
+                      }`}
                   />
                 </button>
 
@@ -1334,9 +1354,8 @@ const Header = () => {
                 type="button"
                 onClick={() => setShowNotifications(true)}
                 aria-label={`Notifications, ${unreadCount} unread`}
-                className={`${bellButtonClass} h-10 w-10 ${
-                  bellActive ? "!bg-[#C2E7FF] !text-[#001D35]" : ""
-                }`}
+                className={`${bellButtonClass} h-10 w-10 ${bellActive ? "!bg-[#C2E7FF] !text-[#001D35]" : ""
+                  }`}
               >
                 <motion.span
                   key={ring}
@@ -1443,11 +1462,10 @@ const Header = () => {
                           key={item.path}
                           type="button"
                           onClick={() => go(item.path)}
-                          className={`flex w-full items-center gap-3 rounded-full px-4 py-3 text-left text-sm font-medium transition-colors ${
-                            isActive(item)
-                              ? "bg-[#C2E7FF] text-[#001D35]"
-                              : "text-[#1F1F1F] hover:bg-[#E1E8F2]"
-                          }`}
+                          className={`flex w-full items-center gap-3 rounded-full px-4 py-3 text-left text-sm font-medium transition-colors ${isActive(item)
+                            ? "bg-[#C2E7FF] text-[#001D35]"
+                            : "text-[#1F1F1F] hover:bg-[#E1E8F2]"
+                            }`}
                         >
                           <Icon size={18} />
                           <span className="flex-1">{item.label}</span>
@@ -1574,9 +1592,8 @@ const Header = () => {
                 to={item.path}
                 onClick={closePopups}
                 aria-current={active ? "page" : undefined}
-                className={`relative flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-full py-2 text-[10px] font-semibold transition-colors ${
-                  active ? "text-[#001D35]" : "text-[#444746]"
-                }`}
+                className={`relative flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-full py-2 text-[10px] font-semibold transition-colors ${active ? "text-[#001D35]" : "text-[#444746]"
+                  }`}
               >
                 <span className="relative z-10 flex flex-col items-center gap-0.5">
                   <span className="relative">

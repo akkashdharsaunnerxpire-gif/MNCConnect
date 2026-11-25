@@ -1,4 +1,3 @@
-// src/App.jsx
 import React, { Suspense, lazy, useEffect } from "react";
 import {
   BrowserRouter as Router,
@@ -23,10 +22,7 @@ import { clearLegacyStorage } from "./utils/auth";
 const Landing = lazy(() => import("./Landingpages/Landing"));
 const Auth = lazy(() => import("./Authpage/Auth"));
 
-// All mentor pages (login, register, forgot/reset password, dashboard)
 const MentorRoutes = lazy(() => import("./Routes/MentorRoutes"));
-
-// All fresher pages (login, forgot/reset password, /Home dashboard)
 const FresherRoutes = lazy(() => import("./Routes/FresherRoutes"));
 
 // ================= AUTH HELPERS =================
@@ -45,33 +41,96 @@ const HomeRoute = () => {
 
 function AppContent() {
   const { isLoading, start, stop } = useLoading();
-
-  // Login check (/auth/me) runs inside AuthProvider. While it runs, the top bar shows.
-  // This is the ONE place that does it, so route guards do not need their own call.
   const { loading: authLoading } = useAuth();
 
-  // Old keys from the previous localStorage-based login. Removed once per browser.
+  // Clear legacy authentication storage
   useEffect(() => {
     clearLegacyStorage();
   }, []);
 
+  // Register loading handlers
   useEffect(() => {
     registerLoadingHandlers(start, stop);
     registerFetchHandlers(start, stop);
   }, [start, stop]);
 
+  // ================= PREVENT PAGE ZOOM =================
+
+  useEffect(() => {
+    // Prevent Ctrl + mouse wheel zoom
+    const preventWheelZoom = (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+      }
+    };
+
+    // Prevent keyboard browser zoom shortcuts
+    const preventKeyboardZoom = (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+
+      const key = e.key;
+
+      if (
+        key === "+" ||
+        key === "-" ||
+        key === "=" ||
+        key === "0" ||
+        key === "_"
+      ) {
+        e.preventDefault();
+      }
+    };
+
+    // Prevent trackpad/pinch gesture zoom where supported
+    const preventGesture = (e) => {
+      e.preventDefault();
+    };
+
+    window.addEventListener("wheel", preventWheelZoom, {
+      passive: false,
+    });
+
+    window.addEventListener("keydown", preventKeyboardZoom);
+
+    document.addEventListener("gesturestart", preventGesture, {
+      passive: false,
+    });
+
+    document.addEventListener("gesturechange", preventGesture, {
+      passive: false,
+    });
+
+    document.addEventListener("gestureend", preventGesture, {
+      passive: false,
+    });
+
+    return () => {
+      window.removeEventListener("wheel", preventWheelZoom);
+
+      window.removeEventListener("keydown", preventKeyboardZoom);
+
+      document.removeEventListener("gesturestart", preventGesture);
+
+      document.removeEventListener("gesturechange", preventGesture);
+
+      document.removeEventListener("gestureend", preventGesture);
+    };
+  }, []);
+
   return (
     <div className="min-h-screen bg-white font-sans text-gray-900">
-      {/* top bar: any api call (isLoading) OR the login check (authLoading) */}
+      {/* Global loading bar */}
       <LinearProgress isLoading={isLoading || authLoading} />
+
       <RouteProgress />
 
-      {/* every new page opens from the top */}
+      {/* Reset page scroll on route navigation */}
       <ScrollToTop />
 
       <Suspense fallback={<SuspenseLoader />}>
         <Routes>
           <Route path="/" element={<HomeRoute />} />
+
           <Route path="/auth" element={<Auth />} />
 
           {/* Legacy redirects */}
@@ -79,19 +138,21 @@ function AppContent() {
             path="/profile"
             element={<Navigate to="/Home/profile" replace />}
           />
+
           <Route
             path="/Mnclogos"
             element={<Navigate to="/Home/mnc-logos" replace />}
           />
+
           <Route
             path="/employee-profile"
             element={<Navigate to="/mentor/register" replace />}
           />
 
-          {/* Mentor side: everything under /mentor/... */}
+          {/* Mentor side */}
           <Route path="/mentor/*" element={<MentorRoutes />} />
 
-          {/* Fresher side: /login, /forgot-password, /reset-password/:token, /Home/... */}
+          {/* Fresher side */}
           <Route path="/*" element={<FresherRoutes />} />
         </Routes>
       </Suspense>

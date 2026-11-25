@@ -14,9 +14,21 @@ router.post("/wallet/withdraw", requireAuth("mentor"), panel.requestWithdrawal);
 router.get("/mentor/profile/stats", requireAuth("mentor"), panel.getProfileStats);
 
 // ---------- reviews ----------
+
+// ---------- reviews ----------
+
+// ---------- reviews ----------
 router.get("/reviews/me", requireAuth("mentor"), panel.getMyReviews);
 router.post("/reviews/:id/reply", requireAuth("mentor"), panel.replyToReview);
 router.post("/reviews", requireAuth("fresher"), panel.createReview);
+
+// Both mentor and fresher can like/unlike a review
+router.post(
+  "/reviews/:id/like",
+  requireAuth("mentor", "fresher"),
+  panel.toggleReviewLike
+);
+
 
 // ---------- notifications ----------
 router.get("/notifications", requireAuth("mentor"), panel.getNotifications);
