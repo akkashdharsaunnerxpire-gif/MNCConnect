@@ -29,7 +29,6 @@ import {
   Star,
   XCircle,
   Loader2,
-  Radio,
   AlertTriangle,
   ShieldCheck,
   UserRound,
@@ -81,33 +80,40 @@ const isGroupSession = (s) =>
 
 const imageOfPerson = (p) => findImage(p);
 
-const photoCache = new Map(); // sessionId -> Promise<string>
+/* ---------- shared counterpart cache ----------
+   One request per booking is shared by:
+   - the avatar photo
+   - the Fresher details popup
+   - the Group details popup
+   - the hover / touch prefetch
+*/
+const counterpartCache = new Map(); // bookingId -> Promise<data>
 
-const loadPersonImage = (id) => {
+const loadCounterpart = (id) => {
   const key = String(id);
-
-  if (!photoCache.has(key)) {
-    const promise = api(`${ENDPOINTS.booking(key)}/counterpart`)
-      .then((d) => {
-        // Try every possible structure the backend might return
-        return imageOfPerson(
-          d?.person ||
-            d?.fresher ||
-            d?.user ||
-            d?.counterpart ||
-            d?.people?.[0] ||
-            d,
-        );
-      })
-      .catch(() => {
-        photoCache.delete(key); // allow a retry next time
-        return "";
-      });
-    photoCache.set(key, promise);
+  if (!counterpartCache.has(key)) {
+    const p = api(`${ENDPOINTS.booking(key)}/counterpart`).catch((e) => {
+      counterpartCache.delete(key); // failed -> allow retry next time
+      throw e;
+    });
+    counterpartCache.set(key, p);
   }
-
-  return photoCache.get(key);
+  return counterpartCache.get(key);
 };
+
+const loadPersonImage = (id) =>
+  loadCounterpart(id)
+    .then((d) =>
+      imageOfPerson(
+        d?.person ||
+          d?.fresher ||
+          d?.user ||
+          d?.counterpart ||
+          d?.people?.[0] ||
+          d,
+      ),
+    )
+    .catch(() => "");
 
 const usePersonImage = (id, existing, enabled) => {
   const [loaded, setLoaded] = useState("");
@@ -118,7 +124,7 @@ const usePersonImage = (id, existing, enabled) => {
       return undefined;
     }
 
-    // Check if we already have a valid image directly from the session object
+    // Already have a valid image directly from the session object
     if (existing && existing.trim() !== "") {
       return undefined;
     }
@@ -464,10 +470,29 @@ const GroupDetailsModal = ({ bookingId, onClose }) => {
   const [people, setPeople] = useState(null);
   const [selected, setSelected] = useState(0);
   const [err, setErr] = useState("");
+  const [visible, setVisible] = useState(false);
+
+  // smooth open animation + lock background scroll
+  useEffect(() => {
+    const r = requestAnimationFrame(() => setVisible(true));
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      cancelAnimationFrame(r);
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  // close on Escape
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   useEffect(() => {
     let cancelled = false;
-    api(`${ENDPOINTS.booking(bookingId)}/counterpart`)
+    loadCounterpart(bookingId)
       .then((d) => {
         if (cancelled) return;
         if (Array.isArray(d?.people) && d.people.length) {
@@ -492,11 +517,17 @@ const GroupDetailsModal = ({ bookingId, onClose }) => {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 px-4"
+      className={`fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 px-4 transition-opacity duration-200 ${
+        visible ? "opacity-100" : "opacity-0"
+      }`}
       onClick={onClose}
     >
       <div
-        className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+        className={`flex h-[min(85vh,560px)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl transition duration-200 ${
+          visible
+            ? "translate-y-0 scale-100 opacity-100"
+            : "translate-y-2 scale-95 opacity-0"
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
@@ -517,7 +548,7 @@ const GroupDetailsModal = ({ bookingId, onClose }) => {
         {err ? (
           <p className="p-5 text-sm text-red-600">{err}</p>
         ) : !people ? (
-          <div className="flex justify-center py-12">
+          <div className="flex flex-1 items-center justify-center">
             <Loader2 className="animate-spin text-blue-600" />
           </div>
         ) : (
@@ -569,7 +600,6 @@ const MentorSessions = () => {
     sessions: serverSessions,
     loading,
     error,
-    connected,
     reload,
   } = useMentorSessions();
 
@@ -881,6 +911,10 @@ const MentorSessions = () => {
     [sessions],
   );
 
+  // Date + time wise ordering
+  // Upcoming  -> nearest session first
+  // Others    -> latest session first
+  // Sessions without startsAt always go to the bottom
   const filtered = useMemo(() => {
     const kw = search.toLowerCase().trim();
     const targetStatus =
@@ -896,8 +930,20 @@ const MentorSessions = () => {
             .toLowerCase()
             .includes(kw)),
     );
+
     const dir = activeTab === "Upcoming" ? 1 : -1;
-    return list.sort((a, b) => dir * ((a.startsAt || 0) - (b.startsAt || 0)));
+
+    return [...list].sort((a, b) => {
+      const as = Number(a.startsAt) || 0;
+      const bs = Number(b.startsAt) || 0;
+
+      if (!as && !bs) return String(a.id).localeCompare(String(b.id));
+      if (!as) return 1;
+      if (!bs) return -1;
+
+      if (as !== bs) return dir * (as - bs);
+      return String(a.id).localeCompare(String(b.id)); // same time -> stable order
+    });
   }, [sessions, activeTab, search]);
 
   const handleJoin = (session) =>
@@ -905,23 +951,21 @@ const MentorSessions = () => {
 
   return (
     <div className="min-h-screen bg-white text-slate-900">
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <header className="mb-6">
-          <p className="text-sm font-medium text-blue-600">Mentor workspace</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">
-            Your Sessions
-          </h1>
-          <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
-            Join, chat and track every session in one place.
-            <span
-              className={`inline-flex items-center gap-1 text-xs font-medium ${connected ? "text-emerald-600" : "text-amber-600"}`}
-            >
-              <Radio size={12} /> {connected ? "Live" : "Reconnecting…"}
-            </span>
-          </p>
-        </header>
-
-        <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div
+          className="
+    sticky top-0 z-40
+    -mx-4 px-4
+    sm:-mx-6 sm:px-6
+    lg:-mx-8 lg:px-8
+    mb-6
+    flex flex-col gap-4
+    lg:flex-row lg:items-center lg:justify-between
+    border-b border-slate-100
+    bg-white
+    py-3
+  "
+        >
           <div className="flex w-fit max-w-full gap-2 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
             {TABS.map((tab) => {
               const active = activeTab === tab;
@@ -1040,6 +1084,18 @@ const SessionCard = ({
   const [showFresher, setShowFresher] = useState(false);
   const closeFresher = useCallback(() => setShowFresher(false), []);
 
+  // Stable fetcher: same function identity on every 1s re-render,
+  // so the details modal never refetches or flickers.
+  const fetchCounterpart = useCallback(
+    () => loadCounterpart(session.id),
+    [session.id],
+  );
+
+  // Warm the cache on hover / focus / touch so the popup opens instantly.
+  const prefetchCounterpart = useCallback(() => {
+    loadCounterpart(session.id).catch(() => {});
+  }, [session.id]);
+
   const openChat = (s) => {
     onChatOpen(s.id);
     setChatFor(s);
@@ -1071,7 +1127,7 @@ const SessionCard = ({
     names.slice(0, NAMES_SHOWN).join(", ") +
     (names.length > NAMES_SHOWN ? ` +${names.length - NAMES_SHOWN} more` : "");
 
-  // Ensure we find an image in the session object, or fallback to the dedicated endpoint
+  // Find an image in the session object, or fall back to the shared counterpart request
   const initialImage =
     fixUrl(session.avatar) || fixUrl(session.image) || findImage(session);
 
@@ -1137,6 +1193,9 @@ const SessionCard = ({
     <button
       type="button"
       onClick={() => setShowFresher(true)}
+      onMouseEnter={prefetchCounterpart}
+      onFocus={prefetchCounterpart}
+      onTouchStart={prefetchCounterpart}
       className={secondaryBtn}
     >
       <UserRound size={15} />
@@ -1412,7 +1471,7 @@ const SessionCard = ({
         ) : (
           <PersonDetailsModal
             title="Fresher details"
-            fetcher={() => api(`${ENDPOINTS.booking(session.id)}/counterpart`)}
+            fetcher={fetchCounterpart}
             onClose={closeFresher}
           />
         ))}

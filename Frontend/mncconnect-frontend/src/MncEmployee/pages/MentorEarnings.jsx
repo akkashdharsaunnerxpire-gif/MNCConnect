@@ -104,21 +104,6 @@ const MentorEarnings = () => {
   return (
     <div className="min-h-screen bg-white text-slate-900">
       <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <header className="mb-8">
-          <p className="text-sm font-medium text-blue-600">Mentor finance</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">
-            Your Earnings
-          </h1>
-          <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
-            Updates live as sessions end. You earn{" "}
-            {data?.mentorSharePercent ?? 75}% of every session.
-            <span
-              className={`inline-flex items-center gap-1 text-xs font-medium ${connected ? "text-emerald-600" : "text-amber-600"}`}
-            >
-              <Radio size={12} /> {connected ? "Live" : "Reconnecting…"}
-            </span>
-          </p>
-        </header>
 
         {error && (
           <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">

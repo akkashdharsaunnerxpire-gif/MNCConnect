@@ -7,12 +7,18 @@ import {
   isChatActive,
 } from "../utils/chatSounds";
 
+// Messages that arrive in the same chat within this time make ONE sound.
+const SOUND_GAP_MS = 4000;
+
 /**
- * Plays a notification sound for every incoming chat message
+ * Plays a notification sound for incoming chat messages
  * when that chat is not open. Mount ONCE in the layout (mentor + fresher).
+ *
+ * Same chat + many messages in a short time -> only ONE sound.
  */
 export default function useChatNotificationSound(role) {
   const seen = useRef(new Set());
+  const lastSound = useRef({}); // chatId -> time of the last sound
 
   // browsers block audio until the first click/key/touch
   useEffect(() => {
@@ -43,6 +49,14 @@ export default function useChatNotificationSound(role) {
 
       // chat is open -> ChatPanel plays its own sound
       if (isChatActive(m.bookingId) || isChatActive(m.requestGroupId)) return;
+
+      // same chat, message burst -> play the sound only once
+      const chatKey = String(m.requestGroupId || m.bookingId || "");
+      const nowTs = Date.now();
+      if (chatKey) {
+        if (nowTs - (lastSound.current[chatKey] || 0) < SOUND_GAP_MS) return;
+        lastSound.current[chatKey] = nowTs;
+      } 
 
       playNotificationSound();
     };

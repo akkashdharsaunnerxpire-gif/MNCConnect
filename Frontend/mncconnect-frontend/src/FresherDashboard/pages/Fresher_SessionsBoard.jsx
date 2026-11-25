@@ -237,10 +237,9 @@ const explainError = (message = "", status = 0) => {
 const inputBase =
   "h-12 w-full rounded-xl border bg-white px-4 text-sm text-slate-800 outline-none transition focus:ring-2 disabled:bg-slate-50 disabled:text-slate-400";
 const inputCls = (hasError) =>
-  `${inputBase} ${
-    hasError
-      ? "border-red-400 focus:border-red-500 focus:ring-red-100"
-      : "border-slate-200 focus:border-blue-500 focus:ring-blue-100"
+  `${inputBase} ${hasError
+    ? "border-red-400 focus:border-red-500 focus:ring-red-100"
+    : "border-slate-200 focus:border-blue-500 focus:ring-blue-100"
   }`;
 
 const Label = ({ children, htmlFor }) => (
@@ -267,9 +266,8 @@ const Section = ({ step, title, subtitle, done, children }) => (
   <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
     <div className="flex items-start gap-3">
       <span
-        className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold transition ${
-          done ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"
-        }`}
+        className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold transition ${done ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"
+          }`}
       >
         {done ? <Check size={16} /> : step}
       </span>
@@ -388,10 +386,10 @@ export default function SessionBoard() {
       p.mode === m
         ? p
         : {
-            ...p,
-            mode: m,
-            gender: m === "group" ? "" : cleanGender(user?.gender),
-          },
+          ...p,
+          mode: m,
+          gender: m === "group" ? "" : cleanGender(user?.gender),
+        },
     );
 
   // stage: null | "paying" | "sending" | "redirecting" | "expired" | "error"
@@ -619,12 +617,12 @@ export default function SessionBoard() {
     ...(rebook
       ? []
       : [
-          { key: "role", label: "Role", done: isDone("role") },
-          { key: "language", label: "Language", done: isDone("language") },
-          ...(!isGroup
-            ? [{ key: "gender", label: "Your gender", done: isDone("gender") }]
-            : []),
-        ]),
+        { key: "role", label: "Role", done: isDone("role") },
+        { key: "language", label: "Language", done: isDone("language") },
+        ...(!isGroup
+          ? [{ key: "gender", label: "Your gender", done: isDone("gender") }]
+          : []),
+      ]),
   ];
 
   const scrollToField = (key) => {
@@ -901,7 +899,7 @@ export default function SessionBoard() {
             razorpay_order_id: order.id,
             reason: lastFailRef.current,
           },
-        }).catch(() => {});
+        }).catch(() => { });
       });
 
       rz.open();
@@ -948,10 +946,10 @@ export default function SessionBoard() {
     ...(rebook
       ? [["Mentor", rebook.mentorName || "Selected mentor"]]
       : [
-          ["Role", f.role || "Not selected"],
-          ["Language", f.language || "Not selected"],
-          ["Guide", genderSummary],
-        ]),
+        ["Role", f.role || "Not selected"],
+        ["Language", f.language || "Not selected"],
+        ["Guide", genderSummary],
+      ]),
   ];
 
   const actionWord = isGroup ? "create group" : "send request";
@@ -970,12 +968,11 @@ export default function SessionBoard() {
 
   const payDisabled = Boolean(stage) || !pricesReady;
   const payButtonCls = (disabled) =>
-    `w-full rounded-xl py-3.5 text-sm font-bold transition ${
-      disabled
-        ? "cursor-not-allowed bg-slate-200 text-slate-400"
-        : problems.length > 0
-          ? "bg-amber-100 text-amber-900 ring-1 ring-amber-300 hover:bg-amber-200"
-          : "bg-blue-600 text-white shadow-sm hover:bg-blue-700"
+    `w-full rounded-xl py-3.5 text-sm font-bold transition ${disabled
+      ? "cursor-not-allowed bg-slate-200 text-slate-400"
+      : problems.length > 0
+        ? "bg-amber-100 text-amber-900 ring-1 ring-amber-300 hover:bg-amber-200"
+        : "bg-blue-600 text-white shadow-sm hover:bg-blue-700"
     }`;
 
   const progressSteps =
@@ -1117,11 +1114,10 @@ export default function SessionBoard() {
                   disabled={Boolean(stage)}
                   onClick={() => chooseMode("single")}
                   aria-pressed={!isGroup}
-                  className={`flex items-start gap-3 rounded-2xl border p-4 text-left transition ${
-                    !isGroup
+                  className={`flex items-start gap-3 rounded-2xl border p-4 text-left transition ${!isGroup
                       ? "border-blue-500 bg-blue-50 shadow-sm"
                       : "border-slate-200 hover:border-blue-300"
-                  }`}
+                    }`}
                 >
                   <span
                     className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${!isGroup ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"}`}
@@ -1144,11 +1140,10 @@ export default function SessionBoard() {
                   disabled={Boolean(stage)}
                   onClick={() => chooseMode("group")}
                   aria-pressed={isGroup}
-                  className={`flex items-start gap-3 rounded-2xl border p-4 text-left transition ${
-                    isGroup
+                  className={`flex items-start gap-3 rounded-2xl border p-4 text-left transition ${isGroup
                       ? "border-blue-500 bg-blue-50 shadow-sm"
                       : "border-slate-200 hover:border-blue-300"
-                  }`}
+                    }`}
                 >
                   <span
                     className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${isGroup ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"}`}
@@ -1181,11 +1176,10 @@ export default function SessionBoard() {
                           type="button"
                           disabled={Boolean(stage)}
                           onClick={() => set("members", n)}
-                          className={`flex h-11 min-w-[3.25rem] items-center justify-center gap-1.5 rounded-xl border px-4 text-sm font-semibold transition ${
-                            f.members === n
+                          className={`flex h-11 min-w-[3.25rem] items-center justify-center gap-1.5 rounded-xl border px-4 text-sm font-semibold transition ${f.members === n
                               ? "border-blue-500 bg-blue-50 text-blue-700"
                               : "border-slate-200 text-slate-700 hover:border-blue-300"
-                          }`}
+                            }`}
                         >
                           <Users size={14} /> {n}
                         </button>
@@ -1257,11 +1251,10 @@ export default function SessionBoard() {
                     type="button"
                     onClick={() => set("sessionType", t.value)}
                     aria-pressed={f.sessionType === t.value}
-                    className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
-                      f.sessionType === t.value
+                    className={`rounded-full border px-4 py-2 text-sm font-medium transition ${f.sessionType === t.value
                         ? "border-blue-500 bg-blue-50 text-blue-700"
                         : "border-slate-200 text-slate-600 hover:border-blue-300"
-                    }`}
+                      }`}
                   >
                     {t.label}
                   </button>
@@ -1293,20 +1286,18 @@ export default function SessionBoard() {
                   rows={4}
                   maxLength={1000}
                   placeholder="e.g. I'm a 2026 CSE graduate. I want to know the hiring process, which skills to prepare and how a referral works."
-                  className={`w-full resize-none rounded-xl border p-4 text-sm outline-none transition placeholder:text-slate-400 focus:ring-2 ${
-                    errFor("reason")
+                  className={`w-full resize-none rounded-xl border p-4 text-sm outline-none transition placeholder:text-slate-400 focus:ring-2 ${errFor("reason")
                       ? "border-red-400 focus:border-red-500 focus:ring-red-100"
                       : "border-slate-200 focus:border-blue-500 focus:ring-blue-100"
-                  }`}
+                    }`}
                 />
                 <div className="mt-1.5 flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <FieldError msg={errFor("reason")} />
                   </div>
                   <span
-                    className={`shrink-0 text-xs ${
-                      reasonDone ? "text-emerald-600" : "text-red-500"
-                    }`}
+                    className={`shrink-0 text-xs ${reasonDone ? "text-emerald-600" : "text-red-500"
+                      }`}
                   >
                     {f.reason.trim().length}/10 minimum
                   </span>
@@ -1371,11 +1362,10 @@ export default function SessionBoard() {
                       type="button"
                       onClick={() => set("minutes", m)}
                       aria-pressed={f.minutes === m}
-                      className={`rounded-xl border px-3 py-3 text-center transition ${
-                        f.minutes === m
+                      className={`rounded-xl border px-3 py-3 text-center transition ${f.minutes === m
                           ? "border-blue-500 bg-blue-50 text-blue-700 shadow-sm"
                           : "border-slate-200 text-slate-700 hover:border-blue-300"
-                      }`}
+                        }`}
                     >
                       <div className="text-sm font-bold">
                         {durationLabel(m)}
@@ -1428,7 +1418,7 @@ export default function SessionBoard() {
                       <p className="mt-1.5 text-xs text-slate-400">
                         {!deptLoading && departments.length === 0
                           ? deptError ||
-                            `No ${companyName} employees have registered yet.`
+                          `No ${companyName} employees have registered yet.`
                           : `Roles of ${companyName} employees on MNCConnect.`}
                       </p>
                     )}
@@ -1518,61 +1508,131 @@ export default function SessionBoard() {
 
             {/* HOW IT WORKS */}
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-                  <ShieldCheck size={20} />
+              {/* Header */}
+              <div className="mb-6 flex items-center gap-3 border-b border-slate-100 pb-5">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                  <ShieldCheck size={21} />
                 </div>
-                <div className="space-y-2 text-sm text-slate-500">
-                  <h3 className="text-sm font-bold text-slate-900">
+
+                <div>
+                  <h3 className="text-base font-bold tracking-tight text-slate-900">
                     What happens after you pay
                   </h3>
-                  {rebook ? (
-                    <>
-                      <p>
-                        <b className="text-slate-900">1.</b> Your request goes
-                        only to {rebook.mentorName || "your mentor"}.
-                      </p>
-                      <p>
-                        <b className="text-slate-900">2.</b> When they accept,
-                        your session is confirmed.
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <p>
-                        <b className="text-slate-900">1.</b> Your request goes
-                        to every matching employee who is online.
-                      </p>
-                      <p>
-                        <b className="text-slate-900">2.</b> The first employee
-                        to accept gets your session.
-                      </p>
-                    </>
-                  )}
-                  {isGroup && (
-                    <p>
-                      <b className="text-slate-900">+</b> Share your group link
-                      from My Bookings. Each friend pays {showInr(price)} and
-                      joins. Friends can join until the session starts. Unfilled
-                      spots are left empty.
-                    </p>
-                  )}
-                  <p>
-                    <b className="text-slate-900">3.</b> You both get an alert{" "}
-                    {OPEN_BEFORE_MIN} minutes before. Read the instructions
-                    first. Your camera turns on and the timer starts only after
-                    the employee and you (the host) accept.
+                  <p className="mt-1 text-xs text-slate-500">
+                    Here's how your booking and session will work.
                   </p>
-                  <p>
-                    <b className="text-slate-900">4.</b> If nobody accepts about
-                    10 minutes before your start time, or the session does not
-                    start, {isGroup ? "everyone in the group is" : "you are"}{" "}
-                    refunded automatically.
+                </div>
+              </div>
+
+              {/* Steps */}
+              <div className="space-y-5">
+                {rebook ? (
+                  <>
+                    <div className="flex gap-3">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-bold text-blue-600">
+                        1
+                      </span>
+                      <p className="pt-1 text-sm leading-6 text-slate-600">
+                        Your request goes only to{" "}
+                        <b className="font-semibold text-slate-900">
+                          {rebook.mentorName || "your mentor"}
+                        </b>.
+                      </p>
+                    </div>
+
+                    <div className="flex gap-3">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-bold text-blue-600">
+                        2
+                      </span>
+                      <p className="pt-1 text-sm leading-6 text-slate-600">
+                        When they accept, your session is confirmed.
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex gap-3">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-bold text-blue-600">
+                        1
+                      </span>
+                      <p className="pt-1 text-sm leading-6 text-slate-600">
+                        Your request goes to every matching employee who is online.
+                      </p>
+                    </div>
+
+                    <div className="flex gap-3">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-bold text-blue-600">
+                        2
+                      </span>
+                      <p className="pt-1 text-sm leading-6 text-slate-600">
+                        The first employee to accept gets your session.
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                {/* Group Information */}
+                {isGroup && (
+                  <div className="ml-0 rounded-xl border border-blue-100 bg-blue-50/60 p-4">
+                    <div className="flex gap-3">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white text-sm font-bold text-blue-600 shadow-sm">
+                        +
+                      </span>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">
+                          Group session
+                        </p>
+                        <p className="mt-1 text-sm leading-6 text-slate-600">
+                          Share your group link from My Bookings. Each friend pays{" "}
+                          <b className="font-semibold text-slate-900">
+                            {showInr(price)}
+                          </b>{" "}
+                          and joins. Friends can join until the session starts. Unfilled
+                          spots are left empty.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-3">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-bold text-blue-600">
+                    3
+                  </span>
+                  <p className="pt-1 text-sm leading-6 text-slate-600">
+                    You both get an alert{" "}
+                    <b className="font-semibold text-slate-900">
+                      {OPEN_BEFORE_MIN} minutes before
+                    </b>
+                    . Read the instructions first. Your camera turns on and the timer
+                    starts only after the employee and you (the host) accept.
                   </p>
-                  <p>
-                    <b className="text-slate-900">5.</b> After the session,{" "}
-                    {isGroup ? "the host confirms" : "confirm"} and leave your
-                    review inside the meeting.
+                </div>
+
+                <div className="flex gap-3">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-bold text-blue-600">
+                    4
+                  </span>
+                  <p className="pt-1 text-sm leading-6 text-slate-600">
+                    If nobody accepts about 10 minutes before your start time, or the
+                    session does not start,{" "}
+                    <b className="font-semibold text-slate-900">
+                      {isGroup ? "everyone in the group is" : "you are"} refunded
+                      automatically.
+                    </b>
+                  </p>
+                </div>
+
+                <div className="flex gap-3">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-bold text-blue-600">
+                    5
+                  </span>
+                  <p className="pt-1 text-sm leading-6 text-slate-600">
+                    After the session,{" "}
+                    <b className="font-semibold text-slate-900">
+                      {isGroup ? "the host confirms" : "confirm"}
+                    </b>{" "}
+                    and leave your review inside the meeting.
                   </p>
                 </div>
               </div>
@@ -1596,18 +1656,16 @@ export default function SessionBoard() {
 
               {/* WHAT IS LEFT */}
               <div
-                className={`mt-5 rounded-xl border p-3 ${
-                  problems.length === 0
+                className={`mt-5 rounded-xl border p-3 ${problems.length === 0
                     ? "border-emerald-200 bg-emerald-50"
                     : "border-slate-200 bg-slate-50"
-                }`}
+                  }`}
               >
                 <p
-                  className={`text-xs font-bold ${
-                    problems.length === 0
+                  className={`text-xs font-bold ${problems.length === 0
                       ? "text-emerald-800"
                       : "text-slate-700"
-                  }`}
+                    }`}
                 >
                   {problems.length === 0
                     ? "All set. You can pay now."
@@ -1624,11 +1682,10 @@ export default function SessionBoard() {
                             setShowErrors(true);
                             scrollToField(c.key);
                           }}
-                          className={`flex w-full items-center gap-2 rounded-lg px-1 py-1 text-left text-xs ${
-                            c.done
+                          className={`flex w-full items-center gap-2 rounded-lg px-1 py-1 text-left text-xs ${c.done
                               ? "text-slate-400 line-through"
                               : "font-semibold text-slate-800 hover:bg-white"
-                          }`}
+                            }`}
                         >
                           {c.done ? (
                             <CheckCircle2
@@ -1663,11 +1720,10 @@ export default function SessionBoard() {
                     disabled={!canWallet || Boolean(stage)}
                     onClick={() => setUseWallet(true)}
                     aria-pressed={payWallet}
-                    className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition ${
-                      payWallet
+                    className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition ${payWallet
                         ? "border-indigo-400 bg-indigo-50"
                         : "border-slate-200"
-                    } ${!canWallet ? "cursor-not-allowed opacity-70" : "hover:border-indigo-300"}`}
+                      } ${!canWallet ? "cursor-not-allowed opacity-70" : "hover:border-indigo-300"}`}
                   >
                     <Wallet size={18} className="mt-0.5 text-indigo-600" />
                     <span className="min-w-0 flex-1">
@@ -1694,11 +1750,10 @@ export default function SessionBoard() {
                     disabled={Boolean(stage)}
                     onClick={() => setUseWallet(false)}
                     aria-pressed={!payWallet}
-                    className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition ${
-                      !payWallet
+                    className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition ${!payWallet
                         ? "border-blue-400 bg-blue-50"
                         : "border-slate-200 hover:border-blue-300"
-                    }`}
+                      }`}
                   >
                     <CreditCard size={18} className="mt-0.5 text-blue-600" />
                     <span className="min-w-0 flex-1">

@@ -74,7 +74,7 @@ const pickVoice = () => {
   const score = (v) => {
     if (!/^en/i.test(v.lang)) return -100;
     let s = 0;
-    if (v.localService) s += 6;
+    if (v.localService) s += 30;
     if (/natural|neural/i.test(v.name)) s += 4;
     if (/david|mark|guy|ryan|prabhat|ravi|daniel|alex|male/i.test(v.name)) s += 3;
     if (/en-IN/i.test(v.lang)) s += 1;
@@ -100,7 +100,7 @@ const VideoAvatar = ({ src, talking }) => {
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
-    if (talking) v.play().catch(() => {});
+    if (talking) v.play().catch(() => { });
     else v.pause();
   }, [talking]);
   return (
@@ -514,6 +514,7 @@ const VoiceTour = ({
       };
 
       const u = new window.SpeechSynthesisUtterance(line);
+        const t0 = performance.now();
       const v = pickVoice();
       if (v) {
         u.voice = v;
@@ -527,6 +528,7 @@ const VoiceTour = ({
 
       u.onstart = () => {
         if (stale()) return;
+        if (i === 0) console.log("speech lag ms:", Math.round(performance.now() - t0), v?.name, v?.localService);
         cur = i;
         shownMax = 0;
         setIdx(i);
@@ -682,13 +684,17 @@ const VoiceTour = ({
       }
       restartFrom(n);
     };
-
     ctrl.current = { wake, next };
 
     setIdx(0);
     setTyped(0);
-    arm(synth ? 60 : 0);
-
+    // start speaking immediately; wait only if an old utterance is still being cancelled
+    if (synth && (synth.speaking || synth.pending)) {
+      arm(80);
+    } else {
+      ready = true;
+      wake();
+    }
     return () => {
       alive = false;
       gen += 1;
@@ -767,11 +773,11 @@ const VoiceTour = ({
 
   const hole = rect
     ? {
-        x1: Math.max(6, rect.x - 10),
-        y1: Math.max(6, rect.y - 10),
-        x2: Math.min(vw - 6, rect.x + rect.w + 10),
-        y2: Math.min(vh - 6, rect.y + rect.h + 10),
-      }
+      x1: Math.max(6, rect.x - 10),
+      y1: Math.max(6, rect.y - 10),
+      x2: Math.min(vw - 6, rect.x + rect.w + 10),
+      y2: Math.min(vh - 6, rect.y + rect.h + 10),
+    }
     : null;
   const validHole = hole && hole.x2 > hole.x1 && hole.y2 > hole.y1 ? hole : null;
 
@@ -887,9 +893,8 @@ const VoiceTour = ({
       {/* ---------- stage 2: presenter + cloud caption ---------- */}
       {stage === "talk" && current && (
         <div
-          className={`tour-pop fixed z-[110] flex w-[min(380px,96vw)] flex-col p-3 ${
-            vertical === "top" ? "top-0" : "bottom-0"
-          } ${side === "right" ? "right-0 items-end" : "left-0 items-start"}`}
+          className={`tour-pop fixed z-[110] flex w-[min(380px,96vw)] flex-col p-3 ${vertical === "top" ? "top-0" : "bottom-0"
+            } ${side === "right" ? "right-0 items-end" : "left-0 items-start"}`}
         >
           <Cloud
             side={side}
