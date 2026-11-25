@@ -30,7 +30,7 @@ import {
 
 // ================= CONFIG =================
 
-const MAX_ALERTS = 3;
+// Only ONE alert is shown at a time: a new message replaces the old one.
 const AUTO_HIDE_MS = 7000;
 const MAX_LEN = 1000;
 const MAX_SEEN = 300;
@@ -677,7 +677,8 @@ export default function ChatAlertHost({ role, getMyId }) {
         image,
       };
 
-      setItems((prev) => [item, ...prev].slice(0, MAX_ALERTS));
+      // ONLY ONE alert at a time: the new message replaces the old one
+      setItems([item]);
 
       // Profile photo fallback
       if (!image) {
